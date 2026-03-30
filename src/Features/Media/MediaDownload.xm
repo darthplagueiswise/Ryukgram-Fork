@@ -200,11 +200,11 @@ static BOOL sciUseDownloadButtons() {
 
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
     btn.tag = 1338;
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
     [btn setImage:[UIImage systemImageNamed:@"arrow.down.to.line" withConfiguration:config] forState:UIControlStateNormal];
     btn.tintColor = [UIColor whiteColor];
     btn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.4];
-    btn.layer.cornerRadius = 16;
+    btn.layer.cornerRadius = 12;
     btn.clipsToBounds = YES;
     btn.translatesAutoresizingMaskIntoConstraints = NO;
     [btn addTarget:self action:@selector(sciDownloadBtnTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -213,8 +213,8 @@ static BOOL sciUseDownloadButtons() {
     [NSLayoutConstraint activateConstraints:@[
         [btn.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:10],
         [btn.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-10],
-        [btn.widthAnchor constraintEqualToConstant:32],
-        [btn.heightAnchor constraintEqualToConstant:32]
+        [btn.widthAnchor constraintEqualToConstant:24],
+        [btn.heightAnchor constraintEqualToConstant:24]
     ]];
 }
 %new - (void)sciDownloadBtnTapped:(UIButton *)sender {
@@ -280,11 +280,11 @@ static BOOL sciUseDownloadButtons() {
 
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
     btn.tag = 1338;
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightMedium];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:13 weight:UIImageSymbolWeightSemibold];
     [btn setImage:[UIImage systemImageNamed:@"arrow.down.to.line" withConfiguration:config] forState:UIControlStateNormal];
     btn.tintColor = [UIColor whiteColor];
     btn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.4];
-    btn.layer.cornerRadius = 16;
+    btn.layer.cornerRadius = 12;
     btn.clipsToBounds = YES;
     btn.translatesAutoresizingMaskIntoConstraints = NO;
     [btn addTarget:self action:@selector(sciDownloadBtnTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -293,8 +293,8 @@ static BOOL sciUseDownloadButtons() {
     [NSLayoutConstraint activateConstraints:@[
         [btn.leadingAnchor constraintEqualToAnchor:selfView.leadingAnchor constant:10],
         [btn.bottomAnchor constraintEqualToAnchor:selfView.bottomAnchor constant:-10],
-        [btn.widthAnchor constraintEqualToConstant:32],
-        [btn.heightAnchor constraintEqualToConstant:32]
+        [btn.widthAnchor constraintEqualToConstant:24],
+        [btn.heightAnchor constraintEqualToConstant:24]
     ]];
 }
 %new - (void)sciDownloadBtnTapped:(UIButton *)sender {
