@@ -46,7 +46,8 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"disable_auto_unmuting_reels": @(YES),
         @"doom_scrolling_reel_count": @(1),
         @"no_seen_visual": @(YES),
-        @"send_audio_as_file": @(YES)
+        @"send_audio_as_file": @(YES),
+        @"unlock_password_reels": @(YES)
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:sciDefaults];
     

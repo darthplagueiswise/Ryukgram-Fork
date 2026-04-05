@@ -85,6 +85,7 @@
                                                 [SCISetting switchCellWithTitle:@"Always show progress scrubber" subtitle:@"Forces the progress bar to appear on every reel" defaultsKey:@"reels_show_scrubber"],
                                                 [SCISetting switchCellWithTitle:@"Disable auto-unmuting reels" subtitle:@"Prevents reels from unmuting when the volume/silent button is pressed" defaultsKey:@"disable_auto_unmuting_reels" requiresRestart:YES],
                                                 [SCISetting switchCellWithTitle:@"Confirm reel refresh" subtitle:@"Shows an alert when you trigger a reels refresh" defaultsKey:@"refresh_reel_confirm"],
+                                                [SCISetting switchCellWithTitle:@"Unlock password-locked reels" subtitle:@"Shows buttons to reveal and auto-fill the password on locked reels" defaultsKey:@"unlock_password_reels"],
                                             ]
                                         },
                                         @{

@@ -425,6 +425,12 @@
 @interface IGSundialViewerNavigationBarOld : UIView
 @end
 
+@interface IGMediaOverlayProfileWithPasswordView : UIView
+- (void)sciAddButtons;
+- (void)sciUnlockTapped;
+- (void)sciShowPasswordTapped;
+@end
+
 @interface IGUFIInteractionCountsView : UIView
 @end
 

@@ -51,6 +51,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Always show progress scrubber
 - Disable auto-unmuting reels (properly blocks mute switch, volume buttons, and announcer broadcasts) **\***
 - Confirm reel refresh
+- Unlock password-locked reels **\***
 - Hide reels header
 - Hide reels blend button
 - Disable scrolling reels
