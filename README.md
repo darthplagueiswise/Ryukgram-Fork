@@ -90,6 +90,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Story download button — download directly from the story overlay **\***
 - Download disappearing DM media (photos + videos) **\***
 - Mark disappearing messages as viewed button **\***
+- Upload audio as voice message — send audio files, extract audio from videos, with built-in trim editor **\***
 - Disable instants creation
 
 ### Navigation

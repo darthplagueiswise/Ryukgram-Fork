@@ -141,6 +141,7 @@
                                                 [SCISetting switchCellWithTitle:@"Keep deleted messages" subtitle:@"Saves deleted messages in chat conversations" defaultsKey:@"keep_deleted_message"],
                                                 [SCISetting switchCellWithTitle:@"Manually mark messages as seen" subtitle:@"Adds a button to DM threads, which will mark messages as seen" defaultsKey:@"remove_lastseen"],
                                                 [SCISetting switchCellWithTitle:@"Disable typing status" subtitle:@"Prevents the typing indicator from being shown to others when you're typing in DMs" defaultsKey:@"disable_typing_status"],
+                                                [SCISetting switchCellWithTitle:@"Send audio as file" subtitle:@"Adds an 'Audio File' option to the plus menu in DMs to send audio files as voice messages" defaultsKey:@"send_audio_as_file"],
                                             ]
                                         },
                                         @{

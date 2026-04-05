@@ -45,7 +45,8 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"custom_note_themes": @(YES),
         @"disable_auto_unmuting_reels": @(YES),
         @"doom_scrolling_reel_count": @(1),
-        @"no_seen_visual": @(YES)
+        @"no_seen_visual": @(YES),
+        @"send_audio_as_file": @(YES)
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:sciDefaults];
     

@@ -479,8 +479,16 @@
 @interface IGDSMenuItem : NSObject
 @end
 
+@interface IGDirectAudioWaveform : NSObject
+- (id)initWithVolumeRecordingInterval:(double)interval averageVolume:(NSArray *)volumes;
++ (NSArray *)generateWaveformDataFromAudioFile:(NSURL *)url maxLength:(NSInteger)maxLength;
++ (NSArray *)scaledArrayOfNumbers:(NSArray *)numbers;
+@end
+
 @interface IGDirectThreadViewController : UIViewController
 - (void)markLastMessageAsSeen;
+- (id)voiceController;
+- (id)messageSenderFeatureController;
 @end
 
 @interface IGTabBarButton : UIButton
