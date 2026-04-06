@@ -28,7 +28,7 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"detailed_color_picker": @(YES),
         @"remove_screenshot_alert": @(YES),
         @"call_confirm": @(YES),
-        @"keep_deleted_message": @(YES),
+        @"keep_deleted_message": @(NO),
         @"dw_feed_posts": @(YES),
         @"dw_reels": @(YES),
         @"dw_story": @(YES),
@@ -50,7 +50,7 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"download_audio_message": @(NO),
         @"unlock_password_reels": @(YES),
         @"seen_mode": @"button",
-        @"seen_auto_on_interact": @(YES),
+        @"seen_auto_on_interact": @(NO),
         @"indicate_unsent_messages": @(NO),
         @"unsent_message_toast": @(NO)
     };
