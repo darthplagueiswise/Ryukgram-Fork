@@ -84,7 +84,8 @@
                                                 [SCISetting switchCellWithTitle:@"No suggested for you" subtitle:@"Hides suggested accounts for you to follow" defaultsKey:@"no_suggested_account"],
                                                 [SCISetting switchCellWithTitle:@"No suggested reels" subtitle:@"Hides suggested reels to watch" defaultsKey:@"no_suggested_reels"],
                                                 [SCISetting switchCellWithTitle:@"No suggested threads posts" subtitle:@"Hides suggested threads posts" defaultsKey:@"no_suggested_threads"],
-                                                [SCISetting switchCellWithTitle:@"Disable video autoplay" subtitle:@"Prevents videos on your feed from playing automatically" defaultsKey:@"disable_feed_autoplay" requiresRestart:YES]
+                                                [SCISetting switchCellWithTitle:@"Disable video autoplay" subtitle:@"Prevents videos on your feed from playing automatically" defaultsKey:@"disable_feed_autoplay" requiresRestart:YES],
+                                                [SCISetting switchCellWithTitle:@"Hide repost button" subtitle:@"Hides the repost button on feed posts" defaultsKey:@"hide_feed_repost" requiresRestart:YES]
                                             ]
                                         }]
                 ],
@@ -105,7 +106,7 @@
                                             @"header": @"Hiding",
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:@"Hide reels header" subtitle:@"Hides the top navigation bar when watching reels" defaultsKey:@"hide_reels_header"],
-                                                [SCISetting switchCellWithTitle:@"Hide repost button" subtitle:@"Hides the repost button on the reels sidebar" defaultsKey:@"hide_reels_repost"]
+                                                [SCISetting switchCellWithTitle:@"Hide repost button" subtitle:@"Hides the repost button on the reels sidebar" defaultsKey:@"hide_reels_repost" requiresRestart:YES]
                                             ]
                                         },
                                         @{
@@ -442,10 +443,10 @@
         @{
             @"header": @"Credits",
             @"rows": @[
-                [SCISetting linkCellWithTitle:@"Original Developer" subtitle:@"SoCuul (SCInsta)" imageUrl:@"https://i.imgur.com/c9CbytZ.png" url:@"https://github.com/SoCuul/SCInsta"],
-                [SCISetting linkCellWithTitle:@"Modded by" subtitle:@"Ryuk" imageUrl:@"https://github.com/faroukbmiled.png" url:@"https://github.com/faroukbmiled"],
+                [SCISetting linkCellWithTitle:@"Ryuk" subtitle:@"Developer" imageUrl:@"https://github.com/faroukbmiled.png" url:@"https://github.com/faroukbmiled"],
                 [SCISetting linkCellWithTitle:@"View Repo" subtitle:@"View the source code on GitHub" imageUrl:@"https://i.imgur.com/BBUNzeP.png" url:@"https://github.com/faroukbmiled/RyukGram"],
-                [SCISetting linkCellWithTitle:@"Donate to SCInsta dev" subtitle:@"Support SoCuul" icon:[SCISymbol symbolWithName:@"heart.circle.fill" color:[UIColor systemPinkColor] size:20.0] url:@"https://ko-fi.com/SoCuul"]
+                [SCISetting linkCellWithTitle:@"SoCuul" subtitle:@"Original SCInsta developer" imageUrl:@"https://i.imgur.com/c9CbytZ.png" url:@"https://github.com/SoCuul/SCInsta"],
+                [SCISetting linkCellWithTitle:@"Donate to SoCuul" subtitle:@"Support the original developer" icon:[SCISymbol symbolWithName:@"heart.circle.fill" color:[UIColor systemPinkColor] size:20.0] url:@"https://ko-fi.com/SoCuul"]
             ],
             @"footer": [NSString stringWithFormat:@"RyukGram %@\n\nInstagram v%@\n\nBased on SCInsta by SoCuul", SCIVersionString, [SCIUtils IGVersionString]]
         }

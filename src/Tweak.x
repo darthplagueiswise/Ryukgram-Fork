@@ -68,6 +68,7 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"story_seen_mode": @"button",
         @"story_audio_toggle": @(NO),
         @"settings_pause_playback": @(YES),
+        @"hide_feed_repost": @(NO),
         @"copy_comment": @(YES),
         @"download_gif_comment": @(YES)
     };
@@ -671,6 +672,19 @@ shouldPersistLastBugReportId:(id)arg6
     }
 }
 %end
+
+// Hide repost button in feed (requires restart)
+%hook IGUFIInteractionCountsView
+- (void)updateUFIWithButtonsConfig:(id)config interactionCountProvider:(id)provider {
+    %orig;
+    if (![SCIUtils getBoolPref:@"hide_feed_repost"]) return;
+    Ivar rv = class_getInstanceVariable(object_getClass(self), "_repostView");
+    if (rv) [object_getIvar((id)self, rv) setHidden:YES];
+    Ivar uv = class_getInstanceVariable(object_getClass(self), "_undoRepostButton");
+    if (uv) [object_getIvar((id)self, uv) setHidden:YES];
+}
+%end
+
 
 %hook IGSundialViewerVerticalUFI
 - (void)_didTapLikeButton:(id)arg1 {

@@ -1,6 +1,6 @@
 # RyukGram
 A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com/SoCuul/SCInsta) with additional features and fixes.\
-`Version v1.1.4` | `Tested on Instagram 423.1.0`
+`Version v1.1.4` | `Tested on Instagram 424.0.0`
 
 ---
 
@@ -48,6 +48,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - No suggested reels
 - No suggested threads posts
 - Disable video autoplay
+- Hide repost button in feed **\***
 
 ### Reels
 - Modify tap controls
