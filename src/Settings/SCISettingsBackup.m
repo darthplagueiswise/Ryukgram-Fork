@@ -405,6 +405,7 @@ typedef NS_ENUM(NSInteger, SCIBackupPreviewRowKind) {
     return @[
         @"excluded_threads",
         @"excluded_story_users",
+        @"embed_custom_domains",
     ];
 }
 

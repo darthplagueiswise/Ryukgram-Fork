@@ -28,27 +28,46 @@
 }
 %end
 
+static BOOL sciReelRefreshInFlight = NO;
+
 %hook IGSundialFeedViewController
 - (void)_refreshReelsWithParamsForNetworkRequest:(NSInteger)arg1 userDidPullToRefresh:(BOOL)arg2 {
     if ([SCIUtils getBoolPref:@"prevent_doom_scrolling"]) {
-        IGRefreshControl *_refreshControl = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
-        [self refreshControlDidEndFinishLoadingAnimation:_refreshControl];
-
+        IGRefreshControl *rc = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
+        [self refreshControlDidEndFinishLoadingAnimation:rc];
         return;
     }
 
-    if ([SCIUtils getBoolPref:@"refresh_reel_confirm"]) {
-        NSLog(@"[SCInsta] Reel refresh triggered");
-        
-        [SCIUtils showConfirmation:^(void) { %orig(arg1, arg2); }
-                     cancelHandler:^(void) {
-                         IGRefreshControl *_refreshControl = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
-                         [self refreshControlDidEndFinishLoadingAnimation:_refreshControl];
-                     }
-                             title:@"Refresh Reels"];
-    } else {
-        return %orig(arg1, arg2);
+    if (![(UIViewController *)self isViewLoaded] || sciReelRefreshInFlight || ![SCIUtils getBoolPref:@"refresh_reel_confirm"]) {
+        %orig(arg1, arg2);
+        return;
     }
+
+    // Reset the refresh control state so pull-to-refresh can trigger again
+    IGRefreshControl *rc = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
+    Ivar stateIvar = class_getInstanceVariable([rc class], "_refreshState");
+    if (stateIvar) {
+        ptrdiff_t off = ivar_getOffset(stateIvar);
+        *(NSInteger *)((char *)(__bridge void *)rc + off) = 0;
+    }
+    if ([rc respondsToSelector:@selector(endRefreshing)])
+        ((void(*)(id,SEL))objc_msgSend)(rc, @selector(endRefreshing));
+    [self refreshControlDidEndFinishLoadingAnimation:rc];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Refresh Reels?"
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    __weak id weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Refresh" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        sciReelRefreshInFlight = YES;
+        SEL rSel = @selector(_refreshReelsWithParamsForNetworkRequest:userDidPullToRefresh:);
+        ((void(*)(id,SEL,NSInteger,BOOL))objc_msgSend)(weakSelf, rSel, arg1, arg2);
+        sciReelRefreshInFlight = NO;
+    }]];
+
+    UIViewController *presenter = (UIViewController *)self;
+    [presenter presentViewController:alert animated:YES completion:nil];
 }
 %end
 

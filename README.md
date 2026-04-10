@@ -25,6 +25,10 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Copy comment text from long-press menu **\***
 - Download GIF comments **\***
 - Profile copy button **\***
+- Replace domain in shared links — rewrite copied/shared links for embeds in Discord, Telegram, etc. with preset or custom domains **\***
+- Strip tracking params from shared links (igsh, utm) **\***
+- Open links in external browser **\***
+- Strip tracking from browser links **\***
 - Do not save recent searches
 - Use detailed (native) color picker
 - Enable liquid glass buttons

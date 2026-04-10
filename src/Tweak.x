@@ -68,6 +68,11 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"story_seen_mode": @"button",
         @"story_audio_toggle": @(NO),
         @"settings_pause_playback": @(YES),
+        @"embed_links": @(NO),
+        @"embed_link_domain": @"kkinstagram.com",
+        @"strip_tracking_params": @(NO),
+        @"open_links_external": @(NO),
+        @"strip_browser_tracking": @(NO),
         @"hide_feed_repost": @(NO),
         @"copy_comment": @(YES),
         @"download_gif_comment": @(YES)
