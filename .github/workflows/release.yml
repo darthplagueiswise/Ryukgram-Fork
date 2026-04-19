@@ -58,6 +58,11 @@ jobs:
               env:
                 THEOS: ${{ github.workspace }}/theos
 
+            - name: Normalize script permissions
+              run: |
+                chmod +x build.sh build-dev.sh scripts/*.sh || true
+                ls -l build.sh build-dev.sh scripts/*.sh
+
             - name: Get Version
               id: version
               run: |
@@ -66,12 +71,12 @@ jobs:
                 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
             - name: Setup FFmpegKit
-              run: ./scripts/setup-ffmpegkit.sh
+              run: bash ./scripts/setup-ffmpegkit.sh
 
             - name: Build rootless deb
               run: |
                 export THEOS="${{ github.workspace }}/theos"
-                ./build.sh rootless
+                bash ./build.sh rootless
                 cd packages
                 DEB="$(ls -t *-rootless.deb | head -n1)"
                 [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootless.deb"
@@ -80,7 +85,7 @@ jobs:
             - name: Build rootful deb
               run: |
                 export THEOS="${{ github.workspace }}/theos"
-                ./build.sh rootful
+                bash ./build.sh rootful
                 cd packages
                 DEB="$(ls -t *-rootful.deb | head -n1)"
                 [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootful.deb"
