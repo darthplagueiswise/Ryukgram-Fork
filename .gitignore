@@ -1,0 +1,52 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+*.icloud
+
+*.deb
+.debmake
+_
+obj
+.theos
+packages
+
+.pyzule*
+.cyan*
+.ipapatch*
+dumps
+livecontainer
+
+src/**/wip.x
+src/**/wip.xm
+
+.claude
+CLAUDE.md
+upstream-scinsta
+*.ipa
+*.dylib
+deploy.sh
+PENDING_CHANGES.md
+PENDING_CHANGES.md.bk
+wrapper/
+scripts/*.py
+scripts/__pycache__/
+
+# FFmpegKit frameworks
+modules/ffmpegkit/
+
+# External reference tweaks
+exp_flags/
