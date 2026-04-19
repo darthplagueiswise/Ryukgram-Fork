@@ -18,5 +18,5 @@ include $(THEOS_MAKE_PATH)/tweak.mk
 
 # Build FLEXing for sideloading (not building in dev-mode)
 ifdef SIDELOAD
-	$(TWEAK_NAME)_SUBPROJECTS += modules/flexing
+	$(TWEAK_NAME)_SUBPROJECTS += modules/FLEXing
 endif
