@@ -22,6 +22,7 @@ jobs:
               uses: actions/checkout@v4
               with:
                 path: main
+                submodules: recursive
 
             - name: Install Dependencies
               run: brew install ldid dpkg make
@@ -58,6 +59,11 @@ jobs:
               env:
                 THEOS: ${{ github.workspace }}/theos
 
+            - name: Normalize script permissions
+              run: |
+                chmod +x main/build.sh main/build-dev.sh main/scripts/*.sh || true
+                ls -l main/build.sh main/build-dev.sh main/scripts/*.sh
+
             - name: Get Version
               id: version
               run: |
@@ -66,12 +72,12 @@ jobs:
                 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
             - name: Setup FFmpegKit
-              run: cd main && ./scripts/setup-ffmpegkit.sh
+              run: cd main && bash ./scripts/setup-ffmpegkit.sh
 
             - name: Build rootless
               run: |
                 cd main
-                ./build.sh rootless
+                bash ./build.sh rootless
                 cd packages
                 DEB="$(ls -t *-rootless.deb | head -n1)"
                 [ -n "$DEB" ] && mv "$DEB" "com.faroukbmiled.ryukgram_${VERSION}+debug-rootless.deb"
@@ -82,7 +88,7 @@ jobs:
             - name: Build rootful
               run: |
                 cd main
-                ./build.sh rootful
+                bash ./build.sh rootful
                 cd packages
                 DEB="$(ls -t *-rootful.deb | head -n1)"
                 [ -n "$DEB" ] && mv "$DEB" "com.faroukbmiled.ryukgram_${VERSION}+debug-rootful.deb"
