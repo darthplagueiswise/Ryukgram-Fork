@@ -71,6 +71,11 @@ jobs:
               env:
                 THEOS: ${{ github.workspace }}/theos
 
+            - name: Normalize script permissions
+              run: |
+                chmod +x main/build.sh main/build-dev.sh main/scripts/*.sh || true
+                ls -l main/build.sh main/build-dev.sh main/scripts/*.sh
+
             - name: Prepare Instagram IPA
               run: |
                 cd main
@@ -89,7 +94,7 @@ jobs:
                 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
             - name: Setup FFmpegKit
-              run: cd main && ./scripts/setup-ffmpegkit.sh
+              run: cd main && bash ./scripts/setup-ffmpegkit.sh
 
             - name: Build sideloaded IPA (rootless deb → cyan inject)
               run: |
@@ -97,7 +102,7 @@ jobs:
 
                 cd main
                 # ipapatch disabled — upstream issues.
-                ./build.sh sideload
+                bash ./build.sh sideload
                 ls -la packages
               env:
                 THEOS: ${{ github.workspace }}/theos
