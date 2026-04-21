@@ -22,7 +22,6 @@ jobs:
               uses: actions/checkout@v4
               with:
                 path: main
-                submodules: recursive
 
             - name: Install Dependencies
               run: brew install ldid dpkg make
