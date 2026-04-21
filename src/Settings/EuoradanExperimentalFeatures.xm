@@ -35,7 +35,8 @@ static NSArray *euoNavSections(void) {
                 EUSwitch(@"Direct Notes: GIFs/Stickers reply", @"Forces GIF and sticker reply types for Direct Notes", @"igt_directnotes_gifs_reply", NO),
                 EUSwitch(@"Direct Notes: Photo reply", @"Forces the photo reply type for Direct Notes", @"igt_directnotes_photo_reply", NO),
                 EUSwitch(@"Enable teen app icons", @"Hold down on the Instagram logo to change the app icon", @"teen_app_icons", YES),
-                EUSwitch(@"Disable app haptics", @"Disables haptics/vibrations within the app", @"disable_haptics", NO)
+                EUSwitch(@"Disable app haptics", @"Disables haptics/vibrations within the app", @"disable_haptics", NO),
+                EUSwitch(@"Enable hooks", @"Installs observers + overrides. Restart required.", @"sci_exp_flags_enabled", YES)
             ]
         }
     ];
@@ -57,12 +58,58 @@ static NSArray *new_sections_euo(id self, SEL _cmd) {
     NSArray *orig = orig_sections_euo ? orig_sections_euo(self, _cmd) : @[];
     NSMutableArray *sections = [orig mutableCopy] ?: [NSMutableArray array];
 
-    for (NSDictionary *section in sections) {
-        NSArray *rows = [section isKindOfClass:[NSDictionary class]] ? section[@"rows"] : nil;
-        for (id row in rows) {
-            if (![row isKindOfClass:[SCISetting class]]) continue;
-            SCISetting *s = (SCISetting *)row;
-            if ([s.title isEqualToString:@"@euoradan Experimental Features"]) return sections;
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        NSDictionary *section = [sections[i] isKindOfClass:[NSDictionary class]] ? sections[i] : nil;
+        NSArray *rows = [section[@"rows"] isKindOfClass:[NSArray class]] ? section[@"rows"] : nil;
+        if (!rows.count) continue;
+
+        NSMutableArray *newRows = [rows mutableCopy];
+        BOOL sectionChanged = NO;
+
+        for (NSInteger r = (NSInteger)newRows.count - 1; r >= 0; r--) {
+            id rowObj = newRows[(NSUInteger)r];
+            if (![rowObj isKindOfClass:[SCISetting class]]) continue;
+            SCISetting *row = (SCISetting *)rowObj;
+
+            if ([row.title isEqualToString:@"@euoradan Experimental Features"]) {
+                return sections;
+            }
+
+            if ([row.title isEqualToString:@"General"]) {
+                NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
+                NSMutableArray *newNavSections = [NSMutableArray array];
+                for (NSDictionary *navSection in navSections) {
+                    NSString *header = [navSection[@"header"] isKindOfClass:[NSString class]] ? navSection[@"header"] : nil;
+                    if ([header isEqualToString:@"Experimental features"]) {
+                        sectionChanged = YES;
+                        continue;
+                    }
+                    [newNavSections addObject:navSection];
+                }
+                row.navSections = newNavSections;
+                newRows[(NSUInteger)r] = row;
+            }
+
+            if ([row.title isEqualToString:@"Advanced"]) {
+                NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
+                NSMutableArray *newNavSections = [NSMutableArray array];
+                for (NSDictionary *navSection in navSections) {
+                    NSString *header = [navSection[@"header"] isKindOfClass:[NSString class]] ? navSection[@"header"] : nil;
+                    if ([header isEqualToString:@"Experimental flags"]) {
+                        sectionChanged = YES;
+                        continue;
+                    }
+                    [newNavSections addObject:navSection];
+                }
+                row.navSections = newNavSections;
+                newRows[(NSUInteger)r] = row;
+            }
+        }
+
+        if (sectionChanged) {
+            NSMutableDictionary *newSection = [section mutableCopy];
+            newSection[@"rows"] = newRows;
+            sections[i] = newSection;
         }
     }
 
