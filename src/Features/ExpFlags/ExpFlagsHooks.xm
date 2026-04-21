@@ -11,6 +11,10 @@
 #import <objc/message.h>
 #import <substrate.h>
 
+static BOOL sciQuickSnapEnabled(void) {
+    return [SCIUtils getBoolPref:@"igt_quicksnap"];
+}
+
 static NSArray<NSString *> *sciForcedExperimentNeedles(void) {
     static NSArray<NSString *> *needles;
     static dispatch_once_t onceToken;
@@ -27,9 +31,18 @@ static NSArray<NSString *> *sciForcedExperimentNeedles(void) {
     return needles;
 }
 
+static BOOL sciContainsQuickSnapName(NSString *expName) {
+    if (![expName isKindOfClass:[NSString class]] || !expName.length) return NO;
+    NSString *lower = expName.lowercaseString;
+    return [lower containsString:@"quicksnap"] ||
+           [lower containsString:@"ig_ios_quicksnap_"] ||
+           [lower containsString:@"_ig_ios_quicksnap_"];
+}
+
 static BOOL sciShouldForceEnableExperimentName(NSString *expName) {
     if (!expName.length) return NO;
     NSString *lower = expName.lowercaseString;
+    if (!sciQuickSnapEnabled() && sciContainsQuickSnapName(lower)) return NO;
     for (NSString *needle in sciForcedExperimentNeedles()) {
         if ([lower containsString:needle]) return YES;
     }
@@ -50,6 +63,8 @@ static NSString *experimentNameOf(id obj) {
 static id overrideGroupFor(NSString *expName, id origGroup) {
     if (!expName.length) return origGroup;
     NSString *lower = expName.lowercaseString;
+
+    if (!sciQuickSnapEnabled() && sciContainsQuickSnapName(lower)) return nil;
 
     for (NSString *key in [SCIExpFlags allOverriddenNames]) {
         if (![lower containsString:key.lowercaseString]) continue;
@@ -88,6 +103,8 @@ static void installHook(Class cls, NSString *selName, IMP newImp, IMP *origOut) 
 static BOOL sciAlwaysTrueNoArgs(id self, SEL _cmd) { return YES; }
 static BOOL sciAlwaysFalseNoArgs(id self, SEL _cmd) { return NO; }
 static BOOL sciAlwaysTrueOneArg(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL sciQuickSnapTrueOrFalseNoArgs(id self, SEL _cmd) { return sciQuickSnapEnabled() ? YES : NO; }
+static BOOL sciQuickSnapTrueOrFalseOneArg(id self, SEL _cmd, id arg1) { return sciQuickSnapEnabled() ? YES : NO; }
 
 static void sciInstallBoolHookForClassMethod(NSString *className, NSString *selName, IMP newImp) {
     Class cls = NSClassFromString(className);
@@ -115,9 +132,6 @@ static void sciInstallConcreteEnablementHooks(void) {
     sciInstallBoolHookForInstanceMethod(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)sciAlwaysTrueNoArgs);
 
     // Validated Swift runtime helper class from the IPA.
-    // strings -a shows:
-    // _TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper
-    // with selectors such as locationNotesEnabled:
     NSString *directNotesHelper = @"_TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper";
     sciInstallBoolHookForClassMethod(directNotesHelper, @"locationNotesEnabled:", (IMP)sciAlwaysTrueOneArg);
     sciInstallBoolHookForClassMethod(directNotesHelper, @"locationNotesIterationEnabled:", (IMP)sciAlwaysTrueOneArg);
@@ -125,13 +139,11 @@ static void sciInstallConcreteEnablementHooks(void) {
     sciInstallBoolHookForClassMethod(directNotesHelper, @"themeEnhancementsEntryPointEnabled:", (IMP)sciAlwaysTrueOneArg);
     sciInstallBoolHookForClassMethod(directNotesHelper, @"hyperlinksEnabled:", (IMP)sciAlwaysTrueOneArg);
 
-    // Validated Swift runtime helper class from the IPA.
-    // strings -a shows:
-    // _TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper
+    // QuickSnap runtime gated by igt_quicksnap.
     NSString *quickSnapHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
-    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)sciAlwaysTrueOneArg);
-    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)sciAlwaysTrueOneArg);
-    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledAsPeek:", (IMP)sciAlwaysTrueOneArg);
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)sciQuickSnapTrueOrFalseOneArg);
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)sciQuickSnapTrueOrFalseOneArg);
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledAsPeek:", (IMP)sciQuickSnapTrueOrFalseOneArg);
 
     // Suppression / mute gates seen in the IPA strings. Keep them off if the
     // selectors live on IGUser in this build.
@@ -141,6 +153,12 @@ static void sciInstallConcreteEnablementHooks(void) {
     sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingFriendMap", (IMP)sciAlwaysFalseNoArgs);
     sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingFriendMapLocation", (IMP)sciAlwaysFalseNoArgs);
     sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingQuickSnap", (IMP)sciAlwaysFalseNoArgs);
+
+    // Notes tray QuickSnap gates.
+    sciInstallBoolHookForInstanceMethod(@"_TtC21IGNotesTrayController21IGNotesTrayController", @"_isEligibleForQuicksnapDialog", (IMP)sciQuickSnapTrueOrFalseNoArgs);
+    sciInstallBoolHookForInstanceMethod(@"_TtC21IGNotesTrayController21IGNotesTrayController", @"_isEligibleForQuicksnapCornerStackTransitionDialog", (IMP)sciQuickSnapTrueOrFalseNoArgs);
+    sciInstallBoolHookForInstanceMethod(@"_TtC21IGNotesTrayController21IGNotesTrayController", @"isQPEnabled:", (IMP)sciQuickSnapTrueOrFalseOneArg);
+    sciInstallBoolHookForInstanceMethod(@"IGDirectNotesTrayRowSectionController", @"isQPEnabled:", (IMP)sciQuickSnapTrueOrFalseOneArg);
 }
 
 %ctor {
