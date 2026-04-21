@@ -56,6 +56,8 @@ static void sciHookInst(Class cls, NSString *selName, IMP newImp, IMP *orig) {
 }
 
 %ctor {
+    if (!sciHomecomingEnabled()) return;
+
     Class metaExp = NSClassFromString(@"MetaLocalExperiment");
     sciHookInst(metaExp, @"isInExperiment", (IMP)new_meta_isInExperiment_hc, (IMP *)&orig_meta_isInExperiment_hc);
 
