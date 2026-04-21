@@ -14,6 +14,10 @@
     self.title = @"Experimental flags";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
 
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Back"
+                                                                             style:UIBarButtonItemStylePlain
+                                                                            target:self
+                                                                            action:@selector(backTapped)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Reset"
                                                                               style:UIBarButtonItemStylePlain
                                                                              target:self
@@ -32,6 +36,14 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadData];
+}
+
+- (void)backTapped {
+    if (self.navigationController && self.navigationController.viewControllers.firstObject != self) {
+        [self.navigationController popViewControllerAnimated:YES];
+        return;
+    }
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)reloadData {
