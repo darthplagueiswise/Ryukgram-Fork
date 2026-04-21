@@ -1,12 +1,15 @@
+// Hooks installed iff sci_exp_flags_enabled.
+// Existing behavior: MetaLocalExperiment group{,Peek}Name override.
+// Experimental additions for this branch:
+//  - force-enable known FriendsMap / QuickSnap experiment-name prefixes
+//  - use validated runtime Swift helper classes from the target IPA for
+//    Direct Notes / QuickSnap instead of guessed class names
+
 #import "../../Utils.h"
 #import "SCIExpFlags.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
-
-static BOOL sciQuickSnapToggleEnabled(void) {
-    return [SCIUtils getBoolPref:@"igt_quicksnap"];
-}
 
 static NSArray<NSString *> *sciForcedExperimentNeedles(void) {
     static NSArray<NSString *> *needles;
@@ -15,19 +18,9 @@ static NSArray<NSString *> *sciForcedExperimentNeedles(void) {
         needles = @[
             @"_ig_ios_friendmap_",
             @"ig_ios_friendmap_",
-            @"friendmapenabled"
-        ];
-    });
-    return needles;
-}
-
-static NSArray<NSString *> *sciQuickSnapExperimentNeedles(void) {
-    static NSArray<NSString *> *needles;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        needles = @[
             @"_ig_ios_quicksnap_",
             @"ig_ios_quicksnap_",
+            @"friendmapenabled",
             @"quicksnapenabled"
         ];
     });
@@ -39,11 +32,6 @@ static BOOL sciShouldForceEnableExperimentName(NSString *expName) {
     NSString *lower = expName.lowercaseString;
     for (NSString *needle in sciForcedExperimentNeedles()) {
         if ([lower containsString:needle]) return YES;
-    }
-    if (sciQuickSnapToggleEnabled()) {
-        for (NSString *needle in sciQuickSnapExperimentNeedles()) {
-            if ([lower containsString:needle]) return YES;
-        }
     }
     return NO;
 }
@@ -120,11 +108,16 @@ static void sciInstallBoolHookForInstanceMethod(NSString *className, NSString *s
 }
 
 static void sciInstallConcreteEnablementHooks(void) {
+    // Validated concrete gate found in the target IPA.
     sciInstallBoolHookForClassMethod(@"_IGDirectNotesFriendMapEnabled", @"isEnabled", (IMP)sciAlwaysTrueNoArgs);
     sciInstallBoolHookForClassMethod(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)sciAlwaysTrueNoArgs);
     sciInstallBoolHookForInstanceMethod(@"_IGDirectNotesFriendMapEnabled", @"isEnabled", (IMP)sciAlwaysTrueNoArgs);
     sciInstallBoolHookForInstanceMethod(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)sciAlwaysTrueNoArgs);
 
+    // Validated Swift runtime helper class from the IPA.
+    // strings -a shows:
+    // _TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper
+    // with selectors such as locationNotesEnabled:
     NSString *directNotesHelper = @"_TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper";
     sciInstallBoolHookForClassMethod(directNotesHelper, @"locationNotesEnabled:", (IMP)sciAlwaysTrueOneArg);
     sciInstallBoolHookForClassMethod(directNotesHelper, @"locationNotesIterationEnabled:", (IMP)sciAlwaysTrueOneArg);
@@ -132,19 +125,22 @@ static void sciInstallConcreteEnablementHooks(void) {
     sciInstallBoolHookForClassMethod(directNotesHelper, @"themeEnhancementsEntryPointEnabled:", (IMP)sciAlwaysTrueOneArg);
     sciInstallBoolHookForClassMethod(directNotesHelper, @"hyperlinksEnabled:", (IMP)sciAlwaysTrueOneArg);
 
-    if (sciQuickSnapToggleEnabled()) {
-        NSString *quickSnapHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
-        sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)sciAlwaysTrueOneArg);
-        sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)sciAlwaysTrueOneArg);
-        sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledAsPeek:", (IMP)sciAlwaysTrueOneArg);
-        sciInstallBoolHookForClassMethod(@"IGUser", @"isMutingQuickSnap", (IMP)sciAlwaysFalseNoArgs);
-        sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingQuickSnap", (IMP)sciAlwaysFalseNoArgs);
-    }
+    // Validated Swift runtime helper class from the IPA.
+    // strings -a shows:
+    // _TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper
+    NSString *quickSnapHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)sciAlwaysTrueOneArg);
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)sciAlwaysTrueOneArg);
+    sciInstallBoolHookForClassMethod(quickSnapHelper, @"isQuicksnapEnabledAsPeek:", (IMP)sciAlwaysTrueOneArg);
 
+    // Suppression / mute gates seen in the IPA strings. Keep them off if the
+    // selectors live on IGUser in this build.
     sciInstallBoolHookForClassMethod(@"IGUser", @"isMutingFriendMap", (IMP)sciAlwaysFalseNoArgs);
     sciInstallBoolHookForClassMethod(@"IGUser", @"isMutingFriendMapLocation", (IMP)sciAlwaysFalseNoArgs);
+    sciInstallBoolHookForClassMethod(@"IGUser", @"isMutingQuickSnap", (IMP)sciAlwaysFalseNoArgs);
     sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingFriendMap", (IMP)sciAlwaysFalseNoArgs);
     sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingFriendMapLocation", (IMP)sciAlwaysFalseNoArgs);
+    sciInstallBoolHookForInstanceMethod(@"IGUser", @"isMutingQuickSnap", (IMP)sciAlwaysFalseNoArgs);
 }
 
 %ctor {
