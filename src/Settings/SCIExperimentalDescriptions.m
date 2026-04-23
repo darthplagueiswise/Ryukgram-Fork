@@ -10,32 +10,32 @@ static NSDictionary<NSString *, NSString *> *SCIExperimentalDescriptionMap(void)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         map = @{
-            @"liquid_glass_buttons": @"Forces the Liquid Glass navigation/button helper. Usually safe; restart required so IG rebuilds the affected UI.",
-            @"liquid_glass_surfaces": @"Enables floating tab bar/surface-level Liquid Glass gates through the tab bar exports. Restart required.",
-            @"teen_app_icons": @"Unlocks Instagram's hidden teen/app icon picker. Long-press the Instagram logo after restart if the picker exists in this build.",
-            @"disable_haptics": @"Turns off Instagram haptic feedback/vibrations where the app exposes a haptics gate.",
+            @"liquid_glass_buttons": @"Liquid Glass buttons and controls.",
+            @"liquid_glass_surfaces": @"Liquid Glass tab bar and surfaces.",
+            @"teen_app_icons": @"Hidden Instagram app icon picker.",
+            @"disable_haptics": @"Disable Instagram haptic feedback.",
 
-            @"igt_homecoming": @"Enables the Homecoming navigation UI through MetaLocalExperiment/FamilyLocalExperiment/LIDExperiment plus IGNavConfiguration.",
-            @"igt_quicksnap": @"Attempts to enable QuickSnap/Instants. Uses rollout names, QuickSnap helper gates, tray gates, and MobileConfig keys such as quick_snap/quicksnap/instants.",
-            @"igt_directnotes_friendmap": @"Enables Direct Notes Friend Map using the working path: IGDirectNotesExperimentHelper isInExperiment plus FriendMap experiment-name matching.",
-            @"igt_directnotes_audio_reply": @"Enables the hidden Direct Notes audio reply experiment gates when the corresponding reply type exists.",
-            @"igt_directnotes_avatar_reply": @"Enables the hidden Direct Notes avatar reply experiment gates when the corresponding reply type exists.",
-            @"igt_directnotes_gifs_reply": @"Enables Direct Notes GIF/sticker reply experiments when present in this Instagram build.",
-            @"igt_directnotes_photo_reply": @"Enables Direct Notes photo reply experiments when present in this Instagram build.",
+            @"igt_homecoming": @"New Homecoming navigation UI.",
+            @"igt_quicksnap": @"Share QuickSnap/Instant photos feature.",
+            @"igt_directnotes_friendmap": @"New Friends Map feature.",
+            @"igt_directnotes_audio_reply": @"Audio replies for Notes.",
+            @"igt_directnotes_avatar_reply": @"Avatar replies for Notes.",
+            @"igt_directnotes_gifs_reply": @"GIF and sticker replies for Notes.",
+            @"igt_directnotes_photo_reply": @"Photo replies for Notes.",
 
-            @"igt_prism": @"Experimental Prism Design System rollout switch. Leave off unless testing Prism-specific experiment names or selectors.",
-            @"igt_reels_first": @"Attempts to enable Reels-first navigation/feed experiments. May depend on server-side account rollout.",
-            @"igt_friends_feed": @"Attempts to enable hidden Friends Feed experiments and related navigation entry points.",
-            @"igt_tab_swiping": @"Enables tab-swipe navigation gates when the matching IG navigation experiment is present.",
-            @"igt_audio_ramping": @"Enables audio-ramping-on-swipe experiments for feed/reels navigation when present.",
-            @"igt_feed_culling": @"Forces feed culling/status-bar optimization gates used by some experimental home feed builds.",
-            @"igt_feed_dedup": @"Forces feed de-duplication optimization gates, especially dedup from Reels/home feed surfaces.",
-            @"igt_pull_to_carrera": @"Attempts to enable hidden Pull to Carrera experiment gates if this build still contains them.",
-            @"igt_screenshot_block": @"Forces screenshot-blocking experiment gates used by some private/visual-message surfaces. Use carefully.",
-            @"igt_employee": @"Attempts to unlock employee/developer-only gates. Best results require matching the exact employee MobileConfig/experiment IDs for this build.",
-            @"igt_internal": @"Attempts to enable internal/dogfood-style gates. This is broader than Employee and can break flows if IG expects internal services.",
-            @"sci_exp_mc_hooks_enabled": @"Master switch for MobileConfig observation/override hooks used by Experimental Flags. Enable before browsing/testing MC IDs.",
-            @"sci_exp_flags_enabled": @"Master switch for Experimental Flags discovery hooks. Collects MetaLocalExperiment, LIDExperiment, MobileConfig IDs, and scanned names while you browse IG."
+            @"igt_prism": @"New Prism design system.",
+            @"igt_reels_first": @"Reels-first experience.",
+            @"igt_friends_feed": @"Friends-only feed experience.",
+            @"igt_tab_swiping": @"Swipe between main tabs.",
+            @"igt_audio_ramping": @"Smooth audio changes while swiping.",
+            @"igt_feed_culling": @"Experimental feed cleanup.",
+            @"igt_feed_dedup": @"Reduce duplicate feed content.",
+            @"igt_pull_to_carrera": @"Pull-to-Carrera experiment.",
+            @"igt_screenshot_block": @"Screenshot blocking experiments.",
+            @"igt_employee": @"Employee/developer options.",
+            @"igt_internal": @"Internal Instagram features.",
+            @"sci_exp_mc_hooks_enabled": @"Enable MobileConfig hooks.",
+            @"sci_exp_flags_enabled": @"Enable experimental flag scanner."
         };
     });
     return map;
@@ -44,7 +44,7 @@ static NSDictionary<NSString *, NSString *> *SCIExperimentalDescriptionMap(void)
 static NSString *SCIExperimentalButtonSubtitle(NSString *title) {
     if (![title isKindOfClass:[NSString class]]) return nil;
     if ([title isEqualToString:@"Experimental flags"]) {
-        return @"Open the scanner/browser for MetaLocalExperiment, LIDExperiment, MobileConfig IDs, scanned names, and overrides.";
+        return @"Browse Meta, MC IDs, scanned names, and overrides.";
     }
     return nil;
 }
