@@ -12,6 +12,14 @@ static BOOL (*orig_qs_enabled_inbox)(id, SEL, id) = NULL;
 static BOOL new_qs_enabled_inbox(id self, SEL _cmd, id arg1) { return YES; }
 static BOOL (*orig_qs_enabled_peek)(id, SEL, id) = NULL;
 static BOOL new_qs_enabled_peek(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_tray)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_tray(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_tray_peek)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_tray_peek(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_tray_pog)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_tray_pog(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_empty_pog)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_empty_pog(id self, SEL _cmd, id arg1) { return YES; }
 
 static BOOL (*orig_qs_eligible_corner)(id, SEL) = NULL;
 static BOOL new_qs_eligible_corner(id self, SEL _cmd) { return YES; }
@@ -88,6 +96,10 @@ static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *
     NSString *quickSnapHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)new_qs_enabled, (IMP *)&orig_qs_enabled);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)new_qs_enabled_inbox, (IMP *)&orig_qs_enabled_inbox);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTray:", (IMP)new_qs_enabled_tray, (IMP *)&orig_qs_enabled_tray);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTrayWithPeek:", (IMP)new_qs_enabled_tray_peek, (IMP *)&orig_qs_enabled_tray_peek);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTrayWithPog:", (IMP)new_qs_enabled_tray_pog, (IMP *)&orig_qs_enabled_tray_pog);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapNotesTrayEmptyPogEnabled:", (IMP)new_qs_enabled_empty_pog, (IMP *)&orig_qs_enabled_empty_pog);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledAsPeek:", (IMP)new_qs_enabled_peek, (IMP *)&orig_qs_enabled_peek);
 
     NSString *trayController = @"_TtC21IGNotesTrayController21IGNotesTrayController";
@@ -112,7 +124,6 @@ static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *
     hookZeroArgAcrossClasses(instantsClasses, @"hasQuicksnapRecapMedia", (IMP)new_has_qs_recap_media, (IMP *)&orig_has_qs_recap_media);
     hookZeroArgAcrossClasses(instantsClasses, @"isInstantsRecapVideo", (IMP)new_is_instants_recap_video, (IMP *)&orig_is_instants_recap_video);
 
-    // Main executable QuickSnap service gate.
     hookInstanceBool0(@"_TtC18IGQuickSnapService18IGQuickSnapService", @"isHiddenByServer", (IMP)new_is_hidden_by_server, (IMP *)&orig_is_hidden_by_server);
     hookInstanceBool0(@"_TtC18IGQuickSnapService18IGQuickSnapService", @"_isHiddenByServer", (IMP)new__is_hidden_by_server, (IMP *)&orig__is_hidden_by_server);
 }
