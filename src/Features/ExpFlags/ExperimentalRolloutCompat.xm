@@ -25,12 +25,12 @@ static BOOL sciContainsAny(NSString *value, NSArray<NSString *> *needles) {
 
 static BOOL sciQuickSnapRollout(NSString *name) {
     if (![SCIUtils getBoolPref:@"igt_quicksnap"]) return NO;
-    return sciContainsAny(name, @[@"quicksnap", @"instants", @"_ig_ios_quicksnap_", @"_ig_ios_instants_"]);
+    return sciContainsAny(name, @[@"quicksnap", @"quick_snap", @"instants", @"xma_quicksnap", @"_ig_ios_quicksnap_", @"_ig_ios_quick_snap_", @"_ig_ios_instants_"]);
 }
 
 static BOOL sciFriendMapRollout(NSString *name) {
     if (![SCIUtils getBoolPref:@"igt_directnotes_friendmap"]) return NO;
-    return sciContainsAny(name, @[@"friendmap", @"friendsmap", @"directnotes", @"_ig_ios_friendmap_"]);
+    return sciContainsAny(name, @[@"friendmap", @"friends_map", @"direct_notes", @"ig_direct_notes_ios", @"_ig_ios_friendmap_", @"_ig_ios_friends_map_"]);
 }
 
 static BOOL sciPrismRollout(NSString *name) {
