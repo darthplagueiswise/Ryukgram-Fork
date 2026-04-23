@@ -42,6 +42,13 @@ static BOOL new_dn_theme_entry(id self, SEL _cmd, id arg1) { return YES; }
 static BOOL (*orig_dn_text_required)(id, SEL, id) = NULL;
 static BOOL new_dn_text_required(id self, SEL _cmd, id arg1) { return YES; }
 
+static BOOL (*orig_supports_location_notes)(id, SEL, id, id) = NULL;
+static BOOL new_supports_location_notes(id self, SEL _cmd, id arg1, id arg2) { return YES; }
+static BOOL (*orig_enable_location_notes)(id, SEL) = NULL;
+static BOOL new_enable_location_notes(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_enable_friendmaps)(id, SEL) = NULL;
+static BOOL new_enable_friendmaps(id self, SEL _cmd) { return YES; }
+
 static BOOL (*orig_reply_enabled)(id, SEL) = NULL;
 static BOOL new_reply_enabled(id self, SEL _cmd) { return YES; }
 
@@ -83,6 +90,24 @@ static void hookClassBool2(NSString *className, NSString *selName, IMP newImp, I
     MSHookMessageEx(meta, sel, newImp, orig);
 }
 
+static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
+    SEL sel = NSSelectorFromString(selName);
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
+        MSHookMessageEx(cls, sel, newImp, orig);
+    }
+}
+
+static void hookTwoArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
+    SEL sel = NSSelectorFromString(selName);
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
+        MSHookMessageEx(cls, sel, newImp, orig);
+    }
+}
+
 static void hookReplyToggleIfNeeded(BOOL enabled, NSString *className) {
     if (!enabled) return;
     hookClassBool0(className, @"isEnabled", (IMP)new_reply_enabled, (IMP *)&orig_reply_enabled);
@@ -108,6 +133,15 @@ static void hookReplyToggleIfNeeded(BOOL enabled, NSString *className) {
         hookClassBool2(directNotesHelper, @"ambientDataCreationEnabled:shouldExpose:", (IMP)new_dn_ambient_data, (IMP *)&orig_dn_ambient_data);
         hookClassBool1(directNotesHelper, @"themeEnhancementsEntryPointEnabled:", (IMP)new_dn_theme_entry, (IMP *)&orig_dn_theme_entry);
         hookClassBool1(directNotesHelper, @"locationNotesTextRequiredEnabled:", (IMP)new_dn_text_required, (IMP *)&orig_dn_text_required);
+
+        NSArray<NSString *> *mainClasses = @[
+            @"IGDirectNotesLocationNoteOpenFriendMapViewModel",
+            @"_TtC27IGDirectNotesDetailsUISwift56IGDirectNotesLocationNotesOpenFriendMapSectionController",
+            @"IGDirectNotesLocationNotesOpenFriendMapSectionController"
+        ];
+        hookTwoArgAcrossClasses(mainClasses, @"supportsLocationNotesFor:launcherSet:", (IMP)new_supports_location_notes, (IMP *)&orig_supports_location_notes);
+        hookZeroArgAcrossClasses(mainClasses, @"enableLocationNotes", (IMP)new_enable_location_notes, (IMP *)&orig_enable_location_notes);
+        hookZeroArgAcrossClasses(mainClasses, @"enableFriendMaps", (IMP)new_enable_friendmaps, (IMP *)&orig_enable_friendmaps);
     }
 
     hookReplyToggleIfNeeded(sciAudioReplyEnabled(), @"_IGDirectNotesEnableAudioNoteReplyType");
