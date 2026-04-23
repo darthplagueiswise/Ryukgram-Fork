@@ -29,6 +29,11 @@ static BOOL new_user_muting_qs_cls(id self, SEL _cmd) { return NO; }
 static BOOL (*orig_user_muting_qs_inst)(id, SEL) = NULL;
 static BOOL new_user_muting_qs_inst(id self, SEL _cmd) { return NO; }
 
+static BOOL (*orig_should_block_ss_inst)(id, SEL, id, id, id) = NULL;
+static BOOL new_should_block_ss_inst(id self, SEL _cmd, id arg1, id arg2, id arg3) { return YES; }
+static BOOL (*orig_should_block_ss0_inst)(id, SEL) = NULL;
+static BOOL new_should_block_ss0_inst(id self, SEL _cmd) { return YES; }
+
 static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
@@ -48,6 +53,14 @@ static void hookInstanceBool0(NSString *className, NSString *selName, IMP newImp
 }
 
 static void hookInstanceBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
+    Class cls = NSClassFromString(className);
+    if (!cls) return;
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, newImp, orig);
+}
+
+static void hookInstanceBool3(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
     SEL sel = NSSelectorFromString(selName);
@@ -92,4 +105,8 @@ static void hookClassBool0(NSString *className, NSString *selName, IMP newImp, I
 
     hookClassBool0(@"IGUser", @"isMutingQuickSnap", (IMP)new_user_muting_qs_cls, (IMP *)&orig_user_muting_qs_cls);
     hookInstanceBool0(@"IGUser", @"isMutingQuickSnap", (IMP)new_user_muting_qs_inst, (IMP *)&orig_user_muting_qs_inst);
+
+    // QuickSnap-specific screenshot blocking support seen in the 426 IPA.
+    hookInstanceBool3(@"_TtC36IGQuickSnapBlockScreenshotBackground46IGQuickSnapBlockScreenshotBackgroundController", @"shouldBlockScreenshotWithLauncherSet:currentUserPk:mediaView:", (IMP)new_should_block_ss_inst, (IMP *)&orig_should_block_ss_inst);
+    hookInstanceBool0(@"_TtC36IGQuickSnapBlockScreenshotBackground46IGQuickSnapBlockScreenshotBackgroundController", @"_shouldBlockScreenshot", (IMP)new_should_block_ss0_inst, (IMP *)&orig_should_block_ss0_inst);
 }
