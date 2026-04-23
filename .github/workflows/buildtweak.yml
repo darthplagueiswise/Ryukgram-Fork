@@ -3,7 +3,7 @@ name: Build RyukGram tweak (rootless + rootful)
 on:
     push:
         branches:
-            - 'main'
+            - 'vanilla'
             - 'dev'
     workflow_dispatch:
 
