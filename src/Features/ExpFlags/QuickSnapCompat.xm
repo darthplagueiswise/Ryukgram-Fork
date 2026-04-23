@@ -34,6 +34,10 @@ static BOOL (*orig_has_qs_recap_media)(id, SEL) = NULL;
 static BOOL new_has_qs_recap_media(id self, SEL _cmd) { return YES; }
 static BOOL (*orig_is_instants_recap_video)(id, SEL) = NULL;
 static BOOL new_is_instants_recap_video(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_is_hidden_by_server)(id, SEL) = NULL;
+static BOOL new_is_hidden_by_server(id self, SEL _cmd) { return NO; }
+static BOOL (*orig__is_hidden_by_server)(id, SEL) = NULL;
+static BOOL new__is_hidden_by_server(id self, SEL _cmd) { return NO; }
 
 static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
@@ -107,4 +111,8 @@ static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *
     hookZeroArgAcrossClasses(instantsClasses, @"_isQuicksnapRecap", (IMP)new__is_qs_recap, (IMP *)&orig__is_qs_recap);
     hookZeroArgAcrossClasses(instantsClasses, @"hasQuicksnapRecapMedia", (IMP)new_has_qs_recap_media, (IMP *)&orig_has_qs_recap_media);
     hookZeroArgAcrossClasses(instantsClasses, @"isInstantsRecapVideo", (IMP)new_is_instants_recap_video, (IMP *)&orig_is_instants_recap_video);
+
+    // Main executable QuickSnap service gate.
+    hookInstanceBool0(@"_TtC18IGQuickSnapService18IGQuickSnapService", @"isHiddenByServer", (IMP)new_is_hidden_by_server, (IMP *)&orig_is_hidden_by_server);
+    hookInstanceBool0(@"_TtC18IGQuickSnapService18IGQuickSnapService", @"_isHiddenByServer", (IMP)new__is_hidden_by_server, (IMP *)&orig__is_hidden_by_server);
 }
