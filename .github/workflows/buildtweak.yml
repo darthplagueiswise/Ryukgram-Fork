@@ -6,12 +6,79 @@ on:
             - 'main'
             - 'dev'
     workflow_dispatch:
+        inputs:
+            mode:
+                description: Build packages or merge branches online
+                required: true
+                default: build
+                type: choice
+                options:
+                    - build
+                    - merge
+            source_branch:
+                description: Branch to merge from
+                required: false
+                default: dev
+                type: string
+            target_branch:
+                description: Branch to merge into
+                required: false
+                default: vanilla
+                type: string
+            conflict_strategy:
+                description: Conflict strategy for online merge
+                required: false
+                default: manual
+                type: choice
+                options:
+                    - manual
+                    - ours
+                    - theirs
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true
+
 jobs:
+    merge:
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'merge' }}
+        name: Merge branches online
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Checkout target branch
+              uses: actions/checkout@v4
+              with:
+                ref: ${{ github.event.inputs.target_branch }}
+                fetch-depth: 0
+
+            - name: Configure git
+              run: |
+                git config user.name "github-actions[bot]"
+                git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            - name: Fetch source branch
+              run: |
+                git fetch origin ${{ github.event.inputs.source_branch }}:${{ github.event.inputs.source_branch }} --no-tags
+
+            - name: Merge source into target
+              run: |
+                set -e
+                if [ "${{ github.event.inputs.conflict_strategy }}" = "ours" ]; then
+                  git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -X ours -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
+                elif [ "${{ github.event.inputs.conflict_strategy }}" = "theirs" ]; then
+                  git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -X theirs -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
+                else
+                  git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
+                fi
+
+            - name: Push merged target branch
+              run: |
+                git push origin HEAD:${{ github.event.inputs.target_branch }}
+
     build:
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.mode != 'merge' }}
         name: Build RyukGram
         runs-on: macos-latest
         permissions:
