@@ -8,8 +8,12 @@ static BOOL sciQuickSnapEnabled(void) {
 
 static BOOL (*orig_qs_enabled)(id, SEL, id) = NULL;
 static BOOL new_qs_enabled(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_feed)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_feed(id self, SEL _cmd, id arg1) { return YES; }
 static BOOL (*orig_qs_enabled_inbox)(id, SEL, id) = NULL;
 static BOOL new_qs_enabled_inbox(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL (*orig_qs_enabled_stories)(id, SEL, id) = NULL;
+static BOOL new_qs_enabled_stories(id self, SEL _cmd, id arg1) { return YES; }
 static BOOL (*orig_qs_enabled_peek)(id, SEL, id) = NULL;
 static BOOL new_qs_enabled_peek(id self, SEL _cmd, id arg1) { return YES; }
 static BOOL (*orig_qs_enabled_tray)(id, SEL, id) = NULL;
@@ -95,7 +99,9 @@ static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *
 
     NSString *quickSnapHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabled:", (IMP)new_qs_enabled, (IMP *)&orig_qs_enabled);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInFeed:", (IMP)new_qs_enabled_feed, (IMP *)&orig_qs_enabled_feed);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInInbox:", (IMP)new_qs_enabled_inbox, (IMP *)&orig_qs_enabled_inbox);
+    hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInStories:", (IMP)new_qs_enabled_stories, (IMP *)&orig_qs_enabled_stories);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTray:", (IMP)new_qs_enabled_tray, (IMP *)&orig_qs_enabled_tray);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTrayWithPeek:", (IMP)new_qs_enabled_tray_peek, (IMP *)&orig_qs_enabled_tray_peek);
     hookClassBool1(quickSnapHelper, @"isQuicksnapEnabledInNotesTrayWithPog:", (IMP)new_qs_enabled_tray_pog, (IMP *)&orig_qs_enabled_tray_pog);
