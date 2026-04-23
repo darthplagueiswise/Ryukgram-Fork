@@ -28,7 +28,7 @@ on:
             conflict_strategy:
                 description: Conflict strategy for online merge
                 required: false
-                default: manual
+                default: theirs
                 type: choice
                 options:
                     - manual
