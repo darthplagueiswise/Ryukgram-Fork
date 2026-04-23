@@ -24,15 +24,16 @@ static void new_qs_show_intro(id self, SEL _cmd) {
     if (orig_qs_show_intro) orig_qs_show_intro(self, _cmd);
 }
 
-static BOOL (*orig_user_muting_qs_cls)(id, SEL) = NULL;
-static BOOL new_user_muting_qs_cls(id self, SEL _cmd) { return NO; }
-static BOOL (*orig_user_muting_qs_inst)(id, SEL) = NULL;
-static BOOL new_user_muting_qs_inst(id self, SEL _cmd) { return NO; }
-
-static BOOL (*orig_should_block_ss_inst)(id, SEL, id, id, id) = NULL;
-static BOOL new_should_block_ss_inst(id self, SEL _cmd, id arg1, id arg2, id arg3) { return YES; }
-static BOOL (*orig_should_block_ss0_inst)(id, SEL) = NULL;
-static BOOL new_should_block_ss0_inst(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_is_eligible_for_peek)(id, SEL) = NULL;
+static BOOL new_is_eligible_for_peek(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_is_qs_recap)(id, SEL) = NULL;
+static BOOL new_is_qs_recap(id self, SEL _cmd) { return YES; }
+static BOOL (*orig__is_qs_recap)(id, SEL) = NULL;
+static BOOL new__is_qs_recap(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_has_qs_recap_media)(id, SEL) = NULL;
+static BOOL new_has_qs_recap_media(id self, SEL _cmd) { return YES; }
+static BOOL (*orig_is_instants_recap_video)(id, SEL) = NULL;
+static BOOL new_is_instants_recap_video(id self, SEL _cmd) { return YES; }
 
 static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
@@ -60,14 +61,6 @@ static void hookInstanceBool1(NSString *className, NSString *selName, IMP newImp
     MSHookMessageEx(cls, sel, newImp, orig);
 }
 
-static void hookInstanceBool3(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return;
-    SEL sel = NSSelectorFromString(selName);
-    if (!class_getInstanceMethod(cls, sel)) return;
-    MSHookMessageEx(cls, sel, newImp, orig);
-}
-
 static void hookInstanceVoid0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
@@ -76,14 +69,13 @@ static void hookInstanceVoid0(NSString *className, NSString *selName, IMP newImp
     MSHookMessageEx(cls, sel, newImp, orig);
 }
 
-static void hookClassBool0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return;
-    Class meta = object_getClass(cls);
-    if (!meta) return;
+static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
     SEL sel = NSSelectorFromString(selName);
-    if (!class_getInstanceMethod(meta, sel)) return;
-    MSHookMessageEx(meta, sel, newImp, orig);
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
+        MSHookMessageEx(cls, sel, newImp, orig);
+    }
 }
 
 %ctor {
@@ -103,10 +95,16 @@ static void hookClassBool0(NSString *className, NSString *selName, IMP newImp, I
     hookInstanceBool1(@"IGDirectNotesTrayRowSectionController", @"isQPEnabled:", (IMP)new_qs_isqp, NULL);
     hookInstanceBool1(@"_TtC24IGDirectNotesTrayUISwift37IGDirectNotesTrayRowSectionController", @"isQPEnabled:", (IMP)new_qs_isqp, NULL);
 
-    hookClassBool0(@"IGUser", @"isMutingQuickSnap", (IMP)new_user_muting_qs_cls, (IMP *)&orig_user_muting_qs_cls);
-    hookInstanceBool0(@"IGUser", @"isMutingQuickSnap", (IMP)new_user_muting_qs_inst, (IMP *)&orig_user_muting_qs_inst);
-
-    // QuickSnap-specific screenshot blocking support seen in the 426 IPA.
-    hookInstanceBool3(@"_TtC36IGQuickSnapBlockScreenshotBackground46IGQuickSnapBlockScreenshotBackgroundController", @"shouldBlockScreenshotWithLauncherSet:currentUserPk:mediaView:", (IMP)new_should_block_ss_inst, (IMP *)&orig_should_block_ss_inst);
-    hookInstanceBool0(@"_TtC36IGQuickSnapBlockScreenshotBackground46IGQuickSnapBlockScreenshotBackgroundController", @"_shouldBlockScreenshot", (IMP)new_should_block_ss0_inst, (IMP *)&orig_should_block_ss0_inst);
+    NSArray<NSString *> *instantsClasses = @[
+        @"IGInstantGestureRecognizer",
+        @"IGAPIQuickSnapData",
+        @"XDTQuickSnapData",
+        @"IGAPIQuicksnapRecapMediaInfo",
+        @"XDTQuicksnapRecapMediaInfo"
+    ];
+    hookZeroArgAcrossClasses(instantsClasses, @"isEligibleForPeek", (IMP)new_is_eligible_for_peek, (IMP *)&orig_is_eligible_for_peek);
+    hookZeroArgAcrossClasses(instantsClasses, @"isQuicksnapRecap", (IMP)new_is_qs_recap, (IMP *)&orig_is_qs_recap);
+    hookZeroArgAcrossClasses(instantsClasses, @"_isQuicksnapRecap", (IMP)new__is_qs_recap, (IMP *)&orig__is_qs_recap);
+    hookZeroArgAcrossClasses(instantsClasses, @"hasQuicksnapRecapMedia", (IMP)new_has_qs_recap_media, (IMP *)&orig_has_qs_recap_media);
+    hookZeroArgAcrossClasses(instantsClasses, @"isInstantsRecapVideo", (IMP)new_is_instants_recap_video, (IMP *)&orig_is_instants_recap_video);
 }
