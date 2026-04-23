@@ -1,0 +1,10 @@
+Package: scilibflex
+Name: libFLEX (SCInsta)
+Pre-Depends: firmware (>= 9.0)
+Depends: 
+Version: 4.7.0~b4
+Architecture: iphoneos-arm
+Description: A library for Flipboard Explorer (for SCInsta).
+Maintainer: SoCuul
+Author: Tanner Bennett <tannerbennett@me.com>
+Section: Tweaks
