@@ -68,7 +68,10 @@ jobs:
                 if [ "${{ github.event.inputs.conflict_strategy }}" = "ours" ]; then
                   git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -X ours -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
                 elif [ "${{ github.event.inputs.conflict_strategy }}" = "theirs" ]; then
-                  git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -X theirs -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
+                  git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories -s ours --no-commit
+                  git read-tree --reset -u ${{ github.event.inputs.source_branch }}
+                  git add -A
+                  git commit -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}' keeping source tree"
                 else
                   git merge ${{ github.event.inputs.source_branch }} --allow-unrelated-histories --no-ff -m "Merge '${{ github.event.inputs.source_branch }}' into '${{ github.event.inputs.target_branch }}'"
                 fi
