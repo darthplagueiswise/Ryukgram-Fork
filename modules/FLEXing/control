@@ -1,0 +1,9 @@
+Package: com.socuul.sciflexing
+Name: FLEXing (SCInsta)
+Pre-Depends: firmware (>= 8.0)
+Version: 1.5.1
+Architecture: iphoneos-arm
+Description: Open FLEX in SCInsta!
+Maintainer: SoCuul
+Author: Tanner Bennett <thepantsthief@me.com>
+Section: Tweaks

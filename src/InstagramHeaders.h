@@ -43,6 +43,12 @@
 @interface IGExploreGridViewController : IGViewController
 @end
 
+@interface IGExploreViewController : IGViewController
+@end
+
+@interface IGExploreSearchTitleView : UIView
+@end
+
 @interface UIImage ()
 - (NSString *)ig_imageName;
 @end
@@ -162,6 +168,15 @@
 
 @interface IGSundialViewerPhotoView : UIView
 - (void)addLongPressGestureRecognizer; // new
+@end
+
+@interface IGSundialViewerPhotoCell : UIView
+@end
+
+@interface IGSundialViewerCarouselPhotoCell : UIView
+@end
+
+@interface IGSundialViewerCarouselCell : UIView
 @end
 
 @interface IGImageProgressView : UIView
@@ -674,4 +689,15 @@ typedef FLEXAlertAction * _Nonnull (^FLEXAlertActionHandler)(void(^handler)(NSAr
 - (void)showExplorer;
 - (void)hideExplorer;
 - (void)toggleExplorer;
+@end
+
+// IGLive classes — discovered via runtime ivar/method dump.
+@interface IGLiveFeedbackController : NSObject
+- (void)start;
+- (void)stop;
+@end
+
+@interface IGLiveCommentsContainerViewController : UIViewController
+- (void)setIsHidden:(BOOL)hidden;
+- (void)setDisabled:(BOOL)disabled;
 @end

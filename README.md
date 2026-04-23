@@ -1,6 +1,6 @@
 # RyukGram
 A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com/SoCuul/SCInsta) with additional features and fixes.\
-`Version v1.2.0` | `Tested on Instagram 425.0.0`
+`Version v1.2.2` | `Tested on Instagram 426.0.0`
 
 ---
 
@@ -32,6 +32,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Open links in external browser **\***
 - Strip tracking from browser links **\***
 - Do not save recent searches
+- Open link from clipboard — long-press the search tab to open a copied Instagram link (handles fix-embed mirrors) **\***
 - Use detailed (native) color picker
 - Enable liquid glass buttons
 - Enable liquid glass surfaces — floating tab bar, dynamic sizing, and other UI elements **\***
@@ -46,6 +47,11 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
   - No suggested chats
   - Hide trending searches
   - Hide explore posts grid
+- Live
+  - Anonymous live viewing — blocks viewer-count heartbeat (you also won't see the viewer count) **\***
+  - Toggle live comments — long-press the heart to hide/show the comments overlay **\***
+- Privacy
+  - Hide UI on capture — redacts RyukGram buttons from screenshots, screen recordings, and mirroring **\***
 
 ### Feed
 - Hide stories tray
@@ -80,6 +86,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
   - Audio forced on in reels tab
   - Play indicator properly hidden when video plays (fixes IG bug after hold/zoom)
   - Playback toggle synced with overlay during hold/zoom
+  - Optional tap-to-mute on photo reels (single + carousel photo pages)
   - Works across IG A/B test variants
 
 ### Action buttons **\***
@@ -97,14 +104,18 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Profile copy button **\***
 - Follow indicator — shows whether the user follows you **\***
 - Copy note on long press — long-press the note bubble to copy text **\***
+- Fake profile stats — fake verified badge and follower/following/post counts on your own profile **\***
+- Profile Analyzer (beta) — follower/following breakdown with mutuals, non-followbacks, new/lost followers and profile change tracking; per-list search, filters, and multi-select batch follow/unfollow **\***
 
 ### Saving
 - Enhanced HD downloads — up to 1080p via DASH + FFmpegKit **\***
   - Quality picker with preview playback **\***
+  - Audio-only and raw photo download options in the quality picker **\***
   - Fallback to 720p without FFmpegKit **\***
 - Download pill with frosted glass, progress bar, bulk counter, success/error states **\***
 - Save to RyukGram album — routes downloads into a dedicated album in Photos **\***
 - Download confirmation — optional dialog before downloading **\***
+- Output filenames formatted as `@username_context_timestamp` **\***
 - Legacy long-press gesture — deprecated, off by default. Finger count + hold time customizable **\***
 
 ### Stories and messages
@@ -141,8 +152,8 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Story audio mute/unmute toggle — button on overlay and in action menu to toggle audio **\***
 - View story mentions — bottom sheet with profile pic, follow/unfollow, tap-to-open profile **\***
 - Stop story auto-advance — stories won't auto-skip when the timer ends **\***
+- Disappearing DM media overlay — action button, mark-as-viewed eye, and audio toggle with independent toggles; long-press opens the full menu with a Messages settings shortcut **\***
 - Download disappearing DM media (photos + videos) — expand, share, or save from action menu **\***
-- Mark disappearing messages as viewed button **\***
 - Upload audio as voice message — send audio files, extract audio from videos, with built-in trim editor **\***
 - Disable instants creation
 
@@ -156,15 +167,18 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
   - Hide create tab
   - Hide messages tab
 - Messages-only mode — keep DM inbox + profile, hide everything else, force launch into inbox **\***
+  - Hide tab bar sub-toggle — drop the bottom tab bar entirely, inbox-only UI with a floating settings gear **\***
 - Launch tab — pick which tab the app opens to (ignored in Messages-only mode) **\***
 
 ### Confirm actions
 - Confirm like: Posts/Stories
+- Confirm story emoji reaction **\***
 - Confirm like: Reels
 - Confirm follow
 - Confirm unfollow **\***
 - Confirm repost
-- Confirm call
+- Confirm voice call **\***
+- Confirm video call **\***
 - Confirm voice messages
 - Confirm follow requests
 - Confirm shh mode (disappearing messages)
@@ -192,10 +206,10 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Multi-language UI — every user-facing string in RyukGram flows through a central translation layer **\***
 - Built-in language picker — globe icon in the top-right of Settings; pick System default or any shipped language **\***
 - Falls back to English when a translation is missing, so nothing ever breaks **\***
-- Currently shipping: **English**, **Spanish** — other languages land as translators submit them (see below).
+- Currently shipping: **English**, **Spanish**, **Russian**, **Korean**, **Arabic** — other languages land as translators submit them (see below).
 
 ### Optimization
-- Automatically clears unneeded cache folders, reducing the size of your Instagram installation
+- Clear Instagram cache on demand from Advanced settings, with optional auto-clear interval and a toggle to skip the automatic size scan **\***
 
 # Translating RyukGram
 Want to see RyukGram in your language? Two ways:
@@ -221,6 +235,7 @@ If you find a string that still renders in English on a translated build, open a
 ## Known Issues
 - Preserved unsent messages cannot be removed using "Delete for you". Pull to refresh in the DMs tab clears all preserved messages (with optional confirmation if "Warn before clearing on refresh" is enabled).
 - "Delete for you" detection uses a ~2 second window after the local action. If a real other-party unsend happens to land in the same window, it may not be preserved. Rare in practice and limited to that specific overlap.
+- With Liquid Glass buttons + Hide UI on capture both on, the DM eye leaves an empty glass bubble in captures — IG draws that backdrop, not the tweak, so it's outside our redaction.
 
 # Opening Tweak Settings
 
@@ -259,3 +274,6 @@ $ ./build.sh <sideload/rootless/rootful>
 - [@erupts0](https://github.com/erupts0) (John) — testing and feature suggestions
 - [BillyCurtis/OpenInstagramSafariExtension](https://github.com/BillyCurtis/OpenInstagramSafariExtension) — base for the bundled Safari extension
 - Furamako — Spanish translation
+- [@ch1tmdgus](https://github.com/ch1tmdgus) (N4C) — Korean translation
+- [ZomkaDEV](https://github.com/ZomkaDEV) — Russian translation
+- [@bruuhim](https://github.com/bruuhim) — Arabic translation

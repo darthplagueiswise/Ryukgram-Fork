@@ -28,6 +28,18 @@ copy_localization_into_bundle() {
     done
 }
 
+# Copy generic static assets (PNGs, etc.) into a RyukGram.bundle. Used for
+# bundled images the tweak loads via SCILocalizationBundle().
+# Arg 1: destination bundle directory (created if missing).
+copy_bundle_assets() {
+    local DEST="$1"
+    local SRC="src/BundleAssets"
+    [ -d "$SRC" ] || return 0
+    mkdir -p "$DEST"
+    find "$SRC" -maxdepth 1 -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.pdf' \) \
+        -exec cp {} "$DEST/" \;
+}
+
 # Collect all FFmpegKit frameworks for injection
 ffmpegkit_frameworks() {
     local fws=""
@@ -57,7 +69,7 @@ inject_bundle_into_deb() {
 
     local BUNDLE_DIR="$TMPDIR/${PREFIX}Library/Application Support/RyukGram.bundle"
     mkdir -p "$BUNDLE_DIR"
-    ( cd .. && copy_localization_into_bundle "$BUNDLE_DIR" )
+    ( cd .. && copy_localization_into_bundle "$BUNDLE_DIR" && copy_bundle_assets "$BUNDLE_DIR" )
 
     if [ -d "../modules/ffmpegkit/ffmpegkit.framework" ]; then
         for fw in ../modules/ffmpegkit/*.framework; do
@@ -108,6 +120,7 @@ then
 
     # Ship localization bundle next to the dylib so Feather/manual installs work.
     copy_localization_into_bundle "packages/RyukGram.bundle"
+    copy_bundle_assets "packages/RyukGram.bundle"
 
     echo -e "\033[1m\033[32mDone!\033[0m\n\nDylib at: $(pwd)/packages/RyukGram.dylib\nBundle at: $(pwd)/packages/RyukGram.bundle"
 
@@ -216,6 +229,7 @@ then
     rm -rf "$BUNDLE_PATH"
     mkdir -p "$BUNDLE_PATH"
     copy_localization_into_bundle "$BUNDLE_PATH"
+    copy_bundle_assets "$BUNDLE_PATH"
     if [ -d "modules/ffmpegkit/ffmpegkit.framework" ]; then
         echo -e '\033[1m\033[32mBuilding RyukGram.bundle\033[0m'
         for fw in modules/ffmpegkit/*.framework; do
@@ -374,6 +388,7 @@ then
     rm -rf "$BUNDLE_PATH"
     mkdir -p "$BUNDLE_PATH"
     copy_localization_into_bundle "$BUNDLE_PATH"
+    copy_bundle_assets "$BUNDLE_PATH"
     if [ -d "modules/ffmpegkit/ffmpegkit.framework" ]; then
         for fw in modules/ffmpegkit/*.framework; do
             cp -R "$fw" "$BUNDLE_PATH/"
