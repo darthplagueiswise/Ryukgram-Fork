@@ -18,36 +18,24 @@ static BOOL sciPhotoReplyEnabled(void) {
     return [SCIUtils getBoolPref:@"igt_directnotes_photo_reply"];
 }
 
-static BOOL (*orig_fm_enabled_cls)(id, SEL) = NULL;
-static BOOL new_fm_enabled_cls(id self, SEL _cmd) { return YES; }
-static BOOL (*orig_fm_enabled_inst)(id, SEL) = NULL;
-static BOOL new_fm_enabled_inst(id self, SEL _cmd) { return YES; }
-
 static BOOL (*orig_dn_location)(id, SEL, id) = NULL;
-static BOOL new_dn_location(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_location(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_iteration)(id, SEL, id) = NULL;
-static BOOL new_dn_iteration(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_iteration(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_bottom_attr)(id, SEL, id) = NULL;
-static BOOL new_dn_bottom_attr(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_bottom_attr(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_audience)(id, SEL, id) = NULL;
-static BOOL new_dn_audience(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_audience(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_tray_gen)(id, SEL, id) = NULL;
-static BOOL new_dn_tray_gen(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_tray_gen(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_details_gen)(id, SEL, id) = NULL;
-static BOOL new_dn_details_gen(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_details_gen(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_ambient_data)(id, SEL, id, BOOL) = NULL;
-static BOOL new_dn_ambient_data(id self, SEL _cmd, id arg1, BOOL arg2) { return YES; }
+static BOOL new_dn_ambient_data(id self, SEL _cmd, id arg1, BOOL arg2) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_theme_entry)(id, SEL, id) = NULL;
-static BOOL new_dn_theme_entry(id self, SEL _cmd, id arg1) { return YES; }
+static BOOL new_dn_theme_entry(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 static BOOL (*orig_dn_text_required)(id, SEL, id) = NULL;
-static BOOL new_dn_text_required(id self, SEL _cmd, id arg1) { return YES; }
-
-static BOOL (*orig_supports_location_notes)(id, SEL, id, id) = NULL;
-static BOOL new_supports_location_notes(id self, SEL _cmd, id arg1, id arg2) { return YES; }
-static BOOL (*orig_enable_location_notes)(id, SEL) = NULL;
-static BOOL new_enable_location_notes(id self, SEL _cmd) { return YES; }
-static BOOL (*orig_enable_friendmaps)(id, SEL) = NULL;
-static BOOL new_enable_friendmaps(id self, SEL _cmd) { return YES; }
+static BOOL new_dn_text_required(id self, SEL _cmd, id arg1) { return sciFriendMapEnabled(); }
 
 static BOOL (*orig_reply_enabled)(id, SEL) = NULL;
 static BOOL new_reply_enabled(id self, SEL _cmd) { return YES; }
@@ -60,14 +48,6 @@ static void hookClassBool0(NSString *className, NSString *selName, IMP newImp, I
     SEL sel = NSSelectorFromString(selName);
     if (!class_getInstanceMethod(meta, sel)) return;
     MSHookMessageEx(meta, sel, newImp, orig);
-}
-
-static void hookInstanceBool0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return;
-    SEL sel = NSSelectorFromString(selName);
-    if (!class_getInstanceMethod(cls, sel)) return;
-    MSHookMessageEx(cls, sel, newImp, orig);
 }
 
 static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
@@ -90,38 +70,16 @@ static void hookClassBool2(NSString *className, NSString *selName, IMP newImp, I
     MSHookMessageEx(meta, sel, newImp, orig);
 }
 
-static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
-    SEL sel = NSSelectorFromString(selName);
-    for (NSString *className in classNames) {
-        Class cls = NSClassFromString(className);
-        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
-        MSHookMessageEx(cls, sel, newImp, orig);
-    }
-}
-
-static void hookTwoArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
-    SEL sel = NSSelectorFromString(selName);
-    for (NSString *className in classNames) {
-        Class cls = NSClassFromString(className);
-        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
-        MSHookMessageEx(cls, sel, newImp, orig);
-    }
-}
-
 static void hookReplyToggleIfNeeded(BOOL enabled, NSString *className) {
     if (!enabled) return;
     hookClassBool0(className, @"isEnabled", (IMP)new_reply_enabled, (IMP *)&orig_reply_enabled);
     hookClassBool0(className, @"enabled", (IMP)new_reply_enabled, NULL);
-    hookInstanceBool0(className, @"isEnabled", (IMP)new_reply_enabled, NULL);
-    hookInstanceBool0(className, @"enabled", (IMP)new_reply_enabled, NULL);
 }
 
 %ctor {
     if (sciFriendMapEnabled()) {
-        hookClassBool0(@"_IGDirectNotesFriendMapEnabled", @"isEnabled", (IMP)new_fm_enabled_cls, (IMP *)&orig_fm_enabled_cls);
-        hookClassBool0(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)new_fm_enabled_cls, NULL);
-        hookInstanceBool0(@"_IGDirectNotesFriendMapEnabled", @"isEnabled", (IMP)new_fm_enabled_inst, (IMP *)&orig_fm_enabled_inst);
-        hookInstanceBool0(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)new_fm_enabled_inst, NULL);
+        hookClassBool0(@"_IGDirectNotesFriendMapEnabled", @"isEnabled", (IMP)new_reply_enabled, NULL);
+        hookClassBool0(@"_IGDirectNotesFriendMapEnabled", @"enabled", (IMP)new_reply_enabled, NULL);
 
         NSString *directNotesHelper = @"_TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper";
         hookClassBool1(directNotesHelper, @"locationNotesEnabled:", (IMP)new_dn_location, (IMP *)&orig_dn_location);
@@ -133,15 +91,6 @@ static void hookReplyToggleIfNeeded(BOOL enabled, NSString *className) {
         hookClassBool2(directNotesHelper, @"ambientDataCreationEnabled:shouldExpose:", (IMP)new_dn_ambient_data, (IMP *)&orig_dn_ambient_data);
         hookClassBool1(directNotesHelper, @"themeEnhancementsEntryPointEnabled:", (IMP)new_dn_theme_entry, (IMP *)&orig_dn_theme_entry);
         hookClassBool1(directNotesHelper, @"locationNotesTextRequiredEnabled:", (IMP)new_dn_text_required, (IMP *)&orig_dn_text_required);
-
-        NSArray<NSString *> *mainClasses = @[
-            @"IGDirectNotesLocationNoteOpenFriendMapViewModel",
-            @"_TtC27IGDirectNotesDetailsUISwift56IGDirectNotesLocationNotesOpenFriendMapSectionController",
-            @"IGDirectNotesLocationNotesOpenFriendMapSectionController"
-        ];
-        hookTwoArgAcrossClasses(mainClasses, @"supportsLocationNotesFor:launcherSet:", (IMP)new_supports_location_notes, (IMP *)&orig_supports_location_notes);
-        hookZeroArgAcrossClasses(mainClasses, @"enableLocationNotes", (IMP)new_enable_location_notes, (IMP *)&orig_enable_location_notes);
-        hookZeroArgAcrossClasses(mainClasses, @"enableFriendMaps", (IMP)new_enable_friendmaps, (IMP *)&orig_enable_friendmaps);
     }
 
     hookReplyToggleIfNeeded(sciAudioReplyEnabled(), @"_IGDirectNotesEnableAudioNoteReplyType");
