@@ -41,22 +41,32 @@ static NSDictionary<NSString *, NSString *> *SCIExperimentalDescriptionMap(void)
     return map;
 }
 
-static NSString *SCIExperimentalButtonSubtitle(NSString *title) {
-    if (![title isKindOfClass:[NSString class]]) return nil;
-    if ([title isEqualToString:@"Experimental flags"]) {
-        return @"Browse Meta, MC IDs, scanned names, and overrides.";
-    }
-    return nil;
+static BOOL SCIShouldRemoveFooter(id footer) {
+    if (![footer isKindOfClass:[NSString class]]) return NO;
+    NSString *s = [(NSString *)footer lowercaseString];
+    return [s containsString:@"quicksnap and friendmap hooks"] ||
+           [s containsString:@"metalocalexperiment and igmobile"] ||
+           [s containsString:@"configcontextmanager browser"];
 }
 
 static void SCIApplyExperimentalDescriptionsToRows(NSArray *rows);
 
-static void SCIApplyExperimentalDescriptionsToSections(NSArray *sections) {
+static NSArray *SCICleanSections(NSArray *sections) {
+    NSMutableArray *cleaned = [NSMutableArray arrayWithCapacity:sections.count];
     for (id section in sections) {
-        if (![section isKindOfClass:[NSDictionary class]]) continue;
-        NSArray *rows = [(NSDictionary *)section objectForKey:@"rows"];
+        if (![section isKindOfClass:[NSDictionary class]]) {
+            [cleaned addObject:section];
+            continue;
+        }
+
+        NSMutableDictionary *copy = [(NSDictionary *)section mutableCopy];
+        if (SCIShouldRemoveFooter(copy[@"footer"])) copy[@"footer"] = @"";
+
+        NSArray *rows = copy[@"rows"];
         SCIApplyExperimentalDescriptionsToRows(rows);
+        [cleaned addObject:[copy copy]];
     }
+    return [cleaned copy];
 }
 
 static void SCIApplyExperimentalDescriptionsToRows(NSArray *rows) {
@@ -67,19 +77,17 @@ static void SCIApplyExperimentalDescriptionsToRows(NSArray *rows) {
         NSString *desc = SCIExperimentalDescriptionMap()[setting.defaultsKey ?: @""];
         if (desc.length) setting.subtitle = desc;
 
-        NSString *buttonDesc = SCIExperimentalButtonSubtitle(setting.title);
-        if (buttonDesc.length) setting.subtitle = buttonDesc;
+        if ([setting.title isEqualToString:@"Experimental flags"]) setting.subtitle = @"";
 
         if ([setting.navSections isKindOfClass:[NSArray class]]) {
-            SCIApplyExperimentalDescriptionsToSections(setting.navSections);
+            setting.navSections = SCICleanSections(setting.navSections);
         }
     }
 }
 
 static NSArray *new_SCITweakSettings_sections(id self, SEL _cmd) {
     NSArray *sections = orig_SCITweakSettings_sections ? orig_SCITweakSettings_sections(self, _cmd) : @[];
-    SCIApplyExperimentalDescriptionsToSections(sections);
-    return sections;
+    return SCICleanSections(sections);
 }
 
 __attribute__((constructor))
