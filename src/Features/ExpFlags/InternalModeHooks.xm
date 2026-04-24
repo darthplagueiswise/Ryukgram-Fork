@@ -9,7 +9,6 @@ static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_e
 static BOOL rgEmployeeMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_mc"]; }
 static BOOL rgEmployeeOrTestUserMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]; }
 
-
 static BOOL rgShouldInstallInternalModeHooks(void) {
     return rgEmployeeMasterEnabled() ||
            rgEmployeeMCEnabled() ||
@@ -74,40 +73,6 @@ static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(voi
         orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
 }
 
-typedef void (*IGMCTryUpdateFn)(id);
-static IGMCTryUpdateFn orig_IGMobileConfigTryUpdateConfigsWithCompletion = NULL;
-static void hook_IGMobileConfigTryUpdateConfigsWithCompletion(id completion) {
-    NSLog(@"[RyukGram][MC] IGMobileConfigTryUpdateConfigsWithCompletion called (completion=%@)", completion);
-    if (orig_IGMobileConfigTryUpdateConfigsWithCompletion) {
-        orig_IGMobileConfigTryUpdateConfigsWithCompletion(completion);
-    }
-}
-
-static void (*orig_IGMobileConfigForceUpdateConfigs)(void) = NULL;
-static void hook_IGMobileConfigForceUpdateConfigs(void) {
-    NSLog(@"[RyukGram][MC] IGMobileConfigForceUpdateConfigs called");
-    if (orig_IGMobileConfigForceUpdateConfigs) orig_IGMobileConfigForceUpdateConfigs();
-}
-
-void RGTriggerMobileConfigTryUpdate(void) {
-    if (!orig_IGMobileConfigTryUpdateConfigsWithCompletion) {
-        [SCIUtils showToastForDuration:2.0 title:@"Try update unavailable"]; return;
-    }
-    hook_IGMobileConfigTryUpdateConfigsWithCompletion(nil);
-    [SCIUtils showToastForDuration:2.0 title:@"Triggered Try Update Configs"];
-}
-
-void RGTriggerMobileConfigForceUpdate(void) {
-    if (!orig_IGMobileConfigForceUpdateConfigs) {
-        [SCIUtils showToastForDuration:2.0 title:@"Force update unavailable"]; return;
-    }
-    hook_IGMobileConfigForceUpdateConfigs();
-    [SCIUtils showToastForDuration:2.0 title:@"Triggered Force Update Configs"];
-}
-
-void RGTryUpdateMobileConfigAction(void) { RGTriggerMobileConfigTryUpdate(); }
-void RGForceUpdateMobileConfigAction(void) { RGTriggerMobileConfigForceUpdate(); }
-
 %ctor {
     if (!rgShouldInstallInternalModeHooks()) return;
 
@@ -115,15 +80,11 @@ void RGForceUpdateMobileConfigAction(void) { RGTriggerMobileConfigForceUpdate();
         {"IGMobileConfigBooleanValueForInternalUse", (void *)hook_IGMobileConfigBooleanValueForInternalUse, (void **)&orig_IGMobileConfigBooleanValueForInternalUse},
         {"IGMobileConfigSessionlessBooleanValueForInternalUse", (void *)hook_IGMobileConfigSessionlessBooleanValueForInternalUse, (void **)&orig_IGMobileConfigSessionlessBooleanValueForInternalUse},
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
-        {"IGMobileConfigTryUpdateConfigsWithCompletion", (void *)hook_IGMobileConfigTryUpdateConfigsWithCompletion, (void **)&orig_IGMobileConfigTryUpdateConfigsWithCompletion},
-        {"IGMobileConfigForceUpdateConfigs", (void *)hook_IGMobileConfigForceUpdateConfigs, (void **)&orig_IGMobileConfigForceUpdateConfigs},
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-    NSLog(@"[RyukGram][MC] internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p tryUpdate=%p forceUpdate=%p",
+    NSLog(@"[RyukGram][MC] internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p",
           rc,
           orig_IGMobileConfigBooleanValueForInternalUse,
           orig_IGMobileConfigSessionlessBooleanValueForInternalUse,
-          orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18,
-          orig_IGMobileConfigTryUpdateConfigsWithCompletion,
-          orig_IGMobileConfigForceUpdateConfigs);
+          orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18);
 }
