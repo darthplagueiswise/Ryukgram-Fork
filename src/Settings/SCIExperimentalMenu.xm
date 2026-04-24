@@ -3,10 +3,17 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
+extern void RGTryUpdateMobileConfigAction(void);
+extern void RGForceUpdateMobileConfigAction(void);
+
 static NSArray *(*orig_sections_exp)(id, SEL);
 
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
+}
+
+static SCISetting *ExpButton(NSString *title, NSString *subtitle, NSString *symbol, void (^action)(void)) {
+    return [SCISetting buttonCellWithTitle:title subtitle:subtitle icon:[SCISymbol symbolWithName:symbol] action:action];
 }
 
 static NSArray *expNavSections(void) {
@@ -48,11 +55,22 @@ static NSArray *expNavSections(void) {
             ]
         },
         @{
-            @"header": @"Account / system",
+            @"header": @"Account / dogfood gates",
+            @"footer": @"Filtered hooks only. Employee toggles force known MobileConfig specifiers, not every InternalUse boolean. Restart after changing toggles.",
             @"rows": @[
-                ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
-                ExpSwitch(@"Employee Mode", @"Stores a dedicated toggle for future experiment hooks", @"igt_employee", NO),
-                ExpSwitch(@"Internal Mode", @"Stores a dedicated toggle for future experiment hooks", @"igt_internal", NO)
+                ExpSwitch(@"Employee MC: ig_is_employee", @"Forces only _ig_is_employee specifiers to YES", @"igt_employee", YES),
+                ExpSwitch(@"Employee/TestUser MC", @"Forces only _ig_is_employee_or_test_user to YES", @"igt_employee_test_user", YES),
+                ExpSwitch(@"Internal Apps Installed Gate", @"Pretends Instagram internal apps are installed/not hidden", @"igt_internal", YES),
+                ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse boolean calls into MC IDs without changing values", @"igt_internaluse_observer", YES),
+                ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO)
+            ]
+        },
+        @{
+            @"header": @"MobileConfig refresh",
+            @"footer": @"Manual actions. Use only after the app is open and stable.",
+            @"rows": @[
+                ExpButton(@"Try update configs", @"Calls IGMobileConfigTryUpdateConfigsWithCompletion", @"arrow.clockwise", ^{ RGTryUpdateMobileConfigAction(); }),
+                ExpButton(@"Force update configs", @"Calls IGMobileConfigForceUpdateConfigs", @"arrow.clockwise.circle", ^{ RGForceUpdateMobileConfigAction(); })
             ]
         },
         @{
