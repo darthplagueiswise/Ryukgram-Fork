@@ -3,13 +3,17 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
-extern void RGTriggerMobileConfigTryUpdate(void);
-extern void RGTriggerMobileConfigForceUpdate(void);
+extern void RGTryUpdateMobileConfigAction(void);
+extern void RGForceUpdateMobileConfigAction(void);
 
 static NSArray *(*orig_sections_exp)(id, SEL);
 
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
+}
+
+static SCISetting *ExpButton(NSString *title, NSString *subtitle, NSString *symbolName, void (^action)(void)) {
+    return [SCISetting buttonCellWithTitle:title subtitle:subtitle icon:[SCISymbol symbolWithName:symbolName] action:action];
 }
 
 static NSArray *expNavSections(void) {
@@ -69,14 +73,8 @@ static NSArray *expNavSections(void) {
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
                                      viewController:[SCIExpFlagsViewController new]],
-                [SCISetting buttonCellWithTitle:@"Try Update Configs"
-                                       subtitle:@"Calls IGMobileConfigTryUpdateConfigsWithCompletion"
-                                           icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
-                                         action:^{ RGTriggerMobileConfigTryUpdate(); }],
-                [SCISetting buttonCellWithTitle:@"Force Update Configs"
-                                       subtitle:@"Calls IGMobileConfigForceUpdateConfigs"
-                                           icon:[SCISymbol symbolWithName:@"exclamationmark.arrow.triangle.2.circlepath"]
-                                         action:^{ RGTriggerMobileConfigForceUpdate(); }]
+                ExpButton(@"Try update configs", @"Calls IGMobileConfigTryUpdateConfigsWithCompletion", @"arrow.clockwise", ^{ RGTryUpdateMobileConfigAction(); }),
+                ExpButton(@"Force update configs", @"Calls IGMobileConfigForceUpdateConfigs", @"arrow.clockwise.circle", ^{ RGForceUpdateMobileConfigAction(); })
             ]
         }
     ];

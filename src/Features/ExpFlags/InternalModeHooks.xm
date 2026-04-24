@@ -105,6 +105,9 @@ void RGTriggerMobileConfigForceUpdate(void) {
     [SCIUtils showToastForDuration:2.0 title:@"Triggered Force Update Configs"];
 }
 
+void RGTryUpdateMobileConfigAction(void) { RGTriggerMobileConfigTryUpdate(); }
+void RGForceUpdateMobileConfigAction(void) { RGTriggerMobileConfigForceUpdate(); }
+
 %ctor {
     if (!rgShouldInstallInternalModeHooks()) return;
 
