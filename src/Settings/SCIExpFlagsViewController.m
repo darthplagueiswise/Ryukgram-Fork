@@ -1,11 +1,13 @@
 // Exp flag browser + override editor.
-// Tabs: Browser(native) | Meta(override) | MC(view) | Scanned(view) | Overrides
+// Tabs: Browser(native) | Meta(override) | MC(view) | Scanned/InternalUse(override) | Overrides
 
 #import "SCIExpFlagsViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+
+static const void *kSCIInternalUseSwitchSpecifierKey = &kSCIInternalUseSwitchSpecifierKey;
 
 typedef NS_ENUM(NSInteger, SCIExpTab) {
     SCIExpTabBrowser = 0,
@@ -15,14 +17,24 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     SCIExpTabOverrides,
 };
 
+typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
+    SCIInternalUseCategoryHot = 0,
+    SCIInternalUseCategoryChanged,
+    SCIInternalUseCategoryOn,
+    SCIInternalUseCategoryOff,
+    SCIInternalUseCategoryRecent,
+};
+
 @interface SCIExpFlagsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
 @property (nonatomic, strong) UISegmentedControl *seg;
+@property (nonatomic, strong) UISegmentedControl *internalCatSeg;
 @property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) UILabel *empty;
 
 @property (nonatomic, assign) SCIExpTab tab;
+@property (nonatomic, assign) SCIInternalUseCategory internalCategory;
 @property (nonatomic, copy)   NSString *query;
 
 @property (nonatomic, strong) NSArray<SCIExpObservation *>   *metaObs;
@@ -39,15 +51,22 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     self.title = @"Experimental flags";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"xmark.circle"]
-                style:UIBarButtonItemStylePlain target:self action:@selector(confirmResetAll)];
+        initWithTitle:@"Bulk" style:UIBarButtonItemStylePlain target:self action:@selector(presentBulkActions)];
 
-    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Scanned", @"Overrides"]];
+    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Internal", @"Overrides"]];
     self.seg.selectedSegmentIndex = SCIExpTabMeta;
     self.tab = SCIExpTabMeta;
     [self.seg addTarget:self action:@selector(segChanged) forControlEvents:UIControlEventValueChanged];
     self.seg.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.seg];
+
+    self.internalCatSeg = [[UISegmentedControl alloc] initWithItems:@[@"Hot", @"Changed", @"On", @"Off", @"Recent"]];
+    self.internalCatSeg.selectedSegmentIndex = SCIInternalUseCategoryHot;
+    self.internalCategory = SCIInternalUseCategoryHot;
+    [self.internalCatSeg addTarget:self action:@selector(internalCategoryChanged) forControlEvents:UIControlEventValueChanged];
+    self.internalCatSeg.translatesAutoresizingMaskIntoConstraints = NO;
+    self.internalCatSeg.hidden = YES;
+    [self.view addSubview:self.internalCatSeg];
 
     self.searchBar = [UISearchBar new];
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
@@ -63,7 +82,6 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     self.tableView.delegate = self;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"cell"];
     [self.view addSubview:self.tableView];
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
@@ -84,15 +102,23 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
         [self.seg.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
         [self.seg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
         [self.seg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
-        [self.searchBar.topAnchor constraintEqualToAnchor:self.seg.bottomAnchor constant:4],
+
+        [self.internalCatSeg.topAnchor constraintEqualToAnchor:self.seg.bottomAnchor constant:6],
+        [self.internalCatSeg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [self.internalCatSeg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+
+        [self.searchBar.topAnchor constraintEqualToAnchor:self.internalCatSeg.bottomAnchor constant:4],
         [self.searchBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
         [self.searchBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
+
         [self.tableView.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor],
         [self.tableView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
+
         [self.spinner.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.spinner.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
+
         [self.empty.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.empty.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
         [self.empty.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:24],
@@ -104,7 +130,13 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
 
 - (void)segChanged {
     self.tab = (SCIExpTab)self.seg.selectedSegmentIndex;
+    self.internalCatSeg.hidden = self.tab != SCIExpTabScanned;
     if (self.tab == SCIExpTabScanned && !self.scannedNames && !self.scannedLoading) [self loadScanned];
+    [self refresh];
+}
+
+- (void)internalCategoryChanged {
+    self.internalCategory = (SCIInternalUseCategory)self.internalCatSeg.selectedSegmentIndex;
     [self refresh];
 }
 
@@ -140,7 +172,7 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             case SCIExpTabBrowser:   self.empty.text = @""; break;
             case SCIExpTabMeta:      self.empty.text = @"Browse IG to populate."; break;
             case SCIExpTabMC:        self.empty.text = @"Browse IG to populate."; break;
-            case SCIExpTabScanned:   self.empty.text = self.query.length ? @"No match" : @"Empty."; break;
+            case SCIExpTabScanned:   self.empty.text = self.query.length ? @"No match" : @"Browse IG to populate InternalUse calls."; break;
             case SCIExpTabOverrides: self.empty.text = @"None."; break;
         }
         self.empty.hidden = NO;
@@ -149,12 +181,14 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     self.empty.hidden = YES;
 }
 
+// Data
+
 - (NSArray *)filteredRows {
     switch (self.tab) {
-        case SCIExpTabBrowser:   return @[@"Open native list", @"Add override"];
+        case SCIExpTabBrowser:   return @[@"Open native list", @"Add MetaLocal override"];
         case SCIExpTabMeta:      return [self filtered:self.metaObs keyPath:@"experimentName"];
         case SCIExpTabMC:        return [self filterMC:self.mcObs];
-        case SCIExpTabScanned:   return [self filterStrings:self.scannedNames];
+        case SCIExpTabScanned:   return [self filteredInternalRows];
         case SCIExpTabOverrides: return [self filterStrings:[self overrideRows]];
     }
 }
@@ -175,8 +209,8 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     NSString *q = self.query.lowercaseString;
     NSMutableArray *out = [NSMutableArray array];
     for (SCIExpMCObservation *o in items) {
-        NSString *s = [NSString stringWithFormat:@"%llu", o.paramID];
-        if ([s containsString:q]) [out addObject:o];
+        NSString *s = [NSString stringWithFormat:@"%llu %@ %@", o.paramID, [self mcTypeName:o.type], o.lastDefault ?: @""];
+        if ([s.lowercaseString containsString:q]) [out addObject:o];
     }
     return out;
 }
@@ -187,6 +221,45 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     NSMutableArray *out = [NSMutableArray array];
     for (NSString *s in items) if ([s.lowercaseString containsString:q]) [out addObject:s];
     return out;
+}
+
+- (NSArray<SCIExpInternalUseObservation *> *)filteredInternalRows {
+    NSMutableArray<SCIExpInternalUseObservation *> *rows = [[SCIExpFlags allInternalUseObservations] mutableCopy] ?: [NSMutableArray array];
+
+    NSIndexSet *remove = [rows indexesOfObjectsPassingTest:^BOOL(SCIExpInternalUseObservation *o, NSUInteger idx, BOOL *stop) {
+        BOOL effective = [self effectiveInternalValue:o];
+        switch (self.internalCategory) {
+            case SCIInternalUseCategoryHot:     return NO;
+            case SCIInternalUseCategoryChanged: return o.defaultValue == o.resultValue;
+            case SCIInternalUseCategoryOn:      return !effective;
+            case SCIInternalUseCategoryOff:     return effective;
+            case SCIInternalUseCategoryRecent:  return NO;
+        }
+    }];
+    [rows removeObjectsAtIndexes:remove];
+
+    if (self.internalCategory == SCIInternalUseCategoryRecent) {
+        [rows sortUsingComparator:^NSComparisonResult(SCIExpInternalUseObservation *a, SCIExpInternalUseObservation *b) {
+            if (a.lastSeenOrder != b.lastSeenOrder) return a.lastSeenOrder > b.lastSeenOrder ? NSOrderedAscending : NSOrderedDescending;
+            if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+    } else if (self.internalCategory == SCIInternalUseCategoryChanged) {
+        [rows sortUsingComparator:^NSComparisonResult(SCIExpInternalUseObservation *a, SCIExpInternalUseObservation *b) {
+            if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
+            if (a.lastSeenOrder != b.lastSeenOrder) return a.lastSeenOrder > b.lastSeenOrder ? NSOrderedAscending : NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+    }
+
+    if (self.query.length) {
+        NSString *q = self.query.lowercaseString;
+        NSIndexSet *qRemove = [rows indexesOfObjectsPassingTest:^BOOL(SCIExpInternalUseObservation *o, NSUInteger idx, BOOL *stop) {
+            return ![[self searchableInternalString:o].lowercaseString containsString:q];
+        }];
+        [rows removeObjectsAtIndexes:qRemove];
+    }
+    return rows;
 }
 
 - (NSArray<NSString *> *)overrideRows {
@@ -212,6 +285,54 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     return rows;
 }
 
+// Internal helpers
+
+- (BOOL)effectiveInternalValue:(SCIExpInternalUseObservation *)o {
+    SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:o.specifier];
+    if (ov == SCIExpFlagOverrideTrue) return YES;
+    if (ov == SCIExpFlagOverrideFalse) return NO;
+    return o.resultValue;
+}
+
+- (NSString *)specifierHex:(unsigned long long)specifier { return [NSString stringWithFormat:@"0x%016llx", specifier]; }
+
+- (NSString *)shortFunctionName:(NSString *)fn {
+    if ([fn containsString:@"Sessionless"]) return @"SessionlessBoolean";
+    if ([fn containsString:@"BooleanValueForInternalUse"]) return @"Boolean";
+    return fn.length ? fn : @"InternalUse";
+}
+
+- (NSString *)internalTitle:(SCIExpInternalUseObservation *)o {
+    NSString *name = o.specifierName.length ? o.specifierName : @"unknown";
+    return [NSString stringWithFormat:@"%@  %@", name, [self specifierHex:o.specifier]];
+}
+
+- (NSString *)internalSubtitle:(SCIExpInternalUseObservation *)o {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    [parts addObject:[self shortFunctionName:o.functionName]];
+    [parts addObject:[NSString stringWithFormat:@"default=%d", o.defaultValue]];
+    [parts addObject:[NSString stringWithFormat:@"result=%d", o.resultValue]];
+    if (o.defaultValue != o.resultValue) [parts addObject:@"changed"];
+    SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:o.specifier];
+    if (ov == SCIExpFlagOverrideTrue) [parts addObject:@"FORCED ON"];
+    if (ov == SCIExpFlagOverrideFalse) [parts addObject:@"FORCED OFF"];
+    [parts addObject:[NSString stringWithFormat:@"×%lu", (unsigned long)o.hitCount]];
+    [parts addObject:[NSString stringWithFormat:@"recent=%lu", (unsigned long)o.lastSeenOrder]];
+    return [parts componentsJoinedByString:@" · "];
+}
+
+- (NSString *)searchableInternalString:(SCIExpInternalUseObservation *)o {
+    return [NSString stringWithFormat:@"%@ %@ %@ %@ default=%d result=%d x%lu recent=%lu",
+            o.functionName ?: @"",
+            o.specifierName ?: @"unknown",
+            [self specifierHex:o.specifier],
+            o.defaultValue != o.resultValue ? @"changed" : @"same",
+            o.defaultValue,
+            o.resultValue,
+            (unsigned long)o.hitCount,
+            (unsigned long)o.lastSeenOrder];
+}
+
 - (unsigned long long)internalUseSpecifierFromLine:(NSString *)line {
     if (![line hasPrefix:@"[InternalUse"]) return 0;
     NSRange r = [line rangeOfString:@"spec=0x"];
@@ -230,22 +351,40 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     return strtoull(hex.UTF8String, NULL, 16);
 }
 
+- (NSString *)mcTypeName:(SCIExpMCType)t {
+    switch (t) {
+        case SCIExpMCTypeBool:   return @"bool";
+        case SCIExpMCTypeInt:    return @"int64";
+        case SCIExpMCTypeDouble: return @"double";
+        case SCIExpMCTypeString: return @"string";
+    }
+}
+
+// Table
+
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip];
+- (UITableViewCell *)newSubtitleCellWithTableView:(UITableView *)tv identifier:(NSString *)identifier {
+    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:identifier];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
     cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.accessoryView = nil;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     cell.textLabel.textColor = UIColor.labelColor;
-    cell.textLabel.font = [UIFont systemFontOfSize:15];
     cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.text = nil;
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.detailTextLabel.numberOfLines = 0;
+    return cell;
+}
 
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     id row = [self filteredRows][ip.row];
+    UITableViewCell *cell = [self newSubtitleCellWithTableView:tv identifier:@"subtitle"];
 
     switch (self.tab) {
         case SCIExpTabBrowser: {
             cell.textLabel.text = (NSString *)row;
+            cell.detailTextLabel.text = nil;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
@@ -256,25 +395,29 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
         }
         case SCIExpTabMC: {
             SCIExpMCObservation *o = row;
-            NSString *tname = @"?";
-            switch (o.type) {
-                case SCIExpMCTypeBool:   tname = @"bool";   break;
-                case SCIExpMCTypeInt:    tname = @"int64";  break;
-                case SCIExpMCTypeDouble: tname = @"double"; break;
-                case SCIExpMCTypeString: tname = @"string"; break;
-            }
             cell.textLabel.text = [NSString stringWithFormat:@"%llu", o.paramID];
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · default=%@ · ×%lu", tname, o.lastDefault ?: @"?", (unsigned long)o.hitCount];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · default=%@ · ×%lu", [self mcTypeName:o.type], o.lastDefault ?: @"?", (unsigned long)o.hitCount];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
-        case SCIExpTabScanned:
+        case SCIExpTabScanned: {
+            SCIExpInternalUseObservation *o = row;
+            cell.textLabel.text = [self internalTitle:o];
+            cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+            cell.detailTextLabel.text = [self internalSubtitle:o];
+            UISwitch *sw = [UISwitch new];
+            sw.on = [self effectiveInternalValue:o];
+            objc_setAssociatedObject(sw, kSCIInternalUseSwitchSpecifierKey, @(o.specifier), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [sw addTarget:self action:@selector(internalSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = sw;
+            break;
+        }
         case SCIExpTabOverrides: {
             NSString *line = (NSString *)row;
             unsigned long long spec = [self internalUseSpecifierFromLine:line];
             SCIExpFlagOverride o = spec ? [SCIExpFlags internalUseOverrideForSpecifier:spec] : SCIExpFlagOverrideOff;
-            if (self.tab == SCIExpTabOverrides && !spec) {
+            if (!spec) {
                 [self fillCell:cell withName:line subtitle:nil];
                 break;
             }
@@ -282,6 +425,7 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             cell.textLabel.text = [prefix stringByAppendingString:line];
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
             cell.textLabel.textColor = o == SCIExpFlagOverrideOff ? UIColor.labelColor : UIColor.systemOrangeColor;
+            cell.detailTextLabel.text = nil;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
@@ -295,13 +439,20 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     cell.textLabel.text = [prefix stringByAppendingString:name];
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
     cell.textLabel.textColor = o == SCIExpFlagOverrideOff ? UIColor.labelColor : UIColor.systemOrangeColor;
-
     NSMutableArray *parts = [NSMutableArray array];
     if (sub.length) [parts addObject:sub];
     if (o == SCIExpFlagOverrideTrue)  [parts addObject:@"FORCED ON"];
     if (o == SCIExpFlagOverrideFalse) [parts addObject:@"FORCED OFF"];
     cell.detailTextLabel.text = [parts componentsJoinedByString:@" · "];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+}
+
+- (void)internalSwitchChanged:(UISwitch *)sender {
+    NSNumber *n = objc_getAssociatedObject(sender, kSCIInternalUseSwitchSpecifierKey);
+    if (!n) return;
+    [SCIExpFlags setInternalUseOverride:(sender.on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse)
+                            forSpecifier:n.unsignedLongLongValue];
+    [self refresh];
 }
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
@@ -322,10 +473,8 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             break;
         }
         case SCIExpTabScanned: {
-            NSString *line = (NSString *)row;
-            unsigned long long spec = [self internalUseSpecifierFromLine:line];
-            if (spec) [self presentInternalUseOverrideSheetForSpecifier:spec line:line fromCell:cell];
-            else [self presentCopySheetWithText:line title:@"Scanned name" fromCell:cell];
+            SCIExpInternalUseObservation *o = row;
+            [self presentInternalUseOverrideSheetForObservation:o fromCell:cell];
             break;
         }
         case SCIExpTabOverrides: {
@@ -337,6 +486,8 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
         }
     }
 }
+
+// Actions
 
 - (void)openNativeBrowser {
     Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
@@ -425,9 +576,13 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
+- (void)presentInternalUseOverrideSheetForObservation:(SCIExpInternalUseObservation *)o fromCell:(UITableViewCell *)cell {
+    [self presentInternalUseOverrideSheetForSpecifier:o.specifier line:[NSString stringWithFormat:@"%@\n%@", [self internalTitle:o], [self internalSubtitle:o]] fromCell:cell];
+}
+
 - (void)presentInternalUseOverrideSheetForSpecifier:(unsigned long long)specifier line:(NSString *)line fromCell:(UITableViewCell *)cell {
     SCIExpFlagOverride cur = [SCIExpFlags internalUseOverrideForSpecifier:specifier];
-    NSString *title = [NSString stringWithFormat:@"InternalUse 0x%016llx", specifier];
+    NSString *title = [NSString stringWithFormat:@"InternalUse %@", [self specifierHex:specifier]];
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:line preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray *opts = @[@{@"t": @"No override", @"v": @(SCIExpFlagOverrideOff)},
                       @{@"t": @"Force ON",    @"v": @(SCIExpFlagOverrideTrue)},
@@ -441,7 +596,7 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
         }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy specifier" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-        [UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"0x%016llx", specifier];
+        [UIPasteboard generalPasteboard].string = [self specifierHex:specifier];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [UIPasteboard generalPasteboard].string = line;
@@ -467,15 +622,44 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
-- (void)confirmResetAll {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Reset all?" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+- (void)presentBulkActions {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Bulk actions" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+
+    if (self.tab == SCIExpTabScanned) {
+        NSArray<SCIExpInternalUseObservation *> *visible = [self filteredInternalRows];
+        NSString *msg = [NSString stringWithFormat:@"%lu visible InternalUse items", (unsigned long)visible.count];
+        sheet.message = msg;
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force visible ON" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            for (SCIExpInternalUseObservation *o in visible) [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:o.specifier];
+            [self refresh];
+        }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force visible OFF" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            for (SCIExpInternalUseObservation *o in visible) [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideFalse forSpecifier:o.specifier];
+            [self refresh];
+        }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Invert visible" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            for (SCIExpInternalUseObservation *o in visible) {
+                BOOL effective = [self effectiveInternalValue:o];
+                [SCIExpFlags setInternalUseOverride:(effective ? SCIExpFlagOverrideFalse : SCIExpFlagOverrideTrue) forSpecifier:o.specifier];
+            }
+            [self refresh];
+        }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Clear visible overrides" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            for (SCIExpInternalUseObservation *o in visible) [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideOff forSpecifier:o.specifier];
+            [self refresh];
+        }]];
+    }
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Reset all overrides" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
         [SCIExpFlags resetAllOverrides];
         [SCIExpFlags resetAllInternalUseOverrides];
         [self refresh];
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)text {
