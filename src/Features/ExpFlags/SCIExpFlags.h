@@ -56,7 +56,7 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
-// InternalUse MobileConfig observations + per-specifier manual overrides
+// InternalUse MobileConfig observations (live)
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
                       functionName:(NSString *)functionName
                      specifierName:(NSString *)specifierName
@@ -65,10 +65,6 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
                        forcedValue:(BOOL)forcedValue;
 + (NSArray<SCIExpInternalUseObservation *> *)allInternalUseObservations;
 + (NSArray<NSString *> *)allInternalUseObservationLines;
-+ (SCIExpFlagOverride)internalUseOverrideForSpecifier:(unsigned long long)specifier;
-+ (void)setInternalUseOverride:(SCIExpFlagOverride)o forSpecifier:(unsigned long long)specifier;
-+ (NSArray<NSNumber *> *)allOverriddenInternalUseSpecifiers;
-+ (void)resetAllInternalUseOverrides;
 
 // binary-scanned names (bg, cb on main)
 + (void)scanExecutableNamesWithCompletion:(void (^)(NSArray<NSString *> *names))completion;
@@ -76,5 +72,15 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 // crash-loop guard — 3 bad launches wipe overrides
 + (BOOL)checkAndHandleCrashLoop;
 + (void)markLaunchStable;
+
+@end
+
+@interface SCIExpFlags (InternalUseOverrides)
+
+// persisted manual overrides for InternalUse boolean specifiers
++ (SCIExpFlagOverride)internalUseOverrideForSpecifier:(unsigned long long)specifier;
++ (void)setInternalUseOverride:(SCIExpFlagOverride)o forSpecifier:(unsigned long long)specifier;
++ (NSArray<NSNumber *> *)allOverriddenInternalUseSpecifiers;
++ (void)resetAllInternalUseOverrides;
 
 @end
