@@ -198,6 +198,26 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     return out;
 }
 
+// InternalUse line helpers
+
+- (unsigned long long)internalUseSpecifierFromLine:(NSString *)line {
+    if (![line hasPrefix:@"[InternalUse]"]) return 0;
+    NSRange r = [line rangeOfString:@"spec=0x"];
+    if (r.location == NSNotFound) return 0;
+    NSUInteger start = r.location + r.length;
+    if (start >= line.length) return 0;
+    NSString *tail = [line substringFromIndex:start];
+    NSMutableString *hex = [NSMutableString string];
+    for (NSUInteger i = 0; i < tail.length; i++) {
+        unichar c = [tail characterAtIndex:i];
+        BOOL ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!ok) break;
+        [hex appendFormat:@"%C", c];
+    }
+    if (!hex.length) return 0;
+    return strtoull(hex.UTF8String, NULL, 16);
+}
+
 // table
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
@@ -240,8 +260,13 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             break;
         }
         case SCIExpTabScanned: {
-            cell.textLabel.text = (NSString *)row;
+            NSString *line = (NSString *)row;
+            unsigned long long spec = [self internalUseSpecifierFromLine:line];
+            SCIExpFlagOverride o = spec ? [SCIExpFlags internalUseOverrideForSpecifier:spec] : SCIExpFlagOverrideOff;
+            NSString *prefix = o == SCIExpFlagOverrideTrue ? @"● " : o == SCIExpFlagOverrideFalse ? @"○ " : @"";
+            cell.textLabel.text = [prefix stringByAppendingString:line];
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+            cell.textLabel.textColor = o == SCIExpFlagOverrideOff ? UIColor.labelColor : UIColor.systemOrangeColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
@@ -287,9 +312,13 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             [self presentCopySheetWithText:[NSString stringWithFormat:@"%llu", o.paramID] title:@"MobileConfig param" fromCell:cell];
             break;
         }
-        case SCIExpTabScanned:
-            [self presentCopySheetWithText:(NSString *)row title:@"Scanned name" fromCell:cell];
+        case SCIExpTabScanned: {
+            NSString *line = (NSString *)row;
+            unsigned long long spec = [self internalUseSpecifierFromLine:line];
+            if (spec) [self presentInternalUseOverrideSheetForSpecifier:spec line:line fromCell:cell];
+            else [self presentCopySheetWithText:line title:@"Scanned name" fromCell:cell];
             break;
+        }
         case SCIExpTabOverrides:
             [self presentOverrideSheetForName:(NSString *)row fromCell:cell];
             break;
@@ -385,6 +414,35 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
+- (void)presentInternalUseOverrideSheetForSpecifier:(unsigned long long)specifier line:(NSString *)line fromCell:(UITableViewCell *)cell {
+    SCIExpFlagOverride cur = [SCIExpFlags internalUseOverrideForSpecifier:specifier];
+    NSString *title = [NSString stringWithFormat:@"InternalUse 0x%016llx", specifier];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:line preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *opts = @[@{@"t": @"No override", @"v": @(SCIExpFlagOverrideOff)},
+                      @{@"t": @"Force ON",    @"v": @(SCIExpFlagOverrideTrue)},
+                      @{@"t": @"Force OFF",   @"v": @(SCIExpFlagOverrideFalse)}];
+    for (NSDictionary *o in opts) {
+        NSString *t = o[@"t"];
+        if (((NSNumber *)o[@"v"]).integerValue == cur) t = [t stringByAppendingString:@"  ✓"];
+        [sheet addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            [SCIExpFlags setInternalUseOverride:((NSNumber *)o[@"v"]).integerValue forSpecifier:specifier];
+            [self refresh];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy specifier" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"0x%016llx", specifier];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [UIPasteboard generalPasteboard].string = line;
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = cell;
+        sheet.popoverPresentationController.sourceRect = cell.bounds;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (void)presentCopySheetWithText:(NSString *)text title:(NSString *)title fromCell:(UITableViewCell *)cell {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:text preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
@@ -403,6 +461,7 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [a addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
         [SCIExpFlags resetAllOverrides];
+        [SCIExpFlags resetAllInternalUseOverrides];
         [self refresh];
     }]];
     [self presentViewController:a animated:YES completion:nil];
