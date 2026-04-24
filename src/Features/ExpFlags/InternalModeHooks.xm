@@ -1,4 +1,5 @@
 #import "../../Utils.h"
+#import "SCIExpFlags.h"
 #include "../../../modules/fishhook/fishhook.h"
 
 static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL; // ig_is_employee
@@ -8,13 +9,14 @@ static const unsigned long long kIGMCEmployeeOrTestUserSpecifier = 0x008100b2000
 static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee"]; }
 static BOOL rgEmployeeMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_mc"]; }
 static BOOL rgEmployeeOrTestUserMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]; }
+static BOOL rgInternalObserverEnabled(void) { return [SCIUtils getBoolPref:@"igt_internaluse_observer"]; }
 
 static BOOL rgShouldInstallInternalModeHooks(void) {
     return rgEmployeeMasterEnabled() ||
            rgEmployeeMCEnabled() ||
            rgEmployeeOrTestUserMCEnabled() ||
            [SCIUtils getBoolPref:@"igt_internal_apps_gate"] ||
-           [SCIUtils getBoolPref:@"igt_internaluse_observer"];
+           rgInternalObserverEnabled();
 }
 
 static BOOL specifierMatchesEmployee(unsigned long long specifier) {
@@ -29,16 +31,30 @@ static NSString *specifierName(unsigned long long specifier) {
     return @"unknown";
 }
 
-static void logInternalUseSpecifier(const char *funcName, unsigned long long specifier, BOOL defaultValue, BOOL resultValue) {
-    if (![SCIUtils getBoolPref:@"igt_internaluse_observer"]) return;
+static void recordInternalUseSpecifier(NSString *funcName, unsigned long long specifier, BOOL defaultValue, BOOL originalValue, BOOL returnedValue) {
+    BOOL forced = (returnedValue != originalValue);
+    BOOL shouldRecord = rgInternalObserverEnabled() || forced || specifierMatchesEmployee(specifier);
+    if (!shouldRecord) return;
+
     NSString *name = specifierName(specifier);
-    NSLog(@"[RyukGram][MC][%s] spec=0x%016llx (%@) default=%d result=%d employeeMatch=%d",
-          funcName,
-          specifier,
-          name,
-          defaultValue,
-          resultValue,
-          specifierMatchesEmployee(specifier));
+    [SCIExpFlags recordInternalUseSpecifier:specifier
+                               functionName:funcName
+                              specifierName:name
+                               defaultValue:defaultValue
+                                resultValue:returnedValue
+                                forcedValue:forced];
+
+    if (rgInternalObserverEnabled()) {
+        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d",
+              funcName,
+              specifier,
+              name,
+              defaultValue,
+              originalValue,
+              returnedValue,
+              forced,
+              specifierMatchesEmployee(specifier));
+    }
 }
 
 typedef BOOL (*IGMCBoolInternalFn)(id, BOOL, unsigned long long);
@@ -46,24 +62,18 @@ static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
         orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
-    logInternalUseSpecifier("internal", specifier, defaultValue, original);
-
-    if (specifierMatchesEmployee(specifier)) {
-        return YES;
-    }
-    return original;
+    BOOL returned = specifierMatchesEmployee(specifier) ? YES : original;
+    recordInternalUseSpecifier(@"IGMobileConfigBooleanValueForInternalUse", specifier, defaultValue, original, returned);
+    return returned;
 }
 
 static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
         orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
-    logInternalUseSpecifier("sessionless", specifier, defaultValue, original);
-
-    if (specifierMatchesEmployee(specifier)) {
-        return YES;
-    }
-    return original;
+    BOOL returned = specifierMatchesEmployee(specifier) ? YES : original;
+    recordInternalUseSpecifier(@"IGMobileConfigSessionlessBooleanValueForInternalUse", specifier, defaultValue, original, returned);
+    return returned;
 }
 
 static BOOL (*orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18)(void) = NULL;
