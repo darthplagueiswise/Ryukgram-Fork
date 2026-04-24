@@ -159,12 +159,14 @@ static dispatch_queue_t internalUseQueue(void) {
     for (SCIExpInternalUseObservation *o in [self allInternalUseObservations]) {
         NSString *forced = o.forcedValue ? @" forced=YES" : @"";
         NSString *name = o.specifierName.length ? o.specifierName : @"unknown";
-        [lines addObject:[NSString stringWithFormat:@"[InternalUse] %@ %@ spec=0x%016llx default=%d result=%d%@ ×%lu",
+        NSString *changed = o.defaultValue != o.resultValue ? @" changed" : @"";
+        [lines addObject:[NSString stringWithFormat:@"[InternalUse] %@ %@ spec=0x%016llx default=%d result=%d%@%@ ×%lu",
                           o.functionName ?: @"InternalUse",
                           name,
                           o.specifier,
                           o.defaultValue,
                           o.resultValue,
+                          changed,
                           forced,
                           (unsigned long)o.hitCount]];
     }
@@ -197,56 +199,67 @@ static dispatch_queue_t internalUseQueue(void) {
 }
 
 + (NSArray<NSString *> *)scanExecutable {
+    NSMutableSet *seen = [NSMutableSet set];
     NSString *path = [[NSBundle mainBundle] executablePath];
-    if (!path) return [self allInternalUseObservationLines];
-    int fd = open(path.UTF8String, O_RDONLY);
-    if (fd < 0) return [self allInternalUseObservationLines];
-    struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); return [self allInternalUseObservationLines]; }
-    size_t size = (size_t)st.st_size;
-    const char *base = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    if (base == MAP_FAILED) return [self allInternalUseObservationLines];
-
-    // Meta flag/analytics name prefixes
-    static const char *prefixes[] = {
-        "ig_ios_", "ig_android_", "ig_direct_", "ig_feed_", "ig_reels_",
-        "ig_stories_", "ig_explore_", "ig_camera_", "ig_growth_", "ig_privacy_",
-        "fbios_", "fb_ios_"
-    };
-    const size_t pc = sizeof(prefixes) / sizeof(prefixes[0]);
-    NSMutableSet *seen = [NSMutableSet setWithArray:[self allInternalUseObservationLines]];
-
-    for (size_t i = 0; i < size; i++) {
-        char c = base[i];
-        if (c != 'i' && c != 'f') continue;
-        if (i > 0) {
-            char prev = base[i - 1];
-            if ((prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') || prev == '_' || prev == '.') continue;
+    if (path) {
+        int fd = open(path.UTF8String, O_RDONLY);
+        if (fd >= 0) {
+            struct stat st;
+            if (fstat(fd, &st) == 0 && st.st_size > 0) {
+                size_t size = (size_t)st.st_size;
+                const char *base = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+                if (base != MAP_FAILED) {
+                    static const char *prefixes[] = {
+                        "ig_ios_", "ig_android_", "ig_direct_", "ig_feed_", "ig_reels_",
+                        "ig_stories_", "ig_explore_", "ig_camera_", "ig_growth_", "ig_privacy_",
+                        "fbios_", "fb_ios_"
+                    };
+                    const size_t pc = sizeof(prefixes) / sizeof(prefixes[0]);
+                    for (size_t i = 0; i < size; i++) {
+                        char c = base[i];
+                        if (c != 'i' && c != 'f') continue;
+                        if (i > 0) {
+                            char prev = base[i - 1];
+                            if ((prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') || prev == '_' || prev == '.') continue;
+                        }
+                        size_t matched = 0;
+                        const char *rem = base + i;
+                        size_t left = size - i;
+                        for (size_t p = 0; p < pc; p++) {
+                            size_t L = strlen(prefixes[p]);
+                            if (left >= L && memcmp(rem, prefixes[p], L) == 0) { matched = L; break; }
+                        }
+                        if (!matched) continue;
+                        size_t j = i + matched;
+                        while (j < size) {
+                            char ch = base[j];
+                            if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.')) break;
+                            j++;
+                        }
+                        size_t nl = j - i;
+                        if (nl >= 16 && nl <= 160) {
+                            NSString *s = [[NSString alloc] initWithBytes:(base + i) length:nl encoding:NSASCIIStringEncoding];
+                            if (s) [seen addObject:s];
+                        }
+                        i = j;
+                    }
+                    munmap((void *)base, size);
+                }
+            }
+            close(fd);
         }
-        size_t matched = 0;
-        const char *rem = base + i;
-        size_t left = size - i;
-        for (size_t p = 0; p < pc; p++) {
-            size_t L = strlen(prefixes[p]);
-            if (left >= L && memcmp(rem, prefixes[p], L) == 0) { matched = L; break; }
-        }
-        if (!matched) continue;
-        size_t j = i + matched;
-        while (j < size) {
-            char ch = base[j];
-            if (!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.')) break;
-            j++;
-        }
-        size_t nl = j - i;
-        if (nl >= 16 && nl <= 160) {
-            NSString *s = [[NSString alloc] initWithBytes:(base + i) length:nl encoding:NSASCIIStringEncoding];
-            if (s) [seen addObject:s];
-        }
-        i = j;
     }
-    munmap((void *)base, size);
-    return [[seen allObjects] sortedArrayUsingSelector:@selector(compare:)];
+
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    NSArray<NSString *> *internal = [self allInternalUseObservationLines]; // already hot-first
+    if (internal.count) {
+        [out addObjectsFromArray:internal];
+    }
+    NSArray<NSString *> *scanned = [[seen allObjects] sortedArrayUsingSelector:@selector(compare:)];
+    if (scanned.count) {
+        [out addObjectsFromArray:scanned];
+    }
+    return out;
 }
 
 @end
