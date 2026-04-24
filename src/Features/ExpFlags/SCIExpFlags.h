@@ -33,6 +33,7 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 @interface SCIExpInternalUseObservation : NSObject
 @property (nonatomic, copy) NSString *functionName;
 @property (nonatomic, copy) NSString *specifierName;
+@property (nonatomic, copy) NSString *callerDescription;
 @property (nonatomic, assign) unsigned long long specifier;
 @property (nonatomic, assign) BOOL defaultValue;
 @property (nonatomic, assign) BOOL resultValue;
@@ -43,45 +44,37 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 
 @interface SCIExpFlags : NSObject
 
-// overrides (persisted)
 + (SCIExpFlagOverride)overrideForName:(NSString *)name;
 + (void)setOverride:(SCIExpFlagOverride)o forName:(NSString *)name;
 + (NSArray<NSString *> *)allOverriddenNames;
 + (void)resetAllOverrides;
 
-// meta observations (live)
 + (void)recordExperimentName:(NSString *)name group:(NSString *)group;
 + (NSArray<SCIExpObservation *> *)allObservations;
 
-// MC id observations (live, view-only)
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
-// InternalUse MobileConfig observations (live)
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
                       functionName:(NSString *)functionName
                      specifierName:(NSString *)specifierName
                       defaultValue:(BOOL)defaultValue
                        resultValue:(BOOL)resultValue
-                       forcedValue:(BOOL)forcedValue;
+                       forcedValue:(BOOL)forcedValue
+                     callerAddress:(void *)callerAddress;
 + (NSArray<SCIExpInternalUseObservation *> *)allInternalUseObservations;
 + (NSArray<NSString *> *)allInternalUseObservationLines;
 
-// binary-scanned names (bg, cb on main)
 + (void)scanExecutableNamesWithCompletion:(void (^)(NSArray<NSString *> *names))completion;
 
-// crash-loop guard — 3 bad launches wipe overrides
 + (BOOL)checkAndHandleCrashLoop;
 + (void)markLaunchStable;
 
 @end
 
 @interface SCIExpFlags (InternalUseOverrides)
-
-// persisted manual overrides for InternalUse boolean specifiers
 + (SCIExpFlagOverride)internalUseOverrideForSpecifier:(unsigned long long)specifier;
 + (void)setInternalUseOverride:(SCIExpFlagOverride)o forSpecifier:(unsigned long long)specifier;
 + (NSArray<NSNumber *> *)allOverriddenInternalUseSpecifiers;
 + (void)resetAllInternalUseOverrides;
-
 @end
