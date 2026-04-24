@@ -4,6 +4,7 @@ on:
     push:
         branches:
             - 'main'
+            - 'codex/create-configurations-for-employee-and-internal-toggles'
     workflow_dispatch:
 
 concurrency:
@@ -12,7 +13,7 @@ concurrency:
 
 jobs:
     build:
-        name: Build RyukGram
+        name: Build RyukGram rootless
         runs-on: macos-latest
         permissions:
             contents: write
@@ -77,27 +78,11 @@ jobs:
                 [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootless.deb"
                 ls -la
 
-            - name: Build rootful deb
-              run: |
-                export THEOS="${{ github.workspace }}/theos"
-                ./build.sh rootful
-                cd packages
-                DEB="$(ls -t *-rootful.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootful.deb"
-                ls -la
-
             - name: Upload rootless artifact
               uses: actions/upload-artifact@v4
               with:
                 name: RyukGram_v${{ steps.version.outputs.version }}_rootless
                 path: packages/RyukGram_${{ env.VERSION }}_rootless.deb
-                if-no-files-found: error
-
-            - name: Upload rootful artifact
-              uses: actions/upload-artifact@v4
-              with:
-                name: RyukGram_v${{ steps.version.outputs.version }}_rootful
-                path: packages/RyukGram_${{ env.VERSION }}_rootful.deb
                 if-no-files-found: error
 
             - name: Check if release
@@ -124,7 +109,6 @@ jobs:
                   echo "| File | Description |"
                   echo "|------|-------------|"
                   echo "| \`RyukGram_rootless.deb\` | Rootless .deb (Dopamine/palera1n). Also works for sideloading via Feather/cyan. |"
-                  echo "| \`RyukGram_rootful.deb\` | Rootful .deb (unc0ver/checkra1n). |"
                   echo ""
                   if [ -n "$PREV_TAG" ]; then
                     echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
@@ -142,7 +126,6 @@ jobs:
                   --repo "${{ github.repository }}" \
                   --title "$TITLE" \
                   --notes-file /tmp/release_notes.md \
-                  "packages/RyukGram_${VERSION}_rootless.deb" \
-                  "packages/RyukGram_${VERSION}_rootful.deb"
+                  "packages/RyukGram_${VERSION}_rootless.deb"
               env:
                 GH_TOKEN: ${{ github.token }}
