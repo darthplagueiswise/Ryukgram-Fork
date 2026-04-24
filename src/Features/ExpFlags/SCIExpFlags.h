@@ -30,6 +30,16 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 @property (nonatomic, assign) NSUInteger hitCount;
 @end
 
+@interface SCIExpInternalUseObservation : NSObject
+@property (nonatomic, copy) NSString *functionName;
+@property (nonatomic, copy) NSString *specifierName;
+@property (nonatomic, assign) unsigned long long specifier;
+@property (nonatomic, assign) BOOL defaultValue;
+@property (nonatomic, assign) BOOL resultValue;
+@property (nonatomic, assign) BOOL forcedValue;
+@property (nonatomic, assign) NSUInteger hitCount;
+@end
+
 @interface SCIExpFlags : NSObject
 
 // overrides (persisted)
@@ -45,6 +55,16 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 // MC id observations (live, view-only)
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
+
+// InternalUse MobileConfig observations (live, view-only; exposed inside Scanned)
++ (void)recordInternalUseSpecifier:(unsigned long long)specifier
+                      functionName:(NSString *)functionName
+                     specifierName:(NSString *)specifierName
+                      defaultValue:(BOOL)defaultValue
+                       resultValue:(BOOL)resultValue
+                       forcedValue:(BOOL)forcedValue;
++ (NSArray<SCIExpInternalUseObservation *> *)allInternalUseObservations;
++ (NSArray<NSString *> *)allInternalUseObservationLines;
 
 // binary-scanned names (bg, cb on main)
 + (void)scanExecutableNamesWithCompletion:(void (^)(NSArray<NSString *> *names))completion;
