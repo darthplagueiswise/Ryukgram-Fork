@@ -56,7 +56,7 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
-// InternalUse MobileConfig observations (live, view-only; exposed inside Scanned)
+// InternalUse MobileConfig observations + per-specifier manual overrides
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
                       functionName:(NSString *)functionName
                      specifierName:(NSString *)specifierName
@@ -65,6 +65,10 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
                        forcedValue:(BOOL)forcedValue;
 + (NSArray<SCIExpInternalUseObservation *> *)allInternalUseObservations;
 + (NSArray<NSString *> *)allInternalUseObservationLines;
++ (SCIExpFlagOverride)internalUseOverrideForSpecifier:(unsigned long long)specifier;
++ (void)setInternalUseOverride:(SCIExpFlagOverride)o forSpecifier:(unsigned long long)specifier;
++ (NSArray<NSNumber *> *)allOverriddenInternalUseSpecifiers;
++ (void)resetAllInternalUseOverrides;
 
 // binary-scanned names (bg, cb on main)
 + (void)scanExecutableNamesWithCompletion:(void (^)(NSArray<NSString *> *names))completion;
