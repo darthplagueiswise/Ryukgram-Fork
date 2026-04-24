@@ -2,6 +2,7 @@
 #import <sys/mman.h>
 #import <sys/stat.h>
 #import <fcntl.h>
+#import <dlfcn.h>
 
 static NSString *const kOverridesKey    = @"sci_exp_overrides_by_name";
 static NSString *const kCrashCounterKey = @"sci_exp_flags_unstable_launches";
@@ -99,7 +100,6 @@ static dispatch_queue_t mcQueue(void) {
 + (NSArray<SCIExpMCObservation *> *)allMCObservations {
     __block NSArray *snap = @[];
     dispatch_sync(mcQueue(), ^{ snap = gMCObs ? [gMCObs.allValues copy] : @[]; });
-    // hot flags first
     return [snap sortedArrayUsingComparator:^NSComparisonResult(SCIExpMCObservation *a, SCIExpMCObservation *b) {
         if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
         if (a.paramID < b.paramID) return NSOrderedAscending;
@@ -111,6 +111,7 @@ static dispatch_queue_t mcQueue(void) {
 // InternalUse observations (live, view-only)
 
 static NSMutableDictionary<NSString *, SCIExpInternalUseObservation *> *gInternalUseObs = nil;
+static NSUInteger gInternalUseOrder = 0;
 static dispatch_queue_t internalUseQueue(void) {
     static dispatch_queue_t q;
     static dispatch_once_t once;
@@ -118,14 +119,53 @@ static dispatch_queue_t internalUseQueue(void) {
     return q;
 }
 
+static NSString *SCIImageBasename(const char *path) {
+    if (!path) return @"?";
+    const char *slash = strrchr(path, '/');
+    return [NSString stringWithUTF8String:(slash ? slash + 1 : path)] ?: @"?";
+}
+
+static NSString *SCICallerDescription(void *callerAddress) {
+    if (!callerAddress) return @"";
+    Dl_info info;
+    memset(&info, 0, sizeof(info));
+    if (dladdr(callerAddress, &info) == 0) {
+        return [NSString stringWithFormat:@"caller=%p", callerAddress];
+    }
+
+    NSString *image = SCIImageBasename(info.dli_fname);
+    uintptr_t caller = (uintptr_t)callerAddress;
+    uintptr_t base = (uintptr_t)info.dli_fbase;
+    uintptr_t imageOffset = base ? (caller - base) : 0;
+
+    if (info.dli_sname && info.dli_saddr) {
+        NSString *symbol = [NSString stringWithUTF8String:info.dli_sname] ?: @"?";
+        uintptr_t symbolOffset = caller - (uintptr_t)info.dli_saddr;
+        return [NSString stringWithFormat:@"%@:%@+0x%lx image+0x%lx", image, symbol, (unsigned long)symbolOffset, (unsigned long)imageOffset];
+    }
+
+    return [NSString stringWithFormat:@"%@+0x%lx", image, (unsigned long)imageOffset];
+}
+
+static NSString *SCIResolvedSpecifierName(NSString *specifierName, void *callerAddress) {
+    if (specifierName.length && ![specifierName isEqualToString:@"unknown"]) return specifierName;
+    NSString *caller = SCICallerDescription(callerAddress);
+    if (caller.length) return [@"callsite " stringByAppendingString:caller];
+    return @"unknown";
+}
+
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
                       functionName:(NSString *)functionName
                      specifierName:(NSString *)specifierName
                       defaultValue:(BOOL)defaultValue
                        resultValue:(BOOL)resultValue
-                       forcedValue:(BOOL)forcedValue {
+                       forcedValue:(BOOL)forcedValue
+                     callerAddress:(void *)callerAddress {
     if (!functionName.length) functionName = @"InternalUse";
     NSString *key = [NSString stringWithFormat:@"%@:%016llx", functionName, specifier];
+    NSString *caller = SCICallerDescription(callerAddress);
+    NSString *resolvedName = SCIResolvedSpecifierName(specifierName, callerAddress);
+
     dispatch_barrier_async(internalUseQueue(), ^{
         if (!gInternalUseObs) gInternalUseObs = [NSMutableDictionary dictionary];
         SCIExpInternalUseObservation *o = gInternalUseObs[key];
@@ -133,12 +173,14 @@ static dispatch_queue_t internalUseQueue(void) {
             o = [SCIExpInternalUseObservation new];
             o.functionName = functionName;
             o.specifier = specifier;
-            o.specifierName = specifierName.length ? specifierName : @"unknown";
             gInternalUseObs[key] = o;
         }
+        o.specifierName = resolvedName.length ? resolvedName : @"unknown";
+        o.callerDescription = caller;
         o.defaultValue = defaultValue;
         o.resultValue = resultValue;
         o.forcedValue = forcedValue;
+        o.lastSeenOrder = ++gInternalUseOrder;
         o.hitCount++;
     });
 }
@@ -251,14 +293,10 @@ static dispatch_queue_t internalUseQueue(void) {
     }
 
     NSMutableArray<NSString *> *out = [NSMutableArray array];
-    NSArray<NSString *> *internal = [self allInternalUseObservationLines]; // already hot-first
-    if (internal.count) {
-        [out addObjectsFromArray:internal];
-    }
+    NSArray<NSString *> *internal = [self allInternalUseObservationLines];
+    if (internal.count) [out addObjectsFromArray:internal];
     NSArray<NSString *> *scanned = [[seen allObjects] sortedArrayUsingSelector:@selector(compare:)];
-    if (scanned.count) {
-        [out addObjectsFromArray:scanned];
-    }
+    if (scanned.count) [out addObjectsFromArray:scanned];
     return out;
 }
 
