@@ -3,17 +3,10 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
-extern void RGTryUpdateMobileConfigAction(void);
-extern void RGForceUpdateMobileConfigAction(void);
-
 static NSArray *(*orig_sections_exp)(id, SEL);
 
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
-}
-
-static SCISetting *ExpButton(NSString *title, NSString *subtitle, NSString *symbolName, void (^action)(void)) {
-    return [SCISetting buttonCellWithTitle:title subtitle:subtitle icon:[SCISymbol symbolWithName:symbolName] action:action];
 }
 
 static NSArray *expNavSections(void) {
@@ -72,9 +65,7 @@ static NSArray *expNavSections(void) {
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
-                                     viewController:[SCIExpFlagsViewController new]],
-                ExpButton(@"Try update configs", @"Calls IGMobileConfigTryUpdateConfigsWithCompletion", @"arrow.clockwise", ^{ RGTryUpdateMobileConfigAction(); }),
-                ExpButton(@"Force update configs", @"Calls IGMobileConfigForceUpdateConfigs", @"arrow.clockwise.circle", ^{ RGForceUpdateMobileConfigAction(); })
+                                     viewController:[SCIExpFlagsViewController new]]
             ]
         }
     ];
