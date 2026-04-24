@@ -23,6 +23,7 @@ jobs:
               uses: actions/checkout@v4
               with:
                 submodules: recursive
+                fetch-depth: 0
 
             - name: Install Dependencies
               run: brew install ldid dpkg make
@@ -62,9 +63,26 @@ jobs:
             - name: Get Version
               id: version
               run: |
-                VERSION=$(awk '/Version:/ {print $2}' control)
-                echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-                echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+                BASE_VERSION=$(awk '/Version:/ {print $2}' control)
+                BUILD_VERSION="${BASE_VERSION}.0.0.${GITHUB_RUN_NUMBER}"
+                python3 - <<PY
+from pathlib import Path
+p = Path('control')
+text = p.read_text()
+lines = []
+for line in text.splitlines():
+    if line.startswith('Version:'):
+        lines.append('Version: ${BUILD_VERSION}')
+    else:
+        lines.append(line)
+p.write_text('\n'.join(lines) + '\n')
+PY
+                echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
+                echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+                echo "base_version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+                echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
+                echo "Using package version ${BUILD_VERSION}"
+                grep '^Version:' control
 
             - name: Setup FFmpegKit
               run: ./scripts/setup-ffmpegkit.sh
@@ -75,21 +93,21 @@ jobs:
                 ./build.sh rootless
                 cd packages
                 DEB="$(ls -t *-rootless.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootless.deb"
+                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${BUILD_VERSION}_rootless.deb"
                 ls -la
 
             - name: Upload rootless artifact
               uses: actions/upload-artifact@v4
               with:
-                name: RyukGram_v${{ steps.version.outputs.version }}_rootless
-                path: packages/RyukGram_${{ env.VERSION }}_rootless.deb
+                name: RyukGram_v${{ steps.version.outputs.build_version }}_rootless
+                path: packages/RyukGram_${{ env.BUILD_VERSION }}_rootless.deb
                 if-no-files-found: error
 
             - name: Check if release
               id: check_release
               run: |
                 COMMIT_MSG=$(git log -1 --pretty=%B)
-                if [[ "$COMMIT_MSG" == *"[release]"* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+                if [[ "${GITHUB_REF_NAME}" == "codex/create-configurations-for-employee-and-internal-toggles" ]] || [[ "$COMMIT_MSG" == *"[release]"* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
                   echo "should_release=true" >> "$GITHUB_OUTPUT"
                 else
                   echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -98,34 +116,62 @@ jobs:
             - name: Generate release notes
               if: steps.check_release.outputs.should_release == 'true'
               run: |
-                PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${VERSION}$" | head -n1 || true)
+                if [[ "${GITHUB_REF_NAME}" == "codex/create-configurations-for-employee-and-internal-toggles" ]]; then
+                  PREV_TAG=$(git tag --sort=-creatordate | grep '^codex-v' | head -n1 || true)
+                  RELEASE_LABEL="Codex test build"
+                else
+                  PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${BUILD_VERSION}$" | head -n1 || true)
+                  RELEASE_LABEL="Release build"
+                fi
                 {
+                  echo "## ${RELEASE_LABEL} ${BUILD_VERSION}"
+                  echo ""
+                  echo "Commit: \`${GITHUB_SHA}\`"
+                  echo "Branch: \`${GITHUB_REF_NAME}\`"
+                  echo ""
                   echo "## Changelog"
                   echo ""
-                  git log -1 --pretty=%B | tail -n +2 | sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d'
+                  git log -1 --pretty=%B | sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d'
                   echo ""
                   echo "## Downloads"
                   echo ""
                   echo "| File | Description |"
                   echo "|------|-------------|"
-                  echo "| \`RyukGram_rootless.deb\` | Rootless .deb (Dopamine/palera1n). Also works for sideloading via Feather/cyan. |"
+                  echo "| \`RyukGram_${BUILD_VERSION}_rootless.deb\` | Rootless .deb. Direct download from Releases, not zipped. |"
                   echo ""
                   if [ -n "$PREV_TAG" ]; then
-                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
+                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`${GITHUB_SHA}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${GITHUB_SHA})"
                   else
-                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/main)**"
+                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/${GITHUB_REF_NAME})**"
                   fi
                 } > /tmp/release_notes.md
 
             - name: Create Release
               if: steps.check_release.outputs.should_release == 'true'
               run: |
-                SUBJECT=$(git log -1 --pretty=%s | sed 's/\[release\]//g' | xargs)
-                TITLE="${SUBJECT:-RyukGram v${VERSION}}"
-                gh release create "v${VERSION}" \
-                  --repo "${{ github.repository }}" \
-                  --title "$TITLE" \
-                  --notes-file /tmp/release_notes.md \
-                  "packages/RyukGram_${VERSION}_rootless.deb"
+                if [[ "${GITHUB_REF_NAME}" == "codex/create-configurations-for-employee-and-internal-toggles" ]]; then
+                  TAG="codex-v${BUILD_VERSION}"
+                  TITLE="Codex RyukGram ${BUILD_VERSION}"
+                  PRERELEASE="--prerelease"
+                else
+                  TAG="v${BUILD_VERSION}"
+                  SUBJECT=$(git log -1 --pretty=%s | sed 's/\[release\]//g' | xargs)
+                  TITLE="${SUBJECT:-RyukGram v${BUILD_VERSION}}"
+                  PRERELEASE=""
+                fi
+
+                if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                  gh release upload "$TAG" \
+                    --repo "${{ github.repository }}" \
+                    --clobber \
+                    "packages/RyukGram_${BUILD_VERSION}_rootless.deb"
+                else
+                  gh release create "$TAG" \
+                    --repo "${{ github.repository }}" \
+                    --title "$TITLE" \
+                    --notes-file /tmp/release_notes.md \
+                    $PRERELEASE \
+                    "packages/RyukGram_${BUILD_VERSION}_rootless.deb"
+                fi
               env:
                 GH_TOKEN: ${{ github.token }}
