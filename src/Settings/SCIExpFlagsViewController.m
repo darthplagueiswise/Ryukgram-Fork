@@ -25,10 +25,9 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
 @property (nonatomic, assign) SCIExpTab tab;
 @property (nonatomic, copy)   NSString *query;
 
-// Tab data.
 @property (nonatomic, strong) NSArray<SCIExpObservation *>   *metaObs;
 @property (nonatomic, strong) NSArray<SCIExpMCObservation *> *mcObs;
-@property (nonatomic, strong) NSArray<NSString *>            *scannedNames;  // lazy-loaded
+@property (nonatomic, strong) NSArray<NSString *>            *scannedNames;
 @property (nonatomic, assign) BOOL scannedLoading;
 @property (nonatomic, strong) NSArray<NSString *>            *overriddenNames;
 @end
@@ -85,19 +84,15 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
         [self.seg.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
         [self.seg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
         [self.seg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
-
         [self.searchBar.topAnchor constraintEqualToAnchor:self.seg.bottomAnchor constant:4],
         [self.searchBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
         [self.searchBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
-
         [self.tableView.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor],
         [self.tableView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
         [self.tableView.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
-
         [self.spinner.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.spinner.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
-
         [self.empty.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
         [self.empty.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
         [self.empty.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:24],
@@ -106,8 +101,6 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self refresh]; }
-
-// tab state
 
 - (void)segChanged {
     self.tab = (SCIExpTab)self.seg.selectedSegmentIndex;
@@ -156,15 +149,13 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     self.empty.hidden = YES;
 }
 
-// filter
-
 - (NSArray *)filteredRows {
     switch (self.tab) {
         case SCIExpTabBrowser:   return @[@"Open native list", @"Add override"];
         case SCIExpTabMeta:      return [self filtered:self.metaObs keyPath:@"experimentName"];
         case SCIExpTabMC:        return [self filterMC:self.mcObs];
         case SCIExpTabScanned:   return [self filterStrings:self.scannedNames];
-        case SCIExpTabOverrides: return [self filterStrings:self.overriddenNames];
+        case SCIExpTabOverrides: return [self filterStrings:[self overrideRows]];
     }
 }
 
@@ -198,10 +189,31 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     return out;
 }
 
-// InternalUse line helpers
+- (NSArray<NSString *> *)overrideRows {
+    NSMutableArray<NSString *> *rows = [NSMutableArray array];
+    for (NSString *name in self.overriddenNames ?: @[]) [rows addObject:name];
+
+    NSArray<SCIExpInternalUseObservation *> *obs = [SCIExpFlags allInternalUseObservations];
+    for (NSNumber *n in [SCIExpFlags allOverriddenInternalUseSpecifiers]) {
+        unsigned long long spec = n.unsignedLongLongValue;
+        SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:spec];
+        NSString *state = ov == SCIExpFlagOverrideTrue ? @"FORCED ON" : ov == SCIExpFlagOverrideFalse ? @"FORCED OFF" : @"NO OVERRIDE";
+        NSString *fn = @"InternalUse";
+        NSString *name = @"unknown";
+        for (SCIExpInternalUseObservation *o in obs) {
+            if (o.specifier == spec) {
+                if (o.functionName.length) fn = o.functionName;
+                if (o.specifierName.length) name = o.specifierName;
+                break;
+            }
+        }
+        [rows addObject:[NSString stringWithFormat:@"[InternalUse Override] %@ %@ spec=0x%016llx %@", fn, name, spec, state]];
+    }
+    return rows;
+}
 
 - (unsigned long long)internalUseSpecifierFromLine:(NSString *)line {
-    if (![line hasPrefix:@"[InternalUse]"]) return 0;
+    if (![line hasPrefix:@"[InternalUse"]) return 0;
     NSRange r = [line rangeOfString:@"spec=0x"];
     if (r.location == NSNotFound) return 0;
     NSUInteger start = r.location + r.length;
@@ -217,8 +229,6 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     if (!hex.length) return 0;
     return strtoull(hex.UTF8String, NULL, 16);
 }
-
-// table
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
 
@@ -259,20 +269,20 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
-        case SCIExpTabScanned: {
+        case SCIExpTabScanned:
+        case SCIExpTabOverrides: {
             NSString *line = (NSString *)row;
             unsigned long long spec = [self internalUseSpecifierFromLine:line];
             SCIExpFlagOverride o = spec ? [SCIExpFlags internalUseOverrideForSpecifier:spec] : SCIExpFlagOverrideOff;
+            if (self.tab == SCIExpTabOverrides && !spec) {
+                [self fillCell:cell withName:line subtitle:nil];
+                break;
+            }
             NSString *prefix = o == SCIExpFlagOverrideTrue ? @"● " : o == SCIExpFlagOverrideFalse ? @"○ " : @"";
             cell.textLabel.text = [prefix stringByAppendingString:line];
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
             cell.textLabel.textColor = o == SCIExpFlagOverrideOff ? UIColor.labelColor : UIColor.systemOrangeColor;
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            break;
-        }
-        case SCIExpTabOverrides: {
-            NSString *name = (NSString *)row;
-            [self fillCell:cell withName:name subtitle:nil];
             break;
         }
     }
@@ -307,7 +317,6 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             [self presentOverrideSheetForName:((SCIExpObservation *)row).experimentName fromCell:cell];
             break;
         case SCIExpTabMC: {
-            // View-only; offer Copy ID for user convenience.
             SCIExpMCObservation *o = row;
             [self presentCopySheetWithText:[NSString stringWithFormat:@"%llu", o.paramID] title:@"MobileConfig param" fromCell:cell];
             break;
@@ -319,13 +328,15 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
             else [self presentCopySheetWithText:line title:@"Scanned name" fromCell:cell];
             break;
         }
-        case SCIExpTabOverrides:
-            [self presentOverrideSheetForName:(NSString *)row fromCell:cell];
+        case SCIExpTabOverrides: {
+            NSString *line = (NSString *)row;
+            unsigned long long spec = [self internalUseSpecifierFromLine:line];
+            if (spec) [self presentInternalUseOverrideSheetForSpecifier:spec line:line fromCell:cell];
+            else [self presentOverrideSheetForName:line fromCell:cell];
             break;
+        }
     }
 }
-
-// actions
 
 - (void)openNativeBrowser {
     Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
@@ -466,8 +477,6 @@ typedef NS_ENUM(NSInteger, SCIExpTab) {
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
-
-// search
 
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)text {
     self.query = text;
