@@ -32,8 +32,12 @@ static NSDictionary<NSString *, NSString *> *SCIExperimentalDescriptionMap(void)
             @"igt_feed_dedup": @"Reduce duplicate feed content.",
             @"igt_pull_to_carrera": @"Pull-to-Carrera experiment.",
             @"igt_screenshot_block": @"Screenshot blocking experiments.",
-            @"igt_employee": @"Employee/developer options.",
+            @"igt_employee": @"Legacy employee master toggle (kept for backward compatibility).",
+            @"igt_employee_mc": @"Forces ig_is_employee MobileConfig specifiers to true.",
+            @"igt_employee_or_test_user_mc": @"Forces ig_is_employee_or_test_user MobileConfig specifier to true.",
             @"igt_internal": @"Internal Instagram features.",
+            @"igt_internal_apps_gate": @"Forces internal apps-installed gate to true.",
+            @"igt_internaluse_observer": @"Logs InternalUse MobileConfig specifiers for diagnostics.",
             @"sci_exp_mc_hooks_enabled": @"Enable MobileConfig hooks.",
             @"sci_exp_flags_enabled": @"Enable experimental flag scanner."
         };

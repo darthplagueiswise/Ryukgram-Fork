@@ -3,6 +3,9 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
+extern void RGTriggerMobileConfigTryUpdate(void);
+extern void RGTriggerMobileConfigForceUpdate(void);
+
 static NSArray *(*orig_sections_exp)(id, SEL);
 
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
@@ -51,8 +54,10 @@ static NSArray *expNavSections(void) {
             @"header": @"Account / system",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
-                ExpSwitch(@"Employee Mode", @"Stores a dedicated toggle for future experiment hooks", @"igt_employee", NO),
-                ExpSwitch(@"Internal Mode", @"Stores a dedicated toggle for future experiment hooks", @"igt_internal", NO)
+                ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES (restart required)", @"igt_employee_mc", YES),
+                ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES (restart required)", @"igt_employee_or_test_user_mc", YES),
+                ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES (restart required)", @"igt_internal_apps_gate", YES),
+                ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse/sessionless InternalUse boolean specifiers (restart required)", @"igt_internaluse_observer", YES)
             ]
         },
         @{
@@ -63,7 +68,15 @@ static NSArray *expNavSections(void) {
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
-                                     viewController:[SCIExpFlagsViewController new]]
+                                     viewController:[SCIExpFlagsViewController new]],
+                [SCISetting buttonCellWithTitle:@"Try Update Configs"
+                                       subtitle:@"Calls IGMobileConfigTryUpdateConfigsWithCompletion"
+                                           icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
+                                         action:^{ RGTriggerMobileConfigTryUpdate(); }],
+                [SCISetting buttonCellWithTitle:@"Force Update Configs"
+                                       subtitle:@"Calls IGMobileConfigForceUpdateConfigs"
+                                           icon:[SCISymbol symbolWithName:@"exclamationmark.arrow.triangle.2.circlepath"]
+                                         action:^{ RGTriggerMobileConfigForceUpdate(); }]
             ]
         }
     ];

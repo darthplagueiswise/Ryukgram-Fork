@@ -19,7 +19,11 @@
         @"igt_pull_to_carrera": @(NO),
         @"igt_screenshot_block": @(NO),
         @"igt_employee": @(NO),
-        @"igt_internal": @(NO)
+        @"igt_employee_mc": @(NO),
+        @"igt_employee_or_test_user_mc": @(NO),
+        @"igt_internal": @(NO),
+        @"igt_internal_apps_gate": @(NO),
+        @"igt_internaluse_observer": @(NO),
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
 }
