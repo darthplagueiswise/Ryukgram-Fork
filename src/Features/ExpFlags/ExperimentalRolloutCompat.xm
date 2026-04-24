@@ -23,9 +23,30 @@ static BOOL sciContainsAny(NSString *value, NSArray<NSString *> *needles) {
     return NO;
 }
 
+static BOOL sciQuickSnapDisableRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_quicksnap"]) return NO;
+    return sciContainsAny(name, @[
+        @"ig_instants_hide",
+        @"instants_hide",
+        @"quick_snap_hide",
+        @"quicksnap_hide",
+        @"hide_quicksnap"
+    ]);
+}
+
 static BOOL sciQuickSnapRollout(NSString *name) {
     if (![SCIUtils getBoolPref:@"igt_quicksnap"]) return NO;
-    return sciContainsAny(name, @[@"quicksnap", @"quick_snap", @"instants", @"xma_quicksnap", @"_ig_ios_quicksnap_", @"_ig_ios_quick_snap_", @"_ig_ios_instants_"]);
+    if (sciQuickSnapDisableRollout(name)) return NO;
+    return sciContainsAny(name, @[
+        @"quicksnap",
+        @"quick_snap",
+        @"instants",
+        @"xma_quicksnap",
+        @"ig_ios_quicksnap",
+        @"ig_ios_quick_snap",
+        @"ig_ios_instants",
+        @"ig_quick_snap_show_peek"
+    ]);
 }
 
 static BOOL sciFriendMapRollout(NSString *name) {
@@ -35,16 +56,37 @@ static BOOL sciFriendMapRollout(NSString *name) {
 
 static BOOL sciPrismRollout(NSString *name) {
     if (![SCIUtils getBoolPref:@"igt_prism"]) return NO;
-    return sciContainsAny(name, @[@"prism"]);
+
+    // Keep Prism scoped to menu/IGDS rollout names. Do not force every experiment
+    // containing "prism", because unrelated Prism surfaces can expect server data
+    // and crash when enabled blindly.
+    return sciContainsAny(name, @[
+        @"igds_prism",
+        @"prism_menu",
+        @"prism_overflow_menu",
+        @"prism_context_menu",
+        @"prism_bottom_sheet",
+        @"prism_toasts",
+        @"prism_alert_dialog",
+        @"prism_media_buttons",
+        @"prism_controls",
+        @"ig_ios_prism_menu"
+    ]);
+}
+
+static BOOL sciShouldForceOff(NSString *name) {
+    return sciQuickSnapDisableRollout(name);
 }
 
 static BOOL sciShouldForceOn(NSString *name) {
+    if (sciShouldForceOff(name)) return NO;
     return sciQuickSnapRollout(name) || sciFriendMapRollout(name) || sciPrismRollout(name);
 }
 
 static BOOL (*orig_meta_isInExperiment)(id, SEL) = NULL;
 static BOOL new_meta_isInExperiment(id self, SEL _cmd) {
     NSString *name = sciExperimentName(self);
+    if (sciShouldForceOff(name)) return NO;
     if (sciShouldForceOn(name)) return YES;
     return orig_meta_isInExperiment ? orig_meta_isInExperiment(self, _cmd) : NO;
 }
@@ -52,12 +94,14 @@ static BOOL new_meta_isInExperiment(id self, SEL _cmd) {
 static BOOL (*orig_family_isInExperiment)(id, SEL) = NULL;
 static BOOL new_family_isInExperiment(id self, SEL _cmd) {
     NSString *name = sciExperimentName(self);
+    if (sciShouldForceOff(name)) return NO;
     if (sciShouldForceOn(name)) return YES;
     return orig_family_isInExperiment ? orig_family_isInExperiment(self, _cmd) : NO;
 }
 
 static BOOL (*orig_lid_isExperimentEnabled)(id, SEL, NSString *) = NULL;
 static BOOL new_lid_isExperimentEnabled(id self, SEL _cmd, NSString *experimentName) {
+    if (sciShouldForceOff(experimentName)) return NO;
     if (sciShouldForceOn(experimentName)) return YES;
     return orig_lid_isExperimentEnabled ? orig_lid_isExperimentEnabled(self, _cmd, experimentName) : NO;
 }
@@ -65,6 +109,7 @@ static BOOL new_lid_isExperimentEnabled(id self, SEL _cmd, NSString *experimentN
 static id (*orig_groupName)(id, SEL) = NULL;
 static id new_groupName(id self, SEL _cmd) {
     NSString *name = sciExperimentName(self);
+    if (sciShouldForceOff(name)) return nil;
     if (sciShouldForceOn(name)) return @"test";
     return orig_groupName ? orig_groupName(self, _cmd) : nil;
 }
@@ -72,6 +117,7 @@ static id new_groupName(id self, SEL _cmd) {
 static id (*orig_peekGroupName)(id, SEL) = NULL;
 static id new_peekGroupName(id self, SEL _cmd) {
     NSString *name = sciExperimentName(self);
+    if (sciShouldForceOff(name)) return nil;
     if (sciShouldForceOn(name)) return @"test";
     return orig_peekGroupName ? orig_peekGroupName(self, _cmd) : nil;
 }
