@@ -38,6 +38,7 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 @property (nonatomic, assign) BOOL resultValue;
 @property (nonatomic, assign) BOOL forcedValue;
 @property (nonatomic, assign) NSUInteger hitCount;
+@property (nonatomic, assign) NSUInteger lastSeenOrder;
 @end
 
 @interface SCIExpFlags : NSObject
