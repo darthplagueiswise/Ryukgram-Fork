@@ -42,7 +42,7 @@ static BOOL applyInternalUseOverride(unsigned long long specifier, BOOL original
     return original;
 }
 
-static void recordInternalUseSpecifier(NSString *funcName, unsigned long long specifier, BOOL defaultValue, BOOL originalValue, BOOL returnedValue) {
+static void recordInternalUseSpecifier(NSString *funcName, unsigned long long specifier, BOOL defaultValue, BOOL originalValue, BOOL returnedValue, void *callerAddress) {
     BOOL forced = (returnedValue != originalValue);
     BOOL shouldRecord = rgInternalObserverEnabled() || forced || specifierMatchesEmployee(specifier) || [SCIExpFlags internalUseOverrideForSpecifier:specifier] != SCIExpFlagOverrideOff;
     if (!shouldRecord) return;
@@ -53,10 +53,11 @@ static void recordInternalUseSpecifier(NSString *funcName, unsigned long long sp
                               specifierName:name
                                defaultValue:defaultValue
                                 resultValue:returnedValue
-                                forcedValue:forced];
+                                forcedValue:forced
+                              callerAddress:callerAddress];
 
     if (rgInternalObserverEnabled()) {
-        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d manual=%ld",
+        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d manual=%ld caller=%p",
               funcName,
               specifier,
               name,
@@ -65,26 +66,29 @@ static void recordInternalUseSpecifier(NSString *funcName, unsigned long long sp
               returnedValue,
               forced,
               specifierMatchesEmployee(specifier),
-              (long)[SCIExpFlags internalUseOverrideForSpecifier:specifier]);
+              (long)[SCIExpFlags internalUseOverrideForSpecifier:specifier],
+              callerAddress);
     }
 }
 
 typedef BOOL (*IGMCBoolInternalFn)(id, BOOL, unsigned long long);
 static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    void *callerAddress = __builtin_return_address(0);
     BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
         orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
-    recordInternalUseSpecifier(@"IGMobileConfigBooleanValueForInternalUse", specifier, defaultValue, original, returned);
+    recordInternalUseSpecifier(@"IGMobileConfigBooleanValueForInternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
 }
 
 static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    void *callerAddress = __builtin_return_address(0);
     BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
         orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
-    recordInternalUseSpecifier(@"IGMobileConfigSessionlessBooleanValueForInternalUse", specifier, defaultValue, original, returned);
+    recordInternalUseSpecifier(@"IGMobileConfigSessionlessBooleanValueForInternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
 }
 
