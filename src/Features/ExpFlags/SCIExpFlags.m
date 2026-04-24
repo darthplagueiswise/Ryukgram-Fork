@@ -11,6 +11,8 @@ static const NSInteger kCrashThreshold  = 3;
 @end
 @implementation SCIExpMCObservation
 @end
+@implementation SCIExpInternalUseObservation
+@end
 
 @implementation SCIExpFlags
 
@@ -106,6 +108,69 @@ static dispatch_queue_t mcQueue(void) {
     }];
 }
 
+// InternalUse observations (live, view-only)
+
+static NSMutableDictionary<NSString *, SCIExpInternalUseObservation *> *gInternalUseObs = nil;
+static dispatch_queue_t internalUseQueue(void) {
+    static dispatch_queue_t q;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ q = dispatch_queue_create("sci.expflags.internaluse", DISPATCH_QUEUE_CONCURRENT); });
+    return q;
+}
+
++ (void)recordInternalUseSpecifier:(unsigned long long)specifier
+                      functionName:(NSString *)functionName
+                     specifierName:(NSString *)specifierName
+                      defaultValue:(BOOL)defaultValue
+                       resultValue:(BOOL)resultValue
+                       forcedValue:(BOOL)forcedValue {
+    if (!functionName.length) functionName = @"InternalUse";
+    NSString *key = [NSString stringWithFormat:@"%@:%016llx", functionName, specifier];
+    dispatch_barrier_async(internalUseQueue(), ^{
+        if (!gInternalUseObs) gInternalUseObs = [NSMutableDictionary dictionary];
+        SCIExpInternalUseObservation *o = gInternalUseObs[key];
+        if (!o) {
+            o = [SCIExpInternalUseObservation new];
+            o.functionName = functionName;
+            o.specifier = specifier;
+            o.specifierName = specifierName.length ? specifierName : @"unknown";
+            gInternalUseObs[key] = o;
+        }
+        o.defaultValue = defaultValue;
+        o.resultValue = resultValue;
+        o.forcedValue = forcedValue;
+        o.hitCount++;
+    });
+}
+
++ (NSArray<SCIExpInternalUseObservation *> *)allInternalUseObservations {
+    __block NSArray *snap = @[];
+    dispatch_sync(internalUseQueue(), ^{ snap = gInternalUseObs ? [gInternalUseObs.allValues copy] : @[]; });
+    return [snap sortedArrayUsingComparator:^NSComparisonResult(SCIExpInternalUseObservation *a, SCIExpInternalUseObservation *b) {
+        if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
+        if (a.specifier < b.specifier) return NSOrderedAscending;
+        if (a.specifier > b.specifier) return NSOrderedDescending;
+        return [a.functionName compare:b.functionName];
+    }];
+}
+
++ (NSArray<NSString *> *)allInternalUseObservationLines {
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (SCIExpInternalUseObservation *o in [self allInternalUseObservations]) {
+        NSString *forced = o.forcedValue ? @" forced=YES" : @"";
+        NSString *name = o.specifierName.length ? o.specifierName : @"unknown";
+        [lines addObject:[NSString stringWithFormat:@"[InternalUse] %@ %@ spec=0x%016llx default=%d result=%d%@ ×%lu",
+                          o.functionName ?: @"InternalUse",
+                          name,
+                          o.specifier,
+                          o.defaultValue,
+                          o.resultValue,
+                          forced,
+                          (unsigned long)o.hitCount]];
+    }
+    return lines;
+}
+
 // crash-loop guard
 
 + (BOOL)checkAndHandleCrashLoop {
@@ -133,15 +198,15 @@ static dispatch_queue_t mcQueue(void) {
 
 + (NSArray<NSString *> *)scanExecutable {
     NSString *path = [[NSBundle mainBundle] executablePath];
-    if (!path) return @[];
+    if (!path) return [self allInternalUseObservationLines];
     int fd = open(path.UTF8String, O_RDONLY);
-    if (fd < 0) return @[];
+    if (fd < 0) return [self allInternalUseObservationLines];
     struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); return @[]; }
+    if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); return [self allInternalUseObservationLines]; }
     size_t size = (size_t)st.st_size;
     const char *base = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
-    if (base == MAP_FAILED) return @[];
+    if (base == MAP_FAILED) return [self allInternalUseObservationLines];
 
     // Meta flag/analytics name prefixes
     static const char *prefixes[] = {
@@ -150,7 +215,7 @@ static dispatch_queue_t mcQueue(void) {
         "fbios_", "fb_ios_"
     };
     const size_t pc = sizeof(prefixes) / sizeof(prefixes[0]);
-    NSMutableSet *seen = [NSMutableSet set];
+    NSMutableSet *seen = [NSMutableSet setWithArray:[self allInternalUseObservationLines]];
 
     for (size_t i = 0; i < size; i++) {
         char c = base[i];
