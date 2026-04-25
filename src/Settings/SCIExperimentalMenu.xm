@@ -56,8 +56,26 @@ static NSArray *expNavSections(void) {
                 ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES (restart required)", @"igt_internal_apps_gate", YES),
                 ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse/sessionless InternalUse boolean specifiers (restart required)", @"igt_internaluse_observer", YES),
                 ExpSwitch(@"Observe MobileConfig updates", @"Safely logs TryUpdate/ForceUpdate calls as pass-through only (restart required)", @"igt_mobileconfig_update_observer", YES),
-                ExpSwitch(@"Runtime MC true patcher", @"Experimental: runtime-patches selected MobileConfig boolean C symbols to return YES. Default OFF. Restart required", @"igt_runtime_mc_true_patcher", YES),
-                ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation for the runtime patcher. Riskier; only use for testing. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
+                ExpSwitch(@"Runtime MC true patcher", @"Master switch. Runtime patcher only patches symbols enabled below. Restart required", @"igt_runtime_mc_true_patcher", YES),
+                ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation. Riskier; use only for isolated tests. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
+            ]
+        },
+        @{
+            @"header": @"Runtime MC symbols",
+            @"footer": @"Master Runtime MC true patcher must also be ON. Enable one symbol at a time first, restart, then check [RyukGram][RGMC] logs.",
+            @"rows": @[
+                ExpSwitch(@"Patch IG InternalUse bool", @"_IGMobileConfigBooleanValueForInternalUse -> YES", @"igt_runtime_mc_patch_ig_internaluse", YES),
+                ExpSwitch(@"Patch IG ForceUpdate", @"_IGMobileConfigForceUpdateConfigs -> YES", @"igt_runtime_mc_patch_ig_force_update", YES),
+                ExpSwitch(@"Patch IG SetConfigOverrides", @"_IGMobileConfigSetConfigOverrides -> YES", @"igt_runtime_mc_patch_ig_set_overrides", YES),
+                ExpSwitch(@"Patch IG TryUpdate", @"_IGMobileConfigTryUpdateConfigsWithCompletion -> YES", @"igt_runtime_mc_patch_ig_try_update", YES),
+                ExpSwitch(@"Patch MCI GetBoolean", @"_MCIMobileConfigGetBoolean -> YES", @"igt_runtime_mc_patch_mci_bool", YES),
+                ExpSwitch(@"Patch METAExtensions GetBoolean", @"_METAExtensionsExperimentGetBoolean -> YES", @"igt_runtime_mc_patch_meta_ext_bool", YES),
+                ExpSwitch(@"Patch METAExtensions no exposure", @"_METAExtensionsExperimentGetBooleanWithoutExposure -> YES", @"igt_runtime_mc_patch_meta_ext_bool_noexp", YES),
+                ExpSwitch(@"Patch MCQMEM CQL bool", @"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mcqmem_cql_bool", YES),
+                ExpSwitch(@"Patch MEM Capability bool", @"_MEMMobileConfigFeatureCapabilityGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_capability_bool", YES),
+                ExpSwitch(@"Patch MEM DevConfig bool", @"_MEMMobileConfigFeatureDevConfigGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_devconfig_bool", YES),
+                ExpSwitch(@"Patch MEM Platform bool", @"_MEMMobileConfigPlatformGetBoolean -> YES", @"igt_runtime_mc_patch_mem_platform_bool", YES),
+                ExpSwitch(@"Patch MEM Protocol bool", @"_MEMMobileConfigProtocolExperimentGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_protocol_bool", YES)
             ]
         },
         @{
