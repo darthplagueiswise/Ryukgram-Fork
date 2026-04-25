@@ -2,14 +2,16 @@
 #import "SCIExpFlags.h"
 #import "SCIExpMobileConfigDebug.h"
 #import "SCIExpMobileConfigMapping.h"
+#import <Foundation/Foundation.h>
 #import <objc/message.h>
+#import <dlfcn.h>
 #include "../../../modules/fishhook/fishhook.h"
 
 static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL; // ig_is_employee
 static const unsigned long long kIGMCEmployeeSpecifierB = 0x0081030f00010a96ULL; // ig_is_employee
 static const unsigned long long kIGMCEmployeeOrTestUserSpecifier = 0x008100b200000161ULL; // ig_is_employee_or_test_user
 
-static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee"]; }
+static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee"] || [SCIUtils getBoolPref:@"igt_employee_devoptions_gate"]; }
 static BOOL rgEmployeeMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_mc"]; }
 static BOOL rgEmployeeOrTestUserMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]; }
 static BOOL rgInternalObserverEnabled(void) { return [SCIUtils getBoolPref:@"igt_internaluse_observer"]; }
@@ -25,13 +27,80 @@ static BOOL rgShouldInstallInternalModeHooks(void) {
            rgHasManualInternalUseOverrides();
 }
 
+static void *rgDLSym(const char *symbol) {
+    if (!symbol || !symbol[0]) return NULL;
+    void *p = dlsym(RTLD_DEFAULT, symbol);
+    if (p) return p;
+    char underscored[256];
+    snprintf(underscored, sizeof(underscored), "_%s", symbol);
+    return dlsym(RTLD_DEFAULT, underscored);
+}
+
+static BOOL rgLooksLikeMCSpecifier(unsigned long long v) {
+    return v != 0 && ((v >> 56) == 0) && ((v >> 48) != 0);
+}
+
+static void rgAddMCSpecifierSymbol(NSMutableDictionary<NSNumber *, NSString *> *map,
+                                   const char *symbol,
+                                   NSString *label,
+                                   NSUInteger count) {
+    unsigned long long *values = (unsigned long long *)rgDLSym(symbol);
+    if (!values) return;
+    for (NSUInteger i = 0; i < count; i++) {
+        unsigned long long spec = values[i];
+        if (!rgLooksLikeMCSpecifier(spec)) continue;
+        NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
+        map[@(spec)] = name;
+    }
+}
+
+static NSDictionary<NSNumber *, NSString *> *rgKnownInternalUseSpecifierMap(void) {
+    static NSDictionary<NSNumber *, NSString *> *map;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary<NSNumber *, NSString *> *m = [NSMutableDictionary dictionary];
+
+        // Exported MC param symbols found in FBSharedFramework. These are the iOS equivalent of
+        // the Android/DexKit "golden anchors": resolve the named specifier arrays first, then
+        // force only those InternalUse calls when the Employee/DevOptions gate is enabled.
+        rgAddMCSpecifierSymbol(m, "ig_is_employee", @"ig_is_employee", 2);
+        rgAddMCSpecifierSymbol(m, "ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1);
+        rgAddMCSpecifierSymbol(m, "xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1);
+        rgAddMCSpecifierSymbol(m, "ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1);
+        rgAddMCSpecifierSymbol(m, "ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1);
+
+        // Hard fallback for the current FBSharedFramework build, in case dlsym does not expose
+        // the data symbols in a sideloaded image.
+        m[@(kIGMCEmployeeSpecifierA)] = @"ig_is_employee[0]";
+        m[@(kIGMCEmployeeSpecifierB)] = @"ig_is_employee[1]";
+        m[@(kIGMCEmployeeOrTestUserSpecifier)] = @"ig_is_employee_or_test_user";
+        map = [m copy];
+    });
+    return map;
+}
+
+static NSString *rgKnownSpecifierName(unsigned long long specifier) {
+    return rgKnownInternalUseSpecifierMap()[@(specifier)];
+}
+
+static BOOL rgKnownNameLooksLikeEmployeeGate(NSString *name) {
+    NSString *n = name.lowercaseString ?: @"";
+    return [n containsString:@"employee"] || [n containsString:@"test_user"] || [n containsString:@"dogfood"] || [n containsString:@"dogfooding"];
+}
+
 static BOOL specifierMatchesEmployee(unsigned long long specifier) {
-    if (specifier == kIGMCEmployeeSpecifierA || specifier == kIGMCEmployeeSpecifierB) return rgEmployeeMCEnabled();
-    if (specifier == kIGMCEmployeeOrTestUserSpecifier) return rgEmployeeOrTestUserMCEnabled();
+    NSString *known = rgKnownSpecifierName(specifier);
+    if (rgEmployeeMasterEnabled() && rgKnownNameLooksLikeEmployeeGate(known)) return YES;
+    if ((specifier == kIGMCEmployeeSpecifierA || specifier == kIGMCEmployeeSpecifierB) && rgEmployeeMCEnabled()) return YES;
+    if (specifier == kIGMCEmployeeOrTestUserSpecifier && rgEmployeeOrTestUserMCEnabled()) return YES;
+    if ([known containsString:@"ig_is_employee"] && rgEmployeeMCEnabled()) return YES;
+    if ([known containsString:@"ig_is_employee_or_test_user"] && rgEmployeeOrTestUserMCEnabled()) return YES;
     return NO;
 }
 
 static NSString *specifierName(unsigned long long specifier) {
+    NSString *known = rgKnownSpecifierName(specifier);
+    if (known.length) return known;
     if (specifier == kIGMCEmployeeSpecifierA || specifier == kIGMCEmployeeSpecifierB) return @"ig_is_employee";
     if (specifier == kIGMCEmployeeOrTestUserSpecifier) return @"ig_is_employee_or_test_user";
     return @"unknown";
@@ -168,9 +237,18 @@ static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOO
 
 static BOOL (*orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18)(void) = NULL;
 static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(void) {
-    if ([SCIUtils getBoolPref:@"igt_internal_apps_gate"]) return YES;
+    if ([SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
     return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ?
         orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
+}
+
+static NSString *rgKnownMapLogLine(void) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    NSDictionary<NSNumber *, NSString *> *m = rgKnownInternalUseSpecifierMap();
+    for (NSNumber *n in [[m allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+        [parts addObject:[NSString stringWithFormat:@"%@=0x%016llx", m[n], n.unsignedLongLongValue]];
+    }
+    return [parts componentsJoinedByString:@", "];
 }
 
 %ctor {
@@ -182,10 +260,11 @@ static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(voi
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-    NSLog(@"[RyukGram][MC] internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu",
+    NSLog(@"[RyukGram][MC] internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu knownGates={%@}",
           rc,
           orig_IGMobileConfigBooleanValueForInternalUse,
           orig_IGMobileConfigSessionlessBooleanValueForInternalUse,
           orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18,
-          (unsigned long)[SCIExpFlags allOverriddenInternalUseSpecifiers].count);
+          (unsigned long)[SCIExpFlags allOverriddenInternalUseSpecifiers].count,
+          rgKnownMapLogLine());
 }
