@@ -3,6 +3,9 @@
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCMapping = nil;
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCNamedConfigs = nil;
 static NSString *gSCIMCMappingSource = nil;
+static NSArray<NSString *> *gSCIMCCheckedPaths = nil;
+static NSArray<NSString *> *gSCIMCFoundPaths = nil;
+
 static dispatch_queue_t SCIMCMappingQueue(void) {
     static dispatch_queue_t q;
     static dispatch_once_t once;
@@ -10,22 +13,36 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     return q;
 }
 
+static void SCIAddUniquePath(NSMutableArray<NSString *> *paths, NSString *path) {
+    if (!path.length) return;
+    NSString *standardized = [path stringByStandardizingPath];
+    if (!standardized.length) return;
+    if (![paths containsObject:standardized]) [paths addObject:standardized];
+}
+
 @implementation SCIExpMobileConfigMapping
 
 + (NSArray<NSString *> *)candidateMappingPaths {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSFileManager *fm = [NSFileManager defaultManager];
 
+    NSString *home = NSHomeDirectory();
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *lib = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
     NSString *tmp = NSTemporaryDirectory();
+    NSString *bundle = [[NSBundle mainBundle] bundlePath];
+    NSString *fbFramework = [bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework"];
 
     NSArray<NSString *> *baseDirs = @[
+        home ?: @"",
         docs ?: @"",
         lib ?: @"",
+        appSupport ?: @"",
+        caches ?: @"",
         tmp ?: @"",
-        [[NSBundle mainBundle] bundlePath] ?: @"",
-        [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework"] ?: @"",
+        bundle ?: @"",
+        fbFramework ?: @"",
     ];
 
     NSArray<NSString *> *relative = @[
@@ -37,6 +54,12 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
         @"mobileconfig/example_mapping.json",
         @"mobileconfig/mc_startup_configs.json",
         @"mobileconfig/startup_configs.json",
+        @"Library/mobileconfig/id_name_mapping.json",
+        @"Library/mobileconfig/example_mapping.json",
+        @"Library/Application Support/mobileconfig/id_name_mapping.json",
+        @"Library/Application Support/mobileconfig/example_mapping.json",
+        @"Documents/mobileconfig/id_name_mapping.json",
+        @"Documents/mobileconfig/example_mapping.json",
         @"RyukGram.bundle/id_name_mapping.json",
         @"RyukGram.bundle/example_mapping.json",
         @"RyukGram.bundle/mc_startup_configs.json",
@@ -50,19 +73,38 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     for (NSString *base in baseDirs) {
         if (!base.length) continue;
         for (NSString *rel in relative) {
-            NSString *p = [base stringByAppendingPathComponent:rel];
-            if ([fm fileExistsAtPath:p]) [paths addObject:p];
+            SCIAddUniquePath(paths, [base stringByAppendingPathComponent:rel]);
         }
     }
 
     for (NSBundle *b in [NSBundle allBundles]) {
+        NSString *bundlePath = b.bundlePath;
+        if (bundlePath.length) {
+            for (NSString *rel in relative) {
+                SCIAddUniquePath(paths, [bundlePath stringByAppendingPathComponent:rel]);
+            }
+        }
         for (NSString *name in @[@"id_name_mapping", @"example_mapping", @"mc_startup_configs", @"startup_configs"]) {
             NSString *p = [b pathForResource:name ofType:@"json"];
-            if (p.length && [fm fileExistsAtPath:p]) [paths addObject:p];
+            if (p.length) SCIAddUniquePath(paths, p);
         }
     }
 
     return paths;
+}
+
++ (NSArray<NSString *> *)checkedMappingPaths {
+    [self loadMappingIfNeeded];
+    __block NSArray<NSString *> *paths = nil;
+    dispatch_sync(SCIMCMappingQueue(), ^{ paths = [gSCIMCCheckedPaths copy] ?: @[]; });
+    return paths ?: @[];
+}
+
++ (NSArray<NSString *> *)foundMappingPaths {
+    [self loadMappingIfNeeded];
+    __block NSArray<NSString *> *paths = nil;
+    dispatch_sync(SCIMCMappingQueue(), ^{ paths = [gSCIMCFoundPaths copy] ?: @[]; });
+    return paths ?: @[];
 }
 
 + (NSDictionary *)parseMappingRawString:(NSString *)raw {
@@ -180,30 +222,47 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
         NSMutableDictionary *allMapping = [NSMutableDictionary dictionary];
         NSMutableDictionary *allNamed = [NSMutableDictionary dictionary];
         NSMutableArray<NSString *> *sources = [NSMutableArray array];
+        NSMutableArray<NSString *> *checked = [NSMutableArray array];
+        NSMutableArray<NSString *> *found = [NSMutableArray array];
+        NSFileManager *fm = [NSFileManager defaultManager];
 
         for (NSString *path in [self candidateMappingPaths]) {
+            if (!path.length) continue;
+            [checked addObject:path];
+            if (![fm fileExistsAtPath:path]) continue;
+            [found addObject:path];
             NSData *data = [NSData dataWithContentsOfFile:path];
-            if (!data.length) continue;
+            if (!data.length) {
+                [sources addObject:[NSString stringWithFormat:@"%@ exists-empty", path.lastPathComponent]];
+                continue;
+            }
             NSError *err = nil;
             id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
-            if (!obj || err) continue;
+            if (!obj || err) {
+                [sources addObject:[NSString stringWithFormat:@"%@ parse-error=%@", path.lastPathComponent, err.localizedDescription ?: @"unknown"]];
+                continue;
+            }
             NSMutableDictionary *named = [NSMutableDictionary dictionary];
             NSDictionary *parsed = [self parseMappingObject:obj named:named];
             if (parsed.count || named.count) {
                 [allMapping addEntriesFromDictionary:parsed ?: @{}];
                 [allNamed addEntriesFromDictionary:named ?: @{}];
                 [sources addObject:[NSString stringWithFormat:@"%@ (%lu ids/%lu named)", path.lastPathComponent, (unsigned long)parsed.count, (unsigned long)named.count]];
+            } else {
+                [sources addObject:[NSString stringWithFormat:@"%@ parsed-empty", path.lastPathComponent]];
             }
         }
 
         gSCIMCMapping = allMapping ?: @{};
         gSCIMCNamedConfigs = allNamed ?: @{};
+        gSCIMCCheckedPaths = [checked copy] ?: @[];
+        gSCIMCFoundPaths = [found copy] ?: @[];
         if (sources.count) {
             gSCIMCMappingSource = [sources componentsJoinedByString:@", "];
             NSLog(@"[RyukGram][MCMapping] loaded %@", gSCIMCMappingSource);
         } else {
             gSCIMCMappingSource = @"none";
-            NSLog(@"[RyukGram][MCMapping] no MobileConfig mapping/startup JSON found");
+            NSLog(@"[RyukGram][MCMapping] no MobileConfig mapping/startup JSON found; checked=%lu", (unsigned long)checked.count);
         }
     });
 }
@@ -213,6 +272,8 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
         gSCIMCMapping = nil;
         gSCIMCNamedConfigs = nil;
         gSCIMCMappingSource = nil;
+        gSCIMCCheckedPaths = nil;
+        gSCIMCFoundPaths = nil;
     });
     [self loadMappingIfNeeded];
 }
@@ -221,9 +282,43 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     [self loadMappingIfNeeded];
     __block NSString *s = nil;
     dispatch_sync(SCIMCMappingQueue(), ^{
-        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count];
+        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu · checked=%lu found=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count, (unsigned long)gSCIMCCheckedPaths.count, (unsigned long)gSCIMCFoundPaths.count];
     });
     return s ?: @"none";
+}
+
++ (NSString *)mappingDebugDescription {
+    [self loadMappingIfNeeded];
+    __block NSString *message = nil;
+    dispatch_sync(SCIMCMappingQueue(), ^{
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        [lines addObject:[NSString stringWithFormat:@"Mapping: %@", [self mappingSourceDescription]]];
+        [lines addObject:@"Found mapping paths:"];
+        if (gSCIMCFoundPaths.count) {
+            for (NSString *p in gSCIMCFoundPaths) [lines addObject:[NSString stringWithFormat:@"  + %@", p]];
+        } else {
+            [lines addObject:@"  none"];
+        }
+        [lines addObject:@"Checked mapping paths:"];
+        NSUInteger limit = MIN((NSUInteger)40, gSCIMCCheckedPaths.count);
+        for (NSUInteger i = 0; i < limit; i++) [lines addObject:[NSString stringWithFormat:@"  - %@", gSCIMCCheckedPaths[i]]];
+        if (gSCIMCCheckedPaths.count > limit) [lines addObject:[NSString stringWithFormat:@"  … %lu more", (unsigned long)(gSCIMCCheckedPaths.count - limit)]];
+
+        [lines addObject:@"Sample parsed ids:"];
+        NSArray<NSString *> *keys = [[gSCIMCMapping allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        NSUInteger sampleCount = MIN((NSUInteger)8, keys.count);
+        for (NSUInteger i = 0; i < sampleCount; i++) {
+            NSString *key = keys[i];
+            NSDictionary *flag = gSCIMCMapping[key];
+            NSDictionary *subs = [flag[@"subs"] isKindOfClass:[NSDictionary class]] ? flag[@"subs"] : @{};
+            NSArray *subKeys = [[subs allKeys] sortedArrayUsingSelector:@selector(compare:)];
+            NSArray *firstSubs = subKeys.count > 5 ? [subKeys subarrayWithRange:NSMakeRange(0, 5)] : subKeys;
+            [lines addObject:[NSString stringWithFormat:@"  %@ -> %@ subs=%@", key, flag[@"name"] ?: @"", firstSubs]];
+        }
+        if (!sampleCount) [lines addObject:@"  none"];
+        message = [lines componentsJoinedByString:@"\n"];
+    });
+    return message ?: @"Mapping: none";
 }
 
 + (NSString *)resolvedNameForSpecifier:(unsigned long long)specifier {
