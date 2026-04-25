@@ -185,7 +185,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 
 - (NSArray *)filteredRows {
     switch (self.tab) {
-        case SCIExpTabBrowser:   return @[@"Open native list", @"Add MetaLocal override"];
+        case SCIExpTabBrowser:   return @[@"Open native LocalExperiment list", @"LID / Family diagnostics", @"Add MetaLocal override"];
         case SCIExpTabMeta:      return [self filtered:self.metaObs keyPath:@"experimentName"];
         case SCIExpTabMC:        return [self filterMC:self.mcObs];
         case SCIExpTabScanned:   return [self filteredInternalRows];
@@ -462,6 +462,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
     switch (self.tab) {
         case SCIExpTabBrowser:
             if (ip.row == 0) [self openNativeBrowser];
+            else if (ip.row == 1) [self openNativeBrowser];
             else [self promptAddByName];
             break;
         case SCIExpTabMeta:
@@ -503,6 +504,10 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
         }
     } @catch (__unused id e) {}
     if (!vc) { [SCIUtils showErrorHUDWithDescription:@"Init failed"]; return; }
+    SEL internalSel = NSSelectorFromString(@"setIsSessionlessCaaInternal:");
+    if ([vc respondsToSelector:internalSel]) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(vc, internalSel, YES);
+    }
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
@@ -525,6 +530,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 
 - (id)nativeBrowserGenerator {
     Class c = NSClassFromString(@"LIDExperimentGenerator");
+    if (!c) c = objc_getClass("LIDExperimentGenerator");
     if (!c) return nil;
     SEL s = NSSelectorFromString(@"initWithDeviceID:logger:");
     if (![c instancesRespondToSelector:s]) return nil;
