@@ -48,18 +48,6 @@ static NSString *rgTrimmedUsefulString(id obj) {
     return s;
 }
 
-static id rgCallNoArgObject(id target, NSString *selectorName) {
-    if (!target || !selectorName.length) return nil;
-    SEL sel = NSSelectorFromString(selectorName);
-    if (![target respondsToSelector:sel]) return nil;
-    @try {
-        id (*send)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-        return send(target, sel);
-    } @catch (__unused NSException *e) {
-        return nil;
-    }
-}
-
 static NSString *rgCallStringForSpecifier(id target, NSString *selectorName, unsigned long long specifier) {
     if (!target || !selectorName.length) return nil;
     SEL sel = NSSelectorFromString(selectorName);
@@ -84,23 +72,7 @@ static unsigned long long rgCallUInt64ForSpecifier(id target, NSString *selector
     }
 }
 
-static NSString *rgResolveWithStartupConfigRuntime(unsigned long long specifier) {
-    Class cls = NSClassFromString(@"FBMobileConfigStartupConfigs");
-    if (!cls) return nil;
-
-    id startup = rgCallNoArgObject(cls, @"getInstance");
-    if (!startup) {
-        @try { startup = [[cls alloc] init]; } @catch (__unused NSException *e) { startup = nil; }
-    }
-    if (!startup) return nil;
-
-    return rgCallStringForSpecifier(startup, @"convertSpecifierToParamName:", specifier);
-}
-
-static NSString *rgResolveWithStartupConfigs(unsigned long long specifier) {
-    NSString *runtimeName = rgResolveWithStartupConfigRuntime(specifier);
-    if (runtimeName.length) return runtimeName;
-
+static NSString *rgResolveWithMappingFile(unsigned long long specifier) {
     NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
     if (mapped.length) return mapped;
     return nil;
@@ -110,7 +82,7 @@ static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
     NSString *hardcoded = specifierName(specifier);
     if (![hardcoded isEqualToString:@"unknown"]) return hardcoded;
 
-    NSString *mapped = rgResolveWithStartupConfigs(specifier);
+    NSString *mapped = rgResolveWithMappingFile(specifier);
     if (mapped.length) return mapped;
 
     NSString *stable = rgCallStringForSpecifier(ctx, @"getStableIdFromParamSpecifier:", specifier);
@@ -125,16 +97,10 @@ static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
     unsigned long long translated = rgCallUInt64ForSpecifier(ctx, @"getTranslatedSpecifier:", specifier);
     if (!translated) translated = rgCallUInt64ForSpecifier(ctx, @"_getTranslatedSpecifier:", specifier);
     if (translated && translated != specifier) {
-        NSString *translatedName = rgResolveWithStartupConfigs(translated);
+        NSString *translatedName = rgResolveWithMappingFile(translated);
         if (translatedName.length) return [NSString stringWithFormat:@"%@ (translated 0x%016llx)", translatedName, translated];
         NSString *stableTranslated = rgCallStringForSpecifier(ctx, @"getStableIdFromParamSpecifier:", translated);
         if (stableTranslated.length) return [NSString stringWithFormat:@"%@ (translated 0x%016llx)", stableTranslated, translated];
-    }
-
-    id launcherSet = rgCallNoArgObject(ctx, @"sessionlessMobileConfig") ?: rgCallNoArgObject(ctx, @"asIGDeviceLauncherSetForMigrationPurposesOnly");
-    if (launcherSet) {
-        NSString *launcherName = rgCallStringForSpecifier(launcherSet, @"convertSpecifierToParamName:", specifier);
-        if (launcherName.length) return launcherName;
     }
 
     return @"unknown";
