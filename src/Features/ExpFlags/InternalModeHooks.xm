@@ -84,7 +84,23 @@ static unsigned long long rgCallUInt64ForSpecifier(id target, NSString *selector
     }
 }
 
+static NSString *rgResolveWithStartupConfigRuntime(unsigned long long specifier) {
+    Class cls = NSClassFromString(@"FBMobileConfigStartupConfigs");
+    if (!cls) return nil;
+
+    id startup = rgCallNoArgObject(cls, @"getInstance");
+    if (!startup) {
+        @try { startup = [[cls alloc] init]; } @catch (__unused NSException *e) { startup = nil; }
+    }
+    if (!startup) return nil;
+
+    return rgCallStringForSpecifier(startup, @"convertSpecifierToParamName:", specifier);
+}
+
 static NSString *rgResolveWithStartupConfigs(unsigned long long specifier) {
+    NSString *runtimeName = rgResolveWithStartupConfigRuntime(specifier);
+    if (runtimeName.length) return runtimeName;
+
     NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
     if (mapped.length) return mapped;
     return nil;
@@ -119,8 +135,6 @@ static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
     if (launcherSet) {
         NSString *launcherName = rgCallStringForSpecifier(launcherSet, @"convertSpecifierToParamName:", specifier);
         if (launcherName.length) return launcherName;
-        NSString *launcherLogging = rgCallStringForSpecifier(launcherSet, @"getLoggingID:", [NSNumber numberWithUnsignedLongLong:specifier]);
-        if (launcherLogging.length) return [@"launcherLoggingID:" stringByAppendingString:launcherLogging];
     }
 
     return @"unknown";
