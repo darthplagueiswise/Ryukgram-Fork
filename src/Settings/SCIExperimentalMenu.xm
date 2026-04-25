@@ -51,6 +51,7 @@ static NSArray *expNavSections(void) {
             @"header": @"Account / system",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
+                ExpSwitch(@"Employee DevOptions gate", @"Forces exported employee/test-user/dogfooding MC gates discovered from FBSharedFramework. Restart required", @"igt_employee_devoptions_gate", YES),
                 ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES (restart required)", @"igt_employee_mc", YES),
                 ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES (restart required)", @"igt_employee_or_test_user_mc", YES),
                 ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES (restart required)", @"igt_internal_apps_gate", YES),
