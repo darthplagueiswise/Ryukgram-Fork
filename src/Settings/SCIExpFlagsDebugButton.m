@@ -1,5 +1,4 @@
 #import "SCIExpFlagsViewController.h"
-#import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpMobileConfigDebug.h"
 #import "../Features/ExpFlags/SCIExpMobileConfigMapping.h"
 #import <UIKit/UIKit.h>
@@ -93,13 +92,7 @@
                target:self
                action:@selector(sci_mcdebug_presentState)];
 
-    UIBarButtonItem *symbols = [[UIBarButtonItem alloc]
-        initWithTitle:@"MC Symbols"
-                style:UIBarButtonItemStylePlain
-               target:self
-               action:@selector(sci_mcdebug_pushSymbols)];
-
-    NSMutableArray<UIBarButtonItem *> *items = [NSMutableArray arrayWithObjects:debug, symbols, nil];
+    NSMutableArray<UIBarButtonItem *> *items = [NSMutableArray arrayWithObject:debug];
     if (self.navigationItem.rightBarButtonItems.count) {
         [items addObjectsFromArray:self.navigationItem.rightBarButtonItems];
     } else if (self.navigationItem.rightBarButtonItem) {
@@ -113,10 +106,6 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:nav animated:YES completion:nil];
-}
-
-- (void)sci_mcdebug_pushSymbols {
-    [self.navigationController pushViewController:[SCIMobileConfigSymbolObserverViewController new] animated:YES];
 }
 
 @end
