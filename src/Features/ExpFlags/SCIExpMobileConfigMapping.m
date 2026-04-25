@@ -1,4 +1,5 @@
 #import "SCIExpMobileConfigMapping.h"
+#import <objc/message.h>
 
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCMapping = nil;
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCNamedConfigs = nil;
@@ -7,6 +8,7 @@ static NSArray<NSString *> *gSCIMCCheckedPaths = nil;
 static NSArray<NSString *> *gSCIMCFoundPaths = nil;
 static NSArray<NSString *> *gSCIMCRoots = nil;
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCFileReports = nil;
+static NSMutableDictionary<NSNumber *, NSString *> *gSCIMCRuntimeResolvedCache = nil;
 
 static dispatch_queue_t SCIMCMappingQueue(void) {
     static dispatch_queue_t q;
@@ -57,6 +59,65 @@ static NSString *SCIJSONStringObjectKind(id obj) {
     if ([obj isKindOfClass:[NSNumber class]]) return @"number";
     if (!obj) return @"nil";
     return NSStringFromClass([obj class]);
+}
+
+static NSString *SCITrimRuntimeName(id obj) {
+    if (!obj) return nil;
+    NSString *s = [obj isKindOfClass:[NSString class]] ? obj : ([obj respondsToSelector:@selector(description)] ? [obj description] : nil);
+    if (!s.length) return nil;
+    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!s.length || [s isEqualToString:@"(null)"] || [s isEqualToString:@"null"] || [s isEqualToString:@"0"]) return nil;
+    return s;
+}
+
+static id SCIStartupConfigInstanceForClassName(NSString *className) {
+    Class cls = NSClassFromString(className);
+    if (!cls) return nil;
+    SEL getInstance = NSSelectorFromString(@"getInstance");
+    if ([cls respondsToSelector:getInstance]) {
+        @try {
+            id (*send)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
+            id obj = send(cls, getInstance);
+            if (obj) return obj;
+        } @catch (__unused NSException *e) {}
+    }
+    @try { return [[cls alloc] init]; } @catch (__unused NSException *e) { return nil; }
+}
+
+static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specifier) {
+    NSNumber *key = @(specifier);
+    __block NSString *cached = nil;
+    dispatch_sync(SCIMCMappingQueue(), ^{
+        cached = gSCIMCRuntimeResolvedCache[key];
+    });
+    if (cached.length) return cached;
+
+    NSArray<NSString *> *classes = @[@"FBMobileConfigStartupConfigs", @"FBMobileConfigStartupConfigsDeprecated"];
+    NSArray<NSString *> *selectors = @[@"convertSpecifierToParamName:", @"getStableIdFromParamSpecifier:"];
+
+    NSString *resolved = nil;
+    for (NSString *className in classes) {
+        id target = SCIStartupConfigInstanceForClassName(className);
+        if (!target) continue;
+        for (NSString *selectorName in selectors) {
+            SEL sel = NSSelectorFromString(selectorName);
+            if (![target respondsToSelector:sel]) continue;
+            @try {
+                id (*send)(id, SEL, unsigned long long) = (id (*)(id, SEL, unsigned long long))objc_msgSend;
+                resolved = SCITrimRuntimeName(send(target, sel, specifier));
+                if (resolved.length) break;
+            } @catch (__unused NSException *e) {}
+        }
+        if (resolved.length) break;
+    }
+
+    if (resolved.length) {
+        dispatch_barrier_async(SCIMCMappingQueue(), ^{
+            if (!gSCIMCRuntimeResolvedCache) gSCIMCRuntimeResolvedCache = [NSMutableDictionary dictionary];
+            gSCIMCRuntimeResolvedCache[key] = resolved;
+        });
+    }
+    return resolved;
 }
 
 @implementation SCIExpMobileConfigMapping
@@ -395,6 +456,7 @@ static NSString *SCIJSONStringObjectKind(id obj) {
         gSCIMCFoundPaths = [found copy] ?: @[];
         gSCIMCRoots = [roots copy] ?: @[];
         gSCIMCFileReports = [reports copy] ?: @{};
+        gSCIMCRuntimeResolvedCache = [NSMutableDictionary dictionary];
         if (sources.count) {
             gSCIMCMappingSource = [sources componentsJoinedByString:@", "];
             NSLog(@"[RyukGram][MCMapping] loaded %@", gSCIMCMappingSource);
@@ -414,6 +476,7 @@ static NSString *SCIJSONStringObjectKind(id obj) {
         gSCIMCFoundPaths = nil;
         gSCIMCRoots = nil;
         gSCIMCFileReports = nil;
+        gSCIMCRuntimeResolvedCache = nil;
     });
     [self loadMappingIfNeeded];
 }
@@ -422,7 +485,7 @@ static NSString *SCIJSONStringObjectKind(id obj) {
     [self loadMappingIfNeeded];
     __block NSString *s = nil;
     dispatch_sync(SCIMCMappingQueue(), ^{
-        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu · checkedJson=%lu foundCandidates=%lu roots=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count, (unsigned long)gSCIMCCheckedPaths.count, (unsigned long)gSCIMCFoundPaths.count, (unsigned long)gSCIMCRoots.count];
+        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu · runtimeNames=%lu · checkedJson=%lu foundCandidates=%lu roots=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count, (unsigned long)gSCIMCRuntimeResolvedCache.count, (unsigned long)gSCIMCCheckedPaths.count, (unsigned long)gSCIMCFoundPaths.count, (unsigned long)gSCIMCRoots.count];
     });
     return s ?: @"none";
 }
@@ -463,6 +526,17 @@ static NSString *SCIJSONStringObjectKind(id obj) {
         for (NSUInteger i = 0; i < checkedLimit; i++) [lines addObject:[NSString stringWithFormat:@"  - %@", gSCIMCCheckedPaths[i]]];
         if (gSCIMCCheckedPaths.count > checkedLimit) [lines addObject:[NSString stringWithFormat:@"  ... %lu more", (unsigned long)(gSCIMCCheckedPaths.count - checkedLimit)]];
 
+        [lines addObject:@"Sample runtime convertSpecifierToParamName:"];
+        NSDictionary<NSNumber *, NSString *> *runtimeSample = @{
+            @(0x0081030f00000a95ULL): @"ig_is_employee[0] expected",
+            @(0x0081030f00010a96ULL): @"ig_is_employee[1] expected",
+            @(0x008100b200000161ULL): @"ig_is_employee_or_test_user expected"
+        };
+        for (NSNumber *n in [[runtimeSample allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+            NSString *name = SCIRuntimeConvertSpecifierToParamName(n.unsignedLongLongValue);
+            [lines addObject:[NSString stringWithFormat:@"  0x%016llx %@ -> %@", n.unsignedLongLongValue, runtimeSample[n], name.length ? name : @"nil"]];
+        }
+
         [lines addObject:@"Sample parsed ids:"];
         NSArray<NSString *> *keys = [[gSCIMCMapping allKeys] sortedArrayUsingSelector:@selector(compare:)];
         NSUInteger sampleCount = MIN((NSUInteger)8, keys.count);
@@ -493,6 +567,9 @@ static NSString *SCIJSONStringObjectKind(id obj) {
 }
 
 + (NSString *)resolvedNameForSpecifier:(unsigned long long)specifier {
+    NSString *runtimeName = SCIRuntimeConvertSpecifierToParamName(specifier);
+    if (runtimeName.length) return runtimeName;
+
     [self loadMappingIfNeeded];
 
     uint32_t flagId32 = (uint32_t)(specifier >> 32);
