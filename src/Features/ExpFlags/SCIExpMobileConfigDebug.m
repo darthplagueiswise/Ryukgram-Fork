@@ -1,4 +1,5 @@
 #import "SCIExpMobileConfigDebug.h"
+#import "SCIExpMobileConfigMapping.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -153,6 +154,9 @@ static NSArray<NSString *> *SCIProbeNoArgObjectMethodsForClass(Class cls) {
 + (NSString *)runDebugDumps {
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     [lines addObject:[NSString stringWithFormat:@"MobileConfig debug context tracker is active. %@", [self debugState]]];
+    [lines addObject:@""];
+    [lines addObject:[SCIExpMobileConfigMapping mappingDebugDescription] ?: @"Mapping: unavailable"];
+    [lines addObject:@""];
 
     NSArray<NSString *> *classes = @[
         @"FBMobileConfigStartupConfigs",
