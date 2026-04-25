@@ -36,7 +36,6 @@ static BOOL RGIsLikelyFunctionPrologue(uint32_t insn) {
     // sub sp, sp, #imm
     // pacibsp / paciasp followed by frame setup may also appear, so this is approximate.
     if ((insn & 0xFFC003FF) == 0xA98003FD) return YES;
-    if ((insn & 0xFFC003FF) == 0xA9A003FD) return YES;
     if ((insn & 0xFF8003FF) == 0xD10003FF) return YES;
     if (insn == 0xD503237F || insn == 0xD503233F) return YES; // pacibsp/paciasp
     return NO;
