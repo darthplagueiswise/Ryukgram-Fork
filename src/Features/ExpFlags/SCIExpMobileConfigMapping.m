@@ -1,6 +1,7 @@
 #import "SCIExpMobileConfigMapping.h"
 
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCMapping = nil;
+static NSDictionary<NSString *, NSDictionary *> *gSCIMCNamedConfigs = nil;
 static NSString *gSCIMCMappingSource = nil;
 static dispatch_queue_t SCIMCMappingQueue(void) {
     static dispatch_queue_t q;
@@ -30,12 +31,20 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     NSArray<NSString *> *relative = @[
         @"id_name_mapping.json",
         @"example_mapping.json",
+        @"mc_startup_configs.json",
+        @"startup_configs.json",
         @"mobileconfig/id_name_mapping.json",
         @"mobileconfig/example_mapping.json",
+        @"mobileconfig/mc_startup_configs.json",
+        @"mobileconfig/startup_configs.json",
         @"RyukGram.bundle/id_name_mapping.json",
         @"RyukGram.bundle/example_mapping.json",
+        @"RyukGram.bundle/mc_startup_configs.json",
+        @"RyukGram.bundle/startup_configs.json",
         @"Library/Application Support/RyukGram.bundle/id_name_mapping.json",
         @"Library/Application Support/RyukGram.bundle/example_mapping.json",
+        @"Library/Application Support/RyukGram.bundle/mc_startup_configs.json",
+        @"Library/Application Support/RyukGram.bundle/startup_configs.json",
     ];
 
     for (NSString *base in baseDirs) {
@@ -47,10 +56,10 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     }
 
     for (NSBundle *b in [NSBundle allBundles]) {
-        NSString *p = [b pathForResource:@"id_name_mapping" ofType:@"json"];
-        if (p.length && [fm fileExistsAtPath:p]) [paths addObject:p];
-        p = [b pathForResource:@"example_mapping" ofType:@"json"];
-        if (p.length && [fm fileExistsAtPath:p]) [paths addObject:p];
+        for (NSString *name in @[@"id_name_mapping", @"example_mapping", @"mc_startup_configs", @"startup_configs"]) {
+            NSString *p = [b pathForResource:name ofType:@"json"];
+            if (p.length && [fm fileExistsAtPath:p]) [paths addObject:p];
+        }
     }
 
     return paths;
@@ -73,7 +82,54 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     return @{@"flagId": flagId, @"name": flagName, @"subs": subs};
 }
 
-+ (NSDictionary<NSString *, NSDictionary *> *)parseMappingObject:(id)obj {
++ (void)addNamedConfigKey:(NSString *)key value:(id)value toMap:(NSMutableDictionary<NSString *, NSDictionary *> *)out named:(NSMutableDictionary<NSString *, NSDictionary *> *)named {
+    if (![key isKindOfClass:[NSString class]] || !key.length) return;
+    if (![value isKindOfClass:[NSDictionary class]]) return;
+    NSDictionary *d = (NSDictionary *)value;
+    if (![key containsString:@"."] && ![key hasPrefix:@"ig_"] && ![key hasPrefix:@"mc_"] && ![key hasPrefix:@"qe_"] && ![key hasPrefix:@"p92_"] && ![key hasPrefix:@"bsl_"] && ![key hasPrefix:@"bcn_"]) return;
+
+    NSString *lid = [d[@"lid"] isKindOfClass:[NSString class]] ? d[@"lid"] : [[d[@"lid"] description] isKindOfClass:[NSString class]] ? [d[@"lid"] description] : @"";
+    id v = d[@"v"];
+    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+    entry[@"name"] = key;
+    if (lid.length) entry[@"lid"] = lid;
+    if (v) entry[@"v"] = v;
+    named[key] = entry;
+
+    if (!lid.length) return;
+
+    unsigned long long spec = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:lid];
+    if ([lid hasPrefix:@"0x"] || [lid hasPrefix:@"0X"]) {
+        [scanner scanHexLongLong:&spec];
+    } else {
+        long long signedSpec = 0;
+        if ([scanner scanLongLong:&signedSpec]) spec = (unsigned long long)signedSpec;
+    }
+    if (!spec) return;
+
+    uint32_t flagId32 = (uint32_t)(spec >> 32);
+    uint32_t paramId32 = (uint32_t)(spec & 0xffffffffULL);
+    NSString *flagId = [NSString stringWithFormat:@"%u", flagId32];
+    NSString *paramId = [NSString stringWithFormat:@"%u", paramId32];
+
+    NSString *flagName = key;
+    NSString *paramName = key;
+    NSRange dot = [key rangeOfString:@"." options:NSBackwardsSearch];
+    if (dot.location != NSNotFound && dot.location > 0 && dot.location + 1 < key.length) {
+        flagName = [key substringToIndex:dot.location];
+        paramName = [key substringFromIndex:dot.location + 1];
+    }
+
+    NSMutableDictionary *flag = [out[flagId] mutableCopy] ?: [NSMutableDictionary dictionary];
+    flag[@"name"] = flag[@"name"] ?: flagName;
+    NSMutableDictionary *subs = [flag[@"subs"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    subs[paramId] = paramName;
+    flag[@"subs"] = subs;
+    out[flagId] = flag;
+}
+
++ (NSDictionary<NSString *, NSDictionary *> *)parseMappingObject:(id)obj named:(NSMutableDictionary<NSString *, NSDictionary *> *)namedOut {
     NSMutableDictionary<NSString *, NSDictionary *> *out = [NSMutableDictionary dictionary];
 
     if ([obj isKindOfClass:[NSArray class]]) {
@@ -101,8 +157,12 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
             } else if ([value isKindOfClass:[NSDictionary class]]) {
                 NSDictionary *d = value;
                 NSString *name = [d[@"name"] description] ?: [d[@"flagName"] description] ?: @"";
-                NSDictionary *subs = [d[@"subs"] isKindOfClass:[NSDictionary class]] ? d[@"subs"] : @{};
-                out[[flagId description]] = @{@"name": name ?: @"", @"subs": subs ?: @{}};
+                NSDictionary *subs = [d[@"subs"] isKindOfClass:[NSDictionary class]] ? d[@"subs"] : nil;
+                if (subs || name.length) {
+                    out[[flagId description]] = @{@"name": name ?: @"", @"subs": subs ?: @{}};
+                } else {
+                    [self addNamedConfigKey:[flagId description] value:value toMap:out named:namedOut];
+                }
             }
         }
     }
@@ -117,29 +177,41 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
 
     dispatch_barrier_sync(SCIMCMappingQueue(), ^{
         if (gSCIMCMapping) return;
+        NSMutableDictionary *allMapping = [NSMutableDictionary dictionary];
+        NSMutableDictionary *allNamed = [NSMutableDictionary dictionary];
+        NSMutableArray<NSString *> *sources = [NSMutableArray array];
+
         for (NSString *path in [self candidateMappingPaths]) {
             NSData *data = [NSData dataWithContentsOfFile:path];
             if (!data.length) continue;
             NSError *err = nil;
             id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
             if (!obj || err) continue;
-            NSDictionary *parsed = [self parseMappingObject:obj];
-            if (parsed.count) {
-                gSCIMCMapping = parsed;
-                gSCIMCMappingSource = [NSString stringWithFormat:@"%@ (%lu flags)", path.lastPathComponent, (unsigned long)parsed.count];
-                NSLog(@"[RyukGram][MCMapping] loaded %@", gSCIMCMappingSource);
-                return;
+            NSMutableDictionary *named = [NSMutableDictionary dictionary];
+            NSDictionary *parsed = [self parseMappingObject:obj named:named];
+            if (parsed.count || named.count) {
+                [allMapping addEntriesFromDictionary:parsed ?: @{}];
+                [allNamed addEntriesFromDictionary:named ?: @{}];
+                [sources addObject:[NSString stringWithFormat:@"%@ (%lu ids/%lu named)", path.lastPathComponent, (unsigned long)parsed.count, (unsigned long)named.count]];
             }
         }
-        gSCIMCMapping = @{};
-        gSCIMCMappingSource = @"none";
-        NSLog(@"[RyukGram][MCMapping] no id_name_mapping.json found");
+
+        gSCIMCMapping = allMapping ?: @{};
+        gSCIMCNamedConfigs = allNamed ?: @{};
+        if (sources.count) {
+            gSCIMCMappingSource = [sources componentsJoinedByString:@", "];
+            NSLog(@"[RyukGram][MCMapping] loaded %@", gSCIMCMappingSource);
+        } else {
+            gSCIMCMappingSource = @"none";
+            NSLog(@"[RyukGram][MCMapping] no MobileConfig mapping/startup JSON found");
+        }
     });
 }
 
 + (void)reloadMapping {
     dispatch_barrier_sync(SCIMCMappingQueue(), ^{
         gSCIMCMapping = nil;
+        gSCIMCNamedConfigs = nil;
         gSCIMCMappingSource = nil;
     });
     [self loadMappingIfNeeded];
@@ -148,7 +220,9 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
 + (NSString *)mappingSourceDescription {
     [self loadMappingIfNeeded];
     __block NSString *s = nil;
-    dispatch_sync(SCIMCMappingQueue(), ^{ s = gSCIMCMappingSource; });
+    dispatch_sync(SCIMCMappingQueue(), ^{
+        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count];
+    });
     return s ?: @"none";
 }
 
@@ -174,15 +248,9 @@ static dispatch_queue_t SCIMCMappingQueue(void) {
     id p = subs[paramDec] ?: subs[paramHex] ?: subs[[paramHex uppercaseString]];
     if (p) paramName = [p description];
 
-    if (flagName.length && paramName.length) {
-        return [NSString stringWithFormat:@"%@ / %@", flagName, paramName];
-    }
-    if (flagName.length) {
-        return [NSString stringWithFormat:@"%@ / param %@", flagName, paramDec];
-    }
-    if (paramName.length) {
-        return [NSString stringWithFormat:@"flag %@ / %@", flagDec, paramName];
-    }
+    if (flagName.length && paramName.length) return [NSString stringWithFormat:@"%@ / %@", flagName, paramName];
+    if (flagName.length) return [NSString stringWithFormat:@"%@ / param %@", flagName, paramDec];
+    if (paramName.length) return [NSString stringWithFormat:@"flag %@ / %@", flagDec, paramName];
     return nil;
 }
 
