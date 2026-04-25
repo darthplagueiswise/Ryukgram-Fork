@@ -1,5 +1,6 @@
 #import "../../Utils.h"
 #import "SCIExpFlags.h"
+#import "SCIExpMobileConfigDebug.h"
 #include "../../../modules/fishhook/fishhook.h"
 
 static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL; // ig_is_employee
@@ -74,6 +75,7 @@ static void recordInternalUseSpecifier(NSString *funcName, unsigned long long sp
 typedef BOOL (*IGMCBoolInternalFn)(id, BOOL, unsigned long long);
 static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    [SCIExpMobileConfigDebug noteContext:ctx source:@"IGMobileConfigBooleanValueForInternalUse"];
     void *callerAddress = __builtin_return_address(0);
     BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
         orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
@@ -84,6 +86,7 @@ static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultVa
 
 static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    [SCIExpMobileConfigDebug noteContext:ctx source:@"IGMobileConfigSessionlessBooleanValueForInternalUse"];
     void *callerAddress = __builtin_return_address(0);
     BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
         orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
