@@ -1,5 +1,6 @@
 #import "SCIExpFlags.h"
 #import "SCIExpCallsiteResolver.h"
+#import "SCIExpMobileConfigMapping.h"
 #import <objc/runtime.h>
 
 typedef void (*SCIRecordInternalUseIMP)(id, SEL, unsigned long long, NSString *, NSString *, BOOL, BOOL, BOOL, void *);
@@ -16,11 +17,16 @@ static void hook_SCIRecordInternalUse(id self,
                                       void *callerAddress) {
     NSString *resolved = specifierName;
     if (!resolved.length || [resolved isEqualToString:@"unknown"]) {
-        NSString *caller = SCIExpDescribeCallsite(callerAddress);
-        if (caller.length && ![caller isEqualToString:@"unknown"]) {
-            resolved = [@"callsite " stringByAppendingString:caller];
+        NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
+        if (mapped.length) {
+            resolved = mapped;
         } else {
-            resolved = @"unknown";
+            NSString *caller = SCIExpDescribeCallsite(callerAddress);
+            if (caller.length && ![caller isEqualToString:@"unknown"]) {
+                resolved = [@"callsite " stringByAppendingString:caller];
+            } else {
+                resolved = @"unknown";
+            }
         }
     }
 
@@ -41,5 +47,5 @@ __attribute__((constructor)) static void SCIInstallInternalUseCallsiteResolverBr
     if (!m) return;
 
     orig_SCIRecordInternalUse = (SCIRecordInternalUseIMP)method_setImplementation(m, (IMP)hook_SCIRecordInternalUse);
-    NSLog(@"[RyukGram][MC] InternalUse callsite resolver bridge installed original=%p", orig_SCIRecordInternalUse);
+    NSLog(@"[RyukGram][MC] InternalUse resolver bridge installed original=%p mapping=%@", orig_SCIRecordInternalUse, [SCIExpMobileConfigMapping mappingSourceDescription]);
 }
