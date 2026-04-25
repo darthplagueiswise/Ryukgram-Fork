@@ -1,5 +1,6 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
+#import "SCIMobileConfigSymbolObserverViewController.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -82,13 +83,17 @@ static NSArray *expNavSections(void) {
         },
         @{
             @"header": @"Flags browser",
-            @"footer": @"MetaLocalExperiment and IGMobileConfigContextManager browser and manual overrides.",
+            @"footer": @"MetaLocalExperiment, IGMobileConfigContextManager, and runtime C-symbol observer views.",
             @"rows": @[
                 ExpSwitch(@"Enable flags browser hooks", @"Installs MetaLocalExperiment and IGMobileConfig observers + overrides. ON by default for missing prefs", @"sci_exp_flags_enabled", YES),
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
-                                     viewController:[SCIExpFlagsViewController new]]
+                                     viewController:[SCIExpFlagsViewController new]],
+                [SCISetting navigationCellWithTitle:@"MobileConfig symbol observer"
+                                           subtitle:@"Filtered view-only tabs for MCI, METAExtensions, MCQMEM, and MEM boolean calls"
+                                               icon:[SCISymbol symbolWithName:@"eye"]
+                                     viewController:[SCIMobileConfigSymbolObserverViewController new]]
             ]
         }
     ];
