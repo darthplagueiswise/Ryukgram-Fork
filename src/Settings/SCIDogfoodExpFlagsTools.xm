@@ -3,20 +3,24 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+static NSArray *(*RGDFOrigFilteredRows)(id self, SEL _cmd);
+static void (*RGDFOrigDidSelect)(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath);
+static BOOL RGDFSwizzled = NO;
+
+static NSString *RGDFPointer(id obj) {
+    if (!obj) return @"0x0";
+    return [NSString stringWithFormat:@"%p", (__bridge void *)obj];
+}
+
 static NSString *RGDFClassName(id obj) {
-    if (!obj) return @"nil";
-    return NSStringFromClass(object_getClass(obj));
+    return obj ? NSStringFromClass([obj class]) : @"nil";
 }
 
-static NSString *RGDFInstanceClassName(id obj) {
-    if (!obj) return @"nil";
-    return NSStringFromClass([obj class]);
-}
-
-static BOOL RGDFLooksLikeUserSession(id obj) {
-    if (!obj) return NO;
-    NSString *name = RGDFInstanceClassName(obj);
-    return [name isEqualToString:@"IGUserSession"];
+static Class RGDFRuntimeClass(NSString *name) {
+    if (!name.length) return Nil;
+    Class cls = NSClassFromString(name);
+    if (!cls) cls = (Class)objc_getClass(name.UTF8String);
+    return cls;
 }
 
 static id RGDFSendId0(id target, NSString *selectorName) {
@@ -31,41 +35,77 @@ static id RGDFSendId0(id target, NSString *selectorName) {
     }
 }
 
-static NSString *RGDFStringFromObject(id obj) {
+static NSString *RGDFStringValue(id obj) {
     if (!obj) return nil;
-    if ([obj isKindOfClass:[NSString class]]) return obj;
+    if ([obj isKindOfClass:[NSString class]]) return (NSString *)obj;
     if ([obj respondsToSelector:@selector(stringValue)]) {
-        @try { return [obj stringValue]; } @catch (__unused id e) { return nil; }
+        @try { return [(id)obj stringValue]; } @catch (__unused id e) { return nil; }
     }
     return nil;
 }
 
-static NSString *RGDFUserPkForSession(id session) {
-    if (!session) return nil;
+static id RGDFObjectIvar(id obj, Ivar ivar) {
+    if (!obj || !ivar) return nil;
+    const char *type = ivar_getTypeEncoding(ivar);
+    if (!type || type[0] != '@') return nil;
+    @try { return object_getIvar(obj, ivar); } @catch (__unused id e) { return nil; }
+}
 
-    NSArray<NSString *> *directSelectors = @[@"userPk", @"userPK", @"userID", @"userId", @"pk"];
-    for (NSString *selName in directSelectors) {
-        NSString *s = RGDFStringFromObject(RGDFSendId0(session, selName));
-        if (s.length) return s;
+static NSString *RGDFUserPk(id obj) {
+    if (!obj) return nil;
+
+    NSArray *selectors = @[@"userPk", @"userPK", @"userId", @"userID", @"pk"];
+    for (NSString *selName in selectors) {
+        NSString *value = RGDFStringValue(RGDFSendId0(obj, selName));
+        if (value.length) return value;
     }
 
-    id user = RGDFSendId0(session, @"user");
+    id user = RGDFSendId0(obj, @"user");
     if (!user) {
-        Ivar iv = class_getInstanceVariable([session class], "_user");
-        if (iv) {
-            @try { user = object_getIvar(session, iv); } @catch (__unused id e) { user = nil; }
-        }
+        Ivar ivar = class_getInstanceVariable([obj class], "_user");
+        user = RGDFObjectIvar(obj, ivar);
     }
 
-    for (NSString *selName in directSelectors) {
-        NSString *s = RGDFStringFromObject(RGDFSendId0(user, selName));
-        if (s.length) return s;
+    for (NSString *selName in selectors) {
+        NSString *value = RGDFStringValue(RGDFSendId0(user, selName));
+        if (value.length) return value;
     }
 
-    return nil;
+    Ivar pkIvar = class_getInstanceVariable([obj class], "_userPK");
+    NSString *pk = RGDFStringValue(RGDFObjectIvar(obj, pkIvar));
+    return pk.length ? pk : nil;
 }
 
-static void RGDFAddObject(NSMutableArray *queue, NSHashTable *seen, id obj) {
+static BOOL RGDFIsUserSession(id obj) {
+    return obj && [RGDFClassName(obj) isEqualToString:@"IGUserSession"];
+}
+
+static void RGDFAppendFound(NSMutableString *log, NSString *prefix, id obj) {
+    if (!log || !obj) return;
+    NSString *pk = RGDFUserPk(obj);
+    [log appendFormat:@"%@%@ <%@>%@\n", prefix ?: @"", RGDFClassName(obj), RGDFPointer(obj), pk.length ? [NSString stringWithFormat:@" · userPk=%@", pk] : @""];
+}
+
+static BOOL RGDFIvarNameLooksUseful(NSString *name) {
+    if (!name.length) return NO;
+    NSString *n = name.lowercaseString;
+    return [n containsString:@"usersession"] ||
+           [n containsString:@"sessions"] ||
+           [n containsString:@"sessionmanager"] ||
+           [n containsString:@"activeusersessions"] ||
+           [n containsString:@"mainapp"] ||
+           [n containsString:@"appcoordinator"] ||
+           [n containsString:@"tabbar"] ||
+           [n containsString:@"window"] ||
+           [n containsString:@"root"] ||
+           [n containsString:@"delegate"] ||
+           [n containsString:@"context"] ||
+           [n containsString:@"launcher"] ||
+           [n containsString:@"feed"] ||
+           [n containsString:@"story"];
+}
+
+static void RGDFQueueObject(NSMutableArray *queue, NSHashTable *seen, id obj) {
     if (!obj) return;
     if (![obj isKindOfClass:[NSObject class]]) return;
     if ([seen containsObject:obj]) return;
@@ -73,135 +113,154 @@ static void RGDFAddObject(NSMutableArray *queue, NSHashTable *seen, id obj) {
     [queue addObject:obj];
 }
 
-static UIWindow *RGDFAnyWindow(void) {
+static UIWindow *RGDFWindow(void) {
     UIApplication *app = UIApplication.sharedApplication;
     UIWindow *fallback = nil;
-
-    for (UIScene *scene in app.connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-        UIWindowScene *windowScene = (UIWindowScene *)scene;
-        for (UIWindow *window in windowScene.windows) {
-            if (!fallback) fallback = window;
-            if (window.isKeyWindow) return window;
-        }
+    for (UIWindow *window in app.windows) {
+        if (!fallback) fallback = window;
+        if (window.isKeyWindow) return window;
     }
-
     return fallback;
 }
 
-static UIViewController *RGDFTopViewControllerFrom(UIViewController *vc) {
+static UIViewController *RGDFTopViewController(UIViewController *vc) {
     UIViewController *cur = vc;
     while (cur.presentedViewController) cur = cur.presentedViewController;
-
     if ([cur isKindOfClass:[UINavigationController class]]) {
-        return RGDFTopViewControllerFrom(((UINavigationController *)cur).visibleViewController ?: ((UINavigationController *)cur).topViewController);
+        UINavigationController *nav = (UINavigationController *)cur;
+        return RGDFTopViewController(nav.visibleViewController ?: nav.topViewController);
     }
     if ([cur isKindOfClass:[UITabBarController class]]) {
-        return RGDFTopViewControllerFrom(((UITabBarController *)cur).selectedViewController);
+        return RGDFTopViewController(((UITabBarController *)cur).selectedViewController);
     }
     return cur;
 }
 
-static UIViewController *RGDFPresenterFor(id fallback) {
-    UIWindow *window = RGDFAnyWindow();
-    UIViewController *vc = RGDFTopViewControllerFrom(window.rootViewController);
+static UIViewController *RGDFPresenter(id fallback) {
+    UIViewController *vc = RGDFTopViewController(RGDFWindow().rootViewController);
     if (vc) return vc;
-    return [fallback isKindOfClass:[UIViewController class]] ? fallback : nil;
+    return [fallback isKindOfClass:[UIViewController class]] ? (UIViewController *)fallback : nil;
 }
 
-static id RGDFObjectIvar(id obj, Ivar iv) {
-    if (!obj || !iv) return nil;
-    const char *type = ivar_getTypeEncoding(iv);
-    if (!type || type[0] != '@') return nil;
-    @try { return object_getIvar(obj, iv); } @catch (__unused id e) { return nil; }
-}
-
-static BOOL RGDFShouldFollowIvarName(NSString *name) {
-    if (!name.length) return NO;
-    NSString *n = name.lowercaseString;
-    return [n containsString:@"usersession"] ||
-           [n containsString:@"sessionmanager"] ||
-           [n containsString:@"activeusersessions"] ||
-           [n containsString:@"appcoordinator"] ||
-           [n containsString:@"mainapp"] ||
-           [n containsString:@"tabbar"] ||
-           [n containsString:@"root"] ||
-           [n containsString:@"window"] ||
-           [n containsString:@"delegate"] ||
-           [n containsString:@"context"];
-}
-
-static id RGDFFindIGUserSessionNear(id seed, NSMutableString *log) {
+static id RGDFFindUserSession(id seed, NSMutableString *log) {
     NSMutableArray *queue = [NSMutableArray array];
     NSHashTable *seen = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+    NSMutableArray *candidates = [NSMutableArray array];
+
+    [log appendString:@"IGUserSession finder\n"];
+    [log appendString:@"mode = root + view-controller tree + known singleton selectors + limited ivar scan\n"];
+    [log appendString:@"goal = find real IGUserSession object; IGDeviceSession is not enough\n\n"];
+
+    Class mgrClass = RGDFRuntimeClass(@"IGUserSessionManager");
+    if (mgrClass) {
+        [log appendString:@"singleton class IGUserSessionManager found\n"];
+        NSArray *mgrSelectors = @[@"sharedInstance", @"sharedManager", @"currentSessionManager", @"instance"];
+        for (NSString *selName in mgrSelectors) RGDFQueueObject(queue, seen, RGDFSendId0((id)mgrClass, selName));
+    }
 
     UIApplication *app = UIApplication.sharedApplication;
-    RGDFAddObject(queue, seen, seed);
-    RGDFAddObject(queue, seen, RGDFPresenterFor(seed));
-    RGDFAddObject(queue, seen, RGDFAnyWindow());
-    RGDFAddObject(queue, seen, app.delegate);
+    UIWindow *window = RGDFWindow();
+    UIViewController *presenter = RGDFPresenter(seed);
+    RGDFQueueObject(queue, seen, seed);
+    RGDFQueueObject(queue, seen, presenter);
+    RGDFQueueObject(queue, seen, window);
+    RGDFQueueObject(queue, seen, window.rootViewController);
+    RGDFQueueObject(queue, seen, app.delegate);
 
-    UIWindow *window = RGDFAnyWindow();
-    RGDFAddObject(queue, seen, window.rootViewController);
-
-    NSUInteger cursor = 0;
-    NSUInteger budget = 450;
-    NSArray<NSString *> *selectors = @[
-        @"userSession",
-        @"igUserSession",
-        @"currentUserSession",
-        @"activeUserSession",
-        @"session",
-        @"mainAppViewController",
-        @"rootViewController",
-        @"selectedViewController",
-        @"visibleViewController",
-        @"topViewController",
-        @"delegate"
+    NSArray *selectors = @[
+        @"userSession", @"igUserSession", @"currentUserSession", @"activeUserSession",
+        @"mainAppViewController", @"rootViewController", @"selectedViewController", @"visibleViewController",
+        @"topViewController", @"delegate", @"appCoordinator", @"sessionManager", @"activeUserSessions"
     ];
 
-    while (cursor < queue.count && budget-- > 0) {
-        id obj = queue[cursor++];
-        if (RGDFLooksLikeUserSession(obj)) {
-            if (log) [log appendFormat:@"FOUND %@ <%p> userPk=%@\n", RGDFInstanceClassName(obj), obj, RGDFUserPkForSession(obj) ?: @"?"];
-            return obj;
+    NSUInteger cursor = 0;
+    NSUInteger budget = 700;
+    id firstSession = nil;
+
+    while (cursor < [queue count] && budget > 0) {
+        budget--;
+        id obj = queue[cursor];
+        cursor++;
+
+        if (RGDFIsUserSession(obj)) {
+            if (!firstSession) firstSession = obj;
+            if (![candidates containsObject:obj]) [candidates addObject:obj];
         }
 
         for (NSString *selName in selectors) {
             id child = RGDFSendId0(obj, selName);
-            if (RGDFLooksLikeUserSession(child)) {
-                if (log) [log appendFormat:@"%@.%@ -> %@ <%p> userPk=%@\n", RGDFInstanceClassName(obj), selName, RGDFInstanceClassName(child), child, RGDFUserPkForSession(child) ?: @"?"];
-                return child;
+            if (!child) continue;
+            if (RGDFIsUserSession(child)) {
+                if (!firstSession) firstSession = child;
+                if (![candidates containsObject:child]) [candidates addObject:child];
+                [log appendFormat:@"%@ <%@>.%@ -> ", RGDFClassName(obj), RGDFPointer(obj), selName];
+                RGDFAppendFound(log, @"", child);
             }
-            RGDFAddObject(queue, seen, child);
+            RGDFQueueObject(queue, seen, child);
         }
 
         unsigned int count = 0;
         Ivar *ivars = class_copyIvarList([obj class], &count);
         for (unsigned int i = 0; i < count; i++) {
-            NSString *ivarName = [NSString stringWithUTF8String:ivar_getName(ivars[i]) ?: ""];
-            if (!RGDFShouldFollowIvarName(ivarName)) continue;
+            NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[i]) ?: ""];
+            if (!RGDFIvarNameLooksUseful(name)) continue;
             id child = RGDFObjectIvar(obj, ivars[i]);
-            if (RGDFLooksLikeUserSession(child)) {
-                if (log) [log appendFormat:@"%@ ivar %@ -> %@ <%p> userPk=%@\n", RGDFInstanceClassName(obj), ivarName, RGDFInstanceClassName(child), child, RGDFUserPkForSession(child) ?: @"?"];
-                if (ivars) free(ivars);
-                return child;
+            if (!child) continue;
+            NSString *pk = RGDFUserPk(child);
+            if (RGDFIsUserSession(child)) {
+                if (!firstSession) firstSession = child;
+                if (![candidates containsObject:child]) [candidates addObject:child];
+                [log appendFormat:@"%@ <%@> ivar %@ -> ", RGDFClassName(obj), RGDFPointer(obj), name];
+                RGDFAppendFound(log, @"", child);
+            } else if (pk.length) {
+                [log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@> · userPk=%@\n", RGDFClassName(obj), RGDFPointer(obj), name, RGDFClassName(child), RGDFPointer(child), pk];
             }
-            RGDFAddObject(queue, seen, child);
+            RGDFQueueObject(queue, seen, child);
         }
         if (ivars) free(ivars);
     }
 
-    if (log) [log appendFormat:@"No IGUserSession found. visited=%lu\n", (unsigned long)seen.count];
-    return nil;
+    [log appendFormat:@"deepScan budgetRemaining=%lu visited=%lu candidates=%lu\n\n", (unsigned long)budget, (unsigned long)[seen allObjects].count, (unsigned long)candidates.count];
+    [log appendFormat:@"RESULT: %lu IGUserSession candidate(s)\n", (unsigned long)candidates.count];
+    for (NSUInteger i = 0; i < candidates.count; i++) {
+        id obj = candidates[i];
+        [log appendFormat:@"candidate[%lu] = %@ <%@> · userPk=%@\n", (unsigned long)i, RGDFClassName(obj), RGDFPointer(obj), RGDFUserPk(obj) ?: @"?"];
+    }
+
+    [log appendString:@"\nFlex cross-check:\n"];
+    [log appendString:@"Good: IGSessionContext with _loggedInContext_userSession = <IGUserSession: 0x...>\n"];
+    [log appendString:@"Good: direct IGUserSession object with userPk matching your account.\n"];
+    [log appendString:@"Bad: only IGDeviceSession / _loggedOutContext_deviceSession.\n"];
+    [log appendString:@"The numeric userPk confirms the account, but the opener needs the live object pointer.\n"];
+
+    return firstSession;
 }
 
-static NSString *RGDFMethodListForClass(Class cls, BOOL meta) {
+static void RGDFShowText(UIViewController *source, NSString *title, NSString *body) {
+    UIViewController *presenter = RGDFPresenter(source) ?: source;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:body preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = body ?: @"";
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
+
+static SEL RGDFClassSelector(Class cls, NSArray *names) {
+    if (!cls) return NULL;
+    for (NSString *name in names) {
+        SEL sel = NSSelectorFromString(name);
+        if ([cls respondsToSelector:sel]) return sel;
+    }
+    return NULL;
+}
+
+static NSString *RGDFMethodNames(Class cls, BOOL meta) {
     if (!cls) return @"missing";
     Class target = meta ? object_getClass(cls) : cls;
     unsigned int count = 0;
     Method *methods = class_copyMethodList(target, &count);
-    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    NSMutableArray *names = [NSMutableArray array];
     for (unsigned int i = 0; i < count; i++) {
         SEL sel = method_getName(methods[i]);
         if (sel) [names addObject:NSStringFromSelector(sel)];
@@ -210,80 +269,52 @@ static NSString *RGDFMethodListForClass(Class cls, BOOL meta) {
     return names.count ? [names componentsJoinedByString:@", "] : @"none";
 }
 
-static void RGDFShowText(UIViewController *vc, NSString *title, NSString *text) {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:text preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = text ?: @"";
-    }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-    [vc presentViewController:a animated:YES completion:nil];
-}
-
-static Class RGDFClass(NSString *name) {
-    Class cls = NSClassFromString(name);
-    if (!cls) cls = objc_getClass(name.UTF8String);
-    return cls;
-}
-
-static SEL RGDFClassSelector(Class cls, NSArray<NSString *> *names) {
-    for (NSString *name in names) {
-        SEL sel = NSSelectorFromString(name);
-        if (sel && [cls respondsToSelector:sel]) return sel;
-    }
-    return NULL;
-}
-
-static void RGDFOpenDirectNotesDogfood(UIViewController *source) {
-    UIViewController *presenter = RGDFPresenterFor(source);
-    NSMutableString *log = [NSMutableString stringWithString:@"Direct Notes dogfooding opener\n\n"];
-
-    Class cls = RGDFClass(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");
-    [log appendFormat:@"class = %@\n", cls ? @"found" : @"missing"];
-
-    NSArray<NSString *> *selectors = @[
+static void RGDFOpenDirectNotes(UIViewController *source) {
+    NSMutableString *log = [NSMutableString stringWithString:@"Try Direct Notes dogfooding opener\nmode = best effort opener\n\n"];
+    UIViewController *presenter = RGDFPresenter(source);
+    Class cls = RGDFRuntimeClass(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");
+    SEL sel = RGDFClassSelector(cls, @[
         @"notesDogfoodingSettingsOpenOnViewController:userSession:",
         @"openOnViewController:userSession:",
         @"openWithViewController:userSession:",
         @"dogfoodingSettingsOpenOnViewController:userSession:",
         @"directNotesDogfoodingSettingsOpenOnViewController:userSession:"
-    ];
-    SEL sel = RGDFClassSelector(cls, selectors);
-    [log appendFormat:@"method = %@\n", sel ? NSStringFromSelector(sel) : @"missing"];
-    [log appendFormat:@"presenter = %@ <%p>\n", RGDFInstanceClassName(presenter), presenter];
+    ]);
 
-    id session = RGDFFindIGUserSessionNear(presenter ?: source, log);
-    [log appendFormat:@"userSession = %@ <%p> userPk=%@\n", RGDFInstanceClassName(session), session, RGDFUserPkForSession(session) ?: @"?"];
+    [log appendFormat:@"directNotesClass = %@\n", cls ? NSStringFromClass(cls) : @"missing"];
+    [log appendFormat:@"method = %@\n", sel ? NSStringFromSelector(sel) : @"NO"];
+    [log appendFormat:@"viewController = %@ <%@>\n", RGDFClassName(presenter), RGDFPointer(presenter)];
+
+    NSMutableString *sessionLog = [NSMutableString string];
+    id session = RGDFFindUserSession(presenter ?: source, sessionLog);
+    [log appendFormat:@"selectedUserSession = %@ <%@> · userPk=%@\n", RGDFClassName(session), RGDFPointer(session), RGDFUserPk(session) ?: @"?"];
 
     if (!presenter || !cls || !sel || !session) {
-        [log appendString:@"\nABORT: missing presenter, class, method, or userSession.\n"];
+        [log appendString:@"\nABORT: missing UIViewController, class, method, or userSession.\n\n"];
+        [log appendString:sessionLog];
         RGDFShowText(source, @"Direct Notes Dogfood", log);
         return;
     }
 
     @try {
         void (*send)(id, SEL, id, id) = (void (*)(id, SEL, id, id))objc_msgSend;
-        send(cls, sel, presenter, session);
-        [log appendString:@"\nCALL OK: native Direct Notes dogfooding opener invoked.\n"];
-        NSLog(@"[RyukGram][Dogfood] %@", log);
+        send((id)cls, sel, presenter, session);
+        NSLog(@"[RyukGram][Dogfood] opened Direct Notes dogfooding with %@", RGDFPointer(session));
     } @catch (id e) {
         [log appendFormat:@"\nEXCEPTION: %@\n", e];
         RGDFShowText(source, @"Direct Notes Dogfood", log);
     }
 }
 
-static void RGDFShowSessionFinder(UIViewController *source) {
-    NSMutableString *log = [NSMutableString stringWithString:@"IGUserSession finder\n\n"];
-    id session = RGDFFindIGUserSessionNear(RGDFPresenterFor(source) ?: source, log);
-    if (session) {
-        [log appendFormat:@"\nRESULT = %@ <%p>\nuserPk = %@\n", RGDFInstanceClassName(session), session, RGDFUserPkForSession(session) ?: @"?"];
-    }
-    RGDFShowText(source, @"IGUserSession", log);
+static void RGDFShowFinder(UIViewController *source) {
+    NSMutableString *log = [NSMutableString string];
+    (void)RGDFFindUserSession(source, log);
+    RGDFShowText(source, @"IGUserSession finder", log);
 }
 
-static void RGDFShowDogfoodClassScan(UIViewController *source) {
-    NSMutableString *log = [NSMutableString stringWithString:@"Dogfooding native check\nmode = safe class/method scan only; no alloc, no KVC, no hook\n\n"];
-
-    NSArray<NSString *> *classes = @[
+static void RGDFShowNativeCheck(UIViewController *source) {
+    NSMutableString *log = [NSMutableString stringWithString:@"Dogfooding native check\nmode = safe check only; no alloc, no KVC, no method invocation\n\n"];
+    NSArray *classes = @[
         @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
         @"IGDogfoodingSettings.IGDogfoodingSettings",
         @"IGDogfoodingSettings.IGDogfoodingSettingsViewController",
@@ -297,34 +328,27 @@ static void RGDFShowDogfoodClassScan(UIViewController *source) {
     ];
 
     for (NSString *name in classes) {
-        Class cls = RGDFClass(name);
+        Class cls = RGDFRuntimeClass(name);
         [log appendFormat:@"%@ = %@", name, cls ? @"found" : @"missing"];
-        if (cls) [log appendFormat:@" · superclass=%@", NSStringFromClass(class_getSuperclass(cls)) ?: @"nil"];
+        if (cls) [log appendFormat:@" · runtime=%@ · superclass=%@", NSStringFromClass(cls), NSStringFromClass(class_getSuperclass(cls)) ?: @"nil"];
         [log appendString:@"\n"];
         if (cls) {
-            [log appendFormat:@"  + %@\n", RGDFMethodListForClass(cls, YES)];
-            [log appendFormat:@"  - %@\n", RGDFMethodListForClass(cls, NO)];
+            [log appendFormat:@"  + %@\n", RGDFMethodNames(cls, YES)];
+            [log appendFormat:@"  - %@\n", RGDFMethodNames(cls, NO)];
         }
     }
-
-    RGDFShowText(source, @"Dogfood scan", log);
+    RGDFShowText(source, @"Dogfooding native check", log);
 }
 
-static BOOL RGDFIsExpFlagsBrowserTab(id vc) {
+static BOOL RGDFIsBrowserTab(id vc) {
     @try {
         NSNumber *tab = [vc valueForKey:@"tab"];
-        if ([tab respondsToSelector:@selector(integerValue)]) return tab.integerValue == 0;
+        if ([tab respondsToSelector:@selector(integerValue)]) return [tab integerValue] == 0;
     } @catch (__unused id e) {}
-
-    @try {
-        UISegmentedControl *seg = [vc valueForKey:@"seg"];
-        if ([seg isKindOfClass:[UISegmentedControl class]]) return seg.selectedSegmentIndex == 0;
-    } @catch (__unused id e) {}
-
     return NO;
 }
 
-static NSArray<NSString *> *RGDFDogfoodRows(void) {
+static NSArray *RGDFRows(void) {
     return @[
         @"Open Direct Notes Dogfood",
         @"Find IGUserSession",
@@ -332,46 +356,66 @@ static NSArray<NSString *> *RGDFDogfoodRows(void) {
     ];
 }
 
-%hook SCIExpFlagsViewController
-
-- (NSArray *)filteredRows {
-    NSArray *orig = %orig;
-    if (!RGDFIsExpFlagsBrowserTab(self)) return orig;
-
+static NSArray *RGDFFilteredRows(id self, SEL _cmd) {
+    NSArray *orig = RGDFOrigFilteredRows ? RGDFOrigFilteredRows(self, _cmd) : @[];
+    if (!RGDFIsBrowserTab(self)) return orig;
     NSMutableArray *rows = [orig mutableCopy] ?: [NSMutableArray array];
-    for (NSString *row in RGDFDogfoodRows()) {
+    for (NSString *row in RGDFRows()) {
         if (![rows containsObject:row]) [rows addObject:row];
     }
     return rows;
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSArray *rows = nil;
-    @try { rows = [self filteredRows]; } @catch (__unused id e) { rows = nil; }
-
-    if (indexPath.row < rows.count) {
-        id row = rows[(NSUInteger)indexPath.row];
+static void RGDFDidSelect(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    NSArray *rows = RGDFFilteredRows(self, NSSelectorFromString(@"filteredRows"));
+    NSUInteger rowIndex = (NSUInteger)indexPath.row;
+    if (rowIndex < rows.count) {
+        id row = rows[rowIndex];
         if ([row isKindOfClass:[NSString class]]) {
             NSString *title = (NSString *)row;
             if ([title isEqualToString:@"Open Direct Notes Dogfood"]) {
                 [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                RGDFOpenDirectNotesDogfood((UIViewController *)self);
+                RGDFOpenDirectNotes((UIViewController *)self);
                 return;
             }
             if ([title isEqualToString:@"Find IGUserSession"]) {
                 [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                RGDFShowSessionFinder((UIViewController *)self);
+                RGDFShowFinder((UIViewController *)self);
                 return;
             }
             if ([title isEqualToString:@"Dogfooding native check"]) {
                 [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                RGDFShowDogfoodClassScan((UIViewController *)self);
+                RGDFShowNativeCheck((UIViewController *)self);
                 return;
             }
         }
     }
 
-    %orig(tableView, indexPath);
+    if (RGDFOrigDidSelect) RGDFOrigDidSelect(self, _cmd, tableView, indexPath);
 }
 
-%end
+static void RGDFInstallExpFlagsSwizzle(void) {
+    if (RGDFSwizzled) return;
+    Class cls = RGDFRuntimeClass(@"SCIExpFlagsViewController");
+    if (!cls) return;
+
+    Method filtered = class_getInstanceMethod(cls, NSSelectorFromString(@"filteredRows"));
+    Method didSelect = class_getInstanceMethod(cls, @selector(tableView:didSelectRowAtIndexPath:));
+    if (!filtered || !didSelect) return;
+
+    RGDFOrigFilteredRows = (NSArray *(*)(id, SEL))method_getImplementation(filtered);
+    RGDFOrigDidSelect = (void (*)(id, SEL, UITableView *, NSIndexPath *))method_getImplementation(didSelect);
+    method_setImplementation(filtered, (IMP)RGDFFilteredRows);
+    method_setImplementation(didSelect, (IMP)RGDFDidSelect);
+    RGDFSwizzled = YES;
+}
+
+__attribute__((constructor))
+static void RGDFCtor(void) {
+    @autoreleasepool {
+        RGDFInstallExpFlagsSwizzle();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            RGDFInstallExpFlagsSwizzle();
+        });
+    }
+}
