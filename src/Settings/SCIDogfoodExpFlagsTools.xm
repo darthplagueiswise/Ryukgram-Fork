@@ -4,282 +4,34 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-static NSString *RYDFPtr(id obj) { return obj ? [NSString stringWithFormat:@"%p", (__bridge void *)obj] : @"0x0"; }
-static NSString *RYDFClass(id obj) { return obj ? NSStringFromClass([obj class]) : @"nil"; }
-static Class RYDFClassNamed(NSString *name) { Class c = NSClassFromString(name); return c ?: (Class)objc_getClass(name.UTF8String); }
+static NSString *RYDFPtr(id o){return o?[NSString stringWithFormat:@"%p",(__bridge void *)o]:@"0x0";}
+static NSString *RYDFClass(id o){return o?NSStringFromClass([o class]):@"nil";}
+static Class RYDFClassNamed(NSString *n){Class c=NSClassFromString(n);return c?:(Class)objc_getClass(n.UTF8String);}
+static id RYDFCall0(id t,NSString*s){if(!t||!s.length)return nil;SEL sel=NSSelectorFromString(s);if(![t respondsToSelector:sel])return nil;@try{return ((id(*)(id,SEL))objc_msgSend)(t,sel);}@catch(__unused id e){return nil;}}
+static NSArray *RYDFCallFilteredRows(id t){SEL sel=NSSelectorFromString(@"filteredRows");if(!t||![t respondsToSelector:sel])return @[];@try{return ((NSArray*(*)(id,SEL))objc_msgSend)(t,sel)?:@[];}@catch(__unused id e){return @[];}}
+static NSString *RYDFStringValue(id o){if(!o)return nil;if([o isKindOfClass:NSString.class])return o;if([o respondsToSelector:@selector(stringValue)]){@try{return [o stringValue];}@catch(__unused id e){}}return nil;}
+static id RYDFObjectIvar(id o,Ivar iv){if(!o||!iv)return nil;const char*t=ivar_getTypeEncoding(iv);if(!t||t[0]!='@')return nil;@try{return object_getIvar(o,iv);}@catch(__unused id e){return nil;}}
+static NSString *RYDFUserPk(id o){NSArray*sels=@[@"userPk",@"userPK",@"userId",@"userID",@"pk"];for(NSString*s in sels){NSString*v=RYDFStringValue(RYDFCall0(o,s));if(v.length)return v;}id u=RYDFCall0(o,@"user")?:RYDFObjectIvar(o,class_getInstanceVariable([o class],"_user"));for(NSString*s in sels){NSString*v=RYDFStringValue(RYDFCall0(u,s));if(v.length)return v;}NSString*v=RYDFStringValue(RYDFObjectIvar(o,class_getInstanceVariable([o class],"_userPK")));return v.length?v:nil;}
 
-static id RYDFCall0(id target, NSString *selectorName) {
-    if (!target) return nil;
-    SEL sel = NSSelectorFromString(selectorName);
-    if (![target respondsToSelector:sel]) return nil;
-    @try { return ((id (*)(id, SEL))objc_msgSend)(target, sel); } @catch (__unused id e) { return nil; }
-}
+static UIWindow *RYDFKeyWindow(void){UIWindow*f=nil;for(UIScene*sc in UIApplication.sharedApplication.connectedScenes){if(![sc isKindOfClass:UIWindowScene.class])continue;for(UIWindow*w in ((UIWindowScene*)sc).windows){if(!f)f=w;if(w.isKeyWindow)return w;}}return f;}
+static UIViewController *RYDFTopVC(UIViewController*vc){UIViewController*c=vc;while(c.presentedViewController)c=c.presentedViewController;if([c isKindOfClass:UINavigationController.class]){UINavigationController*n=(UINavigationController*)c;return RYDFTopVC(n.visibleViewController?:n.topViewController);}if([c isKindOfClass:UITabBarController.class])return RYDFTopVC(((UITabBarController*)c).selectedViewController);return c;}
+static UIViewController *RYDFPresenter(id f){UIViewController*vc=RYDFTopVC(RYDFKeyWindow().rootViewController);return vc?:([f isKindOfClass:UIViewController.class]?(UIViewController*)f:nil);}
+static BOOL RYDFUsefulIvar(NSString*n){NSString*l=n.lowercaseString;return [l containsString:@"usersession"]||[l containsString:@"sessionmanager"]||[l containsString:@"activeusersessions"]||[l containsString:@"mainapp"]||[l containsString:@"appcoordinator"]||[l containsString:@"tabbar"]||[l containsString:@"window"]||[l containsString:@"root"]||[l containsString:@"delegate"]||[l containsString:@"context"]||[l containsString:@"launcher"]||[l containsString:@"feed"]||[l containsString:@"story"]||[l containsString:@"dogfood"]||[l containsString:@"config"];}
+static void RYDFQueue(NSMutableArray*q,NSMutableSet*seen,id o){if(!o||![o isKindOfClass:NSObject.class])return;NSString*k=RYDFPtr(o);if([seen containsObject:k])return;[seen addObject:k];[q addObject:o];}
 
-static NSArray *RYDFCallFilteredRows(id target) {
-    SEL sel = NSSelectorFromString(@"filteredRows");
-    if (!target || ![target respondsToSelector:sel]) return @[];
-    @try { return ((NSArray *(*)(id, SEL))objc_msgSend)(target, sel) ?: @[]; } @catch (__unused id e) { return @[]; }
-}
+static id RYDFFindObjectNamed(id seed,NSString*className,NSMutableString*log,NSUInteger maxBudget){NSMutableArray*q=[NSMutableArray array];NSMutableSet*seen=[NSMutableSet set];UIWindow*w=RYDFKeyWindow();UIViewController*p=RYDFPresenter(seed);RYDFQueue(q,seen,seed);RYDFQueue(q,seen,p);RYDFQueue(q,seen,w);RYDFQueue(q,seen,w.rootViewController);RYDFQueue(q,seen,UIApplication.sharedApplication.delegate);NSArray*sels=@[@"userSession",@"igUserSession",@"mainAppViewController",@"rootViewController",@"selectedViewController",@"visibleViewController",@"topViewController",@"delegate",@"appCoordinator",@"sessionManager",@"activeUserSessions",@"config",@"settingsConfig",@"dogfoodingConfig",@"dogfooder",@"logger"];NSUInteger cur=0,b=maxBudget?:500;while(cur<q.count&&b--){id o=q[cur++];if([RYDFClass(o) isEqualToString:className]){if(log)[log appendFormat:@"FOUND %@ <%@>\n",RYDFClass(o),RYDFPtr(o)];return o;}for(NSString*s in sels)RYDFQueue(q,seen,RYDFCall0(o,s));unsigned int count=0;Ivar*ivars=class_copyIvarList([o class],&count);for(unsigned int i=0;i<count;i++){NSString*n=[NSString stringWithUTF8String:ivar_getName(ivars[i])?:""];if(!RYDFUsefulIvar(n))continue;id child=RYDFObjectIvar(o,ivars[i]);if(child&&[RYDFClass(child) isEqualToString:className]){if(log)[log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@>\n",RYDFClass(o),RYDFPtr(o),n,RYDFClass(child),RYDFPtr(child)];if(ivars)free(ivars);return child;}RYDFQueue(q,seen,child);}if(ivars)free(ivars);}if(log)[log appendFormat:@"No %@ found. visited=%lu\n",className,(unsigned long)seen.count];return nil;}
 
-static NSString *RYDFStringValue(id obj) {
-    if (!obj) return nil;
-    if ([obj isKindOfClass:NSString.class]) return obj;
-    if ([obj respondsToSelector:@selector(stringValue)]) {
-        @try { return [obj stringValue]; } @catch (__unused id e) { return nil; }
-    }
-    return nil;
-}
+static id RYDFFindUserSession(id seed,NSMutableString*log){NSMutableArray*q=[NSMutableArray array];NSMutableSet*seen=[NSMutableSet set];NSMutableArray*cands=[NSMutableArray array];id first=nil;[log appendString:@"IGUserSession finder\nmode = root + view-controller tree + known singleton selectors + limited ivar scan\ngoal = find real IGUserSession object; IGDeviceSession is not enough\n\n"];Class mgr=RYDFClassNamed(@"IGUserSessionManager");if(mgr){[log appendString:@"singleton class IGUserSessionManager found\n"];for(NSString*s in @[@"sharedInstance",@"sharedManager",@"currentSessionManager",@"instance"])RYDFQueue(q,seen,RYDFCall0((id)mgr,s));}UIWindow*w=RYDFKeyWindow();UIViewController*p=RYDFPresenter(seed);RYDFQueue(q,seen,seed);RYDFQueue(q,seen,p);RYDFQueue(q,seen,w);RYDFQueue(q,seen,w.rootViewController);RYDFQueue(q,seen,UIApplication.sharedApplication.delegate);NSArray*sels=@[@"userSession",@"igUserSession",@"currentUserSession",@"activeUserSession",@"mainAppViewController",@"rootViewController",@"selectedViewController",@"visibleViewController",@"topViewController",@"delegate",@"appCoordinator",@"sessionManager",@"activeUserSessions"];NSUInteger cur=0,b=700;while(cur<q.count&&b--){id o=q[cur++];if([RYDFClass(o) isEqualToString:@"IGUserSession"]){if(!first)first=o;if(![cands containsObject:o])[cands addObject:o];}for(NSString*s in sels){id child=RYDFCall0(o,s);if(!child)continue;if([RYDFClass(child) isEqualToString:@"IGUserSession"]){if(!first)first=child;if(![cands containsObject:child])[cands addObject:child];[log appendFormat:@"%@ <%@>.%@ -> %@ <%@> · userPk=%@\n",RYDFClass(o),RYDFPtr(o),s,RYDFClass(child),RYDFPtr(child),RYDFUserPk(child)?:@"?"];}RYDFQueue(q,seen,child);}unsigned int count=0;Ivar*ivars=class_copyIvarList([o class],&count);for(unsigned int i=0;i<count;i++){NSString*n=[NSString stringWithUTF8String:ivar_getName(ivars[i])?:""];if(!RYDFUsefulIvar(n))continue;id child=RYDFObjectIvar(o,ivars[i]);if(!child)continue;NSString*pk=RYDFUserPk(child);if([RYDFClass(child) isEqualToString:@"IGUserSession"]){if(!first)first=child;if(![cands containsObject:child])[cands addObject:child];[log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@> · userPk=%@\n",RYDFClass(o),RYDFPtr(o),n,RYDFClass(child),RYDFPtr(child),pk?:@"?"];}else if(pk.length)[log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@> · userPk=%@\n",RYDFClass(o),RYDFPtr(o),n,RYDFClass(child),RYDFPtr(child),pk];RYDFQueue(q,seen,child);}if(ivars)free(ivars);}[log appendFormat:@"deepScan budgetRemaining=%lu visited=%lu candidates=%lu\n\nRESULT: %lu IGUserSession candidate(s)\n",(unsigned long)b,(unsigned long)seen.count,(unsigned long)cands.count,(unsigned long)cands.count];for(NSUInteger i=0;i<cands.count;i++){id c=cands[i];[log appendFormat:@"candidate[%lu] = %@ <%@> · userPk=%@\n",(unsigned long)i,RYDFClass(c),RYDFPtr(c),RYDFUserPk(c)?:@"?"];}[log appendString:@"\nFlex cross-check:\nGood: IGSessionContext with _loggedInContext_userSession = <IGUserSession: 0x...>\nGood: direct IGUserSession object with userPk matching your account.\nBad: only IGDeviceSession / _loggedOutContext_deviceSession.\nThe numeric userPk confirms the account, but the opener needs the live object pointer.\n"];return first;}
 
-static id RYDFObjectIvar(id obj, Ivar ivar) {
-    if (!obj || !ivar) return nil;
-    const char *type = ivar_getTypeEncoding(ivar);
-    if (!type || type[0] != '@') return nil;
-    @try { return object_getIvar(obj, ivar); } @catch (__unused id e) { return nil; }
-}
-
-static NSString *RYDFUserPk(id obj) {
-    NSArray *sels = @[@"userPk", @"userPK", @"userId", @"userID", @"pk"];
-    for (NSString *s in sels) { NSString *v = RYDFStringValue(RYDFCall0(obj, s)); if (v.length) return v; }
-    id user = RYDFCall0(obj, @"user") ?: RYDFObjectIvar(obj, class_getInstanceVariable([obj class], "_user"));
-    for (NSString *s in sels) { NSString *v = RYDFStringValue(RYDFCall0(user, s)); if (v.length) return v; }
-    NSString *v = RYDFStringValue(RYDFObjectIvar(obj, class_getInstanceVariable([obj class], "_userPK")));
-    return v.length ? v : nil;
-}
-
-static UIWindow *RYDFKeyWindow(void) {
-    UIWindow *fallback = nil;
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-            if (!fallback) fallback = w;
-            if (w.isKeyWindow) return w;
-        }
-    }
-    return fallback;
-}
-
-static UIViewController *RYDFTopVC(UIViewController *vc) {
-    UIViewController *cur = vc;
-    while (cur.presentedViewController) cur = cur.presentedViewController;
-    if ([cur isKindOfClass:UINavigationController.class]) {
-        UINavigationController *nav = (UINavigationController *)cur;
-        return RYDFTopVC(nav.visibleViewController ?: nav.topViewController);
-    }
-    if ([cur isKindOfClass:UITabBarController.class]) return RYDFTopVC(((UITabBarController *)cur).selectedViewController);
-    return cur;
-}
-
-static UIViewController *RYDFPresenter(id fallback) {
-    UIViewController *vc = RYDFTopVC(RYDFKeyWindow().rootViewController);
-    return vc ?: ([fallback isKindOfClass:UIViewController.class] ? (UIViewController *)fallback : nil);
-}
-
-static BOOL RYDFUsefulIvar(NSString *name) {
-    NSString *n = name.lowercaseString;
-    return [n containsString:@"usersession"] || [n containsString:@"sessionmanager"] ||
-           [n containsString:@"activeusersessions"] || [n containsString:@"mainapp"] ||
-           [n containsString:@"appcoordinator"] || [n containsString:@"tabbar"] ||
-           [n containsString:@"window"] || [n containsString:@"root"] ||
-           [n containsString:@"delegate"] || [n containsString:@"context"] ||
-           [n containsString:@"launcher"] || [n containsString:@"feed"] || [n containsString:@"story"];
-}
-
-static void RYDFQueue(NSMutableArray *queue, NSMutableSet *seen, id obj) {
-    if (!obj || ![obj isKindOfClass:NSObject.class]) return;
-    NSString *key = RYDFPtr(obj);
-    if ([seen containsObject:key]) return;
-    [seen addObject:key];
-    [queue addObject:obj];
-}
-
-static id RYDFFindUserSession(id seed, NSMutableString *log) {
-    NSMutableArray *queue = [NSMutableArray array];
-    NSMutableSet *seen = [NSMutableSet set];
-    NSMutableArray *candidates = [NSMutableArray array];
-    id first = nil;
-
-    [log appendString:@"IGUserSession finder\n"];
-    [log appendString:@"mode = root + view-controller tree + known singleton selectors + limited ivar scan\n"];
-    [log appendString:@"goal = find real IGUserSession object; IGDeviceSession is not enough\n\n"];
-
-    Class manager = RYDFClassNamed(@"IGUserSessionManager");
-    if (manager) {
-        [log appendString:@"singleton class IGUserSessionManager found\n"];
-        for (NSString *sel in @[@"sharedInstance", @"sharedManager", @"currentSessionManager", @"instance"]) RYDFQueue(queue, seen, RYDFCall0((id)manager, sel));
-    }
-
-    UIWindow *window = RYDFKeyWindow();
-    UIViewController *presenter = RYDFPresenter(seed);
-    RYDFQueue(queue, seen, seed);
-    RYDFQueue(queue, seen, presenter);
-    RYDFQueue(queue, seen, window);
-    RYDFQueue(queue, seen, window.rootViewController);
-    RYDFQueue(queue, seen, UIApplication.sharedApplication.delegate);
-
-    NSArray *selectors = @[@"userSession", @"igUserSession", @"currentUserSession", @"activeUserSession", @"mainAppViewController", @"rootViewController", @"selectedViewController", @"visibleViewController", @"topViewController", @"delegate", @"appCoordinator", @"sessionManager", @"activeUserSessions"];
-    NSUInteger cursor = 0;
-    NSUInteger budget = 700;
-
-    while (cursor < queue.count && budget-- > 0) {
-        id obj = queue[cursor++];
-        if ([RYDFClass(obj) isEqualToString:@"IGUserSession"]) {
-            if (!first) first = obj;
-            if (![candidates containsObject:obj]) [candidates addObject:obj];
-        }
-
-        for (NSString *sel in selectors) {
-            id child = RYDFCall0(obj, sel);
-            if (!child) continue;
-            if ([RYDFClass(child) isEqualToString:@"IGUserSession"]) {
-                if (!first) first = child;
-                if (![candidates containsObject:child]) [candidates addObject:child];
-                [log appendFormat:@"%@ <%@>.%@ -> %@ <%@> · userPk=%@\n", RYDFClass(obj), RYDFPtr(obj), sel, RYDFClass(child), RYDFPtr(child), RYDFUserPk(child) ?: @"?"];
-            }
-            RYDFQueue(queue, seen, child);
-        }
-
-        unsigned int count = 0;
-        Ivar *ivars = class_copyIvarList([obj class], &count);
-        for (unsigned int i = 0; i < count; i++) {
-            NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[i]) ?: ""];
-            if (!RYDFUsefulIvar(name)) continue;
-            id child = RYDFObjectIvar(obj, ivars[i]);
-            if (!child) continue;
-            NSString *pk = RYDFUserPk(child);
-            if ([RYDFClass(child) isEqualToString:@"IGUserSession"]) {
-                if (!first) first = child;
-                if (![candidates containsObject:child]) [candidates addObject:child];
-                [log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@> · userPk=%@\n", RYDFClass(obj), RYDFPtr(obj), name, RYDFClass(child), RYDFPtr(child), pk ?: @"?"];
-            } else if (pk.length) {
-                [log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@> · userPk=%@\n", RYDFClass(obj), RYDFPtr(obj), name, RYDFClass(child), RYDFPtr(child), pk];
-            }
-            RYDFQueue(queue, seen, child);
-        }
-        if (ivars) free(ivars);
-    }
-
-    [log appendFormat:@"deepScan budgetRemaining=%lu visited=%lu candidates=%lu\n\nRESULT: %lu IGUserSession candidate(s)\n", (unsigned long)budget, (unsigned long)seen.count, (unsigned long)candidates.count, (unsigned long)candidates.count];
-    for (NSUInteger i = 0; i < candidates.count; i++) {
-        id c = candidates[i];
-        [log appendFormat:@"candidate[%lu] = %@ <%@> · userPk=%@\n", (unsigned long)i, RYDFClass(c), RYDFPtr(c), RYDFUserPk(c) ?: @"?"];
-    }
-    [log appendString:@"\nFlex cross-check:\nGood: IGSessionContext with _loggedInContext_userSession = <IGUserSession: 0x...>\nGood: direct IGUserSession object with userPk matching your account.\nBad: only IGDeviceSession / _loggedOutContext_deviceSession.\nThe numeric userPk confirms the account, but the opener needs the live object pointer.\n"];
-    return first;
-}
-
-static void RYDFPresent(UIViewController *source, NSString *title, NSString *body) {
-    UIViewController *presenter = RYDFPresenter(source) ?: source;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:body preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = body ?: @"";
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-    [presenter presentViewController:alert animated:YES completion:nil];
-}
-
-static NSString *RYDFClassLine(NSString *label, NSString *className, BOOL viewController) {
-    Class cls = RYDFClassNamed(className);
-    if (!cls) return [NSString stringWithFormat:@"%@ = missing\n", label];
-    return [NSString stringWithFormat:@"%@ = found · runtime=%@ · superclass=%@%@\n", label, NSStringFromClass(cls), NSStringFromClass(class_getSuperclass(cls)) ?: @"nil", viewController ? [NSString stringWithFormat:@" · UIViewController=%@", [cls isSubclassOfClass:UIViewController.class] ? @"YES" : @"NO"] : @""];
-}
-
-static NSString *RYDFDogfoodingReport(void) {
-    NSMutableString *s = [NSMutableString stringWithString:@"Dogfooding native check\nmode = safe check only; no alloc, no KVC, no method invocation\ngoldenAnchor = 0x0081008a00000122 / 36310864701161762\n\n"];
-    Class entry = RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettings");
-    [s appendString:RYDFClassLine(@"entrypoint", @"IGDogfoodingSettings.IGDogfoodingSettings", YES)];
-    [s appendFormat:@"+openWithConfig:onViewController:userSession: = %@\n\n", (entry && [entry respondsToSelector:NSSelectorFromString(@"openWithConfig:onViewController:userSession:")]) ? @"YES" : @"NO"];
-    Class settings = RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettingsViewController");
-    [s appendString:RYDFClassLine(@"settingsViewController", @"IGDogfoodingSettings.IGDogfoodingSettingsViewController", YES)];
-    [s appendFormat:@"-initWithConfig:userSession: = %@\n\n", (settings && [settings instancesRespondToSelector:NSSelectorFromString(@"initWithConfig:userSession:")]) ? @"YES" : @"NO"];
-    Class selection = RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettingsSelectionViewController");
-    [s appendString:RYDFClassLine(@"selectionViewController", @"IGDogfoodingSettings.IGDogfoodingSettingsSelectionViewController", YES)];
-    [s appendFormat:@"-initWithItem:options: = %@\n\n", (selection && [selection instancesRespondToSelector:NSSelectorFromString(@"initWithItem:options:")]) ? @"YES" : @"NO"];
-    [s appendString:RYDFClassLine(@"lockoutViewController", @"IGDogfoodingFirst.DogfoodingProductionLockoutViewController", YES)];
-    [s appendString:RYDFClassLine(@"settingsConfig", @"IGDogfoodingSettingsConfig", YES)];
-    [s appendString:RYDFClassLine(@"IGDogfooderProd", @"IGDogfooderProd", YES)];
-    [s appendString:RYDFClassLine(@"IGDogfoodingLogger", @"IGDogfoodingLogger", YES)];
-    [s appendString:RYDFClassLine(@"DogfoodingEligibilityQueryBuilder", @"DogfoodingEligibilityQueryBuilder", YES)];
-    [s appendString:@"\nNext: find the callsite for +openWithConfig:onViewController:userSession: in the main Instagram executable. That callsite should reveal the native row/button and the real config/session source.\n"];
-    return s;
-}
-
-static SEL RYDFDirectNotesSelector(Class cls) {
-    if (!cls) return NULL;
-    for (NSString *name in @[@"notesDogfoodingSettingsOpenOnViewController:userSession:", @"openOnViewController:userSession:", @"openWithViewController:userSession:", @"dogfoodingSettingsOpenOnViewController:userSession:", @"directNotesDogfoodingSettingsOpenOnViewController:userSession:"]) {
-        SEL sel = NSSelectorFromString(name);
-        if ([cls respondsToSelector:sel]) return sel;
-    }
-    return NULL;
-}
-
-static void RYDFOpenDirectNotes(UIViewController *source) {
-    NSMutableString *log = [NSMutableString stringWithString:@"Try Direct Notes dogfooding opener\nmode = best effort opener\n\n"];
-    UIViewController *presenter = RYDFPresenter(source);
-    Class cls = RYDFClassNamed(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");
-    SEL sel = RYDFDirectNotesSelector(cls);
-    [log appendFormat:@"directNotesClass = %@\nmethod = %@\nviewController = %@ <%@>\n", cls ? NSStringFromClass(cls) : @"missing", sel ? @"YES" : @"NO", RYDFClass(presenter), RYDFPtr(presenter)];
-    NSMutableString *sessionLog = [NSMutableString string];
-    id userSession = RYDFFindUserSession(presenter ?: source, sessionLog);
-    [log appendFormat:@"selectedUserSession = %@ <%@>%@\n", RYDFClass(userSession), RYDFPtr(userSession), RYDFUserPk(userSession).length ? [NSString stringWithFormat:@" · userPk=%@", RYDFUserPk(userSession)] : @""];
-    if (!cls || !sel) { [log appendString:@"\nABORT: Direct Notes dogfooding class/method missing.\n"]; RYDFPresent(source, @"Dogfooding Notes", log); return; }
-    if (!presenter || !userSession) { [log appendString:@"\nABORT: missing UIViewController or IGUserSession.\nRun Browser > Find IGUserSession first.\n\n"]; [log appendString:sessionLog]; RYDFPresent(source, @"Dogfooding Notes", log); return; }
-    @try {
-        ((void (*)(id, SEL, id, id))objc_msgSend)((id)cls, sel, presenter, userSession);
-    } @catch (id e) {
-        [log appendFormat:@"\nEXCEPTION: %@\n", e];
-        RYDFPresent(source, @"Dogfooding Notes", log);
-    }
-}
-
-static BOOL RYDFIsBrowserTab(id vc) {
-    @try {
-        id tab = [vc valueForKey:@"tab"];
-        if ([tab respondsToSelector:@selector(integerValue)]) return [tab integerValue] == 0;
-    } @catch (__unused id e) {}
-    return NO;
-}
-
-static NSArray *RYDFRows(void) {
-    return @[@"Dogfooding native check", @"Find IGUserSession", @"Try Direct Notes dogfooding opener"];
-}
-
+static void RYDFPresent(UIViewController*src,NSString*t,NSString*b){UIViewController*p=RYDFPresenter(src)?:src;UIAlertController*a=[UIAlertController alertControllerWithTitle:t message:b preferredStyle:UIAlertControllerStyleAlert];[a addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){UIPasteboard.generalPasteboard.string=b?:@"";}]];[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];[p presentViewController:a animated:YES completion:nil];}
+static NSString *RYDFLine(NSString*l,NSString*c,BOOL vc){Class cls=RYDFClassNamed(c);if(!cls)return[NSString stringWithFormat:@"%@ = missing\n",l];return[NSString stringWithFormat:@"%@ = found · runtime=%@ · superclass=%@%@\n",l,NSStringFromClass(cls),NSStringFromClass(class_getSuperclass(cls))?:@"nil",vc?[NSString stringWithFormat:@" · UIViewController=%@",[cls isSubclassOfClass:UIViewController.class]?@"YES":@"NO"]:@""];}
+static NSString *RYDFDogReport(void){NSMutableString*s=[NSMutableString stringWithString:@"Dogfooding native check\nmode = safe check only; no alloc, no KVC, no method invocation\ngoldenAnchor = 0x0081008a00000122 / 36310864701161762\n\n"];Class e=RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettings");[s appendString:RYDFLine(@"entrypoint",@"IGDogfoodingSettings.IGDogfoodingSettings",YES)];[s appendFormat:@"+openWithConfig:onViewController:userSession: = %@\n\n",(e&&[e respondsToSelector:NSSelectorFromString(@"openWithConfig:onViewController:userSession:")])?@"YES":@"NO"];Class settings=RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettingsViewController");[s appendString:RYDFLine(@"settingsViewController",@"IGDogfoodingSettings.IGDogfoodingSettingsViewController",YES)];[s appendFormat:@"-initWithConfig:userSession: = %@\n\n",(settings&&[settings instancesRespondToSelector:NSSelectorFromString(@"initWithConfig:userSession:")])?@"YES":@"NO"];Class sel=RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettingsSelectionViewController");[s appendString:RYDFLine(@"selectionViewController",@"IGDogfoodingSettings.IGDogfoodingSettingsSelectionViewController",YES)];[s appendFormat:@"-initWithItem:options: = %@\n\n",(sel&&[sel instancesRespondToSelector:NSSelectorFromString(@"initWithItem:options:")])?@"YES":@"NO"];[s appendString:RYDFLine(@"lockoutViewController",@"IGDogfoodingFirst.DogfoodingProductionLockoutViewController",YES)];[s appendString:RYDFLine(@"settingsConfig",@"IGDogfoodingSettingsConfig",YES)];[s appendString:RYDFLine(@"IGDogfooderProd",@"IGDogfooderProd",YES)];[s appendString:RYDFLine(@"IGDogfoodingLogger",@"IGDogfoodingLogger",YES)];[s appendString:RYDFLine(@"DogfoodingEligibilityQueryBuilder",@"DogfoodingEligibilityQueryBuilder",YES)];[s appendString:@"\nNext: find the callsite for +openWithConfig:onViewController:userSession: in the main Instagram executable. That callsite should reveal the native row/button and the real config/session source.\n"];return s;}
+static SEL RYDFDNSel(Class c){for(NSString*n in @[@"notesDogfoodingSettingsOpenOnViewController:userSession:",@"openOnViewController:userSession:",@"openWithViewController:userSession:",@"dogfoodingSettingsOpenOnViewController:userSession:",@"directNotesDogfoodingSettingsOpenOnViewController:userSession:"]){SEL sel=NSSelectorFromString(n);if([c respondsToSelector:sel])return sel;}return NULL;}
+static void RYDFOpenDN(UIViewController*src){NSMutableString*log=[NSMutableString stringWithString:@"Try Direct Notes dogfooding opener\nmode = best effort opener\n\n"];UIViewController*p=RYDFPresenter(src);Class c=RYDFClassNamed(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");SEL sel=RYDFDNSel(c);[log appendFormat:@"directNotesClass = %@\nmethod = %@\nviewController = %@ <%@>\n",c?NSStringFromClass(c):@"missing",sel?@"YES":@"NO",RYDFClass(p),RYDFPtr(p)];NSMutableString*sl=[NSMutableString string];id us=RYDFFindUserSession(p?:src,sl);[log appendFormat:@"selectedUserSession = %@ <%@>%@\n",RYDFClass(us),RYDFPtr(us),RYDFUserPk(us).length?[NSString stringWithFormat:@" · userPk=%@",RYDFUserPk(us)]:@""];if(!c||!sel){[log appendString:@"\nABORT: Direct Notes dogfooding class/method missing.\n"];RYDFPresent(src,@"Dogfooding Notes",log);return;}if(!p||!us){[log appendString:@"\nABORT: missing UIViewController or IGUserSession.\nRun Browser > Find IGUserSession first.\n\n"];[log appendString:sl];RYDFPresent(src,@"Dogfooding Notes",log);return;}@try{((void(*)(id,SEL,id,id))objc_msgSend)((id)c,sel,p,us);}@catch(id e){[log appendFormat:@"\nEXCEPTION: %@\n",e];RYDFPresent(src,@"Dogfooding Notes",log);}}
+static void RYDFOpenMain(UIViewController*src){NSMutableString*log=[NSMutableString stringWithString:@"Try Main Dogfood Settings opener\nmode = best effort using live config object only\n\n"];UIViewController*p=RYDFPresenter(src);Class entry=RYDFClassNamed(@"IGDogfoodingSettings.IGDogfoodingSettings");SEL openSel=NSSelectorFromString(@"openWithConfig:onViewController:userSession:");NSMutableString*sl=[NSMutableString string];id us=RYDFFindUserSession(p?:src,sl);NSMutableString*cl=[NSMutableString string];id cfg=RYDFFindObjectNamed(p?:src,@"IGDogfoodingSettingsConfig",cl,700);[log appendFormat:@"entrypoint = %@\nmethod = %@\nviewController = %@ <%@>\nuserSession = %@ <%@>%@\nconfig = %@ <%@>\n",entry?NSStringFromClass(entry):@"missing",(entry&&[entry respondsToSelector:openSel])?@"YES":@"NO",RYDFClass(p),RYDFPtr(p),RYDFClass(us),RYDFPtr(us),RYDFUserPk(us).length?[NSString stringWithFormat:@" · userPk=%@",RYDFUserPk(us)]:@"",RYDFClass(cfg),RYDFPtr(cfg)];if(cl.length)[log appendFormat:@"\nconfig search:\n%@\n",cl];if(!entry||![entry respondsToSelector:openSel]||!p||!us||!cfg){[log appendString:@"\nABORT: missing entrypoint, presenter, IGUserSession, or live IGDogfoodingSettingsConfig. This intentionally refuses to alloc/init fake config because that was the crash path.\n"];RYDFPresent(src,@"Main Dogfood Settings",log);return;}@try{((void(*)(id,SEL,id,id,id))objc_msgSend)((id)entry,openSel,cfg,p,us);}@catch(id e){[log appendFormat:@"\nEXCEPTION: %@\n",e];RYDFPresent(src,@"Main Dogfood Settings",log);}}
+static BOOL RYDFBrowserTab(id vc){@try{id tab=[vc valueForKey:@"tab"];if([tab respondsToSelector:@selector(integerValue)])return [tab integerValue]==0;}@catch(__unused id e){}return NO;}
+static NSArray *RYDFRows(void){return @[@"Dogfooding native check",@"Find IGUserSession",@"Try Direct Notes dogfooding opener",@"Try Main Dogfood Settings opener"];}
 %hook SCIExpFlagsViewController
-
-- (NSArray *)filteredRows {
-    NSArray *orig = %orig;
-    if (!RYDFIsBrowserTab(self)) return orig;
-    NSMutableArray *rows = [orig mutableCopy] ?: [NSMutableArray array];
-    for (NSString *row in RYDFRows()) if (![rows containsObject:row]) [rows addObject:row];
-    return rows;
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSArray *rows = RYDFCallFilteredRows(self);
-    NSUInteger row = (NSUInteger)indexPath.row;
-    if (RYDFIsBrowserTab(self) && row < rows.count) {
-        id item = rows[row];
-        if ([item isKindOfClass:NSString.class]) {
-            NSString *title = item;
-            if ([title isEqualToString:@"Dogfooding native check"]) {
-                [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                RYDFPresent((UIViewController *)self, @"Runtime diagnostics", RYDFDogfoodingReport());
-                return;
-            }
-            if ([title isEqualToString:@"Find IGUserSession"]) {
-                [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                NSMutableString *log = [NSMutableString string];
-                (void)RYDFFindUserSession((UIViewController *)self, log);
-                RYDFPresent((UIViewController *)self, @"Runtime diagnostics", log);
-                return;
-            }
-            if ([title isEqualToString:@"Try Direct Notes dogfooding opener"]) {
-                [tableView deselectRowAtIndexPath:indexPath animated:YES];
-                RYDFOpenDirectNotes((UIViewController *)self);
-                return;
-            }
-        }
-    }
-    %orig(tableView, indexPath);
-}
-
+- (NSArray*)filteredRows{NSArray*orig=%orig;if(!RYDFBrowserTab(self))return orig;NSMutableArray*rows=[orig mutableCopy]?:[NSMutableArray array];for(NSString*r in RYDFRows())if(![rows containsObject:r])[rows addObject:r];return rows;}
+- (void)tableView:(UITableView*)tableView didSelectRowAtIndexPath:(NSIndexPath*)indexPath{NSArray*rows=RYDFCallFilteredRows(self);NSUInteger row=(NSUInteger)indexPath.row;if(RYDFBrowserTab(self)&&row<rows.count){id item=rows[row];if([item isKindOfClass:NSString.class]){NSString*title=item;if([title isEqualToString:@"Dogfooding native check"]){[tableView deselectRowAtIndexPath:indexPath animated:YES];RYDFPresent((UIViewController*)self,@"Runtime diagnostics",RYDFDogReport());return;}if([title isEqualToString:@"Find IGUserSession"]){[tableView deselectRowAtIndexPath:indexPath animated:YES];NSMutableString*log=[NSMutableString string];(void)RYDFFindUserSession((UIViewController*)self,log);RYDFPresent((UIViewController*)self,@"Runtime diagnostics",log);return;}if([title isEqualToString:@"Try Direct Notes dogfooding opener"]){[tableView deselectRowAtIndexPath:indexPath animated:YES];RYDFOpenDN((UIViewController*)self);return;}if([title isEqualToString:@"Try Main Dogfood Settings opener"]){[tableView deselectRowAtIndexPath:indexPath animated:YES];RYDFOpenMain((UIViewController*)self);return;}}}%orig(tableView,indexPath);}
 %end
