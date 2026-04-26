@@ -186,7 +186,6 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
         if (!rows.count) continue;
 
         NSMutableArray *newRows = [rows mutableCopy];
-        BOOL sectionChanged = NO;
 
         for (NSInteger r = (NSInteger)newRows.count - 1; r >= 0; r--) {
             id rowObj = newRows[(NSUInteger)r];
@@ -203,7 +202,6 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
                 for (NSDictionary *navSection in navSections) {
                     NSString *header = [navSection[@"header"] isKindOfClass:[NSString class]] ? navSection[@"header"] : nil;
                     if ([header isEqualToString:@"Experimental features"]) {
-                        sectionChanged = YES;
                         continue;
                     }
                     [newNavSections addObject:navSection];
