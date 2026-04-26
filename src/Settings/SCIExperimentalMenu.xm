@@ -9,11 +9,11 @@ static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key,
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
 }
 
-static NSArray *expNavSections(void) {
+static NSArray *experimentalNavSections(void) {
     return @[
         @{
             @"header": @"UI",
-            @"footer": @"Experimental UI flags. Keep everything off unless you are testing a specific surface.",
+            @"footer": @"Normal experimental UI flags. Dev/debug tooling lives in DEV tests.",
             @"rows": @[
                 ExpSwitch(@"Enable liquid glass buttons", @"Enables experimental liquid glass buttons", @"liquid_glass_buttons", YES),
                 ExpSwitch(@"Enable liquid glass surfaces", @"Enables experimental tab bar and floating navigation surfaces", @"liquid_glass_surfaces", YES),
@@ -46,24 +46,30 @@ static NSArray *expNavSections(void) {
                 ExpSwitch(@"Feed Dedup", @"Stores a dedicated toggle for future experiment hooks", @"igt_feed_dedup", NO),
                 ExpSwitch(@"Pull to Carrera", @"Stores a dedicated toggle for future experiment hooks", @"igt_pull_to_carrera", NO)
             ]
-        },
+        }
+    ];
+}
+
+static NSArray *devTestsNavSections(void) {
+    return @[
         @{
             @"header": @"Account / system",
+            @"footer": @"Risky account/system gates. These are DEV tests and should only be enabled one at a time.",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
                 ExpSwitch(@"Employee DevOptions gate", @"Forces exported employee/test-user/dogfooding MC gates discovered from FBSharedFramework. Restart required", @"igt_employee_devoptions_gate", YES),
-                ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES (restart required)", @"igt_employee_mc", YES),
-                ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES (restart required)", @"igt_employee_or_test_user_mc", YES),
-                ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES (restart required)", @"igt_internal_apps_gate", YES),
-                ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse/sessionless InternalUse boolean specifiers. ON by default for missing prefs. Restart required", @"igt_internaluse_observer", YES),
-                ExpSwitch(@"Observe MobileConfig updates", @"Safely logs TryUpdate/ForceUpdate calls as pass-through only. ON by default for missing prefs. Restart required", @"igt_mobileconfig_update_observer", YES),
+                ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES. Restart required", @"igt_employee_mc", YES),
+                ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES. Restart required", @"igt_employee_or_test_user_mc", YES),
+                ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES. Restart required", @"igt_internal_apps_gate", YES),
+                ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse/sessionless InternalUse boolean specifiers. Observer only. Restart required", @"igt_internaluse_observer", YES),
+                ExpSwitch(@"Observe MobileConfig updates", @"Safely logs TryUpdate/ForceUpdate calls as pass-through only. Observer only. Restart required", @"igt_mobileconfig_update_observer", YES),
                 ExpSwitch(@"Runtime MC true patcher", @"Master switch. Runtime patcher only patches symbols enabled below. Restart required", @"igt_runtime_mc_true_patcher", YES),
                 ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation. Riskier; use only for isolated tests. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
             ]
         },
         @{
             @"header": @"Runtime MC symbols",
-            @"footer": @"Master Runtime MC true patcher must also be ON. These switches only stub/force symbols to YES.",
+            @"footer": @"Master Runtime MC true patcher must also be ON. These switches stub/force individual symbols to YES.",
             @"rows": @[
                 ExpSwitch(@"Patch IG InternalUse bool", @"_IGMobileConfigBooleanValueForInternalUse -> YES", @"igt_runtime_mc_patch_ig_internaluse", YES),
                 ExpSwitch(@"Patch IG ForceUpdate", @"_IGMobileConfigForceUpdateConfigs -> YES", @"igt_runtime_mc_patch_ig_force_update", YES),
@@ -80,10 +86,10 @@ static NSArray *expNavSections(void) {
             ]
         },
         @{
-            @"header": @"Flags browser",
+            @"header": @"Flags Browser",
             @"footer": @"MetaLocalExperiment and IGMobileConfigContextManager browser.",
             @"rows": @[
-                ExpSwitch(@"Enable flags browser hooks", @"Installs MetaLocalExperiment and IGMobileConfig observers + overrides. ON by default for missing prefs", @"sci_exp_flags_enabled", YES),
+                ExpSwitch(@"Enable flags browser hooks", @"Installs MetaLocalExperiment and IGMobileConfig observers + overrides. Restart required", @"sci_exp_flags_enabled", YES),
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
@@ -93,14 +99,79 @@ static NSArray *expNavSections(void) {
     ];
 }
 
-static NSDictionary *expSection(void) {
+static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
+    if (![row isKindOfClass:[SCISetting class]]) return NO;
+
+    NSString *title = row.title ?: @"";
+    NSString *subtitle = row.subtitle ?: @"";
+    NSString *key = row.defaultsKey ?: @"";
+    NSString *vcName = row.navViewController ? NSStringFromClass([row.navViewController class]) : @"";
+
+    if ([vcName isEqualToString:@"SCIExpFlagsViewController"]) return YES;
+    if ([key isEqualToString:@"sci_exp_flags_enabled"] || [key isEqualToString:@"sci_exp_mc_hooks_enabled"]) return YES;
+
+    NSString *joined = [[@[title, subtitle] componentsJoinedByString:@" "] lowercaseString];
+    if ([joined containsString:@"exp flags"] ||
+        [joined containsString:@"experimental flags"] ||
+        [joined containsString:@"flags browser"] ||
+        [joined containsString:@"mobileconfig browser"]) {
+        return YES;
+    }
+
+    return NO;
+}
+
+static void cleanAdvancedDuplicateRows(NSMutableArray *rows) {
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        SCISetting *row = [rows[i] isKindOfClass:[SCISetting class]] ? rows[i] : nil;
+        if (!row) continue;
+
+        if (![row.title isEqualToString:@"Advanced"]) continue;
+        NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
+        if (!navSections.count) continue;
+
+        NSMutableArray *cleanSections = [NSMutableArray array];
+        for (NSDictionary *section in navSections) {
+            if (![section isKindOfClass:[NSDictionary class]]) continue;
+
+            NSArray *sectionRows = [section[@"rows"] isKindOfClass:[NSArray class]] ? section[@"rows"] : nil;
+            NSMutableArray *cleanRows = [NSMutableArray array];
+
+            for (id item in sectionRows) {
+                SCISetting *setting = [item isKindOfClass:[SCISetting class]] ? item : nil;
+                if (setting && rowIsExpFlagsDuplicate(setting)) continue;
+                [cleanRows addObject:item];
+            }
+
+            NSString *header = [section[@"header"] isKindOfClass:[NSString class]] ? section[@"header"] : @"";
+            NSString *footer = [section[@"footer"] isKindOfClass:[NSString class]] ? section[@"footer"] : @"";
+            NSString *combined = [[@[header, footer] componentsJoinedByString:@" "] lowercaseString];
+            BOOL sectionLooksDuplicate = ([combined containsString:@"exp flags"] || [combined containsString:@"experimental flags"] || [combined containsString:@"flags browser"] || [combined containsString:@"mobileconfig browser"]);
+
+            if (sectionLooksDuplicate && cleanRows.count == 0) continue;
+
+            NSMutableDictionary *newSection = [section mutableCopy];
+            newSection[@"rows"] = cleanRows;
+            [cleanSections addObject:newSection];
+        }
+
+        row.navSections = cleanSections;
+        rows[i] = row;
+    }
+}
+
+static NSDictionary *expDevTopSection(void) {
     return @{
         @"header": @"",
         @"rows": @[
             [SCISetting navigationCellWithTitle:@"Experimental"
-                                       subtitle:@""
+                                       subtitle:@"LiquidGlass, Homecoming, QuickSnap, Direct Notes and normal feature experiments"
                                            icon:[SCISymbol symbolWithName:@"testtube.2"]
-                                    navSections:expNavSections()]
+                                    navSections:experimentalNavSections()],
+            [SCISetting navigationCellWithTitle:@"DEV tests"
+                                       subtitle:@"MobileConfig, account/system gates, runtime MC symbols and flags browser"
+                                           icon:[SCISymbol symbolWithName:@"hammer"]
+                                    navSections:devTestsNavSections()]
         ]
     };
 }
@@ -122,7 +193,7 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
             if (![rowObj isKindOfClass:[SCISetting class]]) continue;
             SCISetting *row = (SCISetting *)rowObj;
 
-            if ([row.title isEqualToString:@"Experimental"]) {
+            if ([row.title isEqualToString:@"Experimental"] || [row.title isEqualToString:@"DEV tests"]) {
                 return sections;
             }
 
@@ -142,16 +213,16 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
             }
         }
 
-        if (sectionChanged) {
-            NSMutableDictionary *newSection = [section mutableCopy];
-            newSection[@"rows"] = newRows;
-            sections[i] = newSection;
-        }
+        cleanAdvancedDuplicateRows(newRows);
+
+        NSMutableDictionary *newSection = [section mutableCopy];
+        newSection[@"rows"] = newRows;
+        sections[i] = newSection;
     }
 
     NSUInteger insertIndex = sections.count;
     if (insertIndex > 0) insertIndex -= 1;
-    [sections insertObject:expSection() atIndex:insertIndex];
+    [sections insertObject:expDevTopSection() atIndex:insertIndex];
     return sections;
 }
 
