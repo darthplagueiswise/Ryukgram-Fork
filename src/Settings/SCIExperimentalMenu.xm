@@ -56,7 +56,6 @@ static void RYDevCallOpenSelector(NSString *selectorName) {
         return;
     }
 
-    // Fallback: these selectors are installed by SCIDogfoodingMainLauncher.xm as an NSObject category.
     id target = top ?: RYDevRootViewController();
     if (target && [target respondsToSelector:sel]) {
         ((void (*)(id, SEL, id))objc_msgSend)(target, sel, nil);
@@ -113,13 +112,19 @@ static NSArray *experimentalNavSections(void) {
 
 static void applyInternalOverridesForToggle(NSString *key, BOOL on) {
     SCIExpFlagOverride o = on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideOff;
-    if ([key isEqualToString:@"igt_employee_master"]) {
+
+    if ([key isEqualToString:@"igt_employee_master"] ||
+        [key isEqualToString:@"igt_employee"] ||
+        [key isEqualToString:@"igt_employee_mc"] ||
+        [key isEqualToString:@"igt_employee_or_test_user_mc"]) {
+
         [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00000a95ULL]; // ig_is_employee[0]
         [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00010a96ULL]; // ig_is_employee[1]
         [SCIExpFlags setInternalUseOverride:o forSpecifier:0x008100b200000161ULL]; // ig_is_employee_or_test_user
-    } else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
-        // Specifier para internal apps spoof (se conhecido, caso contrário apenas o hook de símbolo cuidará disso)
-        // [SCIExpFlags setInternalUseOverride:o forSpecifier:kInternalAppsSpecifier];
+    }
+    else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
+        // TODO: Replace with real specifier ID once discovered via SCIExpCallsiteResolver
+        // [SCIExpFlags setInternalUseOverride:o forSpecifier:0x...ULL];
     }
 }
 
@@ -138,9 +143,9 @@ static NSArray *devTestsNavSections(void) {
             @"header": @"Internal / Employee Mode",
             @"footer": @"Toggles to activate internal features. Overrides are applied to known specifiers immediately.",
             @"rows": @[
-                ExpSwitch(@"Employee Mode (Master)", @"Forces ig_is_employee and ig_is_employee_or_test_user to YES via fishhook", @"igt_employee", YES),
-                ExpSwitch(@"Employee MobileConfig Gate", @"Forces ig_is_employee MobileConfig specifier independently", @"igt_employee_mc", YES),
-                ExpSwitch(@"Employee or Test User Gate", @"Forces ig_is_employee_or_test_user specifier", @"igt_employee_or_test_user_mc", YES),
+                ExpOverrideSwitch(@"Employee Mode (Master)", @"Forces ig_is_employee and ig_is_employee_or_test_user to YES via fishhook + specifier overrides", @"igt_employee", YES),
+                ExpOverrideSwitch(@"Employee MobileConfig Gate", @"Forces ig_is_employee MobileConfig specifier independently", @"igt_employee_mc", YES),
+                ExpOverrideSwitch(@"Employee or Test User Gate", @"Forces ig_is_employee_or_test_user specifier", @"igt_employee_or_test_user_mc", YES),
                 ExpSwitch(@"Developer Options Gate", @"Unlocks developer options menu inside Instagram", @"igt_employee_devoptions_gate", YES),
                 ExpSwitch(@"Internal Apps Gate", @"Spoofs IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to return YES", @"igt_internal_apps_gate", YES),
                 ExpSwitch(@"Internal Mode", @"Forces igt_internal flag", @"igt_internal", YES),
