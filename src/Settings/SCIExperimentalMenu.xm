@@ -1,12 +1,72 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
+#import "SCIResolverReportViewController.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 
 static NSArray *(*orig_sections_exp)(id, SEL);
 
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
+}
+
+static UIViewController *RYDevTopViewControllerFrom(UIViewController *vc) {
+    UIViewController *cur = vc;
+    BOOL changed = YES;
+    while (cur && changed) {
+        changed = NO;
+        if ([cur isKindOfClass:UINavigationController.class]) {
+            UIViewController *next = ((UINavigationController *)cur).visibleViewController ?: ((UINavigationController *)cur).topViewController;
+            if (next && next != cur) { cur = next; changed = YES; continue; }
+        }
+        if ([cur isKindOfClass:UITabBarController.class]) {
+            UIViewController *next = ((UITabBarController *)cur).selectedViewController;
+            if (next && next != cur) { cur = next; changed = YES; continue; }
+        }
+        UIViewController *presented = cur.presentedViewController;
+        if (presented && presented != cur) { cur = presented; changed = YES; }
+    }
+    return cur;
+}
+
+static UIViewController *RYDevRootViewController(void) {
+    UIApplication *app = UIApplication.sharedApplication;
+    for (UIScene *scene in app.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.isKeyWindow && window.rootViewController) return window.rootViewController;
+        }
+    }
+    for (UIScene *scene in app.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.rootViewController) return window.rootViewController;
+        }
+    }
+    return nil;
+}
+
+static void RYDevCallOpenSelector(NSString *selectorName) {
+    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
+    SEL sel = NSSelectorFromString(selectorName);
+    if (top && [top respondsToSelector:sel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(top, sel, nil);
+        return;
+    }
+
+    // Fallback: these selectors are installed by SCIDogfoodingMainLauncher.xm as an NSObject category.
+    id target = top ?: RYDevRootViewController();
+    if (target && [target respondsToSelector:sel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(target, sel, nil);
+        return;
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Dogfood opener"
+                                                                   message:[NSString stringWithFormat:@"Selector %@ is not available. Check that SCIDogfoodingMainLauncher.xm is compiled.", selectorName]
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:alert animated:YES completion:nil];
 }
 
 static NSArray *experimentalNavSections(void) {
@@ -54,22 +114,20 @@ static NSArray *devTestsNavSections(void) {
     return @[
         @{
             @"header": @"Account / system",
-            @"footer": @"Risky account/system gates. These are DEV tests and should only be enabled one at a time.",
+            @"footer": @"Risky account/system gates. DEV tests should be enabled one at a time.",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
                 ExpSwitch(@"Employee DevOptions gate", @"Forces exported employee/test-user/dogfooding MC gates discovered from FBSharedFramework. Restart required", @"igt_employee_devoptions_gate", YES),
                 ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES. Restart required", @"igt_employee_mc", YES),
                 ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES. Restart required", @"igt_employee_or_test_user_mc", YES),
                 ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES. Restart required", @"igt_internal_apps_gate", YES),
-                ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse/sessionless InternalUse boolean specifiers. Observer only. Restart required", @"igt_internaluse_observer", YES),
-                ExpSwitch(@"Observe MobileConfig updates", @"Safely logs TryUpdate/ForceUpdate calls as pass-through only. Observer only. Restart required", @"igt_mobileconfig_update_observer", YES),
                 ExpSwitch(@"Runtime MC true patcher", @"Master switch. Runtime patcher only patches symbols enabled below. Restart required", @"igt_runtime_mc_true_patcher", YES),
                 ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation. Riskier; use only for isolated tests. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
             ]
         },
         @{
             @"header": @"Runtime MC symbols",
-            @"footer": @"Master Runtime MC true patcher must also be ON. These switches stub/force individual symbols to YES.",
+            @"footer": @"Master Runtime MC true patcher must also be ON. Legacy MEMMobileConfig/MCQMEM rows were removed because they are not exported in 426.",
             @"rows": @[
                 ExpSwitch(@"Patch IG InternalUse bool", @"_IGMobileConfigBooleanValueForInternalUse -> YES", @"igt_runtime_mc_patch_ig_internaluse", YES),
                 ExpSwitch(@"Patch IG ForceUpdate", @"_IGMobileConfigForceUpdateConfigs -> YES", @"igt_runtime_mc_patch_ig_force_update", YES),
@@ -77,19 +135,46 @@ static NSArray *devTestsNavSections(void) {
                 ExpSwitch(@"Patch IG TryUpdate", @"_IGMobileConfigTryUpdateConfigsWithCompletion -> YES", @"igt_runtime_mc_patch_ig_try_update", YES),
                 ExpSwitch(@"Patch MCI GetBoolean", @"_MCIMobileConfigGetBoolean -> YES", @"igt_runtime_mc_patch_mci_bool", YES),
                 ExpSwitch(@"Patch METAExtensions GetBoolean", @"_METAExtensionsExperimentGetBoolean -> YES", @"igt_runtime_mc_patch_meta_ext_bool", YES),
-                ExpSwitch(@"Patch METAExtensions no exposure", @"_METAExtensionsExperimentGetBooleanWithoutExposure -> YES", @"igt_runtime_mc_patch_meta_ext_bool_noexp", YES),
-                ExpSwitch(@"Patch MCQMEM CQL bool", @"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mcqmem_cql_bool", YES),
-                ExpSwitch(@"Patch MEM Capability bool", @"_MEMMobileConfigFeatureCapabilityGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_capability_bool", YES),
-                ExpSwitch(@"Patch MEM DevConfig bool", @"_MEMMobileConfigFeatureDevConfigGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_devconfig_bool", YES),
-                ExpSwitch(@"Patch MEM Platform bool", @"_MEMMobileConfigPlatformGetBoolean -> YES", @"igt_runtime_mc_patch_mem_platform_bool", YES),
-                ExpSwitch(@"Patch MEM Protocol bool", @"_MEMMobileConfigProtocolExperimentGetBoolean_Internal_DoNotUseOrMock -> YES", @"igt_runtime_mc_patch_mem_protocol_bool", YES)
+                ExpSwitch(@"Patch METAExtensions no exposure", @"_METAExtensionsExperimentGetBooleanWithoutExposure -> YES", @"igt_runtime_mc_patch_meta_ext_bool_noexp", YES)
+            ]
+        },
+        @{
+            @"header": @"Dogfood native openers",
+            @"footer": @"Uses the existing SCIDogfoodingMainLauncher MSHook/category path. Direct Notes should open; Main Dogfood still requires a live IGDogfoodingSettingsConfig and refuses fake config.",
+            @"rows": @[
+                [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
+                                       subtitle:@"Calls the native Direct Notes Dogfooding opener with live IGUserSession"
+                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
+                                         action:^{ RYDevCallOpenSelector(@"ryDogOpenNotesButtonTapped:"); }],
+                [SCISetting buttonCellWithTitle:@"Try Main Dogfood Settings"
+                                       subtitle:@"Attempts the native main Dogfood opener path without alloc/init fake config"
+                                           icon:[SCISymbol symbolWithName:@"pawprint.circle"]
+                                         action:^{ RYDevCallOpenSelector(@"ryDogOpenMainButtonTapped:"); }]
+            ]
+        },
+        @{
+            @"header": @"SCI Resolver",
+            @"footer": @"DexKit-style iOS resolver. View-only scanner for classes/selectors/ivars and symbol availability. No overrides are applied.",
+            @"rows": @[
+                [SCISetting navigationCellWithTitle:@"Resolver: Dogfood / Developer candidates"
+                                           subtitle:@"Find likely Dogfooding, DeveloperOptions, MetaConfig, InternalSettings and Employee UI builders"
+                                               icon:[SCISymbol symbolWithName:@"magnifyingglass"]
+                                     viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindDogfoodDeveloper title:@"Dogfood / Developer candidates"]],
+                [SCISetting navigationCellWithTitle:@"Resolver: MobileConfig symbols"
+                                           subtitle:@"Check IG/MCI/METAExtensions/MSGC/EasyGating/MCD symbol availability and runtime class candidates"
+                                               icon:[SCISymbol symbolWithName:@"point.3.connected.trianglepath.dotted"]
+                                     viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindMobileConfigSymbols title:@"MobileConfig symbols"]],
+                [SCISetting navigationCellWithTitle:@"Resolver: Full scan report"
+                                           subtitle:@"Full view-only scan report combining Dogfood/Developer and MobileConfig candidates"
+                                               icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
+                                     viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindFull title:@"Full resolver report"]]
             ]
         },
         @{
             @"header": @"Flags Browser",
-            @"footer": @"MetaLocalExperiment and IGMobileConfigContextManager browser.",
+            @"footer": @"MetaLocalExperiment and IGMobileConfigContextManager browser. When this is enabled, MC observers run automatically; there are no separate observer toggles.",
             @"rows": @[
-                ExpSwitch(@"Enable flags browser hooks", @"Installs MetaLocalExperiment and IGMobileConfig observers + overrides. Restart required", @"sci_exp_flags_enabled", YES),
+                ExpSwitch(@"Enable flags browser hooks", @"Installs MetaLocalExperiment, IGMobileConfig observers and safe diagnostics. Restart required", @"sci_exp_flags_enabled", YES),
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
@@ -169,7 +254,7 @@ static NSDictionary *expDevTopSection(void) {
                                            icon:[SCISymbol symbolWithName:@"testtube.2"]
                                     navSections:experimentalNavSections()],
             [SCISetting navigationCellWithTitle:@"DEV tests"
-                                       subtitle:@"MobileConfig, account/system gates, runtime MC symbols and flags browser"
+                                       subtitle:@"MobileConfig, account/system gates, runtime MC symbols, resolver and flags browser"
                                            icon:[SCISymbol symbolWithName:@"hammer"]
                                     navSections:devTestsNavSections()]
         ]
