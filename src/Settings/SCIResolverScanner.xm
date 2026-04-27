@@ -1,5 +1,5 @@
 #import "SCIResolverScanner.h"
-#import "SCIExpFlags.h"
+#import "../Features/ExpFlags/SCIExpFlags.h"
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
