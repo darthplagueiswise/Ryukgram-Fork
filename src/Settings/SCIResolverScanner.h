@@ -2,6 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class SCIResolverSpecifierEntry;
+
 @interface SCIResolverScanner : NSObject
 
 + (void *)findPattern:(NSString *)patternMask inSegment:(NSString *)segmentName;
