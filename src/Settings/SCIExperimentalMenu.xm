@@ -113,16 +113,26 @@ static NSArray *experimentalNavSections(void) {
 static NSArray *devTestsNavSections(void) {
     return @[
         @{
+            @"header": @"Internal / Employee Mode",
+            @"footer": @"Toggles to activate internal features. Most require an app restart to take effect.",
+            @"rows": @[
+                ExpSwitch(@"Employee Mode (Master)", @"Forces ig_is_employee and ig_is_employee_or_test_user to YES via fishhook", @"igt_employee", YES),
+                ExpSwitch(@"Employee MobileConfig Gate", @"Forces ig_is_employee MobileConfig specifier independently", @"igt_employee_mc", YES),
+                ExpSwitch(@"Employee or Test User Gate", @"Forces ig_is_employee_or_test_user specifier", @"igt_employee_or_test_user_mc", YES),
+                ExpSwitch(@"Developer Options Gate", @"Unlocks developer options menu inside Instagram", @"igt_employee_devoptions_gate", YES),
+                ExpSwitch(@"Internal Apps Gate", @"Spoofs IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to return YES", @"igt_internal_apps_gate", YES),
+                ExpSwitch(@"Internal Mode", @"Forces igt_internal flag", @"igt_internal", YES),
+                ExpSwitch(@"InternalUse Observer (Logging)", @"Enables verbose NSLog output for all MobileConfig specifier calls", @"igt_internaluse_observer", YES),
+                ExpSwitch(@"QuickSnap / Instants", @"Forces all ig_ios_quick_snap and ig_ios_instants specifier groups to YES", @"igt_quicksnap", YES)
+            ]
+        },
+        @{
             @"header": @"Account / system",
             @"footer": @"Risky account/system gates. DEV tests should be enabled one at a time.",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
-                ExpSwitch(@"Employee Master", @"Master switch for all employee/internal gates. Restart required", @"igt_employee_master", YES),
-                ExpSwitch(@"Employee DevOptions gate", @"Forces exported employee/test-user/dogfooding MC gates discovered from FBSharedFramework. Restart required", @"igt_employee_devoptions_gate", YES),
-                ExpSwitch(@"Employee MC: ig_is_employee", @"Forces ig_is_employee MobileConfig specifiers to YES. Restart required", @"igt_employee_mc", YES),
-                ExpSwitch(@"Employee/TestUser MC: ig_is_employee_or_test_user", @"Forces ig_is_employee_or_test_user MobileConfig specifier to YES. Restart required", @"igt_employee_or_test_user_mc", YES),
+                ExpSwitch(@"Employee Master (Legacy)", @"Master switch for all employee/internal gates. Restart required", @"igt_employee_master", YES),
                 ExpSwitch(@"Internal Apps Spoof", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES. Restart required", @"igt_internal_apps_spoof", YES),
-                ExpSwitch(@"Internal Apps Installed Gate", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES. Restart required", @"igt_internal_apps_gate", YES),
                 ExpSwitch(@"Runtime MC true patcher", @"Master switch. Runtime patcher only patches symbols enabled below. Restart required", @"igt_runtime_mc_true_patcher", YES),
                 ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation. Riskier; use only for isolated tests. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
             ]
