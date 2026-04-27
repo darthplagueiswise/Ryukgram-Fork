@@ -14,6 +14,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)runFullResolverReport;
 
 + (void)applyOverrideForSpecifier:(unsigned long long)specifier value:(BOOL)value;
++ (BOOL)applyOverrideForSpecifier:(unsigned long long)specifier defaultValue:(BOOL)defaultValue;
 + (void)removeOverrideForSpecifier:(unsigned long long)specifier;
 + (NSDictionary<NSNumber *, NSNumber *> *)allResolverOverrides;
 + (void)clearAllResolverOverrides;

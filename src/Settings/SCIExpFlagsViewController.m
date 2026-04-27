@@ -460,7 +460,8 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
                 SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:spec];
                 effective = (ov == SCIExpFlagOverrideTrue);
                 cell.textLabel.text = [NSString stringWithFormat:@"%@  %@", e.name, [self specifierHex:e.specifier]];
-                cell.detailTextLabel.text = [NSString stringWithFormat:@"Resolver: %@ · suggested=%@ · override=%@", e.source, e.suggestedValue ? @"YES" : @"NO", ov == SCIExpFlagOverrideTrue ? @"True" : (ov == SCIExpFlagOverrideFalse ? @"False" : @"None")];
+                NSString *ovStr = (ov == SCIExpFlagOverrideTrue) ? @"True" : (ov == SCIExpFlagOverrideFalse ? @"False" : @"Off");
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"Resolver: %@ · suggested=%@ · override=%@", e.source, e.suggestedValue ? @"YES" : @"NO", ovStr];
             }
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
             UISwitch *sw = [UISwitch new];
@@ -507,8 +508,15 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 - (void)internalSwitchChanged:(UISwitch *)sender {
     NSNumber *n = objc_getAssociatedObject(sender, kSCIInternalUseSwitchSpecifierKey);
     if (!n) return;
-    [SCIExpFlags setInternalUseOverride:(sender.on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse)
-                            forSpecifier:n.unsignedLongLongValue];
+    unsigned long long spec = n.unsignedLongLongValue;
+    SCIExpFlagOverride current = [SCIExpFlags internalUseOverrideForSpecifier:spec];
+    SCIExpFlagOverride next = sender.on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse;
+    
+    // Se o usuário clicar no switch, alternamos entre True e False. 
+    // Para voltar ao estado "Off" (sem override), ele deve usar o menu de toque longo/seleção.
+    if (current == next) return; 
+    
+    [SCIExpFlags setInternalUseOverride:next forSpecifier:spec];
     [self refresh];
 }
 

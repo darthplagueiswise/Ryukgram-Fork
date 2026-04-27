@@ -110,11 +110,32 @@ static NSArray *experimentalNavSections(void) {
     ];
 }
 
+static void applyInternalOverridesForToggle(NSString *key, BOOL on) {
+    SCIExpFlagOverride o = on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideOff;
+    if ([key isEqualToString:@"igt_employee_master"]) {
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00000a95ULL]; // ig_is_employee[0]
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00010a96ULL]; // ig_is_employee[1]
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x008100b200000161ULL]; // ig_is_employee_or_test_user
+    } else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
+        // Specifier para internal apps spoof (se conhecido, caso contrário apenas o hook de símbolo cuidará disso)
+        // [SCIExpFlags setInternalUseOverride:o forSpecifier:kInternalAppsSpecifier];
+    }
+}
+
+static SCISetting *ExpOverrideSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
+    SCISetting *s = [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
+    s.action = ^{
+        BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:key];
+        applyInternalOverridesForToggle(key, on);
+    };
+    return s;
+}
+
 static NSArray *devTestsNavSections(void) {
     return @[
         @{
             @"header": @"Internal / Employee Mode",
-            @"footer": @"Toggles to activate internal features. Most require an app restart to take effect.",
+            @"footer": @"Toggles to activate internal features. Overrides are applied to known specifiers immediately.",
             @"rows": @[
                 ExpSwitch(@"Employee Mode (Master)", @"Forces ig_is_employee and ig_is_employee_or_test_user to YES via fishhook", @"igt_employee", YES),
                 ExpSwitch(@"Employee MobileConfig Gate", @"Forces ig_is_employee MobileConfig specifier independently", @"igt_employee_mc", YES),
@@ -128,11 +149,11 @@ static NSArray *devTestsNavSections(void) {
         },
         @{
             @"header": @"Account / system",
-            @"footer": @"Risky account/system gates. DEV tests should be enabled one at a time.",
+            @"footer": @"Risky account/system gates. Employee Master applies real specifier overrides.",
             @"rows": @[
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO),
-                ExpSwitch(@"Employee Master (Legacy)", @"Master switch for all employee/internal gates. Restart required", @"igt_employee_master", YES),
-                ExpSwitch(@"Internal Apps Spoof", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES. Restart required", @"igt_internal_apps_spoof", YES),
+                ExpOverrideSwitch(@"Employee Master (Legacy)", @"Master switch for all employee/internal gates. Applies specifier overrides.", @"igt_employee_master", YES),
+                ExpOverrideSwitch(@"Internal Apps Spoof", @"Forces IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 to YES.", @"igt_internal_apps_spoof", YES),
                 ExpSwitch(@"Runtime MC true patcher", @"Master switch. Runtime patcher only patches symbols enabled below. Restart required", @"igt_runtime_mc_true_patcher", YES),
                 ExpSwitch(@"Runtime MC true patcher relaxed", @"Skips first-8-byte pattern validation. Riskier; use only for isolated tests. Restart required", @"igt_runtime_mc_true_patcher_relaxed", YES)
             ]

@@ -356,7 +356,16 @@ static NSString *rgKnownMapLogLine(void) {
     return [parts componentsJoinedByString:@", "];
 }
 
+static void rgSyncInternalOverrides(void) {
+    if ([SCIUtils getBoolPref:@"igt_employee_master"]) {
+        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeSpecifierA];
+        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeSpecifierB];
+        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeOrTestUserSpecifier];
+    }
+}
+
 %ctor {
+    rgSyncInternalOverrides();
     if (!rgShouldInstallInternalModeHooks()) return;
 
     struct rebinding rebindings[] = {

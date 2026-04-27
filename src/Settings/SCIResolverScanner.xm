@@ -425,6 +425,13 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
     [SCIExpFlags setInternalUseOverride:(value ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forSpecifier:specifier];
 }
 
++ (BOOL)applyOverrideForSpecifier:(unsigned long long)specifier defaultValue:(BOOL)defaultValue {
+    SCIExpFlagOverride o = [SCIExpFlags internalUseOverrideForSpecifier:specifier];
+    if (o == SCIExpFlagOverrideTrue) return YES;
+    if (o == SCIExpFlagOverrideFalse) return NO;
+    return defaultValue;
+}
+
 + (void)removeOverrideForSpecifier:(unsigned long long)specifier {
     [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideOff forSpecifier:specifier];
 }
