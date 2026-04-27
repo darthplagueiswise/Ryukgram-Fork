@@ -1,4 +1,5 @@
 #import "SCIResolverScanner.h"
+#import "SCIResolverSpecifierEntry.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 
 #import <Foundation/Foundation.h>
@@ -224,6 +225,96 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
 }
 
 @implementation SCIResolverScanner
+
++ (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries {
+    static NSArray<SCIResolverSpecifierEntry *> *entries;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map = [NSMutableDictionary dictionary];
+        
+        void (^add)(unsigned long long, NSString *, NSString *, BOOL) = ^(unsigned long long spec, NSString *name, NSString *src, BOOL suggested) {
+            if (spec == 0) return;
+            SCIResolverSpecifierEntry *e = [SCIResolverSpecifierEntry new];
+            e.specifier = spec;
+            e.name = name;
+            e.source = src;
+            e.suggestedValue = suggested;
+            map[@(spec)] = e;
+        };
+
+        void (^addSymbol)(const char *, NSString *, NSUInteger, BOOL) = ^(const char *symbol, NSString *label, NSUInteger count, BOOL suggested) {
+            unsigned long long *values = (unsigned long long *)dlsym(RTLD_DEFAULT, symbol);
+            if (!values) {
+                char underscored[256];
+                snprintf(underscored, sizeof(underscored), "_%s", symbol);
+                values = (unsigned long long *)dlsym(RTLD_DEFAULT, underscored);
+            }
+            if (!values) return;
+            for (NSUInteger i = 0; i < count; i++) {
+                unsigned long long spec = values[i];
+                if (spec == 0 || ((spec >> 56) != 0) || ((spec >> 48) == 0)) continue;
+                NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
+                add(spec, name, @"dlsym", suggested);
+            }
+        };
+
+        // Basic Employee gates
+        addSymbol("ig_is_employee", @"ig_is_employee", 2, YES);
+        addSymbol("ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1, YES);
+        addSymbol("xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1, YES);
+        addSymbol("ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1, YES);
+        addSymbol("ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1, YES);
+
+        // QuickSnap / Instants
+        addSymbol("ig_instants_hide", @"ig_instants_hide", 1, NO);
+        addSymbol("ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
+        addSymbol("ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
+        addSymbol("ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
+        addSymbol("ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
+        addSymbol("ig_ios_quick_snap_audience", @"ig_ios_quick_snap_audience", 5, YES);
+        addSymbol("ig_ios_quick_snap_burst_photos", @"ig_ios_quick_snap_burst_photos", 4, YES);
+        addSymbol("ig_ios_quick_snap_camera_capture_animation", @"ig_ios_quick_snap_camera_capture_animation", 1, YES);
+        addSymbol("ig_ios_quick_snap_classification", @"ig_ios_quick_snap_classification", 3, YES);
+        addSymbol("ig_ios_quick_snap_extend_expiration", @"ig_ios_quick_snap_extend_expiration", 1, YES);
+        addSymbol("ig_ios_quick_snap_gallery_send", @"ig_ios_quick_snap_gallery_send", 2, YES);
+        addSymbol("ig_ios_quick_snap_moods", @"ig_ios_quick_snap_moods", 6, YES);
+        addSymbol("ig_ios_quick_snap_new_audience_picker", @"ig_ios_quick_snap_new_audience_picker", 3, YES);
+        addSymbol("ig_ios_quick_snap_new_zoom_animation", @"ig_ios_quick_snap_new_zoom_animation", 1, YES);
+        addSymbol("ig_ios_quicksnap_archive", @"ig_ios_quicksnap_archive", 6, YES);
+        addSymbol("ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
+        addSymbol("ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
+        addSymbol("ig_ios_quicksnap_consumption_button", @"ig_ios_quicksnap_consumption_button", 1, YES);
+        addSymbol("ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 19, YES);
+        addSymbol("ig_ios_quicksnap_consumption_v2", @"ig_ios_quicksnap_consumption_v2", 9, YES);
+        addSymbol("ig_ios_quicksnap_craft_improvements", @"ig_ios_quicksnap_craft_improvements", 2, YES);
+        addSymbol("ig_ios_quicksnap_creation_preview", @"ig_ios_quicksnap_creation_preview", 2, YES);
+        addSymbol("ig_ios_quicksnap_dual_camera", @"ig_ios_quicksnap_dual_camera", 4, YES);
+        addSymbol("ig_ios_quicksnap_gtm", @"ig_ios_quicksnap_gtm", 5, YES);
+        addSymbol("ig_ios_quicksnap_navigation_v3", @"ig_ios_quicksnap_navigation_v3", 9, YES);
+        addSymbol("ig_ios_quicksnap_perf_improvements", @"ig_ios_quicksnap_perf_improvements", 7, YES);
+        addSymbol("ig_ios_quicksnap_profile", @"ig_ios_quicksnap_profile", 1, YES);
+        addSymbol("ig_ios_quicksnap_recap_improvements", @"ig_ios_quicksnap_recap_improvements", 6, YES);
+        addSymbol("ig_ios_quicksnap_story_deletion", @"ig_ios_quicksnap_story_deletion", 1, YES);
+        addSymbol("ig_ios_quicksnap_undo_toast", @"ig_ios_quicksnap_undo_toast", 2, YES);
+        addSymbol("ig_ios_quicksnap_valentines_activation", @"ig_ios_quicksnap_valentines_activation", 1, YES);
+        addSymbol("ig_ios_quicksnap_wearables", @"ig_ios_quicksnap_wearables", 2, YES);
+        addSymbol("ig_ios_instants_infinite_archive", @"ig_ios_instants_infinite_archive", 2, YES);
+        addSymbol("ig_ios_instants_tagging", @"ig_ios_instants_tagging", 1, YES);
+        addSymbol("ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
+        addSymbol("ig_ios_instants_upleveling_reactions", @"ig_ios_instants_upleveling_reactions", 3, YES);
+        addSymbol("ig_ios_instants_widget", @"ig_ios_instants_widget", 2, YES);
+
+        // Hardcoded fallbacks
+        add(0x0081030f00000a95ULL, @"ig_is_employee[0]", @"hardcoded", YES);
+        add(0x0081030f00010a96ULL, @"ig_is_employee[1]", @"hardcoded", YES);
+        add(0x008100b200000161ULL, @"ig_is_employee_or_test_user", @"hardcoded", YES);
+
+        entries = [[map allValues] sortedArrayUsingComparator:^NSComparisonResult(SCIResolverSpecifierEntry *a, SCIResolverSpecifierEntry *b) {
+            return [a.name compare:b.name];
+        }];
+    });
+    return entries;
+}
 
 + (void *)findPattern:(NSString *)patternMask inSegment:(NSString *)segmentName {
     NSArray<NSString *> *components = [patternMask componentsSeparatedByString:@" "];

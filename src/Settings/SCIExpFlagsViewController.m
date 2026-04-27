@@ -2,6 +2,8 @@
 // Tabs: Browser(native) | Meta(override) | MC(view) | Scanned/InternalUse(override) | Overrides
 
 #import "SCIExpFlagsViewController.h"
+#import "SCIResolverScanner.h"
+#import "SCIResolverSpecifierEntry.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
@@ -42,6 +44,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 @property (nonatomic, strong) NSArray<NSString *>            *scannedNames;
 @property (nonatomic, assign) BOOL scannedLoading;
 @property (nonatomic, strong) NSArray<NSString *>            *overriddenNames;
+@property (nonatomic, strong) NSArray<SCIResolverSpecifierEntry *> *resolverEntries;
 @end
 
 @implementation SCIExpFlagsViewController
@@ -156,6 +159,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
     self.metaObs = [SCIExpFlags allObservations];
     self.mcObs = [SCIExpFlags allMCObservations];
     self.overriddenNames = [[SCIExpFlags allOverriddenNames] sortedArrayUsingSelector:@selector(compare:)];
+    self.resolverEntries = [SCIResolverScanner allKnownSpecifierEntries];
     [self.tableView reloadData];
     [self updateEmpty];
 }
@@ -223,39 +227,66 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
     return out;
 }
 
-- (NSArray<SCIExpInternalUseObservation *> *)filteredInternalRows {
-    NSMutableArray<SCIExpInternalUseObservation *> *rows = [[SCIExpFlags allInternalUseObservations] mutableCopy] ?: [NSMutableArray array];
+- (NSArray *)filteredInternalRows {
+    NSArray<SCIExpInternalUseObservation *> *obs = [SCIExpFlags allInternalUseObservations] ?: @[];
+    NSMutableArray *rows = [obs mutableCopy];
+    
+    NSMutableSet<NSNumber *> *observedSpecs = [NSMutableSet set];
+    for (SCIExpInternalUseObservation *o in obs) {
+        [observedSpecs addObject:@(o.specifier)];
+    }
+    
+    for (SCIResolverSpecifierEntry *e in self.resolverEntries) {
+        if (![observedSpecs containsObject:@(e.specifier)]) {
+            [rows addObject:e];
+        }
+    }
 
-    NSIndexSet *remove = [rows indexesOfObjectsPassingTest:^BOOL(SCIExpInternalUseObservation *o, NSUInteger idx, BOOL *stop) {
-        BOOL effective = [self effectiveInternalValue:o];
+    NSIndexSet *remove = [rows indexesOfObjectsPassingTest:^BOOL(id o, NSUInteger idx, BOOL *stop) {
+        BOOL effective = NO;
+        BOOL isChanged = NO;
+        if ([o isKindOfClass:[SCIExpInternalUseObservation class]]) {
+            effective = [self effectiveInternalValue:o];
+            SCIExpInternalUseObservation *io = (SCIExpInternalUseObservation *)o;
+            isChanged = (io.defaultValue != io.resultValue);
+        } else if ([o isKindOfClass:[SCIResolverSpecifierEntry class]]) {
+            SCIResolverSpecifierEntry *e = (SCIResolverSpecifierEntry *)o;
+            SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:e.specifier];
+            effective = (ov == SCIExpFlagOverrideTrue);
+            isChanged = (ov != SCIExpFlagOverrideOff);
+        }
+        
         switch (self.internalCategory) {
             case SCIInternalUseCategoryHot:     return NO;
-            case SCIInternalUseCategoryChanged: return o.defaultValue == o.resultValue;
+            case SCIInternalUseCategoryChanged: return !isChanged;
             case SCIInternalUseCategoryOn:      return !effective;
             case SCIInternalUseCategoryOff:     return effective;
             case SCIInternalUseCategoryRecent:  return NO;
         }
+        return NO;
     }];
     [rows removeObjectsAtIndexes:remove];
 
     if (self.internalCategory == SCIInternalUseCategoryRecent) {
-        [rows sortUsingComparator:^NSComparisonResult(SCIExpInternalUseObservation *a, SCIExpInternalUseObservation *b) {
-            if (a.lastSeenOrder != b.lastSeenOrder) return a.lastSeenOrder > b.lastSeenOrder ? NSOrderedAscending : NSOrderedDescending;
-            if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
-            return NSOrderedSame;
-        }];
-    } else if (self.internalCategory == SCIInternalUseCategoryChanged) {
-        [rows sortUsingComparator:^NSComparisonResult(SCIExpInternalUseObservation *a, SCIExpInternalUseObservation *b) {
-            if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
-            if (a.lastSeenOrder != b.lastSeenOrder) return a.lastSeenOrder > b.lastSeenOrder ? NSOrderedAscending : NSOrderedDescending;
+        [rows sortUsingComparator:^NSComparisonResult(id a, id b) {
+            NSUInteger orderA = [a isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)a).lastSeenOrder : 0;
+            NSUInteger orderB = [b isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)b).lastSeenOrder : 0;
+            if (orderA != orderB) return orderA > orderB ? NSOrderedAscending : NSOrderedDescending;
             return NSOrderedSame;
         }];
     }
 
     if (self.query.length) {
         NSString *q = self.query.lowercaseString;
-        NSIndexSet *qRemove = [rows indexesOfObjectsPassingTest:^BOOL(SCIExpInternalUseObservation *o, NSUInteger idx, BOOL *stop) {
-            return ![[self searchableInternalString:o].lowercaseString containsString:q];
+        NSIndexSet *qRemove = [rows indexesOfObjectsPassingTest:^BOOL(id o, NSUInteger idx, BOOL *stop) {
+            NSString *s = @"";
+            if ([o isKindOfClass:[SCIExpInternalUseObservation class]]) {
+                s = [self searchableInternalString:o];
+            } else if ([o isKindOfClass:[SCIResolverSpecifierEntry class]]) {
+                SCIResolverSpecifierEntry *e = (SCIResolverSpecifierEntry *)o;
+                s = [NSString stringWithFormat:@"%@ %@ resolver %@", e.name, [self specifierHex:e.specifier], e.source];
+            }
+            return ![s.lowercaseString containsString:q];
         }];
         [rows removeObjectsAtIndexes:qRemove];
     }
@@ -402,13 +433,26 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
             break;
         }
         case SCIExpTabScanned: {
-            SCIExpInternalUseObservation *o = row;
-            cell.textLabel.text = [self internalTitle:o];
+            unsigned long long spec = 0;
+            BOOL effective = NO;
+            if ([row isKindOfClass:[SCIExpInternalUseObservation class]]) {
+                SCIExpInternalUseObservation *o = row;
+                spec = o.specifier;
+                effective = [self effectiveInternalValue:o];
+                cell.textLabel.text = [self internalTitle:o];
+                cell.detailTextLabel.text = [self internalSubtitle:o];
+            } else if ([row isKindOfClass:[SCIResolverSpecifierEntry class]]) {
+                SCIResolverSpecifierEntry *e = row;
+                spec = e.specifier;
+                SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:spec];
+                effective = (ov == SCIExpFlagOverrideTrue);
+                cell.textLabel.text = [NSString stringWithFormat:@"%@  %@", e.name, [self specifierHex:e.specifier]];
+                cell.detailTextLabel.text = [NSString stringWithFormat:@"Resolver: %@ · suggested=%@ · override=%@", e.source, e.suggestedValue ? @"YES" : @"NO", ov == SCIExpFlagOverrideTrue ? @"True" : (ov == SCIExpFlagOverrideFalse ? @"False" : @"None")];
+            }
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-            cell.detailTextLabel.text = [self internalSubtitle:o];
             UISwitch *sw = [UISwitch new];
-            sw.on = [self effectiveInternalValue:o];
-            objc_setAssociatedObject(sw, kSCIInternalUseSwitchSpecifierKey, @(o.specifier), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            sw.on = effective;
+            objc_setAssociatedObject(sw, kSCIInternalUseSwitchSpecifierKey, @(spec), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [sw addTarget:self action:@selector(internalSwitchChanged:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = sw;
             break;
@@ -474,8 +518,13 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
             break;
         }
         case SCIExpTabScanned: {
-            SCIExpInternalUseObservation *o = row;
-            [self presentInternalUseOverrideSheetForObservation:o fromCell:cell];
+            if ([row isKindOfClass:[SCIExpInternalUseObservation class]]) {
+                [self presentInternalUseOverrideSheetForObservation:row fromCell:cell];
+            } else if ([row isKindOfClass:[SCIResolverSpecifierEntry class]]) {
+                SCIResolverSpecifierEntry *e = row;
+                NSString *line = [NSString stringWithFormat:@"%@\nResolver: %@ · suggested=%@", e.name, e.source, e.suggestedValue ? @"YES" : @"NO"];
+                [self presentInternalUseOverrideSheetForSpecifier:e.specifier line:line fromCell:cell];
+            }
             break;
         }
         case SCIExpTabOverrides: {

@@ -7,6 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (void *)findPattern:(NSString *)patternMask inSegment:(NSString *)segmentName;
 + (void *)findMobileConfigFunctionAddress;
 
++ (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries;
+
 + (NSString *)runDogfoodDeveloperReport;
 + (NSString *)runMobileConfigSymbolReport;
 + (NSString *)runFullResolverReport;
