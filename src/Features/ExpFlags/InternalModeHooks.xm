@@ -4,9 +4,7 @@
 #import "SCIExpMobileConfigMapping.h"
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
-#import <objc/runtime.h>
 #import <dlfcn.h>
-#import <substrate.h>
 #include "../../../modules/fishhook/fishhook.h"
 
 static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL; // ig_is_employee
@@ -62,17 +60,17 @@ static NSDictionary<NSNumber *, NSString *> *rgKnownInternalUseSpecifierMap(void
     dispatch_once(&once, ^{
         NSMutableDictionary<NSNumber *, NSString *> *m = [NSMutableDictionary dictionary];
 
-        // Exported MC param symbols found in FBSharedFramework(22) by static strings/symbol-name scan.
-        // These are the iOS equivalent of the Android/DexKit "golden anchors": resolve the named
-        // specifier arrays first, then force only those InternalUse calls when the Employee/DevOptions
-        // gate is enabled. Do not globally force every MobileConfig boolean.
+        // Static scan of FBSharedFramework(22) found these exported MC param symbols:
+        // _ig_is_employee, _ig_is_employee_or_test_user, _xav_switcher_ig_ios_test_user_check_fdid,
+        // _ig_dogfooding_first_client, plus dogfood/internal string anchors. Keep this hook scoped
+        // to named InternalUse specifiers only; do not globally force every MC boolean.
         rgAddMCSpecifierSymbol(m, "ig_is_employee", @"ig_is_employee", 2);
         rgAddMCSpecifierSymbol(m, "ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1);
         rgAddMCSpecifierSymbol(m, "xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1);
         rgAddMCSpecifierSymbol(m, "ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1);
         rgAddMCSpecifierSymbol(m, "ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1);
 
-        // Hard fallback for the current FBSharedFramework build, in case dlsym does not expose
+        // Hard fallback for this current FBSharedFramework build, in case dlsym does not expose
         // the data symbols in a sideloaded image.
         m[@(kIGMCEmployeeSpecifierA)] = @"ig_is_employee[0]";
         m[@(kIGMCEmployeeSpecifierB)] = @"ig_is_employee[1]";
@@ -92,9 +90,7 @@ static BOOL rgKnownNameLooksLikeEmployeeGate(NSString *name) {
            [n containsString:@"test_user"] ||
            [n containsString:@"dogfood"] ||
            [n containsString:@"dogfooding"] ||
-           [n containsString:@"xav_switcher"] ||
-           [n containsString:@"developer"] ||
-           [n containsString:@"internalsettings"];
+           [n containsString:@"xav_switcher"];
 }
 
 static BOOL specifierMatchesEmployee(unsigned long long specifier) {
@@ -229,18 +225,18 @@ static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultVa
     BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
         orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
-    recordInternalUseSpecifier(ctx, @"IGMobileConfigBooleanValueForInternalUse", specifier, defaultValue, original, returned, callerAddress);
+    recordInternalUseSpecifier(ctx, @"IG InternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
 }
 
 static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    [SCIExpMobileConfigDebug noteContext:ctx source:@"IGMobileConfigSessionlessBooleanValueForInternalUse"];
+    [SCIExpMobileConfigDebug noteContext:ctx source:@"IG Sessionless InternalUse"];
     void *callerAddress = __builtin_return_address(0);
     BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
         orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
-    recordInternalUseSpecifier(ctx, @"IGMobileConfigSessionlessBooleanValueForInternalUse", specifier, defaultValue, original, returned, callerAddress);
+    recordInternalUseSpecifier(ctx, @"IG Sessionless InternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
 }
 
@@ -249,52 +245,6 @@ static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(voi
     if ([SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
     return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ?
         orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
-}
-
-typedef void (*IGAppStateStartLoggingFn)(id, SEL, id, id, BOOL, id, id, BOOL);
-static IGAppStateStartLoggingFn orig_IGApplicationStateLogger_startLogging = NULL;
-static void hook_IGApplicationStateLogger_startLogging(id self, SEL _cmd, id application, id launchOptions, BOOL isEmployee, id userPk, id logNotificationWithLaunch, BOOL wrapNotifSettingLoggingIntoBackgroundTask) {
-    BOOL returnedEmployee = rgEmployeeMasterEnabled() ? YES : isEmployee;
-    if (rgInternalObserverEnabled() || returnedEmployee != isEmployee) {
-        NSLog(@"[RyukGram][DogfoodGate] IGApplicationStateLogger startLogging isEmployee=%d -> %d userPk=%@", isEmployee, returnedEmployee, userPk);
-    }
-    if (orig_IGApplicationStateLogger_startLogging) {
-        orig_IGApplicationStateLogger_startLogging(self, _cmd, application, launchOptions, returnedEmployee, userPk, logNotificationWithLaunch, wrapNotifSettingLoggingIntoBackgroundTask);
-    }
-}
-
-static BOOL (*orig_NSUserDefaults_boolForKey)(id, SEL, NSString *) = NULL;
-static BOOL hook_NSUserDefaults_boolForKey(id self, SEL _cmd, NSString *key) {
-    NSString *k = [key isKindOfClass:[NSString class]] ? key : @"";
-    BOOL isEmployeeKey = [k containsString:@"FBUserIsEmployeeKey"] || [k containsString:@"DeviceReportFBUserIsEmployeeKey"] || [k isEqualToString:@"isEmployee"];
-    if (rgEmployeeMasterEnabled() && isEmployeeKey) {
-        if (rgInternalObserverEnabled()) NSLog(@"[RyukGram][DogfoodGate] NSUserDefaults boolForKey:%@ -> YES", k);
-        return YES;
-    }
-    return orig_NSUserDefaults_boolForKey ? orig_NSUserDefaults_boolForKey(self, _cmd, key) : NO;
-}
-
-static void rgInstallObjCGateHooks(void) {
-    if (!rgEmployeeMasterEnabled() && !rgInternalObserverEnabled()) return;
-
-    Class loggerClass = NSClassFromString(@"IGApplicationStateLogger");
-    Class loggerMeta = loggerClass ? object_getClass(loggerClass) : Nil;
-    SEL startSel = NSSelectorFromString(@"startLoggingForApplication:launchOptions:isEmployee:userPk:logNotificationWithLaunch:wrapNotifSettingLoggingIntoBackgroundTask:");
-    if (loggerMeta && class_getInstanceMethod(loggerMeta, startSel)) {
-        MSHookMessageEx(loggerMeta, startSel, (IMP)hook_IGApplicationStateLogger_startLogging, (IMP *)&orig_IGApplicationStateLogger_startLogging);
-        NSLog(@"[RyukGram][DogfoodGate] hooked IGApplicationStateLogger startLoggingForApplication:...isEmployee...");
-    } else if (rgInternalObserverEnabled()) {
-        NSLog(@"[RyukGram][DogfoodGate] IGApplicationStateLogger startLogging selector not found");
-    }
-
-    if (rgEmployeeMasterEnabled()) {
-        Class defaultsClass = [NSUserDefaults class];
-        SEL boolSel = @selector(boolForKey:);
-        if (defaultsClass && class_getInstanceMethod(defaultsClass, boolSel)) {
-            MSHookMessageEx(defaultsClass, boolSel, (IMP)hook_NSUserDefaults_boolForKey, (IMP *)&orig_NSUserDefaults_boolForKey);
-            NSLog(@"[RyukGram][DogfoodGate] hooked NSUserDefaults employee bool keys");
-        }
-    }
 }
 
 static NSString *rgKnownMapLogLine(void) {
@@ -315,14 +265,11 @@ static NSString *rgKnownMapLogLine(void) {
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-    rgInstallObjCGateHooks();
-    NSLog(@"[RyukGram][MC] internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p appStateLogger=%p userDefaultsBool=%p manualOverrides=%lu knownGates={%@}",
+    NSLog(@"[RyukGram][MC] safe internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu knownGates={%@}",
           rc,
           orig_IGMobileConfigBooleanValueForInternalUse,
           orig_IGMobileConfigSessionlessBooleanValueForInternalUse,
           orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18,
-          orig_IGApplicationStateLogger_startLogging,
-          orig_NSUserDefaults_boolForKey,
           (unsigned long)[SCIExpFlags allOverriddenInternalUseSpecifiers].count,
           rgKnownMapLogLine());
 }
