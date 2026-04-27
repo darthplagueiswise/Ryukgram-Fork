@@ -122,6 +122,27 @@ static NSDictionary *sciRegisteredDefaultsRef = nil;
     return error;
 }
 
++ (JGProgressHUD *)showSuccessHUDWithDescription:(NSString *)successDesc {
+    return [self showSuccessHUDWithDescription:successDesc dismissAfterDelay:2.0];
+}
+
++ (JGProgressHUD *)showSuccessHUDWithDescription:(NSString *)successDesc dismissAfterDelay:(CGFloat)dismissDelay {
+    JGProgressHUD *hud = [[JGProgressHUD alloc] init];
+    hud.textLabel.text = successDesc;
+    hud.indicatorView = [[JGProgressHUDSuccessIndicatorView alloc] init];
+
+    UIView *hudView = topMostController().view;
+    if (!hudView) hudView = [UIApplication sharedApplication].keyWindow;
+    if (hudView) {
+        [hud showInView:hudView];
+        [hud dismissAfterDelay:dismissDelay];
+    } else {
+        NSLog(@"[SCInsta] No valid view for success HUD: %@", successDesc);
+    }
+
+    return hud;
+}
+
 + (JGProgressHUD *)showErrorHUDWithDescription:(NSString *)errorDesc {
     return [self showErrorHUDWithDescription:errorDesc dismissAfterDelay:4.0];
 }

@@ -48,6 +48,8 @@
 
 + (JGProgressHUD *)showErrorHUDWithDescription:(NSString *)errorDesc;
 + (JGProgressHUD *)showErrorHUDWithDescription:(NSString *)errorDesc dismissAfterDelay:(CGFloat)dismissDelay;
++ (JGProgressHUD *)showSuccessHUDWithDescription:(NSString *)successDesc;
++ (JGProgressHUD *)showSuccessHUDWithDescription:(NSString *)successDesc dismissAfterDelay:(CGFloat)dismissDelay;
 
 // Media
 + (NSURL *)getPhotoUrl:(IGPhoto *)photo;
