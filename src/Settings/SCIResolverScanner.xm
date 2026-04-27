@@ -1,4 +1,5 @@
 #import "SCIResolverScanner.h"
+#import "SCIExpFlags.h"
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -327,6 +328,28 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
         [out appendString:[self runMobileConfigSymbolReport]];
         return out;
     }
+}
+
++ (void)applyOverrideForSpecifier:(unsigned long long)specifier value:(BOOL)value {
+    [SCIExpFlags setInternalUseOverride:(value ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forSpecifier:specifier];
+}
+
++ (void)removeOverrideForSpecifier:(unsigned long long)specifier {
+    [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideOff forSpecifier:specifier];
+}
+
++ (NSDictionary<NSNumber *, NSNumber *> *)allResolverOverrides {
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (NSNumber *spec in [SCIExpFlags allOverriddenInternalUseSpecifiers]) {
+        SCIExpFlagOverride o = [SCIExpFlags internalUseOverrideForSpecifier:spec.unsignedLongLongValue];
+        if (o == SCIExpFlagOverrideTrue) out[spec] = @YES;
+        else if (o == SCIExpFlagOverrideFalse) out[spec] = @NO;
+    }
+    return out;
+}
+
++ (void)clearAllResolverOverrides {
+    [SCIExpFlags resetAllInternalUseOverrides];
 }
 
 @end

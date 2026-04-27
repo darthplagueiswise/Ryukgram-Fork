@@ -142,7 +142,7 @@ static NSArray *devTestsNavSections(void) {
         },
         @{
             @"header": @"Dogfood native openers",
-            @"footer": @"Uses the existing SCIDogfoodingMainLauncher MSHook/category path. Direct Notes should open; Main Dogfood still requires a live IGDogfoodingSettingsConfig and refuses fake config.",
+            @"footer": @"Requires Employee Master or Employee DevOptions gate to be ON. If the opener fails, enable those toggles and restart.",
             @"rows": @[
                 [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
                                        subtitle:@"Calls the native Direct Notes Dogfooding opener with live IGUserSession"

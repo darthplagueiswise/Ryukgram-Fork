@@ -53,7 +53,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithTitle:@"Bulk" style:UIBarButtonItemStylePlain target:self action:@selector(presentBulkActions)];
 
-    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Internal", @"Overrides"]];
+    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Internal (tap to override)", @"Overrides"]];
     self.seg.selectedSegmentIndex = SCIExpTabMeta;
     self.tab = SCIExpTabMeta;
     [self.seg addTarget:self action:@selector(segChanged) forControlEvents:UIControlEventValueChanged];
@@ -172,7 +172,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
             case SCIExpTabBrowser:   self.empty.text = @""; break;
             case SCIExpTabMeta:      self.empty.text = @"Browse IG to populate."; break;
             case SCIExpTabMC:        self.empty.text = @"Browse IG to populate."; break;
-            case SCIExpTabScanned:   self.empty.text = self.query.length ? @"No match" : @"Browse IG to populate InternalUse calls."; break;
+            case SCIExpTabScanned:   self.empty.text = self.query.length ? @"No match" : @"Browse IG to populate InternalUse calls.\nTap cell to override (Off/True/False)."; break;
             case SCIExpTabOverrides: self.empty.text = @"None."; break;
         }
         self.empty.hidden = NO;

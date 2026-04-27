@@ -11,6 +11,11 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)runMobileConfigSymbolReport;
 + (NSString *)runFullResolverReport;
 
++ (void)applyOverrideForSpecifier:(unsigned long long)specifier value:(BOOL)value;
++ (void)removeOverrideForSpecifier:(unsigned long long)specifier;
++ (NSDictionary<NSNumber *, NSNumber *> *)allResolverOverrides;
++ (void)clearAllResolverOverrides;
+
 @end
 
 NS_ASSUME_NONNULL_END

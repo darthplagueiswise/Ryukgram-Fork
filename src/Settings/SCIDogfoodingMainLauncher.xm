@@ -295,6 +295,14 @@ static void RYDogOpenMainFrom(UIViewController *sourceVC) {
         return;
     }
 
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    BOOL master = [ud boolForKey:@"igt_employee_master"];
+    BOOL gate = [ud boolForKey:@"igt_employee_devoptions_gate"];
+    if (!master && !gate) {
+        RYDogShowAlert(presenter, @"Employee required", @"É necessário ativar 'Employee Master' ou 'Employee DevOptions gate' primeiro nas configurações experimentais e reiniciar o app.");
+        return;
+    }
+
     id userSession = RYDogFindUserSession(presenter);
     if (!userSession) {
         RYDogShowAlert(presenter, @"Dogfooding", @"Não achei IGUserSession vivo. Abre feed/perfil/configurações e tenta de novo.");
@@ -333,6 +341,14 @@ static void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
     UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogRootViewController());
     if (!presenter) {
         NSLog(@"[RyukGram][Dogfood] notes abort: no presenter");
+        return;
+    }
+
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    BOOL master = [ud boolForKey:@"igt_employee_master"];
+    BOOL gate = [ud boolForKey:@"igt_employee_devoptions_gate"];
+    if (!master && !gate) {
+        RYDogShowAlert(presenter, @"Employee required", @"É necessário ativar 'Employee Master' ou 'Employee DevOptions gate' primeiro nas configurações experimentais e reiniciar o app.");
         return;
     }
 

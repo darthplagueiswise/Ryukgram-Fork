@@ -25,6 +25,7 @@
         @"igt_internal_apps_gate": @(NO),
         @"igt_internaluse_observer": @(NO),
         @"igt_employee_master": @(NO),
+        @"igt_employee_devoptions_gate": @(NO),
         @"igt_internal_apps_spoof": @(NO),
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
