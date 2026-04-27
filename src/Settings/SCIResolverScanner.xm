@@ -12,7 +12,8 @@ static NSArray<NSString *> *SCIResolverDogKeywords(void) {
         @"ProductionLockout", @"Eligibility", @"DeveloperOptions", @"DeveloperAccount", @"DeveloperTools",
         @"InternalSettings", @"Internal", @"MetaConfig", @"SettingsOverrides", @"Override",
         @"Employee", @"employee", @"Whitehat", @"IGLogoutEntryPointDeveloperTools",
-        @"LocalExperiment", @"LIDExperiment", @"FamilyLocalExperiment"
+        @"LocalExperiment", @"LIDExperiment", @"FamilyLocalExperiment",
+        @"QuickSnap", @"Quicksnap", @"quick_snap", @"quicksnap", @"Instants", @"instants"
     ];
 }
 
@@ -22,9 +23,8 @@ static NSArray<NSString *> *SCIResolverMCKeywords(void) {
         @"MCIMobileConfig", @"MCIExperimentCache", @"MCIExtensionExperimentCache",
         @"METAExtensionsExperiment", @"MSGCSessionedMobileConfig", @"EasyGating",
         @"MCQEasyGating", @"MCDDasmNative", @"MCDCoreDasmNative",
-        @"MEMMobileConfig", @"MCQMEMMobileConfig", @"FeatureDevConfig",
-        @"FeatureCapability", @"ProtocolExperiment", @"PlatformGetBoolean",
-        @"InternalUse", @"DoNotUseOrMock", @"getBool", @"getBoolean"
+        @"InternalUse", @"DoNotUseOrMock", @"getBool", @"getBoolean",
+        @"quick_snap", @"quicksnap", @"instants", @"dogfood", @"employee"
     ];
 }
 
@@ -32,7 +32,33 @@ static NSArray<NSString *> *SCIResolverSelectorHints(void) {
     return @[
         @"open", @"openWithConfig", @"initWithConfig", @"userSession", @"deviceSession", @"logger",
         @"settings", @"sections", @"items", @"rows", @"builder", @"coordinator", @"route",
-        @"developer", @"employee", @"dogfood", @"override", @"eligibility", @"config"
+        @"developer", @"employee", @"dogfood", @"override", @"eligibility", @"config",
+        @"quick", @"snap", @"instant"
+    ];
+}
+
+static NSArray<NSString *> *SCIExactClassNames(void) {
+    return @[
+        @"IGDogfoodingSettings.IGDogfoodingSettings",
+        @"IGDogfoodingSettings.IGDogfoodingSettingsViewController",
+        @"IGDogfoodingSettings.IGDogfoodingSettingsSelectionViewController",
+        @"IGDogfoodingFirst.DogfoodingProductionLockoutViewController",
+        @"IGDogfoodingSettingsConfig",
+        @"IGDogfooderProd",
+        @"IGDogfoodingLogger",
+        @"DogfoodingEligibilityQueryBuilder",
+        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"MetaLocalExperiment",
+        @"FamilyLocalExperiment",
+        @"LIDLocalExperiment",
+        @"LIDExperimentGenerator",
+        @"FDIDExperimentGenerator",
+        @"MetaLocalExperimentListViewController",
+        @"MetaLocalExperimentDetailViewController",
+        @"IGMobileConfigContextManager",
+        @"IGMobileConfigUserSessionContextManager",
+        @"IGMobileConfigSessionlessContextManager",
+        @"FBMobileConfigContextManager"
     ];
 }
 
@@ -65,13 +91,15 @@ static BOOL SCIIsUIViewControllerClass(Class cls) {
     return NO;
 }
 
-static NSArray<NSString *> *SCIMatchingMethods(Class cls, NSArray<NSString *> *keys, NSUInteger max) {
+static NSArray<NSString *> *SCIMatchingMethodsOnClass(Class cls, NSArray<NSString *> *keys, BOOL classMethods, NSUInteger max) {
     if (!cls) return @[];
     NSMutableArray<NSString *> *out = [NSMutableArray array];
     NSMutableArray<NSString *> *allKeys = [keys mutableCopy];
     [allKeys addObjectsFromArray:SCIResolverSelectorHints()];
+
+    Class scan = classMethods ? object_getClass(cls) : cls;
     unsigned int count = 0;
-    Method *methods = class_copyMethodList(cls, &count);
+    Method *methods = class_copyMethodList(scan, &count);
     if (methods) {
         for (unsigned int i = 0; i < count; i++) {
             SEL sel = method_getName(methods[i]);
@@ -81,7 +109,7 @@ static NSArray<NSString *> *SCIMatchingMethods(Class cls, NSArray<NSString *> *k
             if (!SCIContainsAny(name, allKeys)) continue;
             const char *types = method_getTypeEncoding(methods[i]);
             NSString *type = types ? [NSString stringWithUTF8String:types] : @"";
-            [out addObject:[NSString stringWithFormat:@"%@ types=%@", name, type]];
+            [out addObject:[NSString stringWithFormat:@"%@%@ types=%@", classMethods ? @"+" : @"-", name, type]];
             if (max && out.count >= max) break;
         }
         free(methods);
@@ -114,11 +142,11 @@ static NSArray<NSString *> *SCIMatchingIvars(Class cls, NSArray<NSString *> *key
 
 static NSInteger SCIScoreClass(Class cls, NSArray<NSString *> *keys, NSArray<NSString *> **methodsOut, NSArray<NSString *> **ivarsOut) {
     NSString *name = SCIClassName(cls);
-    NSArray<NSString *> *methods = SCIMatchingMethods(cls, keys, 16);
+    NSArray<NSString *> *methods = [[SCIMatchingMethodsOnClass(cls, keys, NO, 14) arrayByAddingObjectsFromArray:SCIMatchingMethodsOnClass(cls, keys, YES, 14)] copy];
     NSArray<NSString *> *ivars = SCIMatchingIvars(cls, keys, 12);
     NSInteger score = 0;
     if (SCIContainsAny(name, keys)) score += 60;
-    score += MIN(48, (NSInteger)methods.count * 8);
+    score += MIN(72, (NSInteger)methods.count * 8);
     score += MIN(24, (NSInteger)ivars.count * 4);
     if (SCIIsUIViewControllerClass(cls)) score += 20;
     if ([name containsString:@"."]) score += 5;
@@ -128,6 +156,18 @@ static NSInteger SCIScoreClass(Class cls, NSArray<NSString *> *keys, NSArray<NSS
     return score;
 }
 
+static NSDictionary *SCIDictForClass(Class cls, NSInteger score, NSArray *methods, NSArray *ivars) {
+    return @{
+        @"score": @(score),
+        @"name": SCIClassName(cls),
+        @"super": SCIClassName(class_getSuperclass(cls)),
+        @"image": SCIImageName(cls),
+        @"vc": @(SCIIsUIViewControllerClass(cls)),
+        @"methods": methods ?: @[],
+        @"ivars": ivars ?: @[]
+    };
+}
+
 static NSArray<NSDictionary *> *SCIRankedCandidates(NSArray<NSString *> *keys, NSUInteger limit) {
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return @[];
@@ -135,23 +175,17 @@ static NSArray<NSDictionary *> *SCIRankedCandidates(NSArray<NSString *> *keys, N
     if (!classes) return @[];
     count = objc_getClassList(classes, count);
     NSMutableArray<NSDictionary *> *results = [NSMutableArray array];
+
     for (int i = 0; i < count; i++) {
         Class cls = classes[i];
         NSArray *methods = nil;
         NSArray *ivars = nil;
         NSInteger score = SCIScoreClass(cls, keys, &methods, &ivars);
-        if (score < 25) continue;
-        [results addObject:@{
-            @"score": @(score),
-            @"name": SCIClassName(cls),
-            @"super": SCIClassName(class_getSuperclass(cls)),
-            @"image": SCIImageName(cls),
-            @"vc": @(SCIIsUIViewControllerClass(cls)),
-            @"methods": methods ?: @[],
-            @"ivars": ivars ?: @[]
-        }];
+        if (score < 15) continue;
+        [results addObject:SCIDictForClass(cls, score, methods, ivars)];
     }
     free(classes);
+
     [results sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         NSInteger sa = [a[@"score"] integerValue];
         NSInteger sb = [b[@"score"] integerValue];
@@ -172,6 +206,27 @@ static void *SCIDlsymFlexible(NSString *sym) {
     return dlsym(RTLD_DEFAULT, under.UTF8String);
 }
 
+static NSString *SCIExactClassReport(void) {
+    NSMutableString *out = [NSMutableString string];
+    [out appendString:@"Exact class check\n\n"];
+
+    for (NSString *name in SCIExactClassNames()) {
+        Class cls = NSClassFromString(name) ?: objc_getClass(name.UTF8String);
+        [out appendFormat:@"%@ · %@\n", cls ? @"FOUND" : @"missing", name];
+        if (cls) {
+            [out appendFormat:@"  super=%@ UIViewController=%@ image=%@\n",
+             SCIClassName(class_getSuperclass(cls)),
+             SCIIsUIViewControllerClass(cls) ? @"YES" : @"NO",
+             SCIImageName(cls)];
+            NSArray *im = SCIMatchingMethodsOnClass(cls, SCIResolverDogKeywords(), NO, 16);
+            NSArray *cm = SCIMatchingMethodsOnClass(cls, SCIResolverDogKeywords(), YES, 16);
+            for (NSString *m in cm) [out appendFormat:@"  %@\n", m];
+            for (NSString *m in im) [out appendFormat:@"  %@\n", m];
+        }
+    }
+    return out;
+}
+
 static NSString *SCISymbolReport(void) {
     NSArray<NSString *> *symbols = @[
         @"_IGMobileConfigBooleanValueForInternalUse",
@@ -187,21 +242,23 @@ static NSString *SCISymbolReport(void) {
         @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
         @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
         @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
-        @"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock",
-        @"_MEMMobileConfigFeatureCapabilityGetBoolean_Internal_DoNotUseOrMock",
-        @"_MEMMobileConfigFeatureDevConfigGetBoolean_Internal_DoNotUseOrMock",
-        @"_MEMMobileConfigPlatformGetBoolean",
-        @"_MEMMobileConfigProtocolExperimentGetBoolean_Internal_DoNotUseOrMock",
         @"_ig_is_employee",
         @"_ig_is_employee_or_test_user",
         @"_ig_dogfooding_first_client",
         @"_xav_switcher_ig_ios_test_user_check_fdid",
         @"_kIGDeviceReportFBUserIsEmployeeKey",
         @"_METAAppGroupNameDeveloperAccount",
-        @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"
+        @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
+        @"_ig_ios_quick_snap",
+        @"_ig_ios_quick_snap_nux_v2",
+        @"_ig_ios_quicksnap_navigation_v3",
+        @"_ig_ios_quicksnap_consumption_v2",
+        @"_ig_ios_quicksnap_consumption_stack_improvements",
+        @"_ig_ios_instants_widget",
+        @"_ig_instants_hide"
     ];
     NSMutableString *out = [NSMutableString string];
-    [out appendString:@"MobileConfig / EasyGating / employee symbol availability\n"];
+    [out appendString:@"MobileConfig / EasyGating / QuickSnap symbol availability\n"];
     [out appendString:@"mode = dlsym(RTLD_DEFAULT), flexible underscore handling\n\n"];
     for (NSString *sym in symbols) {
         void *addr = SCIDlsymFlexible(sym);
@@ -214,6 +271,8 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
     NSMutableString *out = [NSMutableString string];
     [out appendFormat:@"%@\n", title];
     [out appendString:@"mode = view-only; no hooks, no alloc/init, no KVC, no entrypoint invocation\n\n"];
+    [out appendFormat:@"candidateCount=%lu\n\n", (unsigned long)candidates.count];
+
     NSUInteger i = 1;
     for (NSDictionary *e in candidates) {
         [out appendFormat:@"%lu. score=%@ %@\n", (unsigned long)i, e[@"score"], e[@"name"]];
@@ -222,7 +281,7 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
         NSArray *methods = e[@"methods"];
         if (methods.count) {
             [out appendString:@"   methods:\n"];
-            for (NSString *m in methods) [out appendFormat:@"     - %@\n", m];
+            for (NSString *m in methods) [out appendFormat:@"     %@\n", m];
         }
         NSArray *ivars = e[@"ivars"];
         if (ivars.count) {
@@ -239,7 +298,11 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
 
 + (NSString *)runDogfoodDeveloperReport {
     @autoreleasepool {
-        return SCIFormatCandidates(@"SCI Resolver — Dogfood / Developer / MetaConfig candidates", SCIRankedCandidates(SCIResolverDogKeywords(), 100));
+        NSMutableString *out = [NSMutableString string];
+        [out appendString:SCIExactClassReport()];
+        [out appendString:@"\n==============================\n\n"];
+        [out appendString:SCIFormatCandidates(@"SCI Resolver — Dogfood / Developer / MetaConfig candidates", SCIRankedCandidates(SCIResolverDogKeywords(), 140))];
+        return out;
     }
 }
 
@@ -247,7 +310,7 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
     @autoreleasepool {
         NSMutableString *out = [NSMutableString stringWithString:SCISymbolReport()];
         [out appendString:@"\nMobileConfig/EasyGating runtime-visible class candidates\n\n"];
-        [out appendString:SCIFormatCandidates(@"Class candidates", SCIRankedCandidates(SCIResolverMCKeywords(), 80))];
+        [out appendString:SCIFormatCandidates(@"Class candidates", SCIRankedCandidates(SCIResolverMCKeywords(), 120))];
         return out;
     }
 }
