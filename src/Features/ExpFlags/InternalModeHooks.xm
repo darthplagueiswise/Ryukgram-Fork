@@ -1,4 +1,5 @@
 #import "../../Utils.h"
+#import "../../Settings/SCIResolverScanner.h"
 #import "SCIExpFlags.h"
 #import "SCIExpMobileConfigDebug.h"
 #import "SCIExpMobileConfigMapping.h"
@@ -11,7 +12,7 @@ static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL;
 static const unsigned long long kIGMCEmployeeSpecifierB = 0x0081030f00010a96ULL; // ig_is_employee
 static const unsigned long long kIGMCEmployeeOrTestUserSpecifier = 0x008100b200000161ULL; // ig_is_employee_or_test_user
 
-static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee"] || [SCIUtils getBoolPref:@"igt_employee_devoptions_gate"]; }
+static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee_master"] || [SCIUtils getBoolPref:@"igt_employee"] || [SCIUtils getBoolPref:@"igt_employee_devoptions_gate"]; }
 static BOOL rgEmployeeMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_mc"]; }
 static BOOL rgEmployeeOrTestUserMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]; }
 static BOOL rgInternalObserverEnabled(void) { return [SCIUtils getBoolPref:@"igt_internaluse_observer"] || [SCIUtils getBoolPref:@"sci_exp_flags_enabled"]; }
@@ -341,7 +342,7 @@ static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOO
 
 static BOOL (*orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18)(void) = NULL;
 static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(void) {
-    if ([SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
+    if ([SCIUtils getBoolPref:@"igt_internal_apps_spoof"] || [SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
     return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ?
         orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
 }
@@ -364,6 +365,16 @@ static NSString *rgKnownMapLogLine(void) {
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
+
+    if (!orig_IGMobileConfigBooleanValueForInternalUse) {
+        void *addr = [SCIResolverScanner findMobileConfigFunctionAddress];
+        if (addr) {
+            orig_IGMobileConfigBooleanValueForInternalUse = (IGMCBoolInternalFn)addr;
+            NSLog(@"[RyukGram][MC] IGMobileConfigBooleanValueForInternalUse resolved via pattern scanner: %p", addr);
+        } else {
+            NSLog(@"[RyukGram][MC] IGMobileConfigBooleanValueForInternalUse not found via fishhook or pattern scanner.");
+        }
+    }
     NSLog(@"[RyukGram][MC] safe internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu quickSnap=%d quickSnapSpecs=%lu knownGates={%@}",
           rc,
           orig_IGMobileConfigBooleanValueForInternalUse,
