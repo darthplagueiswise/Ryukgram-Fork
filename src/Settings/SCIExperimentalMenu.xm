@@ -1,6 +1,7 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
 #import "SCIResolverReportViewController.h"
+#import "SCIExpFlags.h"   // ← ADD THIS LINE
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
