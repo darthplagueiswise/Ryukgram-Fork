@@ -9,6 +9,16 @@
 
 @implementation SCIResolverReportViewController
 
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+    self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
+    if (self) {
+        _kind = SCIResolverReportKindFull;
+        _reportTitle = @"SCI Resolver";
+        self.title = _reportTitle;
+    }
+    return self;
+}
+
 - (instancetype)initWithKind:(SCIResolverReportKind)kind title:(NSString *)title {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
@@ -38,7 +48,7 @@
 
 - (void)runReport {
     SCIResolverReportKind kind = self.kind;
-    __weak typeof(self) weakSelf = self;
+    SCIResolverReportViewController *target = self;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *report = @"";
         if (kind == SCIResolverReportKindDogfoodDeveloper) {
@@ -50,9 +60,7 @@
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
-            self.textView.text = report ?: @"(empty report)";
+            target.textView.text = report ?: @"(empty report)";
         });
     });
 }
