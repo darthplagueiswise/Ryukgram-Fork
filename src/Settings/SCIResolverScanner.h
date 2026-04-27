@@ -1,15 +1,13 @@
 #import <Foundation/Foundation.h>
 
-NS_ASSUME_NONNULL_BEGIN
-
 @class SCIResolverSpecifierEntry;
+
+NS_ASSUME_NONNULL_BEGIN
 
 @interface SCIResolverScanner : NSObject
 
 + (void *)findPattern:(NSString *)patternMask inSegment:(NSString *)segmentName;
 + (void *)findMobileConfigFunctionAddress;
-
-+ (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries;
 
 + (NSString *)runDogfoodDeveloperReport;
 + (NSString *)runMobileConfigSymbolReport;
@@ -19,6 +17,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)removeOverrideForSpecifier:(unsigned long long)specifier;
 + (NSDictionary<NSNumber *, NSNumber *> *)allResolverOverrides;
 + (void)clearAllResolverOverrides;
+
++ (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries;
 
 @end
 

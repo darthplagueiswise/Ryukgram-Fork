@@ -2,10 +2,10 @@
 // Tabs: Browser(native) | Meta(override) | MC(view) | Scanned/InternalUse(override) | Overrides
 
 #import "SCIExpFlagsViewController.h"
-#import "SCIResolverScanner.h"
-#import "SCIResolverSpecifierEntry.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Utils.h"
+#import "SCIResolverScanner.h"
+#import "SCIResolverSpecifierEntry.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -230,12 +230,12 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 - (NSArray *)filteredInternalRows {
     NSArray<SCIExpInternalUseObservation *> *obs = [SCIExpFlags allInternalUseObservations] ?: @[];
     NSMutableArray *rows = [obs mutableCopy];
-    
+
     NSMutableSet<NSNumber *> *observedSpecs = [NSMutableSet set];
     for (SCIExpInternalUseObservation *o in obs) {
         [observedSpecs addObject:@(o.specifier)];
     }
-    
+
     for (SCIResolverSpecifierEntry *e in self.resolverEntries) {
         if (![observedSpecs containsObject:@(e.specifier)]) {
             [rows addObject:e];
@@ -255,7 +255,7 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
             effective = (ov == SCIExpFlagOverrideTrue);
             isChanged = (ov != SCIExpFlagOverrideOff);
         }
-        
+
         switch (self.internalCategory) {
             case SCIInternalUseCategoryHot:     return NO;
             case SCIInternalUseCategoryChanged: return !isChanged;
@@ -269,6 +269,19 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 
     if (self.internalCategory == SCIInternalUseCategoryRecent) {
         [rows sortUsingComparator:^NSComparisonResult(id a, id b) {
+            NSUInteger orderA = [a isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)a).lastSeenOrder : 0;
+            NSUInteger orderB = [b isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)b).lastSeenOrder : 0;
+            if (orderA != orderB) return orderA > orderB ? NSOrderedAscending : NSOrderedDescending;
+            NSUInteger hitA = [a isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)a).hitCount : 0;
+            NSUInteger hitB = [b isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)b).hitCount : 0;
+            if (hitA != hitB) return hitA > hitB ? NSOrderedAscending : NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+    } else if (self.internalCategory == SCIInternalUseCategoryChanged) {
+        [rows sortUsingComparator:^NSComparisonResult(id a, id b) {
+            NSUInteger hitA = [a isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)a).hitCount : 0;
+            NSUInteger hitB = [b isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)b).hitCount : 0;
+            if (hitA != hitB) return hitA > hitB ? NSOrderedAscending : NSOrderedDescending;
             NSUInteger orderA = [a isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)a).lastSeenOrder : 0;
             NSUInteger orderB = [b isKindOfClass:[SCIExpInternalUseObservation class]] ? ((SCIExpInternalUseObservation *)b).lastSeenOrder : 0;
             if (orderA != orderB) return orderA > orderB ? NSOrderedAscending : NSOrderedDescending;
