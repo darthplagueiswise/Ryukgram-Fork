@@ -1,6 +1,6 @@
 // Exp flag override store + observation logs.
-// Override works only for MetaLocalExperiment (name-substring match on _experimentName).
-// MC reads + scanned names are view-only — no reliable name→ID mapping.
+// MetaLocalExperiment overrides are substring based.
+// MobileConfig reads are name-resolved through mobileconfig/id_name_mapping.json and can be selectively overridden by param id.
 
 #import <Foundation/Foundation.h>
 
@@ -26,7 +26,13 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 @interface SCIExpMCObservation : NSObject
 @property (nonatomic, assign) unsigned long long paramID;
 @property (nonatomic, assign) SCIExpMCType type;
+@property (nonatomic, copy) NSString *resolvedName;
+@property (nonatomic, copy) NSString *source;
+@property (nonatomic, copy) NSString *contextClass;
+@property (nonatomic, copy) NSString *selectorName;
 @property (nonatomic, copy) NSString *lastDefault;
+@property (nonatomic, copy) NSString *lastOriginalValue;
+@property (nonatomic, copy) NSString *overrideValue;
 @property (nonatomic, assign) NSUInteger hitCount;
 @end
 
@@ -53,6 +59,12 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 + (NSArray<SCIExpObservation *> *)allObservations;
 
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
++ (void)recordMCParamID:(unsigned long long)pid
+                   type:(SCIExpMCType)t
+           defaultValue:(NSString *)def
+          originalValue:(NSString *)original
+           contextClass:(NSString *)contextClass
+           selectorName:(NSString *)selectorName;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
