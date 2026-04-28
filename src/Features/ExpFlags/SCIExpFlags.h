@@ -59,12 +59,6 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 + (NSArray<SCIExpObservation *> *)allObservations;
 
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
-+ (void)recordMCParamID:(unsigned long long)pid
-                   type:(SCIExpMCType)t
-           defaultValue:(NSString *)def
-          originalValue:(NSString *)original
-           contextClass:(NSString *)contextClass
-           selectorName:(NSString *)selectorName;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
 + (void)recordInternalUseSpecifier:(unsigned long long)specifier
@@ -82,6 +76,15 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 + (BOOL)checkAndHandleCrashLoop;
 + (void)markLaunchStable;
 
+@end
+
+@interface SCIExpFlags (MobileConfigRuntime)
++ (void)recordMCParamID:(unsigned long long)pid
+                   type:(SCIExpMCType)t
+           defaultValue:(NSString *)def
+          originalValue:(NSString *)original
+           contextClass:(NSString *)contextClass
+           selectorName:(NSString *)selectorName;
 @end
 
 @interface SCIExpFlags (InternalUseOverrides)
