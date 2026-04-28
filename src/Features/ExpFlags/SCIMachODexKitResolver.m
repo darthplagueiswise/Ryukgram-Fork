@@ -1,6 +1,7 @@
 #import "SCIMachODexKitResolver.h"
 #import "SCIExpMobileConfigMapping.h"
 #import "SCIExpCallsiteResolver.h"   // for SCIExpDescribeCallsite fallback
+#import "SCIFBSharedKnownMCGroups.inc"
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
@@ -9,7 +10,7 @@
 @implementation SCIMachODexKitResolvedName
 @end
 
-// MARK: - Helpers (style compatible with existing RG* functions)
+// MARK: - Helpers
 
 static NSString *SCIBaseName(const char *path) {
     if (!path) return @"?";
@@ -18,7 +19,18 @@ static NSString *SCIBaseName(const char *path) {
 }
 
 static BOOL SCILooksLikeMCSpecifier(unsigned long long value) {
-    return value != 0 && ((value >> 56) == 0) && ((value >> 48) != 0);
+    if (value == 0) return NO;
+
+    // The FBSharedFramework(26) dump shows real MobileConfig specifiers mostly as:
+    //   0x00 0x81/0x82/0x83/0x84 ...
+    //   0x20 0x81 ...
+    // while broad checks also catch rebased pointers and literal garbage.
+    // Keep this intentionally strict for dlsym arrays to avoid poisoning the map.
+    unsigned int b0 = (unsigned int)((value >> 56) & 0xff);
+    unsigned int b1 = (unsigned int)((value >> 48) & 0xff);
+    BOOL familyLooksValid = (b1 >= 0x81 && b1 <= 0x84);
+    BOOL prefixLooksValid = (b0 == 0x00 || b0 == 0x20);
+    return prefixLooksValid && familyLooksValid;
 }
 
 static int64_t SCISignExtend(uint64_t value, int bits) {
@@ -29,7 +41,9 @@ static int64_t SCISignExtend(uint64_t value, int bits) {
 static BOOL SCIAddrInRanges(uintptr_t addr, NSArray<NSValue *> *ranges) {
     for (NSValue *v in ranges) {
         NSRange r = v.rangeValue;
-        if (addr >= (uintptr_t)r.location && addr < (uintptr_t)r.location + (uintptr_t)r.length) return YES;
+        uintptr_t start = (uintptr_t)r.location;
+        uintptr_t end = start + (uintptr_t)r.length;
+        if (addr >= start && addr < end) return YES;
     }
     return NO;
 }
@@ -37,6 +51,25 @@ static BOOL SCIAddrInRanges(uintptr_t addr, NSArray<NSValue *> *ranges) {
 static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uintptr_t end) {
     if (!start || end <= start) return;
     [ranges addObject:[NSValue valueWithRange:NSMakeRange((NSUInteger)start, (NSUInteger)(end - start))]];
+}
+
+static void *SCIDlsymFlexible(const char *symbol) {
+    if (!symbol || !symbol[0]) return NULL;
+
+    void *ptr = dlsym(RTLD_DEFAULT, symbol);
+    if (ptr) return ptr;
+
+    if (symbol[0] != '_') {
+        char underscored[512];
+        snprintf(underscored, sizeof(underscored), "_%s", symbol);
+        ptr = dlsym(RTLD_DEFAULT, underscored);
+        if (ptr) return ptr;
+    } else {
+        ptr = dlsym(RTLD_DEFAULT, symbol + 1);
+        if (ptr) return ptr;
+    }
+
+    return NULL;
 }
 
 // MARK: - Image Info
@@ -93,8 +126,8 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
         [self.images removeAllObjects];
         [self.specifierNames removeAllObjects];
         [self.reports removeAllObjects];
-        [self buildIndexIfNeeded];
     }
+    [self buildIndexIfNeeded];
 }
 
 - (NSDictionary<NSNumber *, NSString *> *)allKnownSpecifierNames {
@@ -129,14 +162,14 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
         return [self makeResult:mapped source:@"MobileConfigMapping" confidence:@"exact" specifier:specifier];
     }
 
-    // 2. Data symbol correlation (Mach-O)
+    // 2. dlsym/data-symbol correlation (high confidence)
     NSString *symbolName = nil;
     @synchronized (self) { symbolName = self.specifierNames[@(specifier)]; }
     if (symbolName.length) {
-        return [self makeResult:symbolName source:@"Mach-O data symbol" confidence:@"high" specifier:specifier];
+        return [self makeResult:symbolName source:@"dlsym/Mach-O data symbol" confidence:@"high" specifier:specifier];
     }
 
-    // 3. Existing callsite string xref (good fallback)
+    // 3. Existing callsite string xref (fallback)
     if (callerAddress) {
         NSString *caller = SCIExpDescribeCallsite(callerAddress);
         if (caller.length && ![caller isEqualToString:@"unknown"]) {
@@ -161,6 +194,7 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
     }
 
     [self enumerateImages];
+    [self buildSpecifierMapFromKnownDlsymSymbols];
     [self buildSpecifierMapFromDataSymbols];
     [self addHardcodedSafetySpecifiers];
 
@@ -174,7 +208,7 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
 - (BOOL)shouldIndexImage:(NSString *)name {
     if (!name.length) return NO;
     NSString *l = name.lowercaseString;
-    return [l containsString:@"instagram"] || [l containsString:@"fbsharedframework"];
+    return [l containsString:@"instagram"] || [l containsString:@"fbsharedframework"] || [l containsString:@"fbsharedmodules"] || [l containsString:@"sharedmodules"];
 }
 
 - (void)enumerateImages {
@@ -260,6 +294,77 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
     }
 }
 
+- (BOOL)addressIsInKnownDataRanges:(uintptr_t)address {
+    for (SCIMachOImageInfo *img in self.images) {
+        if (SCIAddrInRanges(address, img.dataRanges)) return YES;
+    }
+    return NO;
+}
+
+- (BOOL)addSpecifier:(unsigned long long)specifier name:(NSString *)name source:(NSString *)source replaceWeak:(BOOL)replaceWeak {
+    if (!SCILooksLikeMCSpecifier(specifier) || !name.length) return NO;
+
+    NSNumber *key = @(specifier);
+    @synchronized (self) {
+        NSString *existing = self.specifierNames[key];
+        BOOL weak = !existing.length || [existing hasPrefix:@"unknown"] || [existing hasPrefix:@"callsite"];
+        if (!existing.length || (replaceWeak && weak)) {
+            self.specifierNames[key] = name;
+            [self.reports addObject:[NSString stringWithFormat:@"[DexKit] %@ 0x%016llx → %@", source ?: @"specifier", specifier, name]];
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (void)buildSpecifierMapFromKnownDlsymSymbols {
+    unsigned int groupsResolved = 0;
+    unsigned int specsResolved = 0;
+    unsigned int groupsMissing = 0;
+
+    for (unsigned int g = 0; g < kSCIFBSharedPriorityMCGroupsCount; g++) {
+        const SCIDlsymKnownMCGroup group = kSCIFBSharedPriorityMCGroups[g];
+        void *ptr = SCIDlsymFlexible(group.symbol);
+        if (!ptr) {
+            groupsMissing++;
+            continue;
+        }
+
+        groupsResolved++;
+        unsigned long long *values = (unsigned long long *)ptr;
+        unsigned int count = group.count;
+        if (count > 256) count = 256;
+
+        unsigned int groupAdded = 0;
+        for (unsigned int i = 0; i < count; i++) {
+            uintptr_t slot = (uintptr_t)&values[i];
+            if (![self addressIsInKnownDataRanges:slot]) break;
+
+            unsigned long long specifier = values[i];
+            if (!SCILooksLikeMCSpecifier(specifier)) continue;
+
+            NSString *name = (i == 0)
+                ? [NSString stringWithUTF8String:group.symbol]
+                : [NSString stringWithFormat:@"%s[%u]", group.symbol, i];
+            NSString *source = [NSString stringWithFormat:@"dlsym:%s group=%s", group.symbol, group.group ?: "unknown"];
+            if ([self addSpecifier:specifier name:name source:source replaceWeak:YES]) {
+                groupAdded++;
+                specsResolved++;
+            }
+        }
+
+        @synchronized (self) {
+            [self.reports addObject:[NSString stringWithFormat:@"[DexKit] dlsym group %s count=%u added=%u ptr=%p group=%s",
+                                     group.symbol, group.count, groupAdded, ptr, group.group ?: "unknown"]];
+        }
+    }
+
+    @synchronized (self) {
+        [self.reports addObject:[NSString stringWithFormat:@"[DexKit] dlsym priority groups resolved=%u missing=%u specifiersAdded=%u",
+                                 groupsResolved, groupsMissing, specsResolved]];
+    }
+}
+
 - (void)buildSpecifierMapFromDataSymbols {
     for (SCIMachOImageInfo *img in self.images) {
         if (!img.linkeditBase || !img.symoff || !img.stroff || !img.nsyms) continue;
@@ -268,6 +373,10 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
         const char *strtab = (const char *)(img.linkeditBase + img.stroff);
 
         for (uint32_t i = 0; i < img.nsyms; i++) {
+            uint8_t type = symbols[i].n_type;
+            if (type & N_STAB) continue;
+            if ((type & N_TYPE) != N_SECT) continue;
+
             uint32_t strx = symbols[i].n_un.n_strx;
             if (!strx) continue;
             const char *raw = strtab + strx;
@@ -276,18 +385,19 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
             NSString *sym = [NSString stringWithUTF8String:raw];
             if (!sym.length) continue;
 
-            // Only interesting symbols
             NSString *l = sym.lowercaseString;
             if (![l hasPrefix:@"_ig_"] && ![l hasPrefix:@"_fb_"] &&
-                ![l containsString:@"quick_snap"] && ![l containsString:@"employee"] &&
-                ![l containsString:@"dogfood"] && ![l containsString:@"internal"]) continue;
+                ![l containsString:@"quick_snap"] && ![l containsString:@"quicksnap"] &&
+                ![l containsString:@"employee"] && ![l containsString:@"dogfood"] &&
+                ![l containsString:@"internal"] && ![l containsString:@"notes"] &&
+                ![l containsString:@"friend_map"] && ![l containsString:@"instants"] &&
+                ![l containsString:@"homecoming"] && ![l containsString:@"prism"]) continue;
 
             uintptr_t addr = (uintptr_t)(symbols[i].n_value + img.slide);
             if (!SCIAddrInRanges(addr, img.dataRanges)) continue;
 
             NSString *clean = [sym hasPrefix:@"_"] ? [sym substringFromIndex:1] : sym;
 
-            // Scan up to 96 following uint64_t looking for specifiers
             for (NSUInteger idx = 0; idx < 96; idx++) {
                 uintptr_t p = addr + idx * sizeof(unsigned long long);
                 if (!SCIAddrInRanges(p, img.dataRanges)) break;
@@ -300,13 +410,8 @@ static void SCIAddRange(NSMutableArray<NSValue *> *ranges, uintptr_t start, uint
                 }
 
                 NSString *resolved = (idx == 0) ? clean : [NSString stringWithFormat:@"%@[%lu]", clean, (unsigned long)idx];
-
-                @synchronized (self) {
-                    if (!self.specifierNames[@(value)]) {
-                        self.specifierNames[@(value)] = resolved;
-                        [self.reports addObject:[NSString stringWithFormat:@"[DexKit] symbol %@ 0x%016llx → %@", img.name, value, resolved]];
-                    }
-                }
+                NSString *source = [NSString stringWithFormat:@"LC_SYMTAB:%@", img.name ?: @"image"];
+                [self addSpecifier:value name:resolved source:source replaceWeak:NO];
             }
         }
     }
