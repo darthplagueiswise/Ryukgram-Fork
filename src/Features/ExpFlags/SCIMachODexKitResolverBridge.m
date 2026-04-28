@@ -2,10 +2,6 @@
 #import "SCIMachODexKitResolver.h"
 #import <objc/runtime.h>
 
-// Bridge used to resolve InternalUse gate names at the recording source without
-// touching the hook callsites. This enriches both SCI Resolver and the legacy
-// Experimental Flags Browser because both read from SCIExpFlags observations.
-
 typedef void (*SCIRecordInternalUseIMP)(id,
                                         SEL,
                                         unsigned long long,
@@ -62,5 +58,5 @@ __attribute__((constructor)) static void SCIInstallMachODexKitResolverBridge(voi
 
     orig_SCIRecordInternalUse = (SCIRecordInternalUseIMP)method_setImplementation(method, (IMP)hook_SCIRecordInternalUse);
 
-    NSLog(@"[RyukGram][MachODexKit] InternalUse resolver bridge installed");
+    NSLog(@"[RyukGram][MachoDex] InternalUse resolver bridge installed");
 }
