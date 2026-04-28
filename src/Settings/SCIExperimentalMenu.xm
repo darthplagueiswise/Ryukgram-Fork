@@ -8,6 +8,9 @@
 
 static NSArray *(*orig_sections_exp)(id, SEL);
 
+// ====================== FORWARD DECLARATION ======================
+static void applyInternalOverridesForToggle(NSString *key, BOOL on);
+
 // ====================== HELPER FUNCTIONS ======================
 static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
     return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
@@ -79,6 +82,24 @@ static void RYDevCallOpenSelector(NSString *selectorName) {
     [top presentViewController:alert animated:YES completion:nil];
 }
 
+// ====================== INTERNAL OVERRIDE LOGIC ======================
+static void applyInternalOverridesForToggle(NSString *key, BOOL on) {
+    SCIExpFlagOverride o = on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideOff;
+
+    if ([key isEqualToString:@"igt_employee_master"] ||
+        [key isEqualToString:@"igt_employee"] ||
+        [key isEqualToString:@"igt_employee_mc"] ||
+        [key isEqualToString:@"igt_employee_or_test_user_mc"]) {
+
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00000a95ULL];
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00010a96ULL];
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x008100b200000161ULL];
+    }
+    else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
+        // TODO: Add real specifier ID when discovered via SCI Resolver
+    }
+}
+
 // ====================== EXPERIMENTAL NAV SECTIONS ======================
 static NSArray *experimentalNavSections(void) {
     return @[
@@ -120,24 +141,6 @@ static NSArray *experimentalNavSections(void) {
             ]
         }
     ];
-}
-
-// ====================== INTERNAL OVERRIDE LOGIC ======================
-static void applyInternalOverridesForToggle(NSString *key, BOOL on) {
-    SCIExpFlagOverride o = on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideOff;
-
-    if ([key isEqualToString:@"igt_employee_master"] ||
-        [key isEqualToString:@"igt_employee"] ||
-        [key isEqualToString:@"igt_employee_mc"] ||
-        [key isEqualToString:@"igt_employee_or_test_user_mc"]) {
-
-        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00000a95ULL];
-        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00010a96ULL];
-        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x008100b200000161ULL];
-    }
-    else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
-        // TODO: Add real specifier when discovered
-    }
 }
 
 // ====================== DEV TESTS NAV SECTIONS (PROFESSIONAL) ======================
