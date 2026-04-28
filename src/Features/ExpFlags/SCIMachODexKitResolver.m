@@ -762,7 +762,7 @@ static void *SCIDlsymFlexible(NSString *symbolName) {
 
     for (NSUInteger idx = 0; idx < maxItems; idx++) {
         uintptr_t slot = address + idx * sizeof(unsigned long long);
-        if (![self addressIsReadableData:slot)) break;
+        if (![self addressIsReadableData:slot]) break;
 
         unsigned long long value = *(const unsigned long long *)slot;
 
