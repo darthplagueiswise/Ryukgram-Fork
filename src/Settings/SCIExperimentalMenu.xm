@@ -1,426 +1,399 @@
-#import "../../Utils.h"
-#import "../../Settings/SCIResolverScanner.h"
-#import "SCIExpFlags.h"
-#import "SCIExpMobileConfigDebug.h"
-#import "SCIExpMobileConfigMapping.h"
-#import <Foundation/Foundation.h>
+#import "TweakSettings.h"
+#import "SCIExpFlagsViewController.h"
+#import "SCIResolverReportViewController.h"
+#import "../Features/ExpFlags/SCIExpFlags.h"
+#import <objc/runtime.h>
 #import <objc/message.h>
-#import <dlfcn.h>
-#include "../../../modules/fishhook/fishhook.h"
+#import <substrate.h>
 
-static const unsigned long long kIGMCEmployeeSpecifierA = 0x0081030f00000a95ULL;
-static const unsigned long long kIGMCEmployeeSpecifierB = 0x0081030f00010a96ULL;
-static const unsigned long long kIGMCEmployeeOrTestUserSpecifier = 0x008100b200000161ULL;
+static NSArray *(*orig_sections_exp)(id, SEL);
 
-static BOOL rgEmployeeMasterEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee_master"] || [SCIUtils getBoolPref:@"igt_employee"] || [SCIUtils getBoolPref:@"igt_employee_devoptions_gate"]; }
-static BOOL rgEmployeeMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_mc"]; }
-static BOOL rgEmployeeOrTestUserMCEnabled(void) { return rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]; }
-static BOOL rgInternalObserverEnabled(void) { return [SCIUtils getBoolPref:@"igt_internaluse_observer"] || [SCIUtils getBoolPref:@"sci_exp_flags_enabled"]; }
-static BOOL rgQuickSnapEnabled(void) { return [SCIUtils getBoolPref:@"igt_quicksnap"]; }
-
-static BOOL rgHasManualInternalUseOverrides(void) { return [SCIExpFlags allOverriddenInternalUseSpecifiers].count > 0; }
-
-static BOOL rgShouldInstallInternalModeHooks(void) {
-    return rgEmployeeMasterEnabled() ||
-           rgEmployeeMCEnabled() ||
-           rgEmployeeOrTestUserMCEnabled() ||
-           rgQuickSnapEnabled() ||
-           [SCIUtils getBoolPref:@"igt_internal_apps_gate"] ||
-           rgInternalObserverEnabled() ||
-           rgHasManualInternalUseOverrides();
+// ====================== HELPER FUNCTIONS ======================
+static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
+    return [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
 }
 
-static void *rgDLSym(const char *symbol) {
-    if (!symbol || !symbol[0]) return NULL;
-    void *p = dlsym(RTLD_DEFAULT, symbol);
-    if (p) return p;
-    char underscored[256];
-    snprintf(underscored, sizeof(underscored), "_%s", symbol);
-    return dlsym(RTLD_DEFAULT, underscored);
-}
-
-static BOOL rgLooksLikeMCSpecifier(unsigned long long v) {
-    return v != 0 && ((v >> 56) == 0) && ((v >> 48) != 0);
-}
-
-static void rgAddMCSpecifierSymbol(NSMutableDictionary<NSNumber *, NSString *> *map,
-                                   const char *symbol,
-                                   NSString *label,
-                                   NSUInteger count) {
-    unsigned long long *values = (unsigned long long *)rgDLSym(symbol);
-    if (!values) return;
-    for (NSUInteger i = 0; i < count; i++) {
-        unsigned long long spec = values[i];
-        if (!rgLooksLikeMCSpecifier(spec)) continue;
-        NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
-        map[@(spec)] = name;
-    }
-}
-
-static void rgAddQuickSnapSpecifierSymbol(NSMutableDictionary<NSNumber *, NSString *> *nameMap,
-                                          NSMutableDictionary<NSNumber *, NSNumber *> *returnMap,
-                                          const char *symbol,
-                                          NSString *label,
-                                          NSUInteger count,
-                                          BOOL forcedReturn) {
-    unsigned long long *values = (unsigned long long *)rgDLSym(symbol);
-    if (!values) return;
-
-    NSUInteger valid = 0;
-    for (NSUInteger i = 0; i < count; i++) {
-        unsigned long long spec = values[i];
-        if (!rgLooksLikeMCSpecifier(spec)) continue;
-
-        NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
-        nameMap[@(spec)] = name;
-        returnMap[@(spec)] = @(forcedReturn);
-        valid++;
-    }
-
-    if ([SCIUtils getBoolPref:@"igt_internaluse_observer"]) {
-        NSLog(@"[RyukGram][QuickSnapMC] loaded %lu/%lu specifiers from %s forced=%d",
-              (unsigned long)valid, (unsigned long)count, symbol, forcedReturn);
-    }
-}
-
-static void rgAddKnownQuickSnapGroups(NSMutableDictionary<NSNumber *, NSString *> *nameMap,
-                                      NSMutableDictionary<NSNumber *, NSNumber *> *returnMap) {
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_instants_hide", @"ig_instants_hide", 1, NO);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_audience", @"ig_ios_quick_snap_audience", 5, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_burst_photos", @"ig_ios_quick_snap_burst_photos", 4, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_camera_capture_animation", @"ig_ios_quick_snap_camera_capture_animation", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_classification", @"ig_ios_quick_snap_classification", 3, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_extend_expiration", @"ig_ios_quick_snap_extend_expiration", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_gallery_send", @"ig_ios_quick_snap_gallery_send", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_moods", @"ig_ios_quick_snap_moods", 6, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_new_audience_picker", @"ig_ios_quick_snap_new_audience_picker", 3, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_new_zoom_animation", @"ig_ios_quick_snap_new_zoom_animation", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_archive", @"ig_ios_quicksnap_archive", 6, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_consumption_button", @"ig_ios_quicksnap_consumption_button", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 19, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_consumption_v2", @"ig_ios_quicksnap_consumption_v2", 9, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_craft_improvements", @"ig_ios_quicksnap_craft_improvements", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_creation_preview", @"ig_ios_quicksnap_creation_preview", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_dual_camera", @"ig_ios_quicksnap_dual_camera", 4, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_gtm", @"ig_ios_quicksnap_gtm", 5, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_navigation_v3", @"ig_ios_quicksnap_navigation_v3", 9, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_perf_improvements", @"ig_ios_quicksnap_perf_improvements", 7, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_profile", @"ig_ios_quicksnap_profile", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_recap_improvements", @"ig_ios_quicksnap_recap_improvements", 6, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_story_deletion", @"ig_ios_quicksnap_story_deletion", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_undo_toast", @"ig_ios_quicksnap_undo_toast", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_valentines_activation", @"ig_ios_quicksnap_valentines_activation", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_wearables", @"ig_ios_quicksnap_wearables", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_infinite_archive", @"ig_ios_instants_infinite_archive", 2, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_tagging", @"ig_ios_instants_tagging", 1, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_upleveling_reactions", @"ig_ios_instants_upleveling_reactions", 3, YES);
-    rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_widget", @"ig_ios_instants_widget", 2, YES);
-}
-
-static NSDictionary<NSNumber *, NSNumber *> *rgQuickSnapSpecifierReturnMap(void) {
-    static NSDictionary<NSNumber *, NSNumber *> *map;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableDictionary<NSNumber *, NSString *> *names = [NSMutableDictionary dictionary];
-        NSMutableDictionary<NSNumber *, NSNumber *> *returns = [NSMutableDictionary dictionary];
-        rgAddKnownQuickSnapGroups(names, returns);
-        map = [returns copy];
-    });
-    return map;
-}
-
-static NSDictionary<NSNumber *, NSString *> *rgKnownInternalUseSpecifierMap(void) {
-    static NSDictionary<NSNumber *, NSString *> *map;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableDictionary<NSNumber *, NSString *> *m = [NSMutableDictionary dictionary];
-
-        rgAddMCSpecifierSymbol(m, "ig_is_employee", @"ig_is_employee", 2);
-        rgAddMCSpecifierSymbol(m, "ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1);
-        rgAddMCSpecifierSymbol(m, "xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1);
-        rgAddMCSpecifierSymbol(m, "ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1);
-        rgAddMCSpecifierSymbol(m, "ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1);
-
-        NSMutableDictionary<NSNumber *, NSNumber *> *quickSnapReturns = [NSMutableDictionary dictionary];
-        rgAddKnownQuickSnapGroups(m, quickSnapReturns);
-
-        m[@(kIGMCEmployeeSpecifierA)] = @"ig_is_employee[0]";
-        m[@(kIGMCEmployeeSpecifierB)] = @"ig_is_employee[1]";
-        m[@(kIGMCEmployeeOrTestUserSpecifier)] = @"ig_is_employee_or_test_user";
-        map = [m copy];
-    });
-    return map;
-}
-
-static NSString *rgKnownSpecifierName(unsigned long long specifier) {
-    return rgKnownInternalUseSpecifierMap()[@(specifier)];
-}
-
-static BOOL rgKnownNameLooksLikeEmployeeGate(NSString *name) {
-    NSString *n = name.lowercaseString ?: @"";
-    return [n containsString:@"employee"] ||
-           [n containsString:@"test_user"] ||
-           [n containsString:@"dogfood"] ||
-           [n containsString:@"dogfooding"] ||
-           [n containsString:@"xav_switcher"];
-}
-
-static BOOL specifierMatchesEmployee(unsigned long long specifier) {
-    NSString *known = rgKnownSpecifierName(specifier);
-    if (rgEmployeeMasterEnabled() && rgKnownNameLooksLikeEmployeeGate(known)) return YES;
-    if ((specifier == kIGMCEmployeeSpecifierA || specifier == kIGMCEmployeeSpecifierB) && rgEmployeeMCEnabled()) return YES;
-    if (specifier == kIGMCEmployeeOrTestUserSpecifier && rgEmployeeOrTestUserMCEnabled()) return YES;
-    if ([known containsString:@"ig_is_employee"] && rgEmployeeMCEnabled()) return YES;
-    if ([known containsString:@"ig_is_employee_or_test_user"] && rgEmployeeOrTestUserMCEnabled()) return YES;
-    return NO;
-}
-
-static BOOL specifierMatchesQuickSnap(unsigned long long specifier) {
-    return rgQuickSnapSpecifierReturnMap()[@(specifier)] != nil;
-}
-
-static NSString *specifierName(unsigned long long specifier) {
-    NSString *known = rgKnownSpecifierName(specifier);
-    if (known.length) return known;
-    if (specifier == kIGMCEmployeeSpecifierA || specifier == kIGMCEmployeeSpecifierB) return @"ig_is_employee";
-    if (specifier == kIGMCEmployeeOrTestUserSpecifier) return @"ig_is_employee_or_test_user";
-    return @"unknown";
-}
-
-static NSString *rgTrimmedUsefulString(id obj) {
-    if (!obj) return nil;
-    NSString *s = nil;
-    if ([obj isKindOfClass:[NSString class]]) s = (NSString *)obj;
-    else if ([obj respondsToSelector:@selector(description)]) s = [obj description];
-    if (!s.length) return nil;
-    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (!s.length || [s isEqualToString:@"(null)"] || [s isEqualToString:@"null"] || [s isEqualToString:@"0"]) return nil;
+static SCISetting *ExpOverrideSwitch(NSString *title, NSString *subtitle, NSString *key, BOOL restart) {
+    SCISetting *s = [SCISetting switchCellWithTitle:title subtitle:subtitle defaultsKey:key requiresRestart:restart];
+    s.action = ^{
+        BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:key];
+        applyInternalOverridesForToggle(key, on);
+    };
     return s;
 }
 
-static NSString *rgCallStringForSpecifier(id target, NSString *selectorName, unsigned long long specifier) {
-    if (!target || !selectorName.length) return nil;
-    SEL sel = NSSelectorFromString(selectorName);
-    if (![target respondsToSelector:sel]) return nil;
-    @try {
-        id (*send)(id, SEL, unsigned long long) = (id (*)(id, SEL, unsigned long long))objc_msgSend;
-        return rgTrimmedUsefulString(send(target, sel, specifier));
-    } @catch (__unused NSException *e) { return nil; }
+static UIViewController *RYDevTopViewControllerFrom(UIViewController *vc) {
+    UIViewController *cur = vc;
+    BOOL changed = YES;
+    while (cur && changed) {
+        changed = NO;
+        if ([cur isKindOfClass:UINavigationController.class]) {
+            UIViewController *next = ((UINavigationController *)cur).visibleViewController ?: ((UINavigationController *)cur).topViewController;
+            if (next && next != cur) { cur = next; changed = YES; continue; }
+        }
+        if ([cur isKindOfClass:UITabBarController.class]) {
+            UIViewController *next = ((UITabBarController *)cur).selectedViewController;
+            if (next && next != cur) { cur = next; changed = YES; continue; }
+        }
+        UIViewController *presented = cur.presentedViewController;
+        if (presented && presented != cur) { cur = presented; changed = YES; }
+    }
+    return cur;
 }
 
-static unsigned long long rgCallUInt64ForSpecifier(id target, NSString *selectorName, unsigned long long specifier) {
-    if (!target || !selectorName.length) return 0;
-    SEL sel = NSSelectorFromString(selectorName);
-    if (![target respondsToSelector:sel]) return 0;
-    @try {
-        unsigned long long (*send)(id, SEL, unsigned long long) = (unsigned long long (*)(id, SEL, unsigned long long))objc_msgSend;
-        return send(target, sel, specifier);
-    } @catch (__unused NSException *e) { return 0; }
-}
-
-static NSString *rgResolveWithMappingFile(unsigned long long specifier) {
-    NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
-    if (mapped.length) return mapped;
+static UIViewController *RYDevRootViewController(void) {
+    UIApplication *app = UIApplication.sharedApplication;
+    for (UIScene *scene in app.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.isKeyWindow && window.rootViewController) return window.rootViewController;
+        }
+    }
+    for (UIScene *scene in app.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.rootViewController) return window.rootViewController;
+        }
+    }
     return nil;
 }
 
-static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
-    NSString *hardcoded = specifierName(specifier);
-    if (![hardcoded isEqualToString:@"unknown"]) return hardcoded;
-
-    NSString *mapped = rgResolveWithMappingFile(specifier);
-    if (mapped.length) return mapped;
-
-    NSString *stable = rgCallStringForSpecifier(ctx, @"getStableIdFromParamSpecifier:", specifier);
-    if (stable.length) return stable;
-
-    NSString *latestLogging = rgCallStringForSpecifier(ctx, @"getLatestLoggingID:", specifier);
-    if (latestLogging.length) return [@"loggingID:" stringByAppendingString:latestLogging];
-
-    NSString *logging = rgCallStringForSpecifier(ctx, @"getLoggingID:", specifier);
-    if (logging.length) return [@"loggingID:" stringByAppendingString:logging];
-
-    unsigned long long translated = rgCallUInt64ForSpecifier(ctx, @"getTranslatedSpecifier:", specifier);
-    if (!translated) translated = rgCallUInt64ForSpecifier(ctx, @"_getTranslatedSpecifier:", specifier);
-    if (translated && translated != specifier) {
-        NSString *translatedName = rgResolveWithMappingFile(translated);
-        if (translatedName.length) return [NSString stringWithFormat:@"%@ (translated 0x%016llx)", translatedName, translated];
+static void RYDevCallOpenSelector(NSString *selectorName) {
+    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
+    SEL sel = NSSelectorFromString(selectorName);
+    if (top && [top respondsToSelector:sel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(top, sel, nil);
+        return;
     }
-    return @"unknown";
-}
 
-static BOOL applyInternalUseOverride(unsigned long long specifier, BOOL original) {
-    SCIExpFlagOverride manual = [SCIExpFlags internalUseOverrideForSpecifier:specifier];
-    if (manual == SCIExpFlagOverrideTrue) return YES;
-    if (manual == SCIExpFlagOverrideFalse) return NO;
-    if (specifierMatchesEmployee(specifier)) return YES;
-
-    if (rgQuickSnapEnabled()) {
-        NSNumber *forced = rgQuickSnapSpecifierReturnMap()[@(specifier)];
-        if (forced) return forced.boolValue;
+    id target = top ?: RYDevRootViewController();
+    if (target && [target respondsToSelector:sel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(target, sel, nil);
+        return;
     }
-    return original;
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Dogfood Opener"
+                                                                   message:[NSString stringWithFormat:@"Selector %@ not available. Check SCIDogfoodingMainLauncher.xm", selectorName]
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:alert animated:YES completion:nil];
 }
 
-static void recordInternalUseSpecifier(id ctx, NSString *funcName, unsigned long long specifier, BOOL defaultValue, BOOL originalValue, BOOL returnedValue, void *callerAddress) {
-    BOOL forced = (returnedValue != originalValue);
-    BOOL quickSnapMatch = specifierMatchesQuickSnap(specifier);
-    BOOL shouldRecord = rgInternalObserverEnabled() || forced || specifierMatchesEmployee(specifier) || quickSnapMatch || [SCIExpFlags internalUseOverrideForSpecifier:specifier] != SCIExpFlagOverrideOff;
-    if (!shouldRecord) return;
+// ====================== EXPERIMENTAL NAV SECTIONS ======================
+static NSArray *experimentalNavSections(void) {
+    return @[
+        @{
+            @"header": @"UI & Design",
+            @"footer": @"Experimental UI features and design system toggles.",
+            @"rows": @[
+                ExpSwitch(@"Liquid Glass Buttons", @"Enables experimental liquid glass button style", @"liquid_glass_buttons", YES),
+                ExpSwitch(@"Liquid Glass Surfaces", @"Enables liquid glass tab bar and floating navigation", @"liquid_glass_surfaces", YES),
+                ExpSwitch(@"Homecoming Navigation", @"Forces the new Homecoming navigation style", @"igt_homecoming", YES),
+                ExpSwitch(@"Prism Design System", @"Enables Prism design system experiments", @"igt_prism", NO),
+                ExpSwitch(@"Teen App Icons", @"Hold Instagram logo to change app icon", @"teen_app_icons", YES),
+                ExpSwitch(@"Disable Haptics", @"Completely disables haptics and vibrations", @"disable_haptics", NO)
+            ]
+        },
+        @{
+            @"header": @"Direct Notes & Inbox",
+            @"footer": @"QuickSnap and Direct Notes related experiments.",
+            @"rows": @[
+                ExpSwitch(@"QuickSnap", @"Enables QuickSnap helper and notes tray gates", @"igt_quicksnap", YES),
+                ExpSwitch(@"Direct Notes: FriendMap", @"Enables FriendMap / location notes", @"igt_directnotes_friendmap", YES),
+                ExpSwitch(@"Direct Notes: Audio Reply", @"Future Direct Notes audio reply hook", @"igt_directnotes_audio_reply", NO),
+                ExpSwitch(@"Direct Notes: Avatar Reply", @"Future Direct Notes avatar reply hook", @"igt_directnotes_avatar_reply", NO),
+                ExpSwitch(@"Direct Notes: GIFs/Stickers", @"Future Direct Notes GIFs and stickers reply", @"igt_directnotes_gifs_reply", NO),
+                ExpSwitch(@"Direct Notes: Photo Reply", @"Future Direct Notes photo reply hook", @"igt_directnotes_photo_reply", NO)
+            ]
+        },
+        @{
+            @"header": @"Feed & Navigation",
+            @"footer": @"Feed, tabs and navigation experiments.",
+            @"rows": @[
+                ExpSwitch(@"Reels First / Second", @"Dedicated toggle for future reels experiments", @"igt_reels_first", NO),
+                ExpSwitch(@"Friends Feed", @"Dedicated toggle for friends feed experiments", @"igt_friends_feed", NO),
+                ExpSwitch(@"Tab Swiping", @"Dedicated toggle for tab swiping experiments", @"igt_tab_swiping", NO),
+                ExpSwitch(@"Audio Ramping", @"Dedicated toggle for audio ramping on swipe", @"igt_audio_ramping", NO),
+                ExpSwitch(@"Feed Culling", @"Dedicated toggle for feed culling experiments", @"igt_feed_culling", NO),
+                ExpSwitch(@"Feed Dedup", @"Dedicated toggle for feed deduplication", @"igt_feed_dedup", NO),
+                ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to carrera experiment", @"igt_pull_to_carrera", NO)
+            ]
+        }
+    ];
+}
 
-    NSString *name = rgResolveSpecifierName(ctx, specifier);
-    [SCIExpFlags recordInternalUseSpecifier:specifier
-                               functionName:funcName
-                              specifierName:name
-                               defaultValue:defaultValue
-                                resultValue:returnedValue
-                                forcedValue:forced
-                              callerAddress:callerAddress];
+// ====================== INTERNAL OVERRIDE LOGIC ======================
+static void applyInternalOverridesForToggle(NSString *key, BOOL on) {
+    SCIExpFlagOverride o = on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideOff;
 
-    if ([SCIUtils getBoolPref:@"igt_internaluse_observer"]) {
-        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d quickSnapMatch=%d manual=%ld caller=%p",
-              funcName, specifier, name, defaultValue, originalValue, returnedValue, forced,
-              specifierMatchesEmployee(specifier), quickSnapMatch,
-              (long)[SCIExpFlags internalUseOverrideForSpecifier:specifier], callerAddress);
+    if ([key isEqualToString:@"igt_employee_master"] ||
+        [key isEqualToString:@"igt_employee"] ||
+        [key isEqualToString:@"igt_employee_mc"] ||
+        [key isEqualToString:@"igt_employee_or_test_user_mc"]) {
+
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00000a95ULL];
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x0081030f00010a96ULL];
+        [SCIExpFlags setInternalUseOverride:o forSpecifier:0x008100b200000161ULL];
+    }
+    else if ([key isEqualToString:@"igt_internal_apps_spoof"]) {
+        // TODO: Add real specifier when discovered
     }
 }
 
-// ====================== GENERIC HOOK TEMPLATE ======================
-typedef BOOL (*GenericMCBoolFn)(id, BOOL, unsigned long long);
-
-static BOOL genericHook(id ctx, BOOL defaultValue, unsigned long long specifier, GenericMCBoolFn orig, NSString *funcName) {
-    [SCIExpMobileConfigDebug noteContext:ctx source:funcName];
-    void *caller = __builtin_return_address(0);
-    BOOL original = orig ? orig(ctx, defaultValue, specifier) : defaultValue;
-    BOOL returned = applyInternalUseOverride(specifier, original);
-    recordInternalUseSpecifier(ctx, funcName, specifier, defaultValue, original, returned, caller);
-    return returned;
+// ====================== DEV TESTS NAV SECTIONS (PROFESSIONAL) ======================
+static NSArray *devTestsNavSections(void) {
+    return @[
+        // === CORE EMPLOYEE MODE ===
+        @{
+            @"header": @"Core Employee Mode",
+            @"footer": @"Most important toggles. These force internal/employee state across the app.",
+            @"rows": @[
+                ExpOverrideSwitch(@"Employee Master", 
+                    @"Master switch — forces ig_is_employee + ig_is_employee_or_test_user + all related gates", 
+                    @"igt_employee_master", YES),
+                
+                ExpOverrideSwitch(@"Employee Mode (Full)", 
+                    @"Complete employee unlock using fishhook + specifier overrides", 
+                    @"igt_employee", YES),
+                
+                ExpOverrideSwitch(@"Employee MobileConfig", 
+                    @"Forces all MobileConfig employee gates (use with Master)", 
+                    @"igt_employee_mc", YES),
+            ]
+        },
+        
+        // === ADVANCED GATES ===
+        @{
+            @"header": @"Advanced Internal Gates",
+            @"footer": @"Fine-grained control over specific internal features and developer options.",
+            @"rows": @[
+                ExpOverrideSwitch(@"Employee or Test User Gate", 
+                    @"Forces only the ig_is_employee_or_test_user specifier", 
+                    @"igt_employee_or_test_user_mc", YES),
+                
+                ExpSwitch(@"Developer Options Gate", 
+                    @"Unlocks the hidden Developer Options menu inside Instagram", 
+                    @"igt_employee_devoptions_gate", YES),
+                
+                ExpSwitch(@"Internal Mode", 
+                    @"Forces the igt_internal experiment flag", 
+                    @"igt_internal", YES),
+                
+                ExpOverrideSwitch(@"Internal Apps Spoof", 
+                    @"Spoofs internal apps detection (bypasses many restrictions)", 
+                    @"igt_internal_apps_spoof", YES),
+                
+                ExpSwitch(@"Internal Apps Gate", 
+                    @"Enables internal apps detection bypass", 
+                    @"igt_internal_apps_gate", YES),
+            ]
+        },
+        
+        // === OBSERVERS & DIAGNOSTICS ===
+        @{
+            @"header": @"Observers & Diagnostics",
+            @"footer": @"Logging and debugging tools. Enable when testing or reporting bugs.",
+            @"rows": @[
+                ExpSwitch(@"InternalUse Observer (Verbose)", 
+                    @"Logs every MobileConfig specifier call with full details", 
+                    @"igt_internaluse_observer", YES),
+                
+                ExpSwitch(@"Runtime MC Patcher (Master)", 
+                    @"Enables runtime patching of MobileConfig symbols (restart required)", 
+                    @"igt_runtime_mc_true_patcher", YES),
+                
+                ExpSwitch(@"Runtime MC Patcher (Relaxed)", 
+                    @"Skips some safety checks — advanced testing only", 
+                    @"igt_runtime_mc_true_patcher_relaxed", YES),
+            ]
+        },
+        
+        // === SPECIAL FEATURES ===
+        @{
+            @"header": @"Special Features",
+            @"footer": @"QuickSnap, Instants and other internal experimental features.",
+            @"rows": @[
+                ExpSwitch(@"QuickSnap / Instants Force", 
+                    @"Forces all QuickSnap and Instants experiment groups to enabled", 
+                    @"igt_quicksnap", YES),
+                
+                ExpSwitch(@"Screenshot Blocking", 
+                    @"Prevents screenshots in sensitive areas (experimental)", 
+                    @"igt_screenshot_block", NO),
+            ]
+        },
+        
+        // === TOOLS ===
+        @{
+            @"header": @"Tools & Resolvers",
+            @"footer": @"Native Instagram debug tools and our advanced resolver.",
+            @"rows": @[
+                [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
+                                       subtitle:@"Calls native Direct Notes dogfooding opener"
+                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
+                                         action:^{ RYDevCallOpenSelector(@"ryDogOpenNotesButtonTapped:"); }],
+                
+                [SCISetting buttonCellWithTitle:@"Open Main Dogfood Settings"
+                                       subtitle:@"Attempts native main dogfood settings path"
+                                           icon:[SCISymbol symbolWithName:@"pawprint.circle"]
+                                         action:^{ RYDevCallOpenSelector(@"ryDogOpenMainButtonTapped:"); }],
+                
+                [SCISetting navigationCellWithTitle:@"SCI Resolver"
+                                           subtitle:@"Advanced symbol & MobileConfig resolver (for developers)"
+                                               icon:[SCISymbol symbolWithName:@"magnifyingglass"]
+                                     viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindFull title:@"Full Resolver Report"]],
+            ]
+        },
+        
+        // === FLAGS BROWSER ===
+        @{
+            @"header": @"Flags Browser",
+            @"footer": @"MetaLocalExperiment and IGMobileConfig live browser.",
+            @"rows": @[
+                ExpSwitch(@"Enable Flags Browser Hooks", 
+                    @"Installs MetaLocalExperiment & MobileConfig observers (restart required)", 
+                    @"sci_exp_flags_enabled", YES),
+                
+                [SCISetting navigationCellWithTitle:@"Experimental Flags Browser"
+                                           subtitle:@"Browse and inspect all experiment flags in real time"
+                                               icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
+                                     viewController:[SCIExpFlagsViewController new]],
+            ]
+        }
+    ];
 }
 
-// ====================== SPECIFIC HOOKS ======================
-static GenericMCBoolFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
-static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_IGMobileConfigBooleanValueForInternalUse, @"IGMobileConfigBooleanValueForInternalUse");
-}
+// ====================== DUPLICATE CLEANING & FINAL ASSEMBLY ======================
+static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
+    if (![row isKindOfClass:[SCISetting class]]) return NO;
 
-static GenericMCBoolFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse = NULL;
-static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_IGMobileConfigSessionlessBooleanValueForInternalUse, @"IGMobileConfigSessionlessBooleanValueForInternalUse");
-}
+    NSString *title = row.title ?: @"";
+    NSString *subtitle = row.subtitle ?: @"";
+    NSString *key = row.defaultsKey ?: @"";
+    NSString *vcName = row.navViewController ? NSStringFromClass([row.navViewController class]) : @"";
 
-// New expanded hooks
-static GenericMCBoolFn orig_MCIMobileConfigGetBoolean = NULL;
-static BOOL hook_MCIMobileConfigGetBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MCIMobileConfigGetBoolean, @"MCIMobileConfigGetBoolean");
-}
+    if ([vcName isEqualToString:@"SCIExpFlagsViewController"]) return YES;
+    if ([key isEqualToString:@"sci_exp_flags_enabled"] || [key isEqualToString:@"sci_exp_mc_hooks_enabled"]) return YES;
 
-static GenericMCBoolFn orig_MCIExperimentCacheGetMobileConfigBoolean = NULL;
-static BOOL hook_MCIExperimentCacheGetMobileConfigBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MCIExperimentCacheGetMobileConfigBoolean, @"MCIExperimentCacheGetMobileConfigBoolean");
-}
-
-static GenericMCBoolFn orig_MCIExtensionExperimentCacheGetMobileConfigBoolean = NULL;
-static BOOL hook_MCIExtensionExperimentCacheGetMobileConfigBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MCIExtensionExperimentCacheGetMobileConfigBoolean, @"MCIExtensionExperimentCacheGetMobileConfigBoolean");
-}
-
-static GenericMCBoolFn orig_METAExtensionsExperimentGetBoolean = NULL;
-static BOOL hook_METAExtensionsExperimentGetBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_METAExtensionsExperimentGetBoolean, @"METAExtensionsExperimentGetBoolean");
-}
-
-static GenericMCBoolFn orig_METAExtensionsExperimentGetBooleanWithoutExposure = NULL;
-static BOOL hook_METAExtensionsExperimentGetBooleanWithoutExposure(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_METAExtensionsExperimentGetBooleanWithoutExposure, @"METAExtensionsExperimentGetBooleanWithoutExposure");
-}
-
-static GenericMCBoolFn orig_MSGCSessionedMobileConfigGetBoolean = NULL;
-static BOOL hook_MSGCSessionedMobileConfigGetBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MSGCSessionedMobileConfigGetBoolean, @"MSGCSessionedMobileConfigGetBoolean");
-}
-
-static GenericMCBoolFn orig_EasyGatingPlatformGetBoolean = NULL;
-static BOOL hook_EasyGatingPlatformGetBoolean(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_EasyGatingPlatformGetBoolean, @"EasyGatingPlatformGetBoolean");
-}
-
-static GenericMCBoolFn orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock = NULL;
-static BOOL hook_EasyGatingGetBoolean_Internal_DoNotUseOrMock(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock, @"EasyGatingGetBoolean_Internal_DoNotUseOrMock");
-}
-
-static GenericMCBoolFn orig_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock = NULL;
-static BOOL hook_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock");
-}
-
-static GenericMCBoolFn orig_MCQEasyGatingGetBooleanInternalDoNotUseOrMock = NULL;
-static BOOL hook_MCQEasyGatingGetBooleanInternalDoNotUseOrMock(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MCQEasyGatingGetBooleanInternalDoNotUseOrMock, @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock");
-}
-
-static GenericMCBoolFn orig_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter = NULL;
-static BOOL hook_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    return genericHook(ctx, defaultValue, specifier, orig_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, @"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter");
-}
-
-// Internal Apps spoof (unchanged)
-static BOOL (*orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18)(void) = NULL;
-static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(void) {
-    if ([SCIUtils getBoolPref:@"igt_internal_apps_spoof"] || [SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
-    return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ? orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
-}
-
-static NSString *rgKnownMapLogLine(void) {
-    NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    NSDictionary<NSNumber *, NSString *> *m = rgKnownInternalUseSpecifierMap();
-    for (NSNumber *n in [[m allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
-        [parts addObject:[NSString stringWithFormat:@"%@=0x%016llx", m[n], n.unsignedLongLongValue]];
+    NSString *joined = [[@[title, subtitle] componentsJoinedByString:@" "] lowercaseString];
+    if ([joined containsString:@"exp flags"] ||
+        [joined containsString:@"experimental flags"] ||
+        [joined containsString:@"flags browser"] ||
+        [joined containsString:@"mobileconfig browser"]) {
+        return YES;
     }
-    return [parts componentsJoinedByString:@", "];
+    return NO;
 }
 
-static void rgSyncInternalOverrides(void) {
-    if ([SCIUtils getBoolPref:@"igt_employee_master"]) {
-        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeSpecifierA];
-        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeSpecifierB];
-        [SCIExpFlags setInternalUseOverride:SCIExpFlagOverrideTrue forSpecifier:kIGMCEmployeeOrTestUserSpecifier];
+static void cleanAdvancedDuplicateRows(NSMutableArray *rows) {
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        SCISetting *row = [rows[i] isKindOfClass:[SCISetting class]] ? rows[i] : nil;
+        if (!row) continue;
+
+        if (![row.title isEqualToString:@"Advanced"]) continue;
+        NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
+        if (!navSections.count) continue;
+
+        NSMutableArray *cleanSections = [NSMutableArray array];
+        for (NSDictionary *section in navSections) {
+            if (![section isKindOfClass:[NSDictionary class]]) continue;
+
+            NSArray *sectionRows = [section[@"rows"] isKindOfClass:[NSArray class]] ? section[@"rows"] : nil;
+            NSMutableArray *cleanRows = [NSMutableArray array];
+
+            for (id item in sectionRows) {
+                SCISetting *setting = [item isKindOfClass:[SCISetting class]] ? item : nil;
+                if (setting && rowIsExpFlagsDuplicate(setting)) continue;
+                [cleanRows addObject:item];
+            }
+
+            NSString *header = [section[@"header"] isKindOfClass:[NSString class]] ? section[@"header"] : @"";
+            NSString *footer = [section[@"footer"] isKindOfClass:[NSString class]] ? section[@"footer"] : @"";
+            NSString *combined = [[@[header, footer] componentsJoinedByString:@" "] lowercaseString];
+            BOOL sectionLooksDuplicate = ([combined containsString:@"exp flags"] || [combined containsString:@"experimental flags"] || [combined containsString:@"flags browser"] || [combined containsString:@"mobileconfig browser"]);
+
+            if (sectionLooksDuplicate && cleanRows.count == 0) continue;
+
+            NSMutableDictionary *newSection = [section mutableCopy];
+            newSection[@"rows"] = cleanRows;
+            [cleanSections addObject:newSection];
+        }
+
+        row.navSections = cleanSections;
+        rows[i] = row;
     }
+}
+
+static NSDictionary *expDevTopSection(void) {
+    return @{
+        @"header": @"",
+        @"rows": @[
+            [SCISetting navigationCellWithTitle:@"Experimental"
+                                       subtitle:@"LiquidGlass, Homecoming, QuickSnap, Direct Notes and normal feature experiments"
+                                           icon:[SCISymbol symbolWithName:@"testtube.2"]
+                                    navSections:experimentalNavSections()],
+            [SCISetting navigationCellWithTitle:@"DEV Tests"
+                                       subtitle:@"MobileConfig, account/system gates, runtime MC symbols, resolver and flags browser"
+                                           icon:[SCISymbol symbolWithName:@"hammer"]
+                                    navSections:devTestsNavSections()]
+        ]
+    };
+}
+
+static NSArray *new_sections_exp(id self, SEL _cmd) {
+    NSArray *orig = orig_sections_exp ? orig_sections_exp(self, _cmd) : @[];
+    NSMutableArray *sections = [orig mutableCopy] ?: [NSMutableArray array];
+
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        NSDictionary *section = [sections[i] isKindOfClass:[NSDictionary class]] ? sections[i] : nil;
+        NSArray *rows = [section[@"rows"] isKindOfClass:[NSArray class]] ? section[@"rows"] : nil;
+        if (!rows.count) continue;
+
+        NSMutableArray *newRows = [rows mutableCopy];
+
+        for (NSInteger r = (NSInteger)newRows.count - 1; r >= 0; r--) {
+            id rowObj = newRows[(NSUInteger)r];
+            if (![rowObj isKindOfClass:[SCISetting class]]) continue;
+            SCISetting *row = (SCISetting *)rowObj;
+
+            if ([row.title isEqualToString:@"Experimental"] || [row.title isEqualToString:@"DEV Tests"]) {
+                return sections;
+            }
+
+            if ([row.title isEqualToString:@"General"]) {
+                NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
+                NSMutableArray *newNavSections = [NSMutableArray array];
+                for (NSDictionary *navSection in navSections) {
+                    NSString *header = [navSection[@"header"] isKindOfClass:[NSString class]] ? navSection[@"header"] : nil;
+                    if ([header isEqualToString:@"Experimental features"]) {
+                        continue;
+                    }
+                    [newNavSections addObject:navSection];
+                }
+                row.navSections = newNavSections;
+                newRows[(NSUInteger)r] = row;
+            }
+        }
+
+        cleanAdvancedDuplicateRows(newRows);
+
+        NSMutableDictionary *newSection = [section mutableCopy];
+        newSection[@"rows"] = newRows;
+        sections[i] = newSection;
+    }
+
+    NSUInteger insertIndex = sections.count;
+    if (insertIndex > 0) insertIndex -= 1;
+    [sections insertObject:expDevTopSection() atIndex:insertIndex];
+    return sections;
 }
 
 %ctor {
-    rgSyncInternalOverrides();
-    if (!rgShouldInstallInternalModeHooks()) return;
-
-    struct rebinding rebindings[] = {
-        {"IGMobileConfigBooleanValueForInternalUse", (void *)hook_IGMobileConfigBooleanValueForInternalUse, (void **)&orig_IGMobileConfigBooleanValueForInternalUse},
-        {"IGMobileConfigSessionlessBooleanValueForInternalUse", (void *)hook_IGMobileConfigSessionlessBooleanValueForInternalUse, (void **)&orig_IGMobileConfigSessionlessBooleanValueForInternalUse},
-
-        // === NEW EXPANDED HOOKS ===
-        {"MCIMobileConfigGetBoolean", (void *)hook_MCIMobileConfigGetBoolean, (void **)&orig_MCIMobileConfigGetBoolean},
-        {"MCIExperimentCacheGetMobileConfigBoolean", (void *)hook_MCIExperimentCacheGetMobileConfigBoolean, (void **)&orig_MCIExperimentCacheGetMobileConfigBoolean},
-        {"MCIExtensionExperimentCacheGetMobileConfigBoolean", (void *)hook_MCIExtensionExperimentCacheGetMobileConfigBoolean, (void **)&orig_MCIExtensionExperimentCacheGetMobileConfigBoolean},
-        {"METAExtensionsExperimentGetBoolean", (void *)hook_METAExtensionsExperimentGetBoolean, (void **)&orig_METAExtensionsExperimentGetBoolean},
-        {"METAExtensionsExperimentGetBooleanWithoutExposure", (void *)hook_METAExtensionsExperimentGetBooleanWithoutExposure, (void **)&orig_METAExtensionsExperimentGetBooleanWithoutExposure},
-        {"MSGCSessionedMobileConfigGetBoolean", (void *)hook_MSGCSessionedMobileConfigGetBoolean, (void **)&orig_MSGCSessionedMobileConfigGetBoolean},
-        {"EasyGatingPlatformGetBoolean", (void *)hook_EasyGatingPlatformGetBoolean, (void **)&orig_EasyGatingPlatformGetBoolean},
-        {"EasyGatingGetBoolean_Internal_DoNotUseOrMock", (void *)hook_EasyGatingGetBoolean_Internal_DoNotUseOrMock, (void **)&orig_EasyGatingGetBoolean_Internal_DoNotUseOrMock},
-        {"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", (void *)hook_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, (void **)&orig_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock},
-        {"MCQEasyGatingGetBooleanInternalDoNotUseOrMock", (void *)hook_MCQEasyGatingGetBooleanInternalDoNotUseOrMock, (void **)&orig_MCQEasyGatingGetBooleanInternalDoNotUseOrMock},
-        {"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", (void *)hook_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, (void **)&orig_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter},
-
-        {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
-    };
-
-    int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-
-    NSLog(@"[RyukGram][MC] Expanded internal-mode hooks rc=%d (total %lu functions)",
-          rc, sizeof(rebindings) / sizeof(rebindings[0]));
+    Class cls = NSClassFromString(@"SCITweakSettings");
+    if (!cls) return;
+    Class meta = object_getClass(cls);
+    if (!meta) return;
+    SEL sel = @selector(sections);
+    if (!class_getInstanceMethod(meta, sel)) return;
+    MSHookMessageEx(meta, sel, (IMP)new_sections_exp, (IMP *)&orig_sections_exp);
 }
