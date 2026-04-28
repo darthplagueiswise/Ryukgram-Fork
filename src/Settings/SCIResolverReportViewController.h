@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "../Features/ExpFlags/SCIExpFlags.h"
 
 typedef NS_ENUM(NSInteger, SCIResolverReportKind) {
     SCIResolverReportKindDogfoodDeveloper = 0,
