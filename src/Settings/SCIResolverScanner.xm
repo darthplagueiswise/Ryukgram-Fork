@@ -8,17 +8,36 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/getsect.h>
+#import <stdio.h>
+
+#pragma mark - Search keys
 
 static NSArray<NSString *> *SCIDogKeys(void) {
-    return @[@"dogfood", @"dogfooding", @"dogfooder", @"developer", @"internal", @"employee", @"override", @"eligibility", @"localexperiment", @"lidexperiment", @"quicksnap", @"quick_snap", @"instants"];
+    return @[
+        @"dogfood", @"dogfooding", @"dogfooder", @"developer", @"internal",
+        @"employee", @"override", @"eligibility", @"localexperiment", @"lidexperiment",
+        @"fdidexperiment", @"metalocalexperiment", @"quicksnap", @"quick_snap", @"instants"
+    ];
 }
 
 static NSArray<NSString *> *SCIMCKeys(void) {
-    return @[@"mobileconfig", @"igmobileconfig", @"fbmobileconfig", @"mcimobileconfig", @"mciexperiment", @"metaextensionsexperiment", @"msgcsessionedmobileconfig", @"easygating", @"mcqeasygating", @"mcddasmnative", @"internaluse", @"donotuseormock", @"quicksnap", @"quick_snap", @"instants"];
+    return @[
+        @"mobileconfig", @"igmobileconfig", @"fbmobileconfig", @"mcimobileconfig",
+        @"mciexperiment", @"metaextensionsexperiment", @"msgcsessionedmobileconfig",
+        @"easygating", @"mcqeasygating", @"mcddasmnative", @"internaluse",
+        @"donotuseormock", @"getbool", @"configmanager", @"parametertracker",
+        @"quicksnap", @"quick_snap", @"instants"
+    ];
 }
 
 static NSArray<NSString *> *SCISelectorKeys(void) {
-    return @[@"open", @"config", @"userSession", @"deviceSession", @"logger", @"settings", @"section", @"item", @"row", @"builder", @"coordinator", @"route", @"developer", @"employee", @"dogfood", @"override", @"eligibility", @"quick", @"snap", @"instant", @"getBool"];
+    return @[
+        @"open", @"config", @"userSession", @"deviceSession", @"logger", @"settings",
+        @"section", @"item", @"row", @"builder", @"coordinator", @"route",
+        @"developer", @"employee", @"dogfood", @"override", @"eligibility",
+        @"quick", @"snap", @"instant", @"getBool", @"withDefault", @"withOptions",
+        @"internal", @"mobileConfig", @"experiment", @"force", @"refresh"
+    ];
 }
 
 static NSArray<NSString *> *SCIExactClasses(void) {
@@ -52,6 +71,155 @@ static NSArray<NSString *> *SCIExactClasses(void) {
     ];
 }
 
+#pragma mark - Coverage model
+
+static NSArray<NSDictionary *> *SCIFunctionCoverageRows(void) {
+    return @[
+        @{
+            @"name": @"IGMobileConfigBooleanValueForInternalUse",
+            @"symbol": @"IGMobileConfigBooleanValueForInternalUse",
+            @"family": @"IG MobileConfig InternalUse",
+            @"hook": @"InternalModeHooks.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"ctx=x0 default=w1 specifier=x2",
+            @"notes": @"Known signature; per-specifier override supported."
+        },
+        @{
+            @"name": @"IGMobileConfigSessionlessBooleanValueForInternalUse",
+            @"symbol": @"IGMobileConfigSessionlessBooleanValueForInternalUse",
+            @"family": @"IG MobileConfig InternalUse",
+            @"hook": @"InternalModeHooks.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"ctx=x0 default=w1 specifier=x2",
+            @"notes": @"Known signature; per-specifier override supported."
+        },
+        @{
+            @"name": @"MCIMobileConfigGetBoolean",
+            @"symbol": @"MCIMobileConfigGetBoolean",
+            @"family": @"MCI MobileConfig",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred specifier=x2",
+            @"notes": @"Generic bool-return hook; records observed callsites."
+        },
+        @{
+            @"name": @"MCIExperimentCacheGetMobileConfigBoolean",
+            @"symbol": @"MCIExperimentCacheGetMobileConfigBoolean",
+            @"family": @"MCI Experiment Cache",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred specifier=x2",
+            @"notes": @"Generic bool-return hook; records observed callsites."
+        },
+        @{
+            @"name": @"MCIExtensionExperimentCacheGetMobileConfigBoolean",
+            @"symbol": @"MCIExtensionExperimentCacheGetMobileConfigBoolean",
+            @"family": @"MCI Extension Cache",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred specifier=x2",
+            @"notes": @"Generic bool-return hook; records observed callsites."
+        },
+        @{
+            @"name": @"METAExtensionsExperimentGetBoolean",
+            @"symbol": @"METAExtensionsExperimentGetBoolean",
+            @"family": @"META Extensions Experiment",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred gate=x1 exposure=w4=1",
+            @"notes": @"Exported wrapper; internal dispatcher sets exposure logging."
+        },
+        @{
+            @"name": @"METAExtensionsExperimentGetBooleanWithoutExposure",
+            @"symbol": @"METAExtensionsExperimentGetBooleanWithoutExposure",
+            @"family": @"META Extensions Experiment",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred gate=x1 exposure=w4=0",
+            @"notes": @"Exported wrapper; no exposure logging path."
+        },
+        @{
+            @"name": @"MSGCSessionedMobileConfigGetBoolean",
+            @"symbol": @"MSGCSessionedMobileConfigGetBoolean",
+            @"family": @"MSGC Sessioned MobileConfig",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred gate=x1",
+            @"notes": @"Session-aware bool-return hook."
+        },
+        @{
+            @"name": @"EasyGatingPlatformGetBoolean",
+            @"symbol": @"EasyGatingPlatformGetBoolean",
+            @"family": @"EasyGating",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"preferred gate=x1",
+            @"notes": @"Raw gate id may not look like IG MobileConfig specifier."
+        },
+        @{
+            @"name": @"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+            @"symbol": @"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+            @"family": @"EasyGating",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"gate=x0 default=x2",
+            @"notes": @"Raw gate id path."
+        },
+        @{
+            @"name": @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+            @"symbol": @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+            @"family": @"EasyGating AuthDataContext",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"gate=x1 default=x2 authDataContext=x3",
+            @"notes": @"Auth-data aware raw gate path."
+        },
+        @{
+            @"name": @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+            @"symbol": @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+            @"family": @"MCQ EasyGating",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"force via out pointer",
+            @"safe": @"PARTIAL",
+            @"arg": @"gate=w1 default=x3 result=*x4",
+            @"notes": @"Preserve status return; force only outValue."
+        },
+        @{
+            @"name": @"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
+            @"symbol": @"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
+            @"family": @"DASM/DVM Adapter",
+            @"hook": @"InternalGateObservers.xm",
+            @"mode": @"observe-only",
+            @"safe": @"NO_DIRECT_FORCE",
+            @"arg": @"VM stack adapter",
+            @"notes": @"Uses DVM/DASM support stack; direct BOOL return forcing is unsafe."
+        },
+        @{
+            @"name": @"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
+            @"symbol": @"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
+            @"family": @"Internal Apps Detection",
+            @"hook": @"InternalModeHooks.xm",
+            @"mode": @"forceable",
+            @"safe": @"YES",
+            @"arg": @"void -> BOOL",
+            @"notes": @"Controlled by internal apps spoof/gate."
+        }
+    ];
+}
+
+#pragma mark - Runtime helpers
+
 static NSString *SCIClassName(Class cls) {
     if (!cls) return @"(nil)";
     const char *n = class_getName(cls);
@@ -74,7 +242,9 @@ static BOOL SCIContainsAny(NSString *text, NSArray<NSString *> *keys) {
 
 static BOOL SCIIsVC(Class cls) {
     Class vc = UIViewController.class;
-    for (Class c = cls; c; c = class_getSuperclass(c)) if (c == vc) return YES;
+    for (Class c = cls; c; c = class_getSuperclass(c)) {
+        if (c == vc) return YES;
+    }
     return NO;
 }
 
@@ -123,17 +293,25 @@ static NSArray<NSString *> *SCIIvars(Class cls, NSUInteger max) {
 }
 
 static NSDictionary *SCIDict(Class cls, NSArray *keys) {
-    NSArray *im = SCIMethods(cls, NO, 14);
-    NSArray *cm = SCIMethods(cls, YES, 14);
-    NSArray *iv = SCIIvars(cls, 12);
+    NSArray *im = SCIMethods(cls, NO, 18);
+    NSArray *cm = SCIMethods(cls, YES, 18);
+    NSArray *iv = SCIIvars(cls, 14);
     NSString *name = SCIClassName(cls);
     NSInteger score = 0;
     if (SCIContainsAny(name, keys)) score += 60;
-    score += MIN(56, (NSInteger)(im.count + cm.count) * 7);
-    score += MIN(24, (NSInteger)iv.count * 4);
+    score += MIN(72, (NSInteger)(im.count + cm.count) * 8);
+    score += MIN(32, (NSInteger)iv.count * 4);
     if (SCIIsVC(cls)) score += 20;
-    if ([name containsString:@"Settings"] || [name containsString:@"Controller"] || [name containsString:@"Coordinator"]) score += 10;
-    return @{@"score": @(score), @"name": name, @"super": SCIClassName(class_getSuperclass(cls)), @"image": SCIImageName(cls), @"vc": @(SCIIsVC(cls)), @"methods": [cm arrayByAddingObjectsFromArray:im] ?: @[], @"ivars": iv ?: @[]};
+    if ([name containsString:@"Settings"] || [name containsString:@"Controller"] || [name containsString:@"Coordinator"] || [name containsString:@"Helper"]) score += 10;
+    return @{
+        @"score": @(score),
+        @"name": name,
+        @"super": SCIClassName(class_getSuperclass(cls)),
+        @"image": SCIImageName(cls),
+        @"vc": @(SCIIsVC(cls)),
+        @"methods": [cm arrayByAddingObjectsFromArray:im] ?: @[],
+        @"ivars": iv ?: @[]
+    };
 }
 
 static NSArray<NSDictionary *> *SCIRankedCandidates(NSArray<NSString *> *keys, NSUInteger limit) {
@@ -153,7 +331,6 @@ static NSArray<NSDictionary *> *SCIRankedCandidates(NSArray<NSString *> *keys, N
         if ([seen containsObject:name]) continue;
         [seen addObject:name];
         [results addObject:SCIDict(cls, keys)];
-        if (results.count >= limit) break;
     }
     free(classes);
 
@@ -164,6 +341,9 @@ static NSArray<NSDictionary *> *SCIRankedCandidates(NSArray<NSString *> *keys, N
         if (sa < sb) return NSOrderedDescending;
         return [a[@"name"] compare:b[@"name"]];
     }];
+    if (limit && results.count > limit) {
+        return [results subarrayWithRange:NSMakeRange(0, limit)];
+    }
     return results;
 }
 
@@ -175,43 +355,82 @@ static void *SCIDlsymFlexible(NSString *sym) {
     return dlsym(RTLD_DEFAULT, [[@"_" stringByAppendingString:sym] UTF8String]);
 }
 
+static BOOL SCILooksLikeMCSpecifier(unsigned long long spec) {
+    return spec != 0 && ((spec >> 56) == 0) && ((spec >> 48) != 0);
+}
+
+#pragma mark - Report formatting
+
 static NSString *SCIExactClassReport(void) {
-    NSMutableString *out = [NSMutableString stringWithString:@"Exact class check\nmode = bounded; no all-class method scan\n\n"];
+    NSMutableString *out = [NSMutableString stringWithString:@"Exact class check\nmode = bounded exact-class inspection\n\n"];
     for (NSString *name in SCIExactClasses()) {
         Class cls = NSClassFromString(name) ?: objc_getClass(name.UTF8String);
         [out appendFormat:@"%@ · %@\n", cls ? @"FOUND" : @"missing", name];
         if (!cls) continue;
         [out appendFormat:@"  super=%@ UIViewController=%@ image=%@\n", SCIClassName(class_getSuperclass(cls)), SCIIsVC(cls) ? @"YES" : @"NO", SCIImageName(cls)];
-        for (NSString *m in SCIMethods(cls, YES, 18)) [out appendFormat:@"  %@\n", m];
-        for (NSString *m in SCIMethods(cls, NO, 18)) [out appendFormat:@"  %@\n", m];
-        for (NSString *v in SCIIvars(cls, 12)) [out appendFormat:@"  ivar %@\n", v];
+        for (NSString *m in SCIMethods(cls, YES, 24)) [out appendFormat:@"  %@\n", m];
+        for (NSString *m in SCIMethods(cls, NO, 24)) [out appendFormat:@"  %@\n", m];
+        for (NSString *v in SCIIvars(cls, 16)) [out appendFormat:@"  ivar %@\n", v];
     }
     return out;
 }
 
-static NSString *SCISymbolReport(void) {
-    NSArray *symbols = @[
-        @"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse",
-        @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean",
-        @"_METAExtensionsExperimentGetBoolean", @"_METAExtensionsExperimentGetBooleanWithoutExposure",
-        @"_MSGCSessionedMobileConfigGetBoolean", @"_EasyGatingPlatformGetBoolean", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock",
-        @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
-        @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_ig_is_employee", @"_ig_is_employee_or_test_user",
-        @"_ig_dogfooding_first_client", @"_xav_switcher_ig_ios_test_user_check_fdid", @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
-        @"_ig_ios_quick_snap", @"_ig_ios_quick_snap_nux_v2", @"_ig_ios_quicksnap_navigation_v3", @"_ig_ios_quicksnap_consumption_v2",
-        @"_ig_ios_quicksnap_consumption_stack_improvements", @"_ig_ios_instants_widget", @"_ig_instants_hide"
-    ];
+static NSString *SCIFunctionCoverageReport(void) {
+    NSMutableString *out = [NSMutableString stringWithString:@"Function coverage matrix\nmode = dlsym + hook coverage map\n\n"];
+    for (NSDictionary *row in SCIFunctionCoverageRows()) {
+        NSString *symbol = row[@"symbol"];
+        void *addr = SCIDlsymFlexible(symbol);
+        [out appendFormat:@"%@ · %@ · %@\n", addr ? @"FOUND" : @"missing", row[@"name"], addr ? [NSString stringWithFormat:@"%p", addr] : @"0x0"];
+        [out appendFormat:@"  family=%@\n", row[@"family"]];
+        [out appendFormat:@"  hook=%@ mode=%@ safeForce=%@\n", row[@"hook"], row[@"mode"], row[@"safe"]];
+        [out appendFormat:@"  args=%@\n", row[@"arg"]];
+        [out appendFormat:@"  notes=%@\n", row[@"notes"]];
+    }
+    return out;
+}
+
+static NSString *SCISymbolAvailabilityReport(void) {
     NSMutableString *out = [NSMutableString stringWithString:@"MobileConfig / QuickSnap symbol availability\nmode = dlsym(RTLD_DEFAULT), flexible underscore handling\n\n"];
-    for (NSString *sym in symbols) {
+    for (NSDictionary *row in SCIFunctionCoverageRows()) {
+        NSString *sym = row[@"symbol"];
         void *addr = SCIDlsymFlexible(sym);
-        [out appendFormat:@"%@ · %@ · %p\n", addr ? @"FOUND" : @"missing", sym, addr];
+        [out appendFormat:@"%@ · _%@ · %p\n", addr ? @"FOUND" : @"missing", sym, addr];
+    }
+
+    NSArray *dataSymbols = @[
+        @"ig_is_employee", @"ig_is_employee_or_test_user", @"ig_dogfooding_first_client", @"xav_switcher_ig_ios_test_user_check_fdid",
+        @"ig_ios_home_coming_is_dogfooding_option_enabled",
+        @"ig_ios_quick_snap", @"ig_ios_quick_snap_nux_v2", @"ig_ios_quicksnap_navigation_v3", @"ig_ios_quicksnap_consumption_v2",
+        @"ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_instants_widget", @"ig_instants_hide"
+    ];
+    [out appendString:@"\nKnown data specifier symbols\n\n"];
+    for (NSString *sym in dataSymbols) {
+        void *addr = SCIDlsymFlexible(sym);
+        [out appendFormat:@"%@ · _%@ · %p\n", addr ? @"FOUND" : @"missing", sym, addr];
+    }
+    return out;
+}
+
+static NSString *SCIRuntimeObservationReport(void) {
+    NSMutableString *out = [NSMutableString stringWithString:@"Runtime observed gates\nmode = merged from SCIExpFlags live InternalUse observations\n\n"];
+    NSArray<SCIExpInternalUseObservation *> *obs = [SCIExpFlags allInternalUseObservations];
+    if (!obs.count) {
+        [out appendString:@"No runtime gates observed yet. Enable Flags Browser or Verbose Gate Logging, browse IG, then reopen this report.\n"];
+        return out;
+    }
+    for (SCIExpInternalUseObservation *o in obs) {
+        SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:o.specifier];
+        NSString *ovStr = ov == SCIExpFlagOverrideTrue ? @"FORCED ON" : ov == SCIExpFlagOverrideFalse ? @"FORCED OFF" : @"no override";
+        [out appendFormat:@"%@ · %@ · spec=0x%016llx\n", o.functionName ?: @"Gate", o.specifierName ?: @"unknown", o.specifier];
+        [out appendFormat:@"  default=%d result=%d forced=%d hits=%lu recent=%lu override=%@\n", o.defaultValue, o.resultValue, o.forcedValue, (unsigned long)o.hitCount, (unsigned long)o.lastSeenOrder, ovStr];
+        if (o.callerDescription.length) [out appendFormat:@"  caller=%@\n", o.callerDescription];
     }
     return out;
 }
 
 static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *candidates) {
     NSMutableString *out = [NSMutableString string];
-    [out appendFormat:@"%@\nmode = view-only; candidates are name-filtered before method/ivar inspection\n\ncandidateCount=%lu\n\n", title, (unsigned long)candidates.count];
+    [out appendFormat:@"%@\nmode = focused runtime class scan; name-filtered before method/ivar inspection\n\ncandidateCount=%lu\n\n", title, (unsigned long)candidates.count];
     NSUInteger i = 1;
     for (NSDictionary *e in candidates) {
         [out appendFormat:@"%lu. score=%@ %@\n", (unsigned long)i++, e[@"score"], e[@"name"]];
@@ -224,95 +443,136 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
     return out;
 }
 
+#pragma mark - Entry builder
+
+static void SCIAddEntry(NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map,
+                        unsigned long long spec,
+                        NSString *name,
+                        NSString *src,
+                        BOOL suggested) {
+    if (!spec) return;
+    SCIResolverSpecifierEntry *e = [SCIResolverSpecifierEntry new];
+    e.specifier = spec;
+    e.name = name.length ? name : [NSString stringWithFormat:@"unknown 0x%016llx", spec];
+    e.source = src.length ? src : @"resolver";
+    e.suggestedValue = suggested;
+
+    SCIResolverSpecifierEntry *existing = map[@(spec)];
+    if (existing) {
+        BOOL existingIsUnknown = !existing.name.length || [existing.name.lowercaseString containsString:@"unknown"];
+        BOOL newIsKnown = e.name.length && ![e.name.lowercaseString containsString:@"unknown"];
+        if (existingIsUnknown && newIsKnown) {
+            map[@(spec)] = e;
+        } else {
+            NSString *mergedSource = [NSString stringWithFormat:@"%@ + %@", existing.source ?: @"", e.source ?: @""];
+            existing.source = mergedSource;
+        }
+        return;
+    }
+    map[@(spec)] = e;
+}
+
+static void SCIAddSpecifierSymbol(NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map,
+                                  const char *symbol,
+                                  NSString *label,
+                                  NSUInteger count,
+                                  BOOL suggested) {
+    unsigned long long *values = (unsigned long long *)dlsym(RTLD_DEFAULT, symbol);
+    if (!values) {
+        char underscored[256];
+        snprintf(underscored, sizeof(underscored), "_%s", symbol);
+        values = (unsigned long long *)dlsym(RTLD_DEFAULT, underscored);
+    }
+    if (!values) return;
+    for (NSUInteger i = 0; i < count; i++) {
+        unsigned long long spec = values[i];
+        if (!SCILooksLikeMCSpecifier(spec)) continue;
+        NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
+        SCIAddEntry(map, spec, name, @"dlsym data symbol", suggested);
+    }
+}
+
 @implementation SCIResolverScanner
 
 + (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries {
-    static NSArray<SCIResolverSpecifierEntry *> *entries;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map = [NSMutableDictionary dictionary];
-        
-        void (^add)(unsigned long long, NSString *, NSString *, BOOL) = ^(unsigned long long spec, NSString *name, NSString *src, BOOL suggested) {
-            if (spec == 0) return;
-            SCIResolverSpecifierEntry *e = [SCIResolverSpecifierEntry new];
-            e.specifier = spec;
-            e.name = name;
-            e.source = src;
-            e.suggestedValue = suggested;
-            map[@(spec)] = e;
-        };
+    NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map = [NSMutableDictionary dictionary];
 
-        void (^addSymbol)(const char *, NSString *, NSUInteger, BOOL) = ^(const char *symbol, NSString *label, NSUInteger count, BOOL suggested) {
-            unsigned long long *values = (unsigned long long *)dlsym(RTLD_DEFAULT, symbol);
-            if (!values) {
-                char underscored[256];
-                snprintf(underscored, sizeof(underscored), "_%s", symbol);
-                values = (unsigned long long *)dlsym(RTLD_DEFAULT, underscored);
-            }
-            if (!values) return;
-            for (NSUInteger i = 0; i < count; i++) {
-                unsigned long long spec = values[i];
-                if (spec == 0 || ((spec >> 56) != 0) || ((spec >> 48) == 0)) continue;
-                NSString *name = count > 1 ? [NSString stringWithFormat:@"%@[%lu]", label, (unsigned long)i] : label;
-                add(spec, name, @"dlsym", suggested);
-            }
-        };
+    // Basic Employee / dogfood gates.
+    SCIAddSpecifierSymbol(map, "ig_is_employee", @"ig_is_employee", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1, YES);
+    SCIAddSpecifierSymbol(map, "xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1, YES);
 
-        // Basic Employee gates
-        addSymbol("ig_is_employee", @"ig_is_employee", 2, YES);
-        addSymbol("ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1, YES);
-        addSymbol("xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1, YES);
-        addSymbol("ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1, YES);
-        addSymbol("ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1, YES);
+    // QuickSnap / Instants data specifier groups.
+    SCIAddSpecifierSymbol(map, "ig_instants_hide", @"ig_instants_hide", 1, NO);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
+    SCIAddSpecifierSymbol(map, "ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_audience", @"ig_ios_quick_snap_audience", 5, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_burst_photos", @"ig_ios_quick_snap_burst_photos", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_camera_capture_animation", @"ig_ios_quick_snap_camera_capture_animation", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_classification", @"ig_ios_quick_snap_classification", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_extend_expiration", @"ig_ios_quick_snap_extend_expiration", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_gallery_send", @"ig_ios_quick_snap_gallery_send", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_moods", @"ig_ios_quick_snap_moods", 6, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_new_audience_picker", @"ig_ios_quick_snap_new_audience_picker", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_new_zoom_animation", @"ig_ios_quick_snap_new_zoom_animation", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_archive", @"ig_ios_quicksnap_archive", 6, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_button", @"ig_ios_quicksnap_consumption_button", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 19, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_v2", @"ig_ios_quicksnap_consumption_v2", 9, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_craft_improvements", @"ig_ios_quicksnap_craft_improvements", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_creation_preview", @"ig_ios_quicksnap_creation_preview", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_dual_camera", @"ig_ios_quicksnap_dual_camera", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_gtm", @"ig_ios_quicksnap_gtm", 5, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_navigation_v3", @"ig_ios_quicksnap_navigation_v3", 9, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_perf_improvements", @"ig_ios_quicksnap_perf_improvements", 7, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_profile", @"ig_ios_quicksnap_profile", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_recap_improvements", @"ig_ios_quicksnap_recap_improvements", 6, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_story_deletion", @"ig_ios_quicksnap_story_deletion", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_undo_toast", @"ig_ios_quicksnap_undo_toast", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_valentines_activation", @"ig_ios_quicksnap_valentines_activation", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_wearables", @"ig_ios_quicksnap_wearables", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_instants_infinite_archive", @"ig_ios_instants_infinite_archive", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_instants_tagging", @"ig_ios_instants_tagging", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_instants_upleveling_reactions", @"ig_ios_instants_upleveling_reactions", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_instants_widget", @"ig_ios_instants_widget", 2, YES);
 
-        // QuickSnap / Instants
-        addSymbol("ig_instants_hide", @"ig_instants_hide", 1, NO);
-        addSymbol("ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
-        addSymbol("ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
-        addSymbol("ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
-        addSymbol("ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
-        addSymbol("ig_ios_quick_snap_audience", @"ig_ios_quick_snap_audience", 5, YES);
-        addSymbol("ig_ios_quick_snap_burst_photos", @"ig_ios_quick_snap_burst_photos", 4, YES);
-        addSymbol("ig_ios_quick_snap_camera_capture_animation", @"ig_ios_quick_snap_camera_capture_animation", 1, YES);
-        addSymbol("ig_ios_quick_snap_classification", @"ig_ios_quick_snap_classification", 3, YES);
-        addSymbol("ig_ios_quick_snap_extend_expiration", @"ig_ios_quick_snap_extend_expiration", 1, YES);
-        addSymbol("ig_ios_quick_snap_gallery_send", @"ig_ios_quick_snap_gallery_send", 2, YES);
-        addSymbol("ig_ios_quick_snap_moods", @"ig_ios_quick_snap_moods", 6, YES);
-        addSymbol("ig_ios_quick_snap_new_audience_picker", @"ig_ios_quick_snap_new_audience_picker", 3, YES);
-        addSymbol("ig_ios_quick_snap_new_zoom_animation", @"ig_ios_quick_snap_new_zoom_animation", 1, YES);
-        addSymbol("ig_ios_quicksnap_archive", @"ig_ios_quicksnap_archive", 6, YES);
-        addSymbol("ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
-        addSymbol("ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
-        addSymbol("ig_ios_quicksnap_consumption_button", @"ig_ios_quicksnap_consumption_button", 1, YES);
-        addSymbol("ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 19, YES);
-        addSymbol("ig_ios_quicksnap_consumption_v2", @"ig_ios_quicksnap_consumption_v2", 9, YES);
-        addSymbol("ig_ios_quicksnap_craft_improvements", @"ig_ios_quicksnap_craft_improvements", 2, YES);
-        addSymbol("ig_ios_quicksnap_creation_preview", @"ig_ios_quicksnap_creation_preview", 2, YES);
-        addSymbol("ig_ios_quicksnap_dual_camera", @"ig_ios_quicksnap_dual_camera", 4, YES);
-        addSymbol("ig_ios_quicksnap_gtm", @"ig_ios_quicksnap_gtm", 5, YES);
-        addSymbol("ig_ios_quicksnap_navigation_v3", @"ig_ios_quicksnap_navigation_v3", 9, YES);
-        addSymbol("ig_ios_quicksnap_perf_improvements", @"ig_ios_quicksnap_perf_improvements", 7, YES);
-        addSymbol("ig_ios_quicksnap_profile", @"ig_ios_quicksnap_profile", 1, YES);
-        addSymbol("ig_ios_quicksnap_recap_improvements", @"ig_ios_quicksnap_recap_improvements", 6, YES);
-        addSymbol("ig_ios_quicksnap_story_deletion", @"ig_ios_quicksnap_story_deletion", 1, YES);
-        addSymbol("ig_ios_quicksnap_undo_toast", @"ig_ios_quicksnap_undo_toast", 2, YES);
-        addSymbol("ig_ios_quicksnap_valentines_activation", @"ig_ios_quicksnap_valentines_activation", 1, YES);
-        addSymbol("ig_ios_quicksnap_wearables", @"ig_ios_quicksnap_wearables", 2, YES);
-        addSymbol("ig_ios_instants_infinite_archive", @"ig_ios_instants_infinite_archive", 2, YES);
-        addSymbol("ig_ios_instants_tagging", @"ig_ios_instants_tagging", 1, YES);
-        addSymbol("ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
-        addSymbol("ig_ios_instants_upleveling_reactions", @"ig_ios_instants_upleveling_reactions", 3, YES);
-        addSymbol("ig_ios_instants_widget", @"ig_ios_instants_widget", 2, YES);
+    // Stable fallbacks for current FBSharedFramework builds.
+    SCIAddEntry(map, 0x0081030f00000a95ULL, @"ig_is_employee[0]", @"hardcoded fallback", YES);
+    SCIAddEntry(map, 0x0081030f00010a96ULL, @"ig_is_employee[1]", @"hardcoded fallback", YES);
+    SCIAddEntry(map, 0x008100b200000161ULL, @"ig_is_employee_or_test_user", @"hardcoded fallback", YES);
 
-        // Hardcoded fallbacks
-        add(0x0081030f00000a95ULL, @"ig_is_employee[0]", @"hardcoded", YES);
-        add(0x0081030f00010a96ULL, @"ig_is_employee[1]", @"hardcoded", YES);
-        add(0x008100b200000161ULL, @"ig_is_employee_or_test_user", @"hardcoded", YES);
+    // Merge runtime-observed gates from the Experimental Flags Browser pipeline.
+    // This is what makes SCI Resolver cover names discovered only after browsing the app.
+    for (SCIExpInternalUseObservation *o in [SCIExpFlags allInternalUseObservations]) {
+        if (!o.specifier) continue;
+        NSString *name = o.specifierName.length ? o.specifierName : [NSString stringWithFormat:@"%@ 0x%016llx", o.functionName ?: @"runtime gate", o.specifier];
+        NSString *source = [NSString stringWithFormat:@"runtime %@ ×%lu", o.functionName ?: @"Gate", (unsigned long)o.hitCount];
+        SCIAddEntry(map, o.specifier, name, source, o.resultValue);
+    }
 
-        entries = [[map allValues] sortedArrayUsingComparator:^NSComparisonResult(SCIResolverSpecifierEntry *a, SCIResolverSpecifierEntry *b) {
-            return [a.name compare:b.name];
-        }];
-    });
+    // Preserve manual overrides even if the gate has not appeared in runtime observations yet.
+    for (NSNumber *n in [SCIExpFlags allOverriddenInternalUseSpecifiers]) {
+        unsigned long long spec = n.unsignedLongLongValue;
+        SCIExpFlagOverride ov = [SCIExpFlags internalUseOverrideForSpecifier:spec];
+        NSString *name = [NSString stringWithFormat:@"manual override 0x%016llx", spec];
+        SCIAddEntry(map, spec, name, @"manual override", ov != SCIExpFlagOverrideFalse);
+    }
+
+    NSArray *entries = [[map allValues] sortedArrayUsingComparator:^NSComparisonResult(SCIResolverSpecifierEntry *a, SCIResolverSpecifierEntry *b) {
+        NSString *as = a.source ?: @"";
+        NSString *bs = b.source ?: @"";
+        BOOL ar = [as containsString:@"runtime"];
+        BOOL br = [bs containsString:@"runtime"];
+        if (ar != br) return ar ? NSOrderedAscending : NSOrderedDescending;
+        return [a.name compare:b.name];
+    }];
     return entries;
 }
 
@@ -323,6 +583,11 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
 
     uint8_t *pattern = (uint8_t *)malloc(patternLength);
     BOOL *mask = (BOOL *)malloc(patternLength);
+    if (!pattern || !mask) {
+        if (pattern) free(pattern);
+        if (mask) free(mask);
+        return NULL;
+    }
 
     for (NSUInteger i = 0; i < patternLength; i++) {
         NSString *comp = components[i];
@@ -330,7 +595,7 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
             pattern[i] = 0;
             mask[i] = NO;
         } else {
-            unsigned int val;
+            unsigned int val = 0;
             NSScanner *scanner = [NSScanner scannerWithString:comp];
             [scanner scanHexInt:&val];
             pattern[i] = (uint8_t)val;
@@ -345,12 +610,10 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
         const char *imageName = _dyld_get_image_name(i);
         if (!imageName) continue;
         NSString *imageNameStr = [NSString stringWithUTF8String:imageName];
-        if (![imageNameStr containsString:@"Instagram"] && ![imageNameStr containsString:@"FBSharedFramework"]) {
-            continue;
-        }
+        if (![imageNameStr containsString:@"Instagram"] && ![imageNameStr containsString:@"FBSharedFramework"]) continue;
 
         const struct mach_header_64 *header = (const struct mach_header_64 *)_dyld_get_image_header(i);
-        if (header->magic != MH_MAGIC_64) continue;
+        if (!header || header->magic != MH_MAGIC_64) continue;
 
         unsigned long size = 0;
         uint8_t *data = getsectiondata(header, "__TEXT", segmentName.UTF8String, &size);
@@ -381,13 +644,8 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
 }
 
 + (void *)findMobileConfigFunctionAddress {
-    // Assinatura ARM64 típica de IGMobileConfigBooleanValueForInternalUse
-    // Exemplo fictício, pois a assinatura real depende do binário.
-    // O usuário mencionou: "Implementado o método findMobileConfigFunctionAddress que usa a assinatura ARM64 típica de IGMobileConfigBooleanValueForInternalUse."
-    // Vamos usar um padrão genérico ou o que for apropriado. Como não foi fornecido o padrão exato, vou colocar um placeholder que pode ser ajustado ou um padrão comum de prólogo de função.
-    // Normalmente, funções começam com pacibsp, stp x29, x30, [sp, #-0x10]! etc.
-    // Vamos usar um padrão que represente isso ou deixar um comentário.
-    // Para fins de compilação e completude, usaremos um padrão de exemplo.
+    void *p = SCIDlsymFlexible(@"IGMobileConfigBooleanValueForInternalUse");
+    if (p) return p;
     NSString *pattern = @"ff 43 01 d1 fd 7b 01 a9 fd 43 00 91 ?? ?? ?? ?? ?? ?? ?? ??";
     return [self findPattern:pattern inSegment:@"__text"];
 }
@@ -397,16 +655,21 @@ static NSString *SCIFormatCandidates(NSString *title, NSArray<NSDictionary *> *c
         NSMutableString *out = [NSMutableString string];
         [out appendString:SCIExactClassReport()];
         [out appendString:@"\n==============================\n\n"];
-        [out appendString:SCIFormatCandidates(@"SCI Resolver — Dogfood / Developer / MetaConfig candidates", SCIRankedCandidates(SCIDogKeys(), 160))];
+        [out appendString:SCIFormatCandidates(@"SCI Resolver — Dogfood / Developer / MetaConfig candidates", SCIRankedCandidates(SCIDogKeys(), 220))];
         return out;
     }
 }
 
 + (NSString *)runMobileConfigSymbolReport {
     @autoreleasepool {
-        NSMutableString *out = [NSMutableString stringWithString:SCISymbolReport()];
+        NSMutableString *out = [NSMutableString string];
+        [out appendString:SCIFunctionCoverageReport()];
         [out appendString:@"\n==============================\n\n"];
-        [out appendString:SCIFormatCandidates(@"MobileConfig/EasyGating runtime-visible class candidates", SCIRankedCandidates(SCIMCKeys(), 160))];
+        [out appendString:SCISymbolAvailabilityReport()];
+        [out appendString:@"\n==============================\n\n"];
+        [out appendString:SCIRuntimeObservationReport()];
+        [out appendString:@"\n==============================\n\n"];
+        [out appendString:SCIFormatCandidates(@"MobileConfig/EasyGating runtime-visible class candidates", SCIRankedCandidates(SCIMCKeys(), 260))];
         return out;
     }
 }
