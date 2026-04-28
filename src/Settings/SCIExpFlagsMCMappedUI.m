@@ -87,11 +87,11 @@
     }]];
     if (o.type == SCIExpMCTypeBool) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Force TRUE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-            [SCIMobileConfigMapping setOverrideObject:@YES forParamID:o.paramID typeName:type name:name];
+            [SCIMobileConfigMapping setOverrideObject:@(YES) forParamID:o.paramID typeName:type name:name];
             [self refresh];
         }]];
         [sheet addAction:[UIAlertAction actionWithTitle:@"Force FALSE" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-            [SCIMobileConfigMapping setOverrideObject:@NO forParamID:o.paramID typeName:type name:name];
+            [SCIMobileConfigMapping setOverrideObject:@(NO) forParamID:o.paramID typeName:type name:name];
             [self refresh];
         }]];
     }
