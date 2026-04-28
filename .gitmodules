@@ -1,3 +1,6 @@
 [submodule "modules/FLEXing"]
 	path = modules/FLEXing
 	url = https://github.com/SoCuul/FLEXing
+[submodule "Vendor/MachO-Kit"]
+	path = Vendor/MachO-Kit
+	url = https://github.com/DeVaukz/MachO-Kit.git
