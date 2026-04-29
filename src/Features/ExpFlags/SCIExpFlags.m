@@ -1,5 +1,5 @@
 #import "SCIExpFlags.h"
-#import "SCIMachODexKitResolver.h"
+#import "SCIExpMobileConfigMapping.h"
 #import <sys/mman.h>
 #import <sys/stat.h>
 #import <fcntl.h>
@@ -114,7 +114,7 @@ static dispatch_queue_t mcQueue(void) {
     }];
 }
 
-#pragma mark - InternalUse observations (DexKit integration)
+#pragma mark - InternalUse observations (lightweight mapping integration)
 
 static NSMutableDictionary<NSString *, SCIExpInternalUseObservation *> *gInternalUseObs = nil;
 static NSUInteger gInternalUseOrder = 0;
@@ -155,18 +155,20 @@ static NSString *SCIResolvedSpecifierName(NSString *specifierName,
                                           unsigned long long specifier,
                                           NSString *functionName,
                                           void *callerAddress) {
-    SCIMachODexKitResolvedName *resolved =
-        [[SCIMachODexKitResolver sharedResolver] resolvedNameForSpecifier:specifier
-                                                             functionName:functionName
-                                                             existingName:specifierName
-                                                            callerAddress:callerAddress];
-
-    if (resolved.name.length && ![resolved.name hasPrefix:@"unknown"]) {
-        return resolved.name;
-    }
-    if (specifierName.length && ![specifierName isEqualToString:@"unknown"]) {
+    if (specifierName.length && ![specifierName isEqualToString:@"unknown"] && ![specifierName hasPrefix:@"spec_0x"]) {
         return specifierName;
     }
+
+    NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
+    if (mapped.length) {
+        return mapped;
+    }
+
+    NSString *caller = SCICallerDescription(callerAddress);
+    if (caller.length) {
+        return [NSString stringWithFormat:@"callsite %@ · 0x%016llx", caller, specifier];
+    }
+
     return [NSString stringWithFormat:@"unknown 0x%016llx", specifier];
 }
 
