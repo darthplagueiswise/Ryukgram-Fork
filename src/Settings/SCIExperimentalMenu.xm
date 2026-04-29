@@ -84,7 +84,10 @@ static void RYResetDeveloperModeState(void) {
         @"igt_internal_apps_spoof",
         @"igt_internal_apps_gate",
         @"igt_runtime_mc_true_patcher",
-        @"igt_runtime_mc_true_patcher_relaxed"
+        @"igt_runtime_mc_true_patcher_relaxed",
+        @"sci_exp_mc_hooks_enabled",
+        @"sci_exp_mc_c_hooks_enabled",
+        @"igt_runtime_mc_symbol_observer_verbose"
     ];
 
     for (NSString *key in keys) {
@@ -334,7 +337,7 @@ static NSArray *developerNavSections(void) {
                                 }),
 
                 ExpSwitchAction(@"Force MobileConfig Boolean Gates",
-                                @"Forces MCI, META Extensions, MSGC and EasyGating boolean gates to YES. DVM adapter remains observe-only.",
+                                @"Forces legacy C Boolean patcher aliases. Prefer MC Override Lab for selective testing.",
                                 @"igt_runtime_mc_true_patcher",
                                 YES,
                                 ^(BOOL on) {
@@ -352,28 +355,44 @@ static NSArray *developerNavSections(void) {
         },
 
         @{
-            @"header": @"Diagnostics",
-            @"footer": @"Use these first when mapping unknown gates. Safe observer mode does not change return values.",
+            @"header": @"MobileConfig Override Lab",
+            @"footer": @"Enable hooks, restart, browse IG screens, then use the lab to toggle individual observed gates. Switches in the lab reflect the current effective value; tap a row to clear override.",
             @"rows": @[
-                ExpSwitch(@"Enable Flags Browser",
-                          @"Installs MetaLocalExperiment and MobileConfig observers. Safe, restart required.",
+                ExpSwitch(@"Enable MC Base Observers",
+                          @"Installs the safe MetaLocalExperiment/InternalUse/MobileConfig observer set. Restart required.",
                           @"sci_exp_flags_enabled",
                           YES),
 
-                ExpSwitch(@"Verbose Gate Logging",
-                          @"Logs every observed gate call to console. Debug only, restart required.",
-                          @"igt_internaluse_observer",
+                ExpSwitch(@"Enable ObjC Getter Hooks",
+                          @"Hooks ObjC getBool selectors and allows per-param/per-name overrides in MC Override Lab. Restart required.",
+                          @"sci_exp_mc_hooks_enabled",
                           YES),
 
-                [SCISetting navigationCellWithTitle:@"Experimental Flags Browser"
-                                           subtitle:@"Inspect observed gates and set manual per-gate overrides."
+                ExpSwitch(@"Enable C Broker Hooks",
+                          @"Hooks C MobileConfig brokers such as MCI, METAExtensions, MSGC and EasyGating. Restart required.",
+                          @"sci_exp_mc_c_hooks_enabled",
+                          YES),
+
+                ExpSwitch(@"Verbose Gate Logging",
+                          @"Logs observed gate calls to console. Debug only, restart required.",
+                          @"igt_runtime_mc_symbol_observer_verbose",
+                          YES),
+
+                [SCISetting navigationCellWithTitle:@"MC Override Lab"
+                                           subtitle:@"Would change, ObjC/C/Update filters, category filters, runtime JSON import and JSON/CSV export."
+                                               icon:[SCISymbol symbolWithName:@"waveform.path.ecg.rectangle"]
+                                     viewController:[SCIMobileConfigSymbolObserverViewController new]]
+            ]
+        },
+
+        @{
+            @"header": @"Other Diagnostics",
+            @"footer": @"Meta/Internal browser and raw resolver tools."
+            ,@"rows": @[
+                [SCISetting navigationCellWithTitle:@"Meta/Internal Flags Browser"
+                                           subtitle:@"MetaLocalExperiment, InternalUse specifiers and manual per-gate overrides."
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
                                      viewController:[SCIExpFlagsViewController new]],
-
-                [SCISetting navigationCellWithTitle:@"MobileConfig Observer"
-                                           subtitle:@"Would change, category filters, JSON/CSV export and runtime id_name_mapping import."
-                                               icon:[SCISymbol symbolWithName:@"waveform.path.ecg.rectangle"]
-                                     viewController:[SCIMobileConfigSymbolObserverViewController new]],
 
                 [SCISetting navigationCellWithTitle:@"SCI Resolver"
                                            subtitle:@"Full symbol and MobileConfig resolver report."
@@ -402,12 +421,12 @@ static NSArray *developerNavSections(void) {
                                          }],
 
                 [SCISetting buttonCellWithTitle:@"Reset Developer Mode State"
-                                       subtitle:@"Turns off hidden legacy aliases and clears employee/test-user overrides."
+                                       subtitle:@"Turns off hidden legacy aliases, MC hooks and employee/test-user overrides."
                                            icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
                                          action:^{
                                              RYResetDeveloperModeState();
                                              RYDevShowAlert(@"Developer Mode reset",
-                                                            @"Developer/Internal Mode, Force Gates, Internal Apps spoof and hidden legacy aliases were turned off.");
+                                                            @"Developer/Internal Mode, Force Gates, MC hooks, Internal Apps spoof and hidden legacy aliases were turned off.");
                                          }]
             ]
         }
@@ -427,10 +446,12 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
     NSString *vcName = row.navViewController ? NSStringFromClass([row.navViewController class]) : @"";
 
     if ([vcName isEqualToString:@"SCIExpFlagsViewController"]) return YES;
+    if ([vcName isEqualToString:@"SCIMobileConfigSymbolObserverViewController"]) return YES;
 
     NSArray<NSString *> *hiddenKeys = @[
         @"sci_exp_flags_enabled",
         @"sci_exp_mc_hooks_enabled",
+        @"sci_exp_mc_c_hooks_enabled",
         @"igt_employee_master",
         @"igt_employee",
         @"igt_employee_mc",
@@ -441,7 +462,8 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
         @"igt_internal_apps_gate",
         @"igt_internaluse_observer",
         @"igt_runtime_mc_true_patcher",
-        @"igt_runtime_mc_true_patcher_relaxed"
+        @"igt_runtime_mc_true_patcher_relaxed",
+        @"igt_runtime_mc_symbol_observer_verbose"
     ];
 
     if ([hiddenKeys containsObject:key]) return YES;
@@ -452,6 +474,8 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
         [joined containsString:@"experimental flags"] ||
         [joined containsString:@"flags browser"] ||
         [joined containsString:@"mobileconfig browser"] ||
+        [joined containsString:@"mobileconfig observer"] ||
+        [joined containsString:@"mc override lab"] ||
         [joined containsString:@"employee mode"] ||
         [joined containsString:@"employee mobileconfig"] ||
         [joined containsString:@"developer options gate"] ||
@@ -495,6 +519,8 @@ static void cleanAdvancedDuplicateRows(NSMutableArray *rows) {
                 [combined containsString:@"experimental flags"] ||
                 [combined containsString:@"flags browser"] ||
                 [combined containsString:@"mobileconfig browser"] ||
+                [combined containsString:@"mobileconfig observer"] ||
+                [combined containsString:@"mc override lab"] ||
                 [combined containsString:@"employee"] ||
                 [combined containsString:@"runtime mc patcher"] ||
                 [combined containsString:@"internaluse observer"];
