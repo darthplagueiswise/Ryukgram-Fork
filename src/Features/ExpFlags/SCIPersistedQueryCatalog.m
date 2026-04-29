@@ -365,7 +365,7 @@ static NSString *gSCIPQError = nil;
     [self loadIfNeededSynchronously:YES];
     NSMutableArray *out = [NSMutableArray array];
     for (NSString *name in names) {
-        SCIPersistedQueryEntry *entry = nil;
+        __block SCIPersistedQueryEntry *entry = nil;
         dispatch_sync(SCIPQQueue(), ^{ entry = gSCIPQByOperation[name]; });
         if (entry) [out addObject:entry];
     }
