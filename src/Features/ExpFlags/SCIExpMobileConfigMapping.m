@@ -1,55 +1,33 @@
 #import "SCIExpMobileConfigMapping.h"
-#import <objc/message.h>
 
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCMapping = nil;
+static NSDictionary<NSNumber *, NSString *> *gSCIMCDirectSpecifierNames = nil;
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCNamedConfigs = nil;
 static NSString *gSCIMCMappingSource = nil;
 static NSArray<NSString *> *gSCIMCCheckedPaths = nil;
 static NSArray<NSString *> *gSCIMCFoundPaths = nil;
-static NSArray<NSString *> *gSCIMCRoots = nil;
 static NSDictionary<NSString *, NSDictionary *> *gSCIMCFileReports = nil;
-static NSMutableDictionary<NSNumber *, NSString *> *gSCIMCRuntimeResolvedCache = nil;
 
 static dispatch_queue_t SCIMCMappingQueue(void) {
     static dispatch_queue_t q;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ q = dispatch_queue_create("sci.expflags.mc.mapping", DISPATCH_QUEUE_CONCURRENT); });
+    dispatch_once(&once, ^{ q = dispatch_queue_create("sci.expflags.mc.schemaimport", DISPATCH_QUEUE_CONCURRENT); });
     return q;
 }
 
 static void SCIAddUniquePath(NSMutableArray<NSString *> *paths, NSString *path) {
     if (!path.length) return;
     NSString *standardized = [path stringByStandardizingPath];
-    if (!standardized.length) return;
-    if (![paths containsObject:standardized]) [paths addObject:standardized];
+    if (standardized.length && ![paths containsObject:standardized]) [paths addObject:standardized];
 }
 
-static BOOL SCIPathExistsDirectory(NSString *path, BOOL *isDirOut) {
-    if (!path.length) return NO;
-    BOOL isDir = NO;
-    BOOL ok = [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir];
-    if (isDirOut) *isDirOut = isDir;
-    return ok;
-}
-
-static BOOL SCIFileNameLooksLikeMobileConfigMapping(NSString *path) {
-    NSString *name = path.lastPathComponent.lowercaseString ?: @"";
-    NSString *ext = path.pathExtension.lowercaseString ?: @"";
-    if (![ext isEqualToString:@"json"]) return NO;
-
-    if ([name isEqualToString:@"id_name_mapping.json"]) return YES;
-    if ([name isEqualToString:@"id_mapping.json"]) return YES;
-    if ([name isEqualToString:@"name_mapping.json"]) return YES;
-    if ([name isEqualToString:@"example_mapping.json"]) return YES;
-    if ([name isEqualToString:@"mc_startup_configs.json"]) return YES;
-    if ([name isEqualToString:@"startup_configs.json"]) return YES;
-
-    if ([name containsString:@"mapping"]) return YES;
-    if ([name containsString:@"mobileconfig"]) return YES;
-    if ([name containsString:@"startup"] && [name containsString:@"config"]) return YES;
-    if ([name containsString:@"client"] && [name containsString:@"persist"]) return YES;
-    if ([name containsString:@"distillery"]) return YES;
-    return NO;
+static NSString *SCITrimString(id obj) {
+    if (!obj) return nil;
+    NSString *s = [obj isKindOfClass:[NSString class]] ? obj : ([obj respondsToSelector:@selector(description)] ? [obj description] : nil);
+    if (!s.length) return nil;
+    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!s.length || [s isEqualToString:@"(null)"] || [s isEqualToString:@"null"]) return nil;
+    return s;
 }
 
 static NSString *SCIJSONStringObjectKind(id obj) {
@@ -61,201 +39,158 @@ static NSString *SCIJSONStringObjectKind(id obj) {
     return NSStringFromClass([obj class]);
 }
 
-static NSString *SCITrimRuntimeName(id obj) {
-    if (!obj) return nil;
-    NSString *s = [obj isKindOfClass:[NSString class]] ? obj : ([obj respondsToSelector:@selector(description)] ? [obj description] : nil);
-    if (!s.length) return nil;
-    s = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (!s.length || [s isEqualToString:@"(null)"] || [s isEqualToString:@"null"] || [s isEqualToString:@"0"]) return nil;
-    return s;
+static BOOL SCINameLooksLikeMCName(NSString *name) {
+    if (name.length < 3) return NO;
+    NSString *n = name.lowercaseString;
+    if ([n hasPrefix:@"ig_"] || [n hasPrefix:@"fb_"] || [n hasPrefix:@"mc_"] || [n hasPrefix:@"qe_"] || [n hasPrefix:@"p92_"] || [n hasPrefix:@"bsl_"] || [n hasPrefix:@"bcn_"]) return YES;
+    if ([n containsString:@"."] && ([n containsString:@"ig"] || [n containsString:@"fb"] || [n containsString:@"mobileconfig"])) return YES;
+    if ([n containsString:@"quick_snap"] || [n containsString:@"quicksnap"] || [n containsString:@"instants"] || [n containsString:@"employee"] || [n containsString:@"dogfood"] || [n containsString:@"internal"] || [n containsString:@"prism"] || [n containsString:@"homecoming"] || [n containsString:@"liquid_glass"] || [n containsString:@"liquidglass"]) return YES;
+    return NO;
 }
 
-static id SCIStartupConfigInstanceForClassName(NSString *className) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return nil;
-    SEL getInstance = NSSelectorFromString(@"getInstance");
-    if ([cls respondsToSelector:getInstance]) {
-        @try {
-            id (*send)(id, SEL) = (id (*)(id, SEL))objc_msgSend;
-            id obj = send(cls, getInstance);
-            if (obj) return obj;
-        } @catch (__unused NSException *e) {}
+static BOOL SCIStringToUInt64(NSString *s, unsigned long long *outValue) {
+    if (!s.length) return NO;
+    NSString *trim = [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!trim.length) return NO;
+    unsigned long long value = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:trim];
+    if ([trim hasPrefix:@"0x"] || [trim hasPrefix:@"0X"]) {
+        if (![scanner scanHexLongLong:&value]) return NO;
+    } else {
+        long long signedValue = 0;
+        if (![scanner scanLongLong:&signedValue]) return NO;
+        value = (unsigned long long)signedValue;
     }
-    @try { return [[cls alloc] init]; } @catch (__unused NSException *e) { return nil; }
+    if (outValue) *outValue = value;
+    return YES;
 }
 
-static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specifier) {
-    NSNumber *key = @(specifier);
-    __block NSString *cached = nil;
-    dispatch_sync(SCIMCMappingQueue(), ^{
-        cached = gSCIMCRuntimeResolvedCache[key];
-    });
-    if (cached.length) return cached;
-
-    NSArray<NSString *> *classes = @[@"FBMobileConfigStartupConfigs", @"FBMobileConfigStartupConfigsDeprecated"];
-    NSArray<NSString *> *selectors = @[@"convertSpecifierToParamName:", @"getStableIdFromParamSpecifier:"];
-
-    NSString *resolved = nil;
-    for (NSString *className in classes) {
-        id target = SCIStartupConfigInstanceForClassName(className);
-        if (!target) continue;
-        for (NSString *selectorName in selectors) {
-            SEL sel = NSSelectorFromString(selectorName);
-            if (![target respondsToSelector:sel]) continue;
-            @try {
-                id (*send)(id, SEL, unsigned long long) = (id (*)(id, SEL, unsigned long long))objc_msgSend;
-                resolved = SCITrimRuntimeName(send(target, sel, specifier));
-                if (resolved.length) break;
-            } @catch (__unused NSException *e) {}
-        }
-        if (resolved.length) break;
+static NSString *SCIStringValueForKeys(NSDictionary *d, NSArray<NSString *> *keys) {
+    for (NSString *key in keys) {
+        id v = d[key];
+        NSString *s = SCITrimString(v);
+        if (s.length) return s;
     }
+    return nil;
+}
 
-    if (resolved.length) {
-        dispatch_barrier_async(SCIMCMappingQueue(), ^{
-            if (!gSCIMCRuntimeResolvedCache) gSCIMCRuntimeResolvedCache = [NSMutableDictionary dictionary];
-            gSCIMCRuntimeResolvedCache[key] = resolved;
-        });
+static unsigned long long SCICombinedSpecifierFromFlagParam(NSString *flagId, NSString *paramId) {
+    unsigned long long f = 0, p = 0;
+    if (!SCIStringToUInt64(flagId, &f) || !SCIStringToUInt64(paramId, &p)) return 0;
+    return ((f & 0xffffffffULL) << 32) | (p & 0xffffffffULL);
+}
+
+static void SCIAddFlagParam(NSMutableDictionary<NSString *, NSDictionary *> *flagMap,
+                            NSMutableDictionary<NSNumber *, NSString *> *directMap,
+                            NSString *flagId,
+                            NSString *flagName,
+                            NSString *paramId,
+                            NSString *paramName) {
+    if (!flagId.length && !paramId.length) return;
+    if (!flagName.length && !paramName.length) return;
+
+    NSString *f = flagId.length ? flagId : @"0";
+    NSString *p = paramId.length ? paramId : @"0";
+    NSMutableDictionary *flag = [flagMap[f] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (flagName.length && ![flag[@"name"] length]) flag[@"name"] = flagName;
+    NSMutableDictionary *subs = [flag[@"subs"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (paramName.length) subs[p] = paramName;
+    flag[@"subs"] = subs;
+    flagMap[f] = flag;
+
+    unsigned long long spec = SCICombinedSpecifierFromFlagParam(f, p);
+    NSString *name = nil;
+    if (flagName.length && paramName.length) name = [NSString stringWithFormat:@"%@ / %@", flagName, paramName];
+    else name = flagName.length ? flagName : paramName;
+    if (spec && name.length) directMap[@(spec)] = name;
+}
+
+static void SCIAddDirectSpecifier(NSMutableDictionary<NSNumber *, NSString *> *directMap,
+                                  NSMutableDictionary<NSString *, NSDictionary *> *flagMap,
+                                  NSString *lidString,
+                                  NSString *name) {
+    if (!lidString.length || !name.length) return;
+    unsigned long long spec = 0;
+    if (!SCIStringToUInt64(lidString, &spec) || !spec) return;
+    directMap[@(spec)] = name;
+
+    uint32_t flagId32 = (uint32_t)(spec >> 32);
+    uint32_t paramId32 = (uint32_t)(spec & 0xffffffffULL);
+    NSString *flagId = [NSString stringWithFormat:@"%u", flagId32];
+    NSString *paramId = [NSString stringWithFormat:@"%u", paramId32];
+    NSString *flagName = name;
+    NSString *paramName = name;
+    NSRange dot = [name rangeOfString:@"." options:NSBackwardsSearch];
+    if (dot.location != NSNotFound && dot.location > 0 && dot.location + 1 < name.length) {
+        flagName = [name substringToIndex:dot.location];
+        paramName = [name substringFromIndex:dot.location + 1];
     }
-    return resolved;
+    SCIAddFlagParam(flagMap, directMap, flagId, flagName, paramId, paramName);
+}
+
+static NSDictionary *SCIReportForPath(NSString *path, NSDictionary *mapping, NSDictionary *direct, NSDictionary *named, id obj, NSError *err, unsigned long long size) {
+    NSMutableDictionary *r = [NSMutableDictionary dictionary];
+    r[@"size"] = @(size);
+    r[@"jsonKind"] = SCIJSONStringObjectKind(obj);
+    r[@"ids"] = @((NSUInteger)mapping.count);
+    r[@"direct"] = @((NSUInteger)direct.count);
+    r[@"named"] = @((NSUInteger)named.count);
+    if (err.localizedDescription.length) r[@"error"] = err.localizedDescription;
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSArray *keys = [[(NSDictionary *)obj allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        NSUInteger n = MIN((NSUInteger)8, keys.count);
+        r[@"sampleKeys"] = n ? [keys subarrayWithRange:NSMakeRange(0, n)] : @[];
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        r[@"arrayCount"] = @([(NSArray *)obj count]);
+    }
+    return r;
 }
 
 @implementation SCIExpMobileConfigMapping
 
-+ (NSArray<NSString *> *)recursiveSearchRoots {
-    NSMutableArray<NSString *> *roots = [NSMutableArray array];
-    NSString *home = NSHomeDirectory();
-    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *lib = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *tmp = NSTemporaryDirectory();
-    NSString *bundle = [[NSBundle mainBundle] bundlePath];
-
-    SCIAddUniquePath(roots, bundle);
-    SCIAddUniquePath(roots, [bundle stringByAppendingPathComponent:@"Frameworks"]);
-    SCIAddUniquePath(roots, [bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework"]);
-    SCIAddUniquePath(roots, [bundle stringByAppendingPathComponent:@"RyukGram.bundle"]);
-    SCIAddUniquePath(roots, home);
-    SCIAddUniquePath(roots, docs);
-    SCIAddUniquePath(roots, lib);
-    SCIAddUniquePath(roots, appSupport);
-    SCIAddUniquePath(roots, caches);
-    SCIAddUniquePath(roots, tmp);
-
-    for (NSBundle *b in [NSBundle allBundles]) {
-        SCIAddUniquePath(roots, b.bundlePath);
-    }
-
-    NSMutableArray<NSString *> *existing = [NSMutableArray array];
-    for (NSString *root in roots) {
-        BOOL isDir = NO;
-        if (SCIPathExistsDirectory(root, &isDir) && isDir) [existing addObject:root];
-    }
-    return existing;
-}
-
 + (NSArray<NSString *> *)exactCandidateMappingPaths {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSString *home = NSHomeDirectory();
+    NSString *bundle = [[NSBundle mainBundle] bundlePath];
     NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
     NSString *lib = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
     NSString *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *caches = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *tmp = NSTemporaryDirectory();
-    NSString *bundle = [[NSBundle mainBundle] bundlePath];
 
     NSArray<NSString *> *baseDirs = @[
-        home ?: @"",
-        docs ?: @"",
-        lib ?: @"",
-        appSupport ?: @"",
-        caches ?: @"",
-        tmp ?: @"",
-        bundle ?: @"",
-        [bundle stringByAppendingPathComponent:@"Frameworks"] ?: @"",
         [bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework"] ?: @"",
+        [bundle stringByAppendingPathComponent:@"Frameworks/FBSharedModules.framework"] ?: @"",
+        [bundle stringByAppendingPathComponent:@"Frameworks"] ?: @"",
         [bundle stringByAppendingPathComponent:@"RyukGram.bundle"] ?: @"",
+        bundle ?: @"",
+        docs ?: @"",
+        appSupport ?: @"",
+        lib ?: @""
     ];
 
     NSArray<NSString *> *names = @[
+        @"igios-instagram-schema_client-persist.json",
+        @"igios-facebook-schema_client-persist.json",
         @"id_name_mapping.json",
         @"id_mapping.json",
         @"name_mapping.json",
-        @"example_mapping.json",
         @"mc_startup_configs.json",
-        @"startup_configs.json",
+        @"startup_configs.json"
     ];
-    NSArray<NSString *> *subdirs = @[@"", @"mobileconfig", @"MobileConfig", @"Config", @"configs", @"Resources"];
 
     for (NSString *base in baseDirs) {
         if (!base.length) continue;
-        for (NSString *subdir in subdirs) {
-            NSString *dir = subdir.length ? [base stringByAppendingPathComponent:subdir] : base;
-            for (NSString *name in names) SCIAddUniquePath(paths, [dir stringByAppendingPathComponent:name]);
-        }
+        for (NSString *name in names) SCIAddUniquePath(paths, [base stringByAppendingPathComponent:name]);
     }
 
     for (NSBundle *b in [NSBundle allBundles]) {
-        for (NSString *name in @[@"id_name_mapping", @"id_mapping", @"name_mapping", @"example_mapping", @"mc_startup_configs", @"startup_configs"]) {
-            NSString *p = [b pathForResource:name ofType:@"json"];
+        for (NSString *name in names) {
+            NSString *p = [b pathForResource:[name stringByDeletingPathExtension] ofType:@"json"];
             if (p.length) SCIAddUniquePath(paths, p);
         }
     }
-
     return paths;
 }
 
-+ (NSArray<NSString *> *)recursiveCandidateMappingPathsWithChecked:(NSMutableArray<NSString *> *)checked roots:(NSMutableArray<NSString *> *)rootsOut {
-    NSMutableArray<NSString *> *found = [NSMutableArray array];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSArray<NSString *> *roots = [self recursiveSearchRoots];
-    [rootsOut addObjectsFromArray:roots];
-
-    for (NSString *root in roots) {
-        NSDirectoryEnumerator<NSURL *> *en = [fm enumeratorAtURL:[NSURL fileURLWithPath:root]
-                                      includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLFileSizeKey]
-                                                         options:NSDirectoryEnumerationSkipsHiddenFiles
-                                                    errorHandler:^BOOL(NSURL *url, NSError *error) {
-            NSLog(@"[RyukGram][MCMapping] recursive scan error %@: %@", url.path, error.localizedDescription);
-            return YES;
-        }];
-
-        NSUInteger visited = 0;
-        for (NSURL *url in en) {
-            if (++visited > 20000) {
-                NSLog(@"[RyukGram][MCMapping] recursive scan cap hit at root %@", root);
-                break;
-            }
-            NSString *path = url.path;
-            if (!path.length) continue;
-
-            NSNumber *isDirNum = nil;
-            [url getResourceValue:&isDirNum forKey:NSURLIsDirectoryKey error:nil];
-            if (isDirNum.boolValue) {
-                NSString *name = path.lastPathComponent.lowercaseString ?: @"";
-                if ([name isEqualToString:@".git"] || [name isEqualToString:@"_codesignature"]) [en skipDescendants];
-                continue;
-            }
-
-            NSString *ext = path.pathExtension.lowercaseString ?: @"";
-            if ([ext isEqualToString:@"json"]) SCIAddUniquePath(checked, path);
-            if (SCIFileNameLooksLikeMobileConfigMapping(path)) SCIAddUniquePath(found, path);
-        }
-    }
-
-    return found;
-}
-
-+ (NSArray<NSString *> *)candidateMappingPaths {
-    NSMutableArray<NSString *> *checked = [NSMutableArray array];
-    NSMutableArray<NSString *> *roots = [NSMutableArray array];
-    for (NSString *p in [self exactCandidateMappingPaths]) SCIAddUniquePath(checked, p);
-    NSArray<NSString *> *recursive = [self recursiveCandidateMappingPathsWithChecked:checked roots:roots];
-    NSMutableArray<NSString *> *all = [checked mutableCopy] ?: [NSMutableArray array];
-    for (NSString *p in recursive) SCIAddUniquePath(all, p);
-    return all;
-}
++ (NSArray<NSString *> *)candidateMappingPaths { return [self exactCandidateMappingPaths]; }
 
 + (NSArray<NSString *> *)checkedMappingPaths {
     [self loadMappingIfNeeded];
@@ -274,125 +209,90 @@ static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specif
 + (NSDictionary *)parseMappingRawString:(NSString *)raw {
     NSArray<NSString *> *parts = [raw componentsSeparatedByString:@":"];
     if (parts.count < 2) return nil;
-    NSString *flagId = parts[0];
-    NSString *flagName = parts[1];
+    NSString *flagId = SCITrimString(parts[0]);
+    NSString *flagName = SCITrimString(parts[1]);
     if (!flagId.length || !flagName.length) return nil;
-
     NSMutableDictionary *subs = [NSMutableDictionary dictionary];
     for (NSUInteger i = 2; i + 1 < parts.count; i += 2) {
-        NSString *paramId = parts[i];
-        NSString *paramName = parts[i + 1];
+        NSString *paramId = SCITrimString(parts[i]);
+        NSString *paramName = SCITrimString(parts[i + 1]);
         if (paramId.length && paramName.length) subs[paramId] = paramName;
     }
-
     return @{@"flagId": flagId, @"name": flagName, @"subs": subs};
 }
 
-+ (void)addNamedConfigKey:(NSString *)key value:(id)value toMap:(NSMutableDictionary<NSString *, NSDictionary *> *)out named:(NSMutableDictionary<NSString *, NSDictionary *> *)named {
-    if (![key isKindOfClass:[NSString class]] || !key.length) return;
-    if (![value isKindOfClass:[NSDictionary class]]) return;
-    NSDictionary *d = (NSDictionary *)value;
-    if (![key containsString:@"."] && ![key hasPrefix:@"ig_"] && ![key hasPrefix:@"mc_"] && ![key hasPrefix:@"qe_"] && ![key hasPrefix:@"p92_"] && ![key hasPrefix:@"bsl_"] && ![key hasPrefix:@"bcn_"]) return;
++ (void)scanObject:(id)obj
+              key:(NSString *)key
+          flagMap:(NSMutableDictionary<NSString *, NSDictionary *> *)flagMap
+        directMap:(NSMutableDictionary<NSNumber *, NSString *> *)directMap
+            named:(NSMutableDictionary<NSString *, NSDictionary *> *)named
+            depth:(NSUInteger)depth {
+    if (!obj || depth > 10) return;
 
-    id rawLid = d[@"lid"];
-    NSString *lid = [rawLid isKindOfClass:[NSString class]] ? rawLid : (rawLid ? [rawLid description] : @"");
-    id v = d[@"v"];
-    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
-    entry[@"name"] = key;
-    if (lid.length) entry[@"lid"] = lid;
-    if (v) entry[@"v"] = v;
-    named[key] = entry;
-
-    if (!lid.length) return;
-
-    unsigned long long spec = 0;
-    NSScanner *scanner = [NSScanner scannerWithString:lid];
-    if ([lid hasPrefix:@"0x"] || [lid hasPrefix:@"0X"]) {
-        [scanner scanHexLongLong:&spec];
-    } else {
-        long long signedSpec = 0;
-        if ([scanner scanLongLong:&signedSpec]) spec = (unsigned long long)signedSpec;
+    if ([obj isKindOfClass:[NSString class]]) {
+        NSDictionary *parsed = [self parseMappingRawString:(NSString *)obj];
+        if (parsed) {
+            NSString *flagId = parsed[@"flagId"];
+            NSString *flagName = parsed[@"name"];
+            NSDictionary *subs = parsed[@"subs"] ?: @{};
+            if (!subs.count) SCIAddFlagParam(flagMap, directMap, flagId, flagName, @"0", flagName);
+            for (NSString *paramId in subs) SCIAddFlagParam(flagMap, directMap, flagId, flagName, paramId, [subs[paramId] description]);
+        }
+        return;
     }
-    if (!spec) return;
-
-    uint32_t flagId32 = (uint32_t)(spec >> 32);
-    uint32_t paramId32 = (uint32_t)(spec & 0xffffffffULL);
-    NSString *flagId = [NSString stringWithFormat:@"%u", flagId32];
-    NSString *paramId = [NSString stringWithFormat:@"%u", paramId32];
-
-    NSString *flagName = key;
-    NSString *paramName = key;
-    NSRange dot = [key rangeOfString:@"." options:NSBackwardsSearch];
-    if (dot.location != NSNotFound && dot.location > 0 && dot.location + 1 < key.length) {
-        flagName = [key substringToIndex:dot.location];
-        paramName = [key substringFromIndex:dot.location + 1];
-    }
-
-    NSMutableDictionary *flag = [out[flagId] mutableCopy] ?: [NSMutableDictionary dictionary];
-    flag[@"name"] = flag[@"name"] ?: flagName;
-    NSMutableDictionary *subs = [flag[@"subs"] mutableCopy] ?: [NSMutableDictionary dictionary];
-    subs[paramId] = paramName;
-    flag[@"subs"] = subs;
-    out[flagId] = flag;
-}
-
-+ (NSDictionary<NSString *, NSDictionary *> *)parseMappingObject:(id)obj named:(NSMutableDictionary<NSString *, NSDictionary *> *)namedOut {
-    NSMutableDictionary<NSString *, NSDictionary *> *out = [NSMutableDictionary dictionary];
 
     if ([obj isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)obj) {
-            if ([item isKindOfClass:[NSString class]]) {
-                NSDictionary *parsed = [self parseMappingRawString:item];
-                NSString *flagId = parsed[@"flagId"];
-                if (flagId.length) out[flagId] = @{@"name": parsed[@"name"] ?: @"", @"subs": parsed[@"subs"] ?: @{}};
-            } else if ([item isKindOfClass:[NSDictionary class]]) {
-                NSDictionary *d = item;
-                NSString *flagId = d[@"flagId"] ? [d[@"flagId"] description] : (d[@"id"] ? [d[@"id"] description] : (d[@"key"] ? [d[@"key"] description] : @""));
-                NSString *name = d[@"name"] ? [d[@"name"] description] : (d[@"flagName"] ? [d[@"flagName"] description] : @"");
-                NSDictionary *subs = [d[@"subs"] isKindOfClass:[NSDictionary class]] ? d[@"subs"] : @{};
-                if (flagId.length) out[flagId] = @{@"name": name ?: @"", @"subs": subs ?: @{}};
-            }
-        }
-    } else if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = obj;
-        for (id rawKey in dict.allKeys) {
-            NSString *flagId = [rawKey description];
-            id value = dict[rawKey];
-            if ([value isKindOfClass:[NSString class]]) {
-                NSDictionary *parsed = [self parseMappingRawString:value];
-                NSString *realId = parsed[@"flagId"] ?: flagId;
-                if (realId.length) out[realId] = @{@"name": parsed[@"name"] ?: @"", @"subs": parsed[@"subs"] ?: @{}};
-            } else if ([value isKindOfClass:[NSDictionary class]]) {
-                NSDictionary *d = value;
-                NSString *name = d[@"name"] ? [d[@"name"] description] : (d[@"flagName"] ? [d[@"flagName"] description] : @"");
-                NSDictionary *subs = [d[@"subs"] isKindOfClass:[NSDictionary class]] ? d[@"subs"] : nil;
-                if (subs || name.length) {
-                    out[flagId] = @{@"name": name ?: @"", @"subs": subs ?: @{}};
-                } else {
-                    [self addNamedConfigKey:flagId value:value toMap:out named:namedOut];
-                }
-            }
-        }
+        for (id item in (NSArray *)obj) [self scanObject:item key:key flagMap:flagMap directMap:directMap named:named depth:depth + 1];
+        return;
     }
 
-    return out;
-}
+    if (![obj isKindOfClass:[NSDictionary class]]) return;
+    NSDictionary *d = (NSDictionary *)obj;
 
-+ (NSDictionary *)reportForPath:(NSString *)path mapping:(NSDictionary *)mapping named:(NSDictionary *)named json:(id)obj error:(NSError *)err size:(unsigned long long)size {
-    NSMutableDictionary *r = [NSMutableDictionary dictionary];
-    r[@"size"] = @(size);
-    r[@"jsonKind"] = SCIJSONStringObjectKind(obj);
-    r[@"ids"] = @((NSUInteger)mapping.count);
-    r[@"named"] = @((NSUInteger)named.count);
-    if (err.localizedDescription.length) r[@"error"] = err.localizedDescription;
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSArray *keys = [[(NSDictionary *)obj allKeys] sortedArrayUsingSelector:@selector(compare:)];
-        NSUInteger n = MIN((NSUInteger)6, keys.count);
-        r[@"sampleKeys"] = n ? [keys subarrayWithRange:NSMakeRange(0, n)] : @[];
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        r[@"arrayCount"] = @([(NSArray *)obj count]);
+    NSString *name = SCIStringValueForKeys(d, @[@"name", @"param_name", @"paramName", @"config_name", @"configName", @"stable_id", @"stableId", @"key"]);
+    if (!name.length && SCINameLooksLikeMCName(key)) name = key;
+
+    NSString *lid = SCIStringValueForKeys(d, @[@"lid", @"logging_id", @"loggingId", @"specifier", @"param_specifier", @"paramSpecifier"]);
+    if (lid.length && name.length) {
+        named[name] = @{ @"name": name, @"lid": lid, @"v": d[@"v"] ?: d[@"value"] ?: d[@"default"] ?: @"" };
+        SCIAddDirectSpecifier(directMap, flagMap, lid, name);
     }
-    return r;
+
+    NSString *flagId = SCIStringValueForKeys(d, @[@"flagId", @"flag_id", @"config_id", @"configId", @"family", @"id"]);
+    NSString *paramId = SCIStringValueForKeys(d, @[@"paramId", @"param_id", @"param", @"field", @"subId", @"sub_id"]);
+    NSString *flagName = SCIStringValueForKeys(d, @[@"flagName", @"flag_name", @"configName", @"config_name", @"groupName", @"group_name"]);
+    NSString *paramName = SCIStringValueForKeys(d, @[@"paramName", @"param_name", @"fieldName", @"field_name"]);
+    if (!flagName.length && name.length && !paramName.length) flagName = name;
+    if (!paramName.length && name.length && flagName.length && ![name isEqualToString:flagName]) paramName = name;
+    if ((flagId.length || paramId.length) && (flagName.length || paramName.length)) {
+        SCIAddFlagParam(flagMap, directMap, flagId, flagName, paramId.length ? paramId : @"0", paramName.length ? paramName : flagName);
+    }
+
+    id subs = d[@"subs"] ?: d[@"params"] ?: d[@"parameters"] ?: d[@"fields"];
+    if ([subs isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *sd = (NSDictionary *)subs;
+        for (id rawSubKey in sd) {
+            NSString *subKey = SCITrimString(rawSubKey);
+            id subValue = sd[rawSubKey];
+            if ([subValue isKindOfClass:[NSString class]]) {
+                SCIAddFlagParam(flagMap, directMap, flagId, flagName.length ? flagName : name, subKey, (NSString *)subValue);
+            } else {
+                [self scanObject:subValue key:subKey flagMap:flagMap directMap:directMap named:named depth:depth + 1];
+            }
+        }
+    } else if ([subs isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)subs) [self scanObject:item key:name flagMap:flagMap directMap:directMap named:named depth:depth + 1];
+    }
+
+    for (id rawKey in d) {
+        NSString *childKey = SCITrimString(rawKey);
+        if (!childKey.length) continue;
+        id child = d[rawKey];
+        if (child == subs) continue;
+        if ([child isKindOfClass:[NSDictionary class]] || [child isKindOfClass:[NSArray class]] || [child isKindOfClass:[NSString class]]) {
+            [self scanObject:child key:childKey flagMap:flagMap directMap:directMap named:named depth:depth + 1];
+        }
+    }
 }
 
 + (void)loadMappingIfNeeded {
@@ -403,80 +303,74 @@ static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specif
     dispatch_barrier_sync(SCIMCMappingQueue(), ^{
         if (gSCIMCMapping) return;
         NSMutableDictionary *allMapping = [NSMutableDictionary dictionary];
+        NSMutableDictionary *allDirect = [NSMutableDictionary dictionary];
         NSMutableDictionary *allNamed = [NSMutableDictionary dictionary];
         NSMutableArray<NSString *> *sources = [NSMutableArray array];
         NSMutableArray<NSString *> *checked = [NSMutableArray array];
         NSMutableArray<NSString *> *found = [NSMutableArray array];
-        NSMutableArray<NSString *> *roots = [NSMutableArray array];
         NSMutableDictionary<NSString *, NSDictionary *> *reports = [NSMutableDictionary dictionary];
         NSFileManager *fm = [NSFileManager defaultManager];
 
-        for (NSString *p in [self exactCandidateMappingPaths]) SCIAddUniquePath(checked, p);
-        NSArray<NSString *> *recursiveFound = [self recursiveCandidateMappingPathsWithChecked:checked roots:roots];
-        NSMutableArray<NSString *> *toInspect = [NSMutableArray array];
-        for (NSString *p in [self exactCandidateMappingPaths]) SCIAddUniquePath(toInspect, p);
-        for (NSString *p in recursiveFound) SCIAddUniquePath(toInspect, p);
-
+        NSArray<NSString *> *toInspect = [self exactCandidateMappingPaths];
         for (NSString *path in toInspect) {
-            if (!path.length) continue;
+            SCIAddUniquePath(checked, path);
             BOOL isDir = NO;
             if (![fm fileExistsAtPath:path isDirectory:&isDir] || isDir) continue;
             SCIAddUniquePath(found, path);
 
             NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
             unsigned long long size = [attrs[NSFileSize] unsignedLongLongValue];
-            NSData *data = [NSData dataWithContentsOfFile:path];
+            NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
             if (!data.length) {
-                reports[path] = [self reportForPath:path mapping:@{} named:@{} json:nil error:nil size:size];
-                [sources addObject:[NSString stringWithFormat:@"%@ exists-empty", path.lastPathComponent]];
+                reports[path] = SCIReportForPath(path, @{}, @{}, @{}, nil, nil, size);
+                [sources addObject:[NSString stringWithFormat:@"%@ empty", path.lastPathComponent]];
                 continue;
             }
+
             NSError *err = nil;
             id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
             if (!obj || err) {
-                reports[path] = [self reportForPath:path mapping:@{} named:@{} json:nil error:err size:size];
+                reports[path] = SCIReportForPath(path, @{}, @{}, @{}, nil, err, size);
                 [sources addObject:[NSString stringWithFormat:@"%@ parse-error", path.lastPathComponent]];
                 continue;
             }
+
+            NSMutableDictionary *parsed = [NSMutableDictionary dictionary];
+            NSMutableDictionary *direct = [NSMutableDictionary dictionary];
             NSMutableDictionary *named = [NSMutableDictionary dictionary];
-            NSDictionary *parsed = [self parseMappingObject:obj named:named];
-            reports[path] = [self reportForPath:path mapping:parsed ?: @{} named:named ?: @{} json:obj error:nil size:size];
-            if (parsed.count || named.count) {
-                [allMapping addEntriesFromDictionary:parsed ?: @{}];
-                [allNamed addEntriesFromDictionary:named ?: @{}];
-                [sources addObject:[NSString stringWithFormat:@"%@ (%lu ids/%lu named)", path.lastPathComponent, (unsigned long)parsed.count, (unsigned long)named.count]];
+            [self scanObject:obj key:path.lastPathComponent flagMap:parsed directMap:direct named:named depth:0];
+
+            reports[path] = SCIReportForPath(path, parsed, direct, named, obj, nil, size);
+            if (parsed.count || direct.count || named.count) {
+                [allMapping addEntriesFromDictionary:parsed];
+                [allDirect addEntriesFromDictionary:direct];
+                [allNamed addEntriesFromDictionary:named];
+                [sources addObject:[NSString stringWithFormat:@"%@ (%lu ids/%lu direct/%lu named)", path.lastPathComponent, (unsigned long)parsed.count, (unsigned long)direct.count, (unsigned long)named.count]];
             } else {
                 [sources addObject:[NSString stringWithFormat:@"%@ parsed-empty", path.lastPathComponent]];
             }
         }
 
-        gSCIMCMapping = allMapping ?: @{};
-        gSCIMCNamedConfigs = allNamed ?: @{};
+        gSCIMCMapping = [allMapping copy] ?: @{};
+        gSCIMCDirectSpecifierNames = [allDirect copy] ?: @{};
+        gSCIMCNamedConfigs = [allNamed copy] ?: @{};
         gSCIMCCheckedPaths = [checked copy] ?: @[];
         gSCIMCFoundPaths = [found copy] ?: @[];
-        gSCIMCRoots = [roots copy] ?: @[];
         gSCIMCFileReports = [reports copy] ?: @{};
-        gSCIMCRuntimeResolvedCache = [NSMutableDictionary dictionary];
-        if (sources.count) {
-            gSCIMCMappingSource = [sources componentsJoinedByString:@", "];
-            NSLog(@"[RyukGram][MCMapping] loaded %@", gSCIMCMappingSource);
-        } else {
-            gSCIMCMappingSource = @"none";
-            NSLog(@"[RyukGram][MCMapping] no MobileConfig mapping/startup JSON found; checked=%lu roots=%lu", (unsigned long)checked.count, (unsigned long)roots.count);
-        }
+        gSCIMCMappingSource = sources.count ? [sources componentsJoinedByString:@", "] : @"none";
+        NSLog(@"[RyukGram][MCMapping] import %@", gSCIMCMappingSource);
     });
 }
 
 + (void)reloadMapping {
     dispatch_barrier_sync(SCIMCMappingQueue(), ^{
         gSCIMCMapping = nil;
+        gSCIMCDirectSpecifierNames = nil;
         gSCIMCNamedConfigs = nil;
         gSCIMCMappingSource = nil;
         gSCIMCCheckedPaths = nil;
         gSCIMCFoundPaths = nil;
-        gSCIMCRoots = nil;
         gSCIMCFileReports = nil;
-        gSCIMCRuntimeResolvedCache = nil;
     });
     [self loadMappingIfNeeded];
 }
@@ -485,7 +379,7 @@ static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specif
     [self loadMappingIfNeeded];
     __block NSString *s = nil;
     dispatch_sync(SCIMCMappingQueue(), ^{
-        s = [NSString stringWithFormat:@"%@ · ids=%lu named=%lu · runtimeNames=%lu · checkedJson=%lu foundCandidates=%lu roots=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCNamedConfigs.count, (unsigned long)gSCIMCRuntimeResolvedCache.count, (unsigned long)gSCIMCCheckedPaths.count, (unsigned long)gSCIMCFoundPaths.count, (unsigned long)gSCIMCRoots.count];
+        s = [NSString stringWithFormat:@"%@ · ids=%lu direct=%lu named=%lu · checked=%lu found=%lu", gSCIMCMappingSource ?: @"none", (unsigned long)gSCIMCMapping.count, (unsigned long)gSCIMCDirectSpecifierNames.count, (unsigned long)gSCIMCNamedConfigs.count, (unsigned long)gSCIMCCheckedPaths.count, (unsigned long)gSCIMCFoundPaths.count];
     });
     return s ?: @"none";
 }
@@ -496,81 +390,41 @@ static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specif
     dispatch_sync(SCIMCMappingQueue(), ^{
         NSMutableArray<NSString *> *lines = [NSMutableArray array];
         [lines addObject:[NSString stringWithFormat:@"Mapping: %@", [self mappingSourceDescription]]];
-        [lines addObject:@"Recursive search roots:"];
-        if (gSCIMCRoots.count) {
-            for (NSString *p in gSCIMCRoots) [lines addObject:[NSString stringWithFormat:@"  - %@", p]];
-        } else {
-            [lines addObject:@"  none"];
-        }
-
-        [lines addObject:@"Found mapping/mobileconfig JSON candidates:"];
+        [lines addObject:@"Found schema/import JSON files:"];
         if (gSCIMCFoundPaths.count) {
-            NSUInteger limit = MIN((NSUInteger)40, gSCIMCFoundPaths.count);
-            for (NSUInteger i = 0; i < limit; i++) {
-                NSString *p = gSCIMCFoundPaths[i];
+            for (NSString *p in gSCIMCFoundPaths) {
                 NSDictionary *r = gSCIMCFileReports[p] ?: @{};
-                NSString *line = [NSString stringWithFormat:@"  + %@ size=%@ kind=%@ ids=%@ named=%@", p, r[@"size"] ?: @0, r[@"jsonKind"] ?: @"?", r[@"ids"] ?: @0, r[@"named"] ?: @0];
-                [lines addObject:line];
+                [lines addObject:[NSString stringWithFormat:@"  + %@ size=%@ kind=%@ ids=%@ direct=%@ named=%@", p, r[@"size"] ?: @0, r[@"jsonKind"] ?: @"?", r[@"ids"] ?: @0, r[@"direct"] ?: @0, r[@"named"] ?: @0]];
                 NSArray *sample = [r[@"sampleKeys"] isKindOfClass:[NSArray class]] ? r[@"sampleKeys"] : nil;
                 if (sample.count) [lines addObject:[NSString stringWithFormat:@"    sample=%@", sample]];
                 if (r[@"arrayCount"]) [lines addObject:[NSString stringWithFormat:@"    arrayCount=%@", r[@"arrayCount"]]];
                 if (r[@"error"]) [lines addObject:[NSString stringWithFormat:@"    error=%@", r[@"error"]]];
             }
-            if (gSCIMCFoundPaths.count > limit) [lines addObject:[NSString stringWithFormat:@"  ... %lu more", (unsigned long)(gSCIMCFoundPaths.count - limit)]];
         } else {
             [lines addObject:@"  none"];
         }
+        [lines addObject:@"Checked exact paths:"];
+        for (NSString *p in gSCIMCCheckedPaths) [lines addObject:[NSString stringWithFormat:@"  - %@", p]];
 
-        [lines addObject:@"Checked JSON files / exact candidate paths:"];
-        NSUInteger checkedLimit = MIN((NSUInteger)60, gSCIMCCheckedPaths.count);
-        for (NSUInteger i = 0; i < checkedLimit; i++) [lines addObject:[NSString stringWithFormat:@"  - %@", gSCIMCCheckedPaths[i]]];
-        if (gSCIMCCheckedPaths.count > checkedLimit) [lines addObject:[NSString stringWithFormat:@"  ... %lu more", (unsigned long)(gSCIMCCheckedPaths.count - checkedLimit)]];
-
-        [lines addObject:@"Sample runtime convertSpecifierToParamName:"];
-        NSDictionary<NSNumber *, NSString *> *runtimeSample = @{
-            @(0x0081030f00000a95ULL): @"ig_is_employee[0] expected",
-            @(0x0081030f00010a96ULL): @"ig_is_employee[1] expected",
-            @(0x008100b200000161ULL): @"ig_is_employee_or_test_user expected"
-        };
-        for (NSNumber *n in [[runtimeSample allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
-            NSString *name = SCIRuntimeConvertSpecifierToParamName(n.unsignedLongLongValue);
-            [lines addObject:[NSString stringWithFormat:@"  0x%016llx %@ -> %@", n.unsignedLongLongValue, runtimeSample[n], name.length ? name : @"nil"]];
+        [lines addObject:@"Sample direct specifiers:"];
+        NSArray<NSNumber *> *directKeys = [[gSCIMCDirectSpecifierNames allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        NSUInteger directCount = MIN((NSUInteger)12, directKeys.count);
+        for (NSUInteger i = 0; i < directCount; i++) {
+            NSNumber *n = directKeys[i];
+            [lines addObject:[NSString stringWithFormat:@"  0x%016llx -> %@", n.unsignedLongLongValue, gSCIMCDirectSpecifierNames[n]]];
         }
-
-        [lines addObject:@"Sample parsed ids:"];
-        NSArray<NSString *> *keys = [[gSCIMCMapping allKeys] sortedArrayUsingSelector:@selector(compare:)];
-        NSUInteger sampleCount = MIN((NSUInteger)8, keys.count);
-        for (NSUInteger i = 0; i < sampleCount; i++) {
-            NSString *key = keys[i];
-            NSDictionary *flag = gSCIMCMapping[key];
-            NSDictionary *subs = [flag[@"subs"] isKindOfClass:[NSDictionary class]] ? flag[@"subs"] : @{};
-            NSArray *subKeys = [[subs allKeys] sortedArrayUsingSelector:@selector(compare:)];
-            NSArray *firstSubs = subKeys.count > 5 ? [subKeys subarrayWithRange:NSMakeRange(0, 5)] : subKeys;
-            [lines addObject:[NSString stringWithFormat:@"  %@ -> %@ subs=%@", key, flag[@"name"] ?: @"", firstSubs]];
-        }
-        if (!sampleCount) [lines addObject:@"  none"];
-
-        [lines addObject:@"Sample named startup configs:"];
-        NSArray<NSString *> *namedKeys = [[gSCIMCNamedConfigs allKeys] sortedArrayUsingSelector:@selector(compare:)];
-        NSUInteger namedSampleCount = MIN((NSUInteger)12, namedKeys.count);
-        for (NSUInteger i = 0; i < namedSampleCount; i++) {
-            NSString *key = namedKeys[i];
-            NSDictionary *entry = gSCIMCNamedConfigs[key];
-            NSString *lid = [entry[@"lid"] isKindOfClass:[NSString class]] ? entry[@"lid"] : @"";
-            id value = entry[@"v"];
-            [lines addObject:[NSString stringWithFormat:@"  %@ lid=%@ v=%@", key, lid.length ? lid : @"empty", value ?: @"<default>"]];
-        }
-        if (!namedSampleCount) [lines addObject:@"  none"];
+        if (!directCount) [lines addObject:@"  none"];
         message = [lines componentsJoinedByString:@"\n"];
     });
     return message ?: @"Mapping: none";
 }
 
 + (NSString *)resolvedNameForSpecifier:(unsigned long long)specifier {
-    NSString *runtimeName = SCIRuntimeConvertSpecifierToParamName(specifier);
-    if (runtimeName.length) return runtimeName;
-
     [self loadMappingIfNeeded];
+
+    __block NSString *direct = nil;
+    dispatch_sync(SCIMCMappingQueue(), ^{ direct = gSCIMCDirectSpecifierNames[@(specifier)]; });
+    if (direct.length) return direct;
 
     uint32_t flagId32 = (uint32_t)(specifier >> 32);
     uint32_t paramId32 = (uint32_t)(specifier & 0xffffffffULL);
@@ -580,17 +434,13 @@ static NSString *SCIRuntimeConvertSpecifierToParamName(unsigned long long specif
     NSString *paramHex = [NSString stringWithFormat:@"0x%08x", paramId32];
 
     __block NSDictionary *flag = nil;
-    dispatch_sync(SCIMCMappingQueue(), ^{
-        flag = gSCIMCMapping[flagDec] ?: gSCIMCMapping[flagHex] ?: gSCIMCMapping[[flagHex uppercaseString]];
-    });
+    dispatch_sync(SCIMCMappingQueue(), ^{ flag = gSCIMCMapping[flagDec] ?: gSCIMCMapping[flagHex] ?: gSCIMCMapping[[flagHex uppercaseString]]; });
     if (![flag isKindOfClass:[NSDictionary class]]) return nil;
 
     NSString *flagName = [flag[@"name"] isKindOfClass:[NSString class]] ? flag[@"name"] : @"";
     NSDictionary *subs = [flag[@"subs"] isKindOfClass:[NSDictionary class]] ? flag[@"subs"] : @{};
-    NSString *paramName = nil;
     id p = subs[paramDec] ?: subs[paramHex] ?: subs[[paramHex uppercaseString]];
-    if (p) paramName = [p description];
-
+    NSString *paramName = p ? [p description] : nil;
     if (flagName.length && paramName.length) return [NSString stringWithFormat:@"%@ / %@", flagName, paramName];
     if (flagName.length) return [NSString stringWithFormat:@"%@ / param %@", flagName, paramDec];
     if (paramName.length) return [NSString stringWithFormat:@"flag %@ / %@", flagDec, paramName];
