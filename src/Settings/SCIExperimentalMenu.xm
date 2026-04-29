@@ -1,6 +1,7 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
 #import "SCIResolverReportViewController.h"
+#import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -368,6 +369,11 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Inspect observed gates and set manual per-gate overrides."
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
                                      viewController:[SCIExpFlagsViewController new]],
+
+                [SCISetting navigationCellWithTitle:@"MobileConfig Observer"
+                                           subtitle:@"Would change, category filters, JSON/CSV export and runtime id_name_mapping import."
+                                               icon:[SCISymbol symbolWithName:@"waveform.path.ecg.rectangle"]
+                                     viewController:[SCIMobileConfigSymbolObserverViewController new]],
 
                 [SCISetting navigationCellWithTitle:@"SCI Resolver"
                                            subtitle:@"Full symbol and MobileConfig resolver report."
