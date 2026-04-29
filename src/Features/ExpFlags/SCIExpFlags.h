@@ -78,15 +78,6 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 
 @end
 
-@interface SCIExpFlags (MobileConfigRuntime)
-+ (void)recordMCParamID:(unsigned long long)pid
-                   type:(SCIExpMCType)t
-           defaultValue:(NSString *)def
-          originalValue:(NSString *)original
-           contextClass:(NSString *)contextClass
-           selectorName:(NSString *)selectorName;
-@end
-
 @interface SCIExpFlags (InternalUseOverrides)
 + (SCIExpFlagOverride)internalUseOverrideForSpecifier:(unsigned long long)specifier;
 + (void)setInternalUseOverride:(SCIExpFlagOverride)o forSpecifier:(unsigned long long)specifier;
