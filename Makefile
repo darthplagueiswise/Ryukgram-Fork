@@ -14,8 +14,9 @@ before-all::
 
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIMachODexKitResolver.m,$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out $(GENERATED_SCHEMA_SRC),$(RYUKGRAM_SRC_FILES))
 
-$(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
+$(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation UniformTypeIdentifiers CoreLocation MapKit
 $(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -include src/SCIPrefix.h
