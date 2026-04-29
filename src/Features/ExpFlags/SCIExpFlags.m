@@ -93,12 +93,50 @@ static dispatch_queue_t mcQueue(void) {
 }
 
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def {
+    [self recordMCParamID:pid
+                    type:t
+            defaultValue:def
+           originalValue:nil
+            contextClass:nil
+            selectorName:nil];
+}
+
++ (void)recordMCParamID:(unsigned long long)pid
+                   type:(SCIExpMCType)t
+           defaultValue:(NSString *)def
+          originalValue:(NSString *)original
+           contextClass:(NSString *)contextClass
+           selectorName:(NSString *)selectorName {
+
     dispatch_barrier_async(mcQueue(), ^{
         if (!gMCObs) gMCObs = [NSMutableDictionary dictionary];
+
         NSNumber *k = @(pid);
         SCIExpMCObservation *o = gMCObs[k];
-        if (!o) { o = [SCIExpMCObservation new]; o.paramID = pid; o.type = t; gMCObs[k] = o; }
+
+        if (!o) {
+            o = [SCIExpMCObservation new];
+            o.paramID = pid;
+            o.type = t;
+
+            NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:pid];
+            if (mapped.length) {
+                o.resolvedName = mapped;
+            }
+
+            NSString *source = [SCIExpMobileConfigMapping mappingSourceDescription];
+            if (source.length) {
+                o.source = source;
+            }
+
+            gMCObs[k] = o;
+        }
+
+        o.type = t;
         o.lastDefault = def ?: @"";
+        o.lastOriginalValue = original ?: @"";
+        o.contextClass = contextClass ?: o.contextClass ?: @"";
+        o.selectorName = selectorName ?: o.selectorName ?: @"";
         o.hitCount++;
     });
 }
