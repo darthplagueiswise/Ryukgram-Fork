@@ -1,45 +1,85 @@
 #import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
+#import "../Features/ExpFlags/SCIExpMobileConfigMapping.h"
+#import "../Utils.h"
 #import <objc/runtime.h>
 
-static NSString *const kSCIMCSymbolAll = @"All";
+typedef NS_ENUM(NSInteger, SCIMCObserverMode) {
+    SCIMCObserverModeAll = 0,
+    SCIMCObserverModeWouldChange,
+    SCIMCObserverModeObjC,
+    SCIMCObserverModeC,
+    SCIMCObserverModeUpdate,
+};
+
+static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 @interface SCIMobileConfigSymbolObserverViewController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
-@property (nonatomic, strong) UISegmentedControl *sourceSeg;
+
+@property (nonatomic, strong) UISegmentedControl *modeSeg;
+@property (nonatomic, strong) UISegmentedControl *categorySeg;
 @property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, copy) NSString *query;
-@property (nonatomic, strong) NSArray<NSString *> *sources;
+@property (nonatomic, strong) NSArray<NSString *> *categories;
 @property (nonatomic, strong) NSArray<SCIExpMCObservation *> *rows;
+
 @end
 
 @implementation SCIMobileConfigSymbolObserverViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"MC Symbol Observer";
+
+    self.title = @"MC Observer";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.sources = @[
-        kSCIMCSymbolAll,
-        @"MCI",
-        @"METAExtensions",
-        @"MCQMEM",
-        @"MEM Capability",
-        @"MEM DevConfig",
-        @"MEM Platform",
-        @"MEM Protocol"
+
+    self.categories = @[
+        @"All",
+        @"Dogfood",
+        @"Direct",
+        @"QuickSnap",
+        @"Prism",
+        @"TabBar",
+        @"Feed",
+        @"Infra",
+        @"Unknown"
     ];
 
-    self.sourceSeg = [[UISegmentedControl alloc] initWithItems:self.sources];
-    self.sourceSeg.selectedSegmentIndex = 0;
-    self.sourceSeg.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.sourceSeg addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
-    [self.view addSubview:self.sourceSeg];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:@"Import JSON"
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(importRuntimeJSON)];
+
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:@"Export"
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(exportMenu)];
+
+    self.modeSeg = [[UISegmentedControl alloc] initWithItems:@[
+        @"All",
+        @"Would change",
+        @"ObjC",
+        @"C",
+        @"Update"
+    ]];
+    self.modeSeg.selectedSegmentIndex = SCIMCObserverModeAll;
+    self.modeSeg.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.modeSeg addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:self.modeSeg];
+
+    self.categorySeg = [[UISegmentedControl alloc] initWithItems:self.categories];
+    self.categorySeg.selectedSegmentIndex = 0;
+    self.categorySeg.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.categorySeg addTarget:self action:@selector(filterChanged) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:self.categorySeg];
 
     self.searchBar = [UISearchBar new];
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    self.searchBar.placeholder = @"Search symbol / args / candidate";
+    self.searchBar.placeholder = @"Search name / category / selector / source";
     self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
     self.searchBar.delegate = self;
@@ -62,12 +102,17 @@ static NSString *const kSCIMCSymbolAll = @"All";
     [self.view addSubview:self.emptyLabel];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.sourceSeg.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
-        [self.sourceSeg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
-        [self.sourceSeg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
 
-        [self.searchBar.topAnchor constraintEqualToAnchor:self.sourceSeg.bottomAnchor constant:4],
+    [NSLayoutConstraint activateConstraints:@[
+        [self.modeSeg.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
+        [self.modeSeg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [self.modeSeg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+
+        [self.categorySeg.topAnchor constraintEqualToAnchor:self.modeSeg.bottomAnchor constant:6],
+        [self.categorySeg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [self.categorySeg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+
+        [self.searchBar.topAnchor constraintEqualToAnchor:self.categorySeg.bottomAnchor constant:4],
         [self.searchBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
         [self.searchBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
 
@@ -88,125 +133,637 @@ static NSString *const kSCIMCSymbolAll = @"All";
     [self refresh];
 }
 
-- (void)filterChanged { [self refresh]; }
+- (void)filterChanged {
+    [self refresh];
+}
 
 - (void)refresh {
     self.rows = [self filteredRows];
     [self.tableView reloadData];
+
     self.emptyLabel.hidden = self.rows.count > 0;
-    self.emptyLabel.text = self.query.length ? @"No matching MobileConfig symbol observations yet." : @"Browse Instagram to populate observed MobileConfig C boolean symbols.";
+    self.emptyLabel.text = self.query.length
+        ? @"No matching observations."
+        : @"Browse Instagram screens to populate MobileConfig observations.";
 }
 
+#pragma mark - Runtime schema import/debug
+
+- (NSArray<NSString *> *)runtimeJSONCandidatePaths {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+
+    NSString *bundle = [NSBundle mainBundle].bundlePath;
+    if (bundle.length) {
+        [paths addObject:[bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/igios-instagram-schema_client-persist.json"]];
+        [paths addObject:[bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/igios-facebook-schema_client-persist.json"]];
+        [paths addObject:[bundle stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"]];
+    }
+
+    NSArray<NSString *> *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    if (docs.firstObject) {
+        [paths addObject:[docs.firstObject stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"]];
+    }
+
+    NSArray<NSString *> *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    if (appSupport.firstObject) {
+        NSString *ryukPath = [[appSupport.firstObject stringByAppendingPathComponent:@"RyukGram"]
+            stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"];
+        [paths addObject:ryukPath];
+    }
+
+    return paths;
+}
+
+- (NSString *)persistedRuntimeJSONPath {
+    NSArray<NSString *> *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    NSString *base = appSupport.firstObject ?: NSTemporaryDirectory();
+
+    NSString *dir = [base stringByAppendingPathComponent:@"RyukGram"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+
+    return [dir stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"];
+}
+
+- (NSDictionary *)runtimeJSONStatus {
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    NSMutableArray *checked = [NSMutableArray array];
+    NSMutableArray *found = [NSMutableArray array];
+
+    for (NSString *path in [self runtimeJSONCandidatePaths]) {
+        if (!path.length) continue;
+
+        [checked addObject:path];
+
+        BOOL isDir = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && !isDir) {
+            NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] ?: @{};
+            [found addObject:@{
+                @"path": path,
+                @"size": attrs[NSFileSize] ?: @0
+            }];
+        }
+    }
+
+    out[@"checked"] = checked;
+    out[@"found"] = found;
+    out[@"mapping"] = [SCIExpMobileConfigMapping mappingSourceDescription] ?: @"none";
+    out[@"persisted"] = [self persistedRuntimeJSONPath] ?: @"";
+
+    return out;
+}
+
+- (void)importRuntimeJSON {
+    NSDictionary *status = [self runtimeJSONStatus];
+    NSArray *found = status[@"found"];
+
+    NSString *source = nil;
+
+    for (NSDictionary *entry in found) {
+        NSString *p = entry[@"path"];
+        if ([p containsString:@"FBSharedFramework.framework/igios-instagram-schema_client-persist.json"]) {
+            source = p;
+            break;
+        }
+
+        if (!source.length) {
+            source = p;
+        }
+    }
+
+    NSMutableString *msg = [NSMutableString string];
+    [msg appendFormat:@"Resolver atual:\n%@\n\n", status[@"mapping"] ?: @"none"];
+    [msg appendFormat:@"Destino importado:\n%@\n\n", status[@"persisted"] ?: @""];
+
+    if (!source.length) {
+        [msg appendString:@"Nenhum JSON runtime encontrado.\n\nChecked:\n"];
+        for (NSString *p in status[@"checked"]) {
+            [msg appendFormat:@"- %@\n", p];
+        }
+
+        [self presentText:msg title:@"Import JSON"];
+        return;
+    }
+
+    NSString *dest = [self persistedRuntimeJSONPath];
+
+    NSError *err = nil;
+    [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+
+    BOOL ok = [[NSFileManager defaultManager] copyItemAtPath:source
+                                                      toPath:dest
+                                                       error:&err];
+
+    if (ok) {
+        [SCIExpMobileConfigMapping reloadMapping];
+
+        [msg appendFormat:@"Importado de:\n%@\n\n", source];
+        [msg appendString:@"Observação: o resolver usa o schema embutido quando ele existe; este import mantém uma cópia local e valida o caminho runtime sem depender do UUID da instalação.\n\n"];
+    } else {
+        [msg appendFormat:@"Falha ao copiar:\n%@\n", err.localizedDescription ?: @"unknown"];
+    }
+
+    [msg appendString:[SCIExpMobileConfigMapping mappingDebugDescription] ?: @""];
+
+    [self presentText:msg title:ok ? @"JSON importado" : @"Import JSON"];
+}
+
+- (void)presentText:(NSString *)text title:(NSString *)title {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:title ?: @"Debug"
+                                                               message:text ?: @""
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+
+    [a addAction:[UIAlertAction actionWithTitle:@"Copy"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = text ?: @"";
+    }]];
+
+    [a addAction:[UIAlertAction actionWithTitle:@"OK"
+                                          style:UIAlertActionStyleCancel
+                                        handler:nil]];
+
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+#pragma mark - Filtering
+
 - (NSArray<SCIExpMCObservation *> *)filteredRows {
-    NSArray<SCIExpMCObservation *> *all = [SCIExpFlags allMCObservations];
+    NSArray<SCIExpMCObservation *> *all = [SCIExpFlags allMCObservations] ?: @[];
     NSMutableArray<SCIExpMCObservation *> *out = [NSMutableArray array];
-    NSString *selected = self.sources[(NSUInteger)MAX(0, self.sourceSeg.selectedSegmentIndex)];
+
+    NSUInteger categoryIndex = (NSUInteger)MAX(0, self.categorySeg.selectedSegmentIndex);
+    if (categoryIndex >= self.categories.count) categoryIndex = 0;
+
+    NSString *selectedCategory = self.categories[categoryIndex];
     NSString *q = self.query.lowercaseString ?: @"";
+    SCIMCObserverMode mode = (SCIMCObserverMode)self.modeSeg.selectedSegmentIndex;
 
     for (SCIExpMCObservation *o in all) {
         NSString *detail = o.lastDefault ?: @"";
-        if (![self isRuntimeSymbolObservation:detail]) continue;
-        NSString *symbol = [self symbolNameFromDetail:detail];
-        if (![self symbol:symbol matchesSource:selected]) continue;
-        NSString *haystack = [NSString stringWithFormat:@"%@ %@ 0x%016llx %llu", symbol ?: @"", detail, o.paramID, o.paramID].lowercaseString;
+        NSString *display = [self displayNameForObservation:o];
+        NSString *category = [self categoryForObservation:o];
+
+        if (![self observation:o detail:detail matchesMode:mode]) continue;
+        if (![selectedCategory isEqualToString:@"All"] && ![category isEqualToString:selectedCategory]) continue;
+
+        NSString *haystack = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@ %@ %@",
+                              display ?: @"",
+                              category ?: @"",
+                              detail ?: @"",
+                              o.resolvedName ?: @"",
+                              o.source ?: @"",
+                              o.contextClass ?: @"",
+                              o.selectorName ?: @"",
+                              [self specifierHex:o.paramID]].lowercaseString;
+
         if (q.length && ![haystack containsString:q]) continue;
+
         [out addObject:o];
     }
 
     return [out sortedArrayUsingComparator:^NSComparisonResult(SCIExpMCObservation *a, SCIExpMCObservation *b) {
+        BOOL ac = [self wouldChangeObservation:a];
+        BOOL bc = [self wouldChangeObservation:b];
+
+        if (ac != bc) return ac ? NSOrderedAscending : NSOrderedDescending;
         if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
-        NSString *as = [self symbolNameFromDetail:a.lastDefault ?: @""] ?: @"";
-        NSString *bs = [self symbolNameFromDetail:b.lastDefault ?: @""] ?: @"";
-        NSComparisonResult r = [as compare:bs];
-        if (r != NSOrderedSame) return r;
-        if (a.paramID < b.paramID) return NSOrderedAscending;
-        if (a.paramID > b.paramID) return NSOrderedDescending;
-        return NSOrderedSame;
+
+        return [[self displayNameForObservation:a] compare:[self displayNameForObservation:b]];
     }];
 }
 
-- (BOOL)isRuntimeSymbolObservation:(NSString *)detail {
-    return [detail containsString:@"_MCIMobileConfigGetBoolean"] ||
-           [detail containsString:@"_METAExtensionsExperimentGetBoolean"] ||
-           [detail containsString:@"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock"] ||
-           [detail containsString:@"_MEMMobileConfigFeatureCapabilityGetBoolean_Internal_DoNotUseOrMock"] ||
-           [detail containsString:@"_MEMMobileConfigFeatureDevConfigGetBoolean_Internal_DoNotUseOrMock"] ||
-           [detail containsString:@"_MEMMobileConfigPlatformGetBoolean"] ||
-           [detail containsString:@"_MEMMobileConfigProtocolExperimentGetBoolean_Internal_DoNotUseOrMock"];
+- (BOOL)observation:(SCIExpMCObservation *)o
+             detail:(NSString *)detail
+        matchesMode:(SCIMCObserverMode)mode {
+    switch (mode) {
+        case SCIMCObserverModeAll:
+            return YES;
+
+        case SCIMCObserverModeWouldChange:
+            return [self wouldChangeObservation:o];
+
+        case SCIMCObserverModeObjC:
+            return [detail containsString:@"ObjC MobileConfig getter"] || o.contextClass.length > 0;
+
+        case SCIMCObserverModeC:
+            return ![detail containsString:@"ObjC MobileConfig getter"] && ![self isUpdatePathObservation:o];
+
+        case SCIMCObserverModeUpdate:
+            return [self isUpdatePathObservation:o];
+    }
+
+    return YES;
+}
+
+- (BOOL)isUpdatePathObservation:(SCIExpMCObservation *)o {
+    NSString *s = [NSString stringWithFormat:@"%@ %@ %@ %@",
+                   o.lastDefault ?: @"",
+                   o.resolvedName ?: @"",
+                   o.contextClass ?: @"",
+                   o.selectorName ?: @""].lowercaseString;
+
+    return [s containsString:@"updateconfigs"] ||
+           [s containsString:@"forceupdate"] ||
+           [s containsString:@"setconfigoverrides"] ||
+           [s containsString:@"refresh"] ||
+           [s containsString:@"override path"];
+}
+
+- (BOOL)wouldChangeObservation:(SCIExpMCObservation *)o {
+    NSString *detail = o.lastDefault ?: @"";
+    NSString *orig = o.lastOriginalValue ?: @"";
+
+    return [detail containsString:@"wouldChangeIfTrue=1"] ||
+           [detail containsString:@"wouldChange=1"] ||
+           [orig isEqualToString:@"NO"] ||
+           [orig isEqualToString:@"0"];
+}
+
+- (NSString *)displayNameForObservation:(SCIExpMCObservation *)o {
+    if (o.resolvedName.length) return o.resolvedName;
+
+    NSString *detail = o.lastDefault ?: @"";
+    NSString *symbol = [self symbolNameFromDetail:detail];
+
+    if (symbol.length) return symbol;
+
+    if (o.contextClass.length || o.selectorName.length) {
+        return [NSString stringWithFormat:@"%@ %@",
+                o.contextClass.length ? o.contextClass : @"ObjC",
+                o.selectorName.length ? o.selectorName : @""];
+    }
+
+    return [NSString stringWithFormat:@"unknown %@", [self specifierHex:o.paramID]];
+}
+
+- (NSString *)categoryForObservation:(SCIExpMCObservation *)o {
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@",
+                     o.resolvedName ?: @"",
+                     o.lastDefault ?: @"",
+                     o.contextClass ?: @"",
+                     o.selectorName ?: @"",
+                     [self symbolNameFromDetail:o.lastDefault ?: @""] ?: @""].lowercaseString;
+
+    if ([self string:hay containsAny:@[@"employee", @"dogfood", @"dogfooding", @"internal", @"test_user", @"devoptions"]]) return @"Dogfood";
+    if ([self string:hay containsAny:@[@"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notestray"]]) return @"Direct";
+    if ([self string:hay containsAny:@[@"quicksnap", @"quick_snap", @"instants", @"instant", @"mshquicksnap"]]) return @"QuickSnap";
+    if ([self string:hay containsAny:@[@"prism", @"igdsprism", @"prismmenu"]]) return @"Prism";
+    if ([self string:hay containsAny:@[@"tabbar", @"homecoming", @"launcher", @"navigation", @"sundial"]]) return @"TabBar";
+    if ([self string:hay containsAny:@[@"feed", @"reels", @"story", @"stories", @"explore"]]) return @"Feed";
+    if ([self string:hay containsAny:@[@"mobileconfig", @"startupconfigs", @"easygating", @"override", @"refresh", @"updateconfigs", @"sessionless", @"objc mobileconfig getter"]]) return @"Infra";
+
+    return @"Unknown";
+}
+
+- (BOOL)string:(NSString *)s containsAny:(NSArray<NSString *> *)needles {
+    for (NSString *n in needles) {
+        if ([s containsString:n]) return YES;
+    }
+
+    return NO;
 }
 
 - (NSString *)symbolNameFromDetail:(NSString *)detail {
     NSArray<NSString *> *symbols = @[
+        @"_IGMobileConfigBooleanValueForInternalUse",
+        @"_IGMobileConfigSessionlessBooleanValueForInternalUse",
+        @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+        @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+        @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+        @"_EasyGatingPlatformGetBoolean",
+        @"_MSGCSessionedMobileConfigGetBoolean",
         @"_MCIMobileConfigGetBoolean",
+        @"_MCIExperimentCacheGetMobileConfigBoolean",
+        @"_MCIExtensionExperimentCacheGetMobileConfigBoolean",
+        @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
         @"_METAExtensionsExperimentGetBooleanWithoutExposure",
         @"_METAExtensionsExperimentGetBoolean",
-        @"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock",
-        @"_MEMMobileConfigFeatureCapabilityGetBoolean_Internal_DoNotUseOrMock",
-        @"_MEMMobileConfigFeatureDevConfigGetBoolean_Internal_DoNotUseOrMock",
-        @"_MEMMobileConfigPlatformGetBoolean",
-        @"_MEMMobileConfigProtocolExperimentGetBoolean_Internal_DoNotUseOrMock"
+        @"_MEBIsMinosDogfoodMekEncryptionVersionEnabled",
+        @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
+        @"_IGMobileConfigTryUpdateConfigsWithCompletion",
+        @"_IGMobileConfigForceUpdateConfigs",
+        @"_IGMobileConfigSetConfigOverrides"
     ];
-    for (NSString *s in symbols) if ([detail containsString:s]) return s;
-    return @"Unknown MC symbol";
+
+    for (NSString *s in symbols) {
+        if ([detail containsString:s]) return s;
+    }
+
+    return nil;
 }
 
-- (BOOL)symbol:(NSString *)symbol matchesSource:(NSString *)source {
-    if (!source.length || [source isEqualToString:kSCIMCSymbolAll]) return YES;
-    if ([source isEqualToString:@"MCI"]) return [symbol containsString:@"MCIMobileConfigGetBoolean"];
-    if ([source isEqualToString:@"METAExtensions"]) return [symbol containsString:@"METAExtensionsExperimentGetBoolean"];
-    if ([source isEqualToString:@"MCQMEM"]) return [symbol containsString:@"MCQMEMMobileConfigCqlGetBoolean"];
-    if ([source isEqualToString:@"MEM Capability"]) return [symbol containsString:@"FeatureCapability"];
-    if ([source isEqualToString:@"MEM DevConfig"]) return [symbol containsString:@"FeatureDevConfig"];
-    if ([source isEqualToString:@"MEM Platform"]) return [symbol containsString:@"PlatformGetBoolean"];
-    if ([source isEqualToString:@"MEM Protocol"]) return [symbol containsString:@"ProtocolExperiment"];
-    return YES;
+- (NSString *)specifierHex:(unsigned long long)specifier {
+    return [NSString stringWithFormat:@"0x%016llx", specifier];
 }
 
-- (NSString *)cleanDetail:(NSString *)detail {
-    NSString *symbol = [self symbolNameFromDetail:detail] ?: @"";
-    NSString *clean = detail;
-    if (symbol.length) clean = [clean stringByReplacingOccurrencesOfString:symbol withString:@""];
-    clean = [clean stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    return clean.length ? clean : detail;
+- (NSString *)overrideKeyForObservation:(SCIExpMCObservation *)o {
+    NSString *name = o.resolvedName.length ? o.resolvedName : [self displayNameForObservation:o];
+
+    if (!name.length || [name hasPrefix:@"unknown "]) return nil;
+
+    return name;
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows.count; }
+#pragma mark - Export
+
+- (NSArray<NSDictionary *> *)exportRows {
+    NSMutableArray<NSDictionary *> *arr = [NSMutableArray array];
+
+    for (SCIExpMCObservation *o in self.rows ?: @[]) {
+        NSString *key = [self overrideKeyForObservation:o] ?: @"";
+        SCIExpFlagOverride ov = key.length ? [SCIExpFlags overrideForName:key] : SCIExpFlagOverrideOff;
+
+        [arr addObject:@{
+            @"param_id_hex": [self specifierHex:o.paramID],
+            @"param_id": @(o.paramID),
+            @"name": [self displayNameForObservation:o] ?: @"",
+            @"resolved_name": o.resolvedName ?: @"",
+            @"category": [self categoryForObservation:o] ?: @"Unknown",
+            @"source": o.source ?: @"",
+            @"context_class": o.contextClass ?: @"",
+            @"selector": o.selectorName ?: @"",
+            @"default_or_detail": o.lastDefault ?: @"",
+            @"original": o.lastOriginalValue ?: @"",
+            @"would_change_if_true": @([self wouldChangeObservation:o]),
+            @"override_key": key,
+            @"override": @(ov),
+            @"hits": @(o.hitCount)
+        }];
+    }
+
+    return arr;
+}
+
+- (NSString *)exportJSON {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:[self exportRows]
+                                                   options:NSJSONWritingPrettyPrinted
+                                                     error:nil];
+
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"[]";
+}
+
+- (NSString *)csvEscape:(id)obj {
+    NSString *s = [obj respondsToSelector:@selector(description)] ? [obj description] : @"";
+    s = [s stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""];
+
+    return [NSString stringWithFormat:@"\"%@\"", s];
+}
+
+- (NSString *)exportCSV {
+    NSArray *keys = @[
+        @"param_id_hex",
+        @"name",
+        @"resolved_name",
+        @"category",
+        @"source",
+        @"context_class",
+        @"selector",
+        @"original",
+        @"would_change_if_true",
+        @"override",
+        @"hits",
+        @"default_or_detail"
+    ];
+
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+
+    [lines addObject:[keys componentsJoinedByString:@","]];
+
+    for (NSDictionary *row in [self exportRows]) {
+        NSMutableArray *cols = [NSMutableArray array];
+
+        for (NSString *k in keys) {
+            [cols addObject:[self csvEscape:row[k] ?: @""]];
+        }
+
+        [lines addObject:[cols componentsJoinedByString:@","]];
+    }
+
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+- (void)exportMenu {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Export MC Observer"
+                                                                   message:[NSString stringWithFormat:@"%lu row(s)", (unsigned long)self.rows.count]
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy JSON"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [self exportJSON];
+        [SCIUtils showSuccessHUDWithDescription:@"JSON copied"];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy CSV"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [self exportCSV];
+        [SCIUtils showSuccessHUDWithDescription:@"CSV copied"];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Share JSON"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[[self exportJSON]]
+                                                                         applicationActivities:nil];
+
+        if (vc.popoverPresentationController) {
+            vc.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+        }
+
+        [self presentViewController:vc animated:YES completion:nil];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Mapping debug"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        NSMutableString *msg = [NSMutableString stringWithString:[SCIExpMobileConfigMapping mappingDebugDescription] ?: @""];
+        [msg appendString:@"\n\nRuntime JSON candidates:\n"];
+
+        for (NSString *p in [self runtimeJSONCandidatePaths]) {
+            [msg appendFormat:@"- %@\n", p];
+        }
+
+        [self presentText:msg title:@"id_name_mapping debug"];
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    }
+
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+#pragma mark - Table
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.rows.count;
+}
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mc-symbol"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"mc-symbol"];
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mc-observer"];
+
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                      reuseIdentifier:@"mc-observer"];
+    }
+
     SCIExpMCObservation *o = self.rows[(NSUInteger)indexPath.row];
-    NSString *symbol = [self symbolNameFromDetail:o.lastDefault ?: @""];
-    NSString *candidate = o.paramID ? [NSString stringWithFormat:@"0x%016llx", o.paramID] : @"candidate=none";
-    cell.textLabel.text = [NSString stringWithFormat:@"%@  %@", symbol, candidate];
+
+    NSString *name = [self displayNameForObservation:o];
+    NSString *category = [self categoryForObservation:o];
+    NSString *change = [self wouldChangeObservation:o] ? @" WOULD_TRUE" : @"";
+    NSString *key = [self overrideKeyForObservation:o];
+    SCIExpFlagOverride ov = key.length ? [SCIExpFlags overrideForName:key] : SCIExpFlagOverrideOff;
+
+    cell.textLabel.text = [NSString stringWithFormat:@"[%@] %@ %@%@",
+                           category,
+                           name,
+                           [self specifierHex:o.paramID],
+                           change];
+
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · ×%lu", [self cleanDetail:o.lastDefault ?: @""], (unsigned long)o.hitCount];
+
+    NSMutableArray *parts = [NSMutableArray array];
+
+    if (o.contextClass.length || o.selectorName.length) {
+        [parts addObject:[NSString stringWithFormat:@"%@ %@",
+                          o.contextClass ?: @"",
+                          o.selectorName ?: @""]];
+    }
+
+    if (o.lastOriginalValue.length) {
+        [parts addObject:[NSString stringWithFormat:@"original=%@", o.lastOriginalValue]];
+    }
+
+    if (o.lastDefault.length) {
+        [parts addObject:o.lastDefault];
+    }
+
+    if (ov == SCIExpFlagOverrideTrue) {
+        [parts addObject:@"FORCED ON"];
+    }
+
+    if (ov == SCIExpFlagOverrideFalse) {
+        [parts addObject:@"FORCED OFF"];
+    }
+
+    [parts addObject:[NSString stringWithFormat:@"×%lu", (unsigned long)o.hitCount]];
+
+    cell.detailTextLabel.text = [parts componentsJoinedByString:@" · "];
     cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.detailTextLabel.numberOfLines = 0;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+    if (key.length) {
+        UISwitch *sw = [UISwitch new];
+        sw.on = (ov == SCIExpFlagOverrideTrue);
+
+        objc_setAssociatedObject(sw,
+                                 kSCIMCObserverSwitchKey,
+                                 key,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        [sw addTarget:self
+               action:@selector(overrideSwitchChanged:)
+     forControlEvents:UIControlEventValueChanged];
+
+        cell.accessoryView = sw;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+    } else {
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    }
+
     return cell;
+}
+
+- (void)overrideSwitchChanged:(UISwitch *)sender {
+    NSString *key = objc_getAssociatedObject(sender, kSCIMCObserverSwitchKey);
+
+    if (!key.length) return;
+
+    [SCIExpFlags setOverride:(sender.on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse)
+                     forName:key];
+
+    [self refresh];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+
     SCIExpMCObservation *o = self.rows[(NSUInteger)indexPath.row];
-    NSString *symbol = [self symbolNameFromDetail:o.lastDefault ?: @""];
-    NSString *row = [NSString stringWithFormat:@"%@\ncandidate=0x%016llx\nhits=%lu\n%@", symbol, o.paramID, (unsigned long)o.hitCount, o.lastDefault ?: @""];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:symbol message:row preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = row;
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy symbol" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = symbol;
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    NSString *key = [self overrideKeyForObservation:o];
+
+    NSString *msg = [NSString stringWithFormat:@"name=%@\ncategory=%@\nparam=%@\nresolved=%@\nsource=%@\ncontext=%@\nselector=%@\noriginal=%@\nhits=%lu\n\n%@",
+                     [self displayNameForObservation:o],
+                     [self categoryForObservation:o],
+                     [self specifierHex:o.paramID],
+                     o.resolvedName ?: @"",
+                     o.source ?: @"",
+                     o.contextClass ?: @"",
+                     o.selectorName ?: @"",
+                     o.lastOriginalValue ?: @"",
+                     (unsigned long)o.hitCount,
+                     o.lastDefault ?: @""];
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[self displayNameForObservation:o]
+                                                                   message:msg
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = msg;
+    }]];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy param"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [self specifierHex:o.paramID];
+    }]];
+
+    if (key.length) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"No override"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction *action) {
+            [SCIExpFlags setOverride:SCIExpFlagOverrideOff forName:key];
+            [self refresh];
+        }]];
+
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force ON"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction *action) {
+            [SCIExpFlags setOverride:SCIExpFlagOverrideTrue forName:key];
+            [self refresh];
+        }]];
+
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force OFF"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction *action) {
+            [SCIExpFlags setOverride:SCIExpFlagOverrideFalse forName:key];
+            [self refresh];
+        }]];
+    }
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
     if (sheet.popoverPresentationController) {
         sheet.popoverPresentationController.sourceView = cell;
         sheet.popoverPresentationController.sourceRect = cell.bounds;
     }
+
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -215,6 +772,8 @@ static NSString *const kSCIMCSymbolAll = @"All";
     [self refresh];
 }
 
-- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [searchBar resignFirstResponder]; }
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
+    [searchBar resignFirstResponder];
+}
 
 @end
