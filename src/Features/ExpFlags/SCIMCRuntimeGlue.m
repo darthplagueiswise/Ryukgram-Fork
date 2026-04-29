@@ -1,21 +1,14 @@
+#import <Foundation/Foundation.h>
 #import "SCIExpFlags.h"
-#import "SCIMobileConfigMapping.h"
 
-@implementation SCIExpFlags (MobileConfigRuntime)
+/*
+ This file intentionally no longer implements SCIExpFlags methods through a
+ category.
 
-+ (void)recordMCParamID:(unsigned long long)pid
-                   type:(SCIExpMCType)t
-           defaultValue:(NSString *)def
-          originalValue:(NSString *)original
-           contextClass:(NSString *)contextClass
-           selectorName:(NSString *)selectorName {
-    // This method is called from very hot MobileConfig paths. Keep it cheap:
-    // record the ID/default snapshot only and avoid dispatching work to the main queue
-    // for every hit. UI/debug enrichment must happen lazily when the menu is opened.
-    (void)original;
-    (void)contextClass;
-    (void)selectorName;
-    [self recordMCParamID:pid type:t defaultValue:def];
-}
+ recordMCParamID:type:defaultValue:originalValue:contextClass:selectorName:
+ belongs in SCIExpFlags.m, inside the primary @implementation SCIExpFlags.
 
-@end
+ Keeping the old category implementation here makes clang fail with:
+ -Wobjc-protocol-method-implementation
+ because the selector is declared on the primary class.
+ */
