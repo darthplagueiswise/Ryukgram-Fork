@@ -6,6 +6,12 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
+SCHEMA_JSON ?= resources/igios-instagram-schema_client-persist.json
+GENERATED_SCHEMA_SRC := src/Generated/SCIEmbeddedMobileConfigSchema.m
+
+before-all::
+	@python3 scripts/embed_mobileconfig_schema.py "$(SCHEMA_JSON)" "$(GENERATED_SCHEMA_SRC)"
+
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIMachODexKitResolver.m,$(RYUKGRAM_SRC_FILES))
 
