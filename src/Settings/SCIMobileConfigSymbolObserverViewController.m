@@ -24,6 +24,8 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 @property (nonatomic, copy) NSString *query;
 @property (nonatomic, strong) NSArray<NSString *> *categories;
 @property (nonatomic, strong) NSArray<SCIExpMCObservation *> *rows;
+@property (nonatomic, strong) NSArray<NSString *> *sectionTitles;
+@property (nonatomic, strong) NSDictionary<NSString *, NSArray<SCIExpMCObservation *> *> *sectionRows;
 @end
 
 @implementation SCIMobileConfigSymbolObserverViewController
@@ -33,6 +35,8 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     self.title = @"MC Override Lab";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     self.categories = @[@"All"];
+    self.sectionTitles = @[];
+    self.sectionRows = @{};
 
     UIBarButtonItem *exportItem = [[UIBarButtonItem alloc] initWithTitle:@"Export" style:UIBarButtonItemStylePlain target:self action:@selector(exportMenu)];
     UIBarButtonItem *importItem = [[UIBarButtonItem alloc] initWithTitle:@"Import id_map" style:UIBarButtonItemStylePlain target:self action:@selector(importRuntimeJSON)];
@@ -59,7 +63,7 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     self.searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.searchBar];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
@@ -103,9 +107,10 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     NSArray<SCIExpMCObservation *> *all = [SCIExpFlags allMCObservations] ?: @[];
     [self rebuildCategoriesFromRows:all];
     self.rows = [self filteredRowsFromAll:all];
+    [self rebuildSections];
     [self.tableView reloadData];
     self.emptyLabel.hidden = self.rows.count > 0;
-    self.emptyLabel.text = self.query.length ? @"No matching gates." : @"Enable MC hooks, restart, then browse Instagram screens to populate gates.";
+    self.emptyLabel.text = self.query.length ? @"No matching gates." : @"MC observers are on by default. Restart, then browse Instagram screens to populate gates.";
 }
 
 - (void)rebuildCategoriesFromRows:(NSArray<SCIExpMCObservation *> *)all {
@@ -144,19 +149,26 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 - (NSDictionary *)runtimeJSONStatus {
     NSMutableDictionary *out = [NSMutableDictionary dictionary];
-    NSMutableArray *checked = [NSMutableArray array];
-    NSMutableArray *found = [NSMutableArray array];
-    for (NSString *path in [self runtimeJSONCandidatePaths]) {
-        if (!path.length) continue;
-        [checked addObject:path];
-        BOOL isDir = NO;
-        if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && !isDir) {
-            NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] ?: @{};
-            [found addObject:@{@"path": path, @"size": attrs[NSFileSize] ?: @0}];
+    NSMutableArray *foundData = [NSMutableArray array];
+    NSMutableArray *foundBundle = [NSMutableArray array];
+
+    void (^scan)(NSArray<NSString *> *, NSMutableArray *) = ^(NSArray<NSString *> *paths, NSMutableArray *found) {
+        for (NSString *path in paths ?: @[]) {
+            if (!path.length) continue;
+            BOOL isDir = NO;
+            if ([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && !isDir) {
+                NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] ?: @{};
+                [found addObject:@{@"path": path, @"size": attrs[NSFileSize] ?: @0}];
+            }
         }
-    }
-    out[@"checked"] = checked;
-    out[@"found"] = found;
+    };
+
+    scan([SCIMobileConfigMapping dataContainerMappingPaths], foundData);
+    scan([SCIMobileConfigMapping bundleMappingPaths], foundBundle);
+    out[@"dataChecked"] = [SCIMobileConfigMapping dataContainerMappingPaths] ?: @[];
+    out[@"bundleChecked"] = [SCIMobileConfigMapping bundleMappingPaths] ?: @[];
+    out[@"dataFound"] = foundData;
+    out[@"bundleFound"] = foundBundle;
     out[@"mapping"] = [SCIMobileConfigMapping mappingStatusLine] ?: @"none";
     out[@"persisted"] = [self persistedRuntimeJSONPath] ?: @"";
     out[@"active"] = [SCIMobileConfigMapping activeIDNameMappingPath] ?: @"";
@@ -165,27 +177,38 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 - (void)importRuntimeJSON {
     NSDictionary *status = [self runtimeJSONStatus];
-    NSArray *found = status[@"found"];
+    NSArray *dataFound = status[@"dataFound"] ?: @[];
+    NSArray *bundleFound = status[@"bundleFound"] ?: @[];
     NSString *source = nil;
-    for (NSDictionary *entry in found) {
+    NSString *dest = [self persistedRuntimeJSONPath];
+
+    for (NSDictionary *entry in dataFound) {
         NSString *p = entry[@"path"];
-        if ([p containsString:@"id_name_mapping.json"] && ![p isEqualToString:[self persistedRuntimeJSONPath]]) { source = p; break; }
-        if (!source.length) source = p;
+        if (p.length && ![p isEqualToString:dest]) { source = p; break; }
     }
+    if (!source.length) {
+        for (NSDictionary *entry in bundleFound) {
+            NSString *p = entry[@"path"];
+            if (p.length && ![p isEqualToString:dest]) { source = p; break; }
+        }
+    }
+    if (!source.length && dataFound.count) source = dataFound[0][@"path"];
+    if (!source.length && bundleFound.count) source = bundleFound[0][@"path"];
 
     NSMutableString *msg = [NSMutableString string];
     [msg appendFormat:@"Resolver atual:\n%@\n\n", status[@"mapping"] ?: @"none"];
     [msg appendFormat:@"Ativo:\n%@\n\n", status[@"active"] ?: @"none"];
-    [msg appendFormat:@"Destino local:\n%@\n\n", status[@"persisted"] ?: @""];
+    [msg appendFormat:@"Destino estilo InstaMoon/iOS:\n%@\n\n", dest ?: @""];
 
     if (!source.length) {
-        [msg appendString:@"Nenhum id_name_mapping.json encontrado.\n\nChecked:\n"];
-        for (NSString *p in status[@"checked"]) [msg appendFormat:@"- %@\n", p];
+        [msg appendString:@"Nenhum id_name_mapping.json encontrado.\n\nData container candidates:\n"];
+        for (NSString *p in status[@"dataChecked"]) [msg appendFormat:@"- %@\n", p];
+        [msg appendString:@"\nBundle candidates:\n"];
+        for (NSString *p in status[@"bundleChecked"]) [msg appendFormat:@"- %@\n", p];
         [self presentText:msg title:@"Import id_name_mapping"];
         return;
     }
 
-    NSString *dest = [self persistedRuntimeJSONPath];
     NSError *err = nil;
     BOOL same = [source isEqualToString:dest];
     BOOL ok = YES;
@@ -231,12 +254,43 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
         [out addObject:o];
     }
     return [out sortedArrayUsingComparator:^NSComparisonResult(SCIExpMCObservation *a, SCIExpMCObservation *b) {
+        NSString *ga = [self gateGroupForObservation:a];
+        NSString *gb = [self gateGroupForObservation:b];
+        NSComparisonResult gr = [ga caseInsensitiveCompare:gb];
+        if (gr != NSOrderedSame) return gr;
         BOOL ac = [self wouldChangeObservation:a];
         BOOL bc = [self wouldChangeObservation:b];
         if (ac != bc) return ac ? NSOrderedAscending : NSOrderedDescending;
         if (a.hitCount != b.hitCount) return a.hitCount > b.hitCount ? NSOrderedAscending : NSOrderedDescending;
         return [[self displayNameForObservation:a] compare:[self displayNameForObservation:b]];
     }];
+}
+
+- (void)rebuildSections {
+    NSMutableDictionary<NSString *, NSMutableArray<SCIExpMCObservation *> *> *groups = [NSMutableDictionary dictionary];
+    for (SCIExpMCObservation *o in self.rows ?: @[]) {
+        NSString *gate = [self gateGroupForObservation:o] ?: @"Unknown gate";
+        NSMutableArray *arr = groups[gate];
+        if (!arr) { arr = [NSMutableArray array]; groups[gate] = arr; }
+        [arr addObject:o];
+    }
+    NSArray *titles = [[groups allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
+    NSMutableDictionary *frozen = [NSMutableDictionary dictionary];
+    for (NSString *title in titles) frozen[title] = [groups[title] copy];
+    self.sectionTitles = titles ?: @[];
+    self.sectionRows = frozen ?: @{};
+}
+
+- (NSString *)gateGroupForObservation:(SCIExpMCObservation *)o {
+    NSString *symbol = [self symbolNameFromDetail:o.lastDefault ?: @""];
+    if (symbol.length) return symbol;
+    if (o.contextClass.length || o.selectorName.length) {
+        return [NSString stringWithFormat:@"%@ %@", o.contextClass.length ? o.contextClass : @"ObjC", o.selectorName.length ? o.selectorName : @""];
+    }
+    NSString *detail = o.lastDefault.lowercaseString ?: @"";
+    if ([detail containsString:@"objc mobileconfig getter"]) return @"ObjC MobileConfig getter";
+    if ([detail containsString:@"mobileconfig"] || [detail containsString:@"easygating"] || [detail containsString:@"metaextensions"] || [detail containsString:@"msgc"] || [detail containsString:@"mci"]) return @"C MobileConfig broker";
+    return @"Unknown gate";
 }
 
 - (BOOL)observation:(SCIExpMCObservation *)o detail:(NSString *)detail matchesMode:(SCIMCObserverMode)mode {
@@ -251,7 +305,7 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 }
 
 - (BOOL)isUpdatePathObservation:(SCIExpMCObservation *)o {
-    NSString *s = [NSString stringWithFormat:@"%@ %@ %@ %@", o.lastDefault ?: @"", o.resolvedName ?: @"", o.contextClass ?: @"", o.selectorName ?: @""].lowercaseString;
+    NSString *s = [NSString stringWithFormat:@"%@ %@ %@ %@", o.lastDefault ?: @"", [self resolvedNameForObservation:o] ?: @"", o.contextClass ?: @"", o.selectorName ?: @""].lowercaseString;
     return [s containsString:@"updateconfigs"] || [s containsString:@"forceupdate"] || [s containsString:@"setconfigoverrides"] || [s containsString:@"refresh"] || [s containsString:@"override path"];
 }
 
@@ -271,8 +325,17 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     return ![self wouldChangeObservation:o];
 }
 
-- (NSString *)displayNameForObservation:(SCIExpMCObservation *)o {
+- (NSString *)resolvedNameForObservation:(SCIExpMCObservation *)o {
+    NSString *mapped = [SCIMobileConfigMapping resolvedNameForParamID:o.paramID];
+    if (mapped.length) return mapped;
     if (o.resolvedName.length) return o.resolvedName;
+    mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:o.paramID];
+    return mapped.length ? mapped : nil;
+}
+
+- (NSString *)displayNameForObservation:(SCIExpMCObservation *)o {
+    NSString *resolved = [self resolvedNameForObservation:o];
+    if (resolved.length) return resolved;
     NSString *detail = o.lastDefault ?: @"";
     NSString *symbol = [self symbolNameFromDetail:detail];
     if (symbol.length) return symbol;
@@ -283,11 +346,11 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 - (NSString *)fallbackOverrideKeyForObservation:(SCIExpMCObservation *)o { return [NSString stringWithFormat:@"mc:0x%016llx", o.paramID]; }
 
 - (NSString *)categoryForObservation:(SCIExpMCObservation *)o {
-    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@", o.resolvedName ?: @"", o.lastDefault ?: @"", o.contextClass ?: @"", o.selectorName ?: @"", [self symbolNameFromDetail:o.lastDefault ?: @""] ?: @""].lowercaseString;
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@", [self resolvedNameForObservation:o] ?: @"", [self displayNameForObservation:o] ?: @"", o.lastDefault ?: @"", o.contextClass ?: @"", o.selectorName ?: @"", [self symbolNameFromDetail:o.lastDefault ?: @""] ?: @""].lowercaseString;
     if ([self string:hay containsAny:@[@"employee", @"dogfood", @"dogfooding", @"internal", @"test_user", @"devoptions"]]) return @"Dogfood";
     if ([self string:hay containsAny:@[@"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notestray"]]) return @"Direct";
     if ([self string:hay containsAny:@[@"quicksnap", @"quick_snap", @"instants", @"instant", @"mshquicksnap"]]) return @"QuickSnap";
-    if ([self string:hay containsAny:@[@"prism", @"igdsprism", @"prismmenu"]]) return @"Prism";
+    if ([self string:hay containsAny:@[@"prism", @"igdsprism", @"prismmenu", @"isrevertedprismcolorenabled"]]) return @"Prism";
     if ([self string:hay containsAny:@[@"tabbar", @"homecoming", @"launcher", @"navigation", @"sundial"]]) return @"TabBar";
     if ([self string:hay containsAny:@[@"feed", @"reels", @"story", @"stories", @"explore"]]) return @"Feed";
     if ([self string:hay containsAny:@[@"mobileconfig", @"startupconfigs", @"easygating", @"override", @"refresh", @"updateconfigs", @"sessionless", @"objc mobileconfig getter", @"mci", @"metaextensions", @"msgc"]]) return @"Infra";
@@ -297,13 +360,13 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 - (BOOL)string:(NSString *)s containsAny:(NSArray<NSString *> *)needles { for (NSString *n in needles) if ([s containsString:n]) return YES; return NO; }
 
 - (NSString *)symbolNameFromDetail:(NSString *)detail {
-    NSArray<NSString *> *symbols = @[@"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock", @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock", @"_EasyGatingPlatformGetBoolean", @"_MSGCSessionedMobileConfigGetBoolean", @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean", @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_METAExtensionsExperimentGetBooleanWithoutExposure", @"_METAExtensionsExperimentGetBoolean", @"_MEBIsMinosDogfoodMekEncryptionVersionEnabled", @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", @"_IGMobileConfigTryUpdateConfigsWithCompletion", @"_IGMobileConfigForceUpdateConfigs", @"_IGMobileConfigSetConfigOverrides"];
+    NSArray<NSString *> *symbols = @[@"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock", @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock", @"_EasyGatingPlatformGetBoolean", @"_MSGCSessionedMobileConfigGetBoolean", @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean", @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_METAExtensionsExperimentGetBooleanWithoutExposure", @"_METAExtensionsExperimentGetBoolean", @"_MEBIsMinosDogfoodMekEncryptionVersionEnabled", @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", @"_IGMobileConfigTryUpdateConfigsWithCompletion", @"_IGMobileConfigForceUpdateConfigs", @"_IGMobileConfigSetConfigOverrides", @"IGDSPrismMenu", @"IGDSPrismMenuView", @"IGDSPrismMenuElement", @"IGDSPrismMenuItem", @"isPrismEnabled", @"isRevertedPrismColorEnabled", @"isPrismButtonEnabled", @"isPrismOverflowMenuEnabled"];
     for (NSString *s in symbols) if ([detail containsString:s]) return s;
     return nil;
 }
 
 - (NSString *)specifierHex:(unsigned long long)specifier { return [NSString stringWithFormat:@"0x%016llx", specifier]; }
-- (NSString *)overrideKeyForObservation:(SCIExpMCObservation *)o { return o.resolvedName.length ? o.resolvedName : [self fallbackOverrideKeyForObservation:o]; }
+- (NSString *)overrideKeyForObservation:(SCIExpMCObservation *)o { NSString *resolved = [self resolvedNameForObservation:o]; return resolved.length ? resolved : [self fallbackOverrideKeyForObservation:o]; }
 - (SCIExpFlagOverride)overrideForObservation:(SCIExpMCObservation *)o { return [SCIExpFlags overrideForName:[self overrideKeyForObservation:o]]; }
 
 #pragma mark - Export
@@ -313,7 +376,7 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     for (SCIExpMCObservation *o in self.rows ?: @[]) {
         NSString *key = [self overrideKeyForObservation:o] ?: @"";
         SCIExpFlagOverride ov = key.length ? [SCIExpFlags overrideForName:key] : SCIExpFlagOverrideOff;
-        [arr addObject:@{@"param_id_hex": [self specifierHex:o.paramID], @"param_id": @(o.paramID), @"name": [self displayNameForObservation:o] ?: @"", @"resolved_name": o.resolvedName ?: @"", @"category": [self categoryForObservation:o] ?: @"Unknown", @"source": o.source ?: @"", @"context_class": o.contextClass ?: @"", @"selector": o.selectorName ?: @"", @"default_or_detail": o.lastDefault ?: @"", @"original": o.lastOriginalValue ?: @"", @"effective": @([self effectiveValueForObservation:o]), @"would_change_if_true": @([self wouldChangeObservation:o]), @"override_key": key, @"override": @(ov), @"hits": @(o.hitCount)}];
+        [arr addObject:@{@"gate": [self gateGroupForObservation:o] ?: @"", @"param_id_hex": [self specifierHex:o.paramID], @"param_id": @(o.paramID), @"name": [self displayNameForObservation:o] ?: @"", @"resolved_name": [self resolvedNameForObservation:o] ?: @"", @"category": [self categoryForObservation:o] ?: @"Unknown", @"source": o.source ?: @"", @"context_class": o.contextClass ?: @"", @"selector": o.selectorName ?: @"", @"default_or_detail": o.lastDefault ?: @"", @"original": o.lastOriginalValue ?: @"", @"effective": @([self effectiveValueForObservation:o]), @"would_change_if_true": @([self wouldChangeObservation:o]), @"override_key": key, @"override": @(ov), @"hits": @(o.hitCount)}];
     }
     return arr;
 }
@@ -321,7 +384,7 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 - (NSString *)exportJSON { NSData *data = [NSJSONSerialization dataWithJSONObject:[self exportRows] options:NSJSONWritingPrettyPrinted error:nil]; return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"[]"; }
 - (NSString *)csvEscape:(id)obj { NSString *s = [obj respondsToSelector:@selector(description)] ? [obj description] : @""; s = [s stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""]; return [NSString stringWithFormat:@"\"%@\"", s]; }
 - (NSString *)exportCSV {
-    NSArray *keys = @[@"param_id_hex", @"name", @"resolved_name", @"category", @"source", @"context_class", @"selector", @"original", @"effective", @"would_change_if_true", @"override_key", @"override", @"hits", @"default_or_detail"];
+    NSArray *keys = @[@"gate", @"param_id_hex", @"name", @"resolved_name", @"category", @"source", @"context_class", @"selector", @"original", @"effective", @"would_change_if_true", @"override_key", @"override", @"hits", @"default_or_detail"];
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     [lines addObject:[keys componentsJoinedByString:@","]];
     for (NSDictionary *row in [self exportRows]) { NSMutableArray *cols = [NSMutableArray array]; for (NSString *k in keys) [cols addObject:[self csvEscape:row[k] ?: @""]]; [lines addObject:[cols componentsJoinedByString:@","]]; }
@@ -329,25 +392,50 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 }
 
 - (void)exportMenu {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"MC Override Lab" message:[NSString stringWithFormat:@"%lu row(s)", (unsigned long)self.rows.count] preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"MC Override Lab" message:[NSString stringWithFormat:@"%lu row(s) / %lu gate group(s)", (unsigned long)self.rows.count, (unsigned long)self.sectionTitles.count] preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [self exportJSON]; [SCIUtils showSuccessHUDWithDescription:@"JSON copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy CSV" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [self exportCSV]; [SCIUtils showSuccessHUDWithDescription:@"CSV copied"]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Share JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[[self exportJSON]] applicationActivities:nil]; if (vc.popoverPresentationController) vc.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem; [self presentViewController:vc animated:YES completion:nil]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"id_name_mapping debug" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { NSMutableString *msg = [NSMutableString stringWithFormat:@"%@\n\n", [SCIMobileConfigMapping mappingStatusLine] ?: @"none"]; [msg appendString:@"Candidate paths:\n"]; for (NSString *p in [self runtimeJSONCandidatePaths]) [msg appendFormat:@"- %@\n", p]; [self presentText:msg title:@"id_name_mapping debug"]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Share JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[[self exportJSON]] applicationActivities:nil]; if (vc.popoverPresentationController) vc.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject; [self presentViewController:vc animated:YES completion:nil]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"id_name_mapping debug" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self showIDMappingDebug]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy active id_name_mapping path" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [SCIMobileConfigMapping activeIDNameMappingPath] ?: @""; [SCIUtils showSuccessHUDWithDescription:@"Path copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject;
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)showIDMappingDebug {
+    NSDictionary *status = [self runtimeJSONStatus];
+    NSMutableString *msg = [NSMutableString stringWithFormat:@"%@\n\n", [SCIMobileConfigMapping mappingStatusLine] ?: @"none"];
+    [msg appendFormat:@"Active:\n%@\n\n", status[@"active"] ?: @"none"];
+    [msg appendFormat:@"Import destination:\n%@\n\n", status[@"persisted"] ?: @""];
+    [msg appendString:@"Data container candidates (InstaMoon-style first):\n"];
+    NSArray *dataFound = status[@"dataFound"] ?: @[];
+    for (NSString *p in status[@"dataChecked"] ?: @[]) {
+        BOOL found = NO;
+        for (NSDictionary *entry in dataFound) if ([entry[@"path"] isEqualToString:p]) { found = YES; break; }
+        [msg appendFormat:@"%@ %@\n", found ? @"+" : @"-", p];
+    }
+    [msg appendString:@"\nBundle candidates (fallback only):\n"];
+    NSArray *bundleFound = status[@"bundleFound"] ?: @[];
+    for (NSString *p in status[@"bundleChecked"] ?: @[]) {
+        BOOL found = NO;
+        for (NSDictionary *entry in bundleFound) if ([entry[@"path"] isEqualToString:p]) { found = YES; break; }
+        [msg appendFormat:@"%@ %@\n", found ? @"+" : @"-", p];
+    }
+    [self presentText:msg title:@"id_name_mapping debug"];
 }
 
 #pragma mark - Table
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.rows.count; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.sectionTitles.count; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { if ((NSUInteger)section >= self.sectionTitles.count) return 0; return [self.sectionRows[self.sectionTitles[(NSUInteger)section]] count]; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { if ((NSUInteger)section >= self.sectionTitles.count) return nil; NSString *t = self.sectionTitles[(NSUInteger)section]; NSUInteger count = [self.sectionRows[t] count]; return [NSString stringWithFormat:@"%@  ·  %lu", t, (unsigned long)count]; }
+- (SCIExpMCObservation *)observationAtIndexPath:(NSIndexPath *)indexPath { if ((NSUInteger)indexPath.section >= self.sectionTitles.count) return nil; NSArray *arr = self.sectionRows[self.sectionTitles[(NSUInteger)indexPath.section]] ?: @[]; if ((NSUInteger)indexPath.row >= arr.count) return nil; return arr[(NSUInteger)indexPath.row]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mc-override-lab"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"mc-override-lab"];
-    SCIExpMCObservation *o = self.rows[(NSUInteger)indexPath.row];
+    SCIExpMCObservation *o = [self observationAtIndexPath:indexPath];
     NSString *name = [self displayNameForObservation:o];
     NSString *category = [self categoryForObservation:o];
     NSString *change = [self wouldChangeObservation:o] ? @" WOULD_TRUE" : @"";
@@ -385,10 +473,11 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    SCIExpMCObservation *o = self.rows[(NSUInteger)indexPath.row];
+    SCIExpMCObservation *o = [self observationAtIndexPath:indexPath];
+    if (!o) return;
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     NSString *key = [self overrideKeyForObservation:o];
-    NSString *msg = [NSString stringWithFormat:@"name=%@\ncategory=%@\nparam=%@\nresolved=%@\noverrideKey=%@\nsource=%@\ncontext=%@\nselector=%@\noriginal=%@\neffective=%@\nhits=%lu\n\n%@", [self displayNameForObservation:o], [self categoryForObservation:o], [self specifierHex:o.paramID], o.resolvedName ?: @"", key ?: @"", o.source ?: @"", o.contextClass ?: @"", o.selectorName ?: @"", o.lastOriginalValue ?: @"", [self effectiveValueForObservation:o] ? @"YES" : @"NO", (unsigned long)o.hitCount, o.lastDefault ?: @""];
+    NSString *msg = [NSString stringWithFormat:@"gate=%@\nname=%@\ncategory=%@\nparam=%@\nresolved=%@\noverrideKey=%@\nsource=%@\ncontext=%@\nselector=%@\noriginal=%@\neffective=%@\nhits=%lu\n\n%@", [self gateGroupForObservation:o], [self displayNameForObservation:o], [self categoryForObservation:o], [self specifierHex:o.paramID], [self resolvedNameForObservation:o] ?: @"", key ?: @"", o.source ?: @"", o.contextClass ?: @"", o.selectorName ?: @"", o.lastOriginalValue ?: @"", [self effectiveValueForObservation:o] ? @"YES" : @"NO", (unsigned long)o.hitCount, o.lastDefault ?: @""];
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[self displayNameForObservation:o] message:msg preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = msg; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy override key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = key ?: @""; }]];
