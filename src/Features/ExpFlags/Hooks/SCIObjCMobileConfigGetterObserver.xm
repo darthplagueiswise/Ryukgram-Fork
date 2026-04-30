@@ -76,11 +76,15 @@ static BOOL SCIObjCApplyOverride(SCIExpFlagOverride ov, BOOL original) {
 
 static BOOL SCIObjCShouldRecord(NSString *key, unsigned long long pid, BOOL changed, SCIExpFlagOverride ov) {
     if (changed || ov != SCIExpFlagOverrideOff) return YES;
+
     NSString *countKey = [NSString stringWithFormat:@"%@:%016llx", key ?: @"", pid];
     NSMutableDictionary *d = SCIObjCRecordCounts();
-    NSUInteger count = [d[countKey] unsignedIntegerValue] + 1;
-    d[countKey] = @(count);
-    return count <= 8 || (count % 256) == 0;
+
+    @synchronized (d) {
+        NSUInteger count = [d[countKey] unsignedIntegerValue] + 1;
+        d[countKey] = @(count);
+        return count <= 8 || (count % 256) == 0;
+    }
 }
 
 static BOOL SCIObjCRecordAndReturn(NSString *className,

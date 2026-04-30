@@ -51,10 +51,19 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"MC Focus Lab";
+    self.title = @"MC Override Lab";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     self.targets = [self buildTargets];
     self.rows = @[];
+
+    NSUserDefaults *udInit = [NSUserDefaults standardUserDefaults];
+    if (![udInit objectForKey:kSCIMCFocusTargetKey]) {
+        [udInit setObject:@"c|all" forKey:kSCIMCFocusTargetKey];
+    }
+    [udInit setBool:YES forKey:@"sci_exp_flags_enabled"];
+    [udInit setBool:YES forKey:@"sci_exp_mc_c_hooks_enabled"];
+    [udInit setBool:YES forKey:@"igt_runtime_mc_symbol_observer_enabled"];
+    [udInit synchronize];
 
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Bulk" style:UIBarButtonItemStylePlain target:self action:@selector(showBulkMenu)];
 
@@ -86,6 +95,8 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     self.emptyLabel.font = [UIFont systemFontOfSize:14];
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.numberOfLines = 0;
+    self.emptyLabel.hidden = YES;
+    self.emptyLabel.userInteractionEnabled = NO;
     [self.view addSubview:self.emptyLabel];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
@@ -187,10 +198,10 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
         return [a.name caseInsensitiveCompare:b.name];
     }];
     [self.tableView reloadData];
-    self.emptyLabel.hidden = self.rows.count > 0;
+    self.emptyLabel.hidden = YES;
     if (!self.rows.count) {
         NSDictionary *active = [self activeTarget];
-        self.emptyLabel.text = [NSString stringWithFormat:@"Focused target:\n%@\n%@\n\nOpen the relevant Instagram screen, then come back and refresh. ObjC targets record only the selected getter.", active[@"title"] ?: @"", active[@"subtitle"] ?: @""];
+        self.emptyLabel.text = @"";
     }
 }
 
@@ -315,10 +326,10 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? self.targets.count : self.rows.count; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Focused scan target" : @"Focused Boolean dump"; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Gate / getter target" : @"Observed bools for selected target"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Pick one getter, open the relevant IG screen, then return here. This avoids scanning every ObjC getter at once.";
-    return @"Switches show effective value. Toggling creates an override for that param/name; tap row for Force ON/OFF/clear.";
+    if (section == 0) return @"Selecione UM getter/gate por vez. Depois abra a tela relevante no Instagram e volte aqui para ver só os bools que passaram por esse caminho.";
+    return @"O switch mostra o valor efetivo. Tocar no switch cria override só para aquele param/nome. Use Bulk para exportar ou forçar linhas visíveis.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
