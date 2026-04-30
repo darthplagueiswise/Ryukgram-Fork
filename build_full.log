@@ -1,0 +1,3 @@
+[1m[32mBuilding RyukGram tweak for rootless[0m
+Makefile:5: /root/Ryukgram-Fork/theos/makefiles/common.mk: No such file or directory
+make: *** No rule to make target '/root/Ryukgram-Fork/theos/makefiles/common.mk'.  Stop.
