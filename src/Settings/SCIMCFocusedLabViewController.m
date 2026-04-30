@@ -45,6 +45,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 @property (nonatomic, copy) NSString *query;
 @property (nonatomic, strong) NSArray<NSDictionary *> *targets;
 @property (nonatomic, strong) NSArray<SCIMCFocusedLabRow *> *rows;
+- (void)setActiveTargetKey:(NSString *)key;
 @end
 
 @implementation SCIMCFocusedLabViewController
@@ -215,6 +216,26 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 }
 
 - (NSString *)activeTargetKey { return [[NSUserDefaults standardUserDefaults] stringForKey:kSCIMCFocusTargetKey] ?: @"all"; }
+
+- (void)setActiveTargetKey:(NSString *)key {
+    if (!key.length) key = @"all";
+
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    [ud setObject:key forKey:kSCIMCFocusTargetKey];
+
+    BOOL exactObjC = [key hasPrefix:@"objc|"];
+
+    [ud setBool:exactObjC forKey:kSCIMCFocusEnabledKey];
+    [ud setBool:exactObjC forKey:@"sci_exp_mc_hooks_enabled"];
+    [ud setBool:YES forKey:@"sci_exp_flags_enabled"];
+    [ud setBool:YES forKey:@"sci_exp_mc_c_hooks_enabled"];
+    [ud setBool:YES forKey:@"igt_runtime_mc_symbol_observer_enabled"];
+    [ud synchronize];
+
+    if (exactObjC) {
+        SCIInstallFocusedObjCGetterObserver();
+    }
+}
 
 - (NSDictionary *)activeTarget {
     NSString *key = [self activeTargetKey];
