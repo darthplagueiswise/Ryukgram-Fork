@@ -3,8 +3,7 @@ name: Build RyukGram Rootless Test
 on:
     push:
         branches:
-            - 'main'
-            - 'codex/create-configurations-for-employee-and-internal-toggles'
+            - 'test'
     workflow_dispatch:
 
 concurrency:
