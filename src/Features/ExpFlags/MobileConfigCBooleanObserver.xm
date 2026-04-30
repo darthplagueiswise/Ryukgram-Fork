@@ -1,6 +1,7 @@
 #import "../../Utils.h"
 #import "SCIExpFlags.h"
 #import "SCIExpMobileConfigMapping.h"
+#import "SCIMobileConfigMapping.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
 #include "../../../modules/fishhook/fishhook.h"
@@ -23,8 +24,15 @@ static NSString *RGMCHexKey(unsigned long long pid) {
     return [NSString stringWithFormat:@"mc:0x%016llx", pid];
 }
 
+static NSString *RGMCResolvedName(unsigned long long pid) {
+    NSString *mapped = [SCIMobileConfigMapping resolvedNameForParamID:pid];
+    if (mapped.length) return mapped;
+    mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:pid];
+    return mapped.length ? mapped : nil;
+}
+
 static SCIExpFlagOverride RGMCOverrideForCandidate(unsigned long long pid) {
-    NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:pid];
+    NSString *mapped = RGMCResolvedName(pid);
     if (mapped.length) {
         SCIExpFlagOverride ov = [SCIExpFlags overrideForName:mapped];
         if (ov != SCIExpFlagOverrideOff) return ov;
@@ -77,14 +85,17 @@ static unsigned long long RGMCBestSpecifierCandidate(uintptr_t a0, uintptr_t a1,
 
 static BOOL RGRecordCBooleanObservation(const char *symbol, BOOL original, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, void *caller) {
     unsigned long long candidate = RGMCBestSpecifierCandidate(a0, a1, a2, a3, a4, a5);
+    NSString *mappedName = RGMCResolvedName(candidate);
     SCIExpFlagOverride ov = RGMCOverrideForCandidate(candidate);
     BOOL finalValue = RGMCApplyOverride(ov, original);
 
     NSString *sym = symbol ? [NSString stringWithUTF8String:symbol] : @"unknown";
     NSString *source = RGMCSourceForSymbol(symbol);
-    NSString *def = [NSString stringWithFormat:@"source=%@ · symbol=%@ · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d · id=0x%llx · a0=0x%lx a1=0x%lx a2=0x%lx a3=0x%lx a4=0x%lx a5=0x%lx · caller=%p",
+    NSString *namePart = mappedName.length ? [NSString stringWithFormat:@" · name=%@", mappedName] : @"";
+    NSString *def = [NSString stringWithFormat:@"source=%@ · symbol=%@%@ · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d · id=0x%llx · a0=0x%lx a1=0x%lx a2=0x%lx a3=0x%lx a4=0x%lx a5=0x%lx · caller=%p",
                      source,
                      sym,
+                     namePart,
                      original,
                      finalValue,
                      RGMCOverrideText(ov),
@@ -106,9 +117,10 @@ static BOOL RGRecordCBooleanObservation(const char *symbol, BOOL original, uintp
                     selectorName:sym];
 
     if (RGMCVerboseLoggingEnabled()) {
-        NSLog(@"[RyukGram][MCSymbolObserver][%@] %@ original=%d final=%d override=%@ candidate=0x%016llx caller=%p",
+        NSLog(@"[RyukGram][MCSymbolObserver][%@] %@ name=%@ original=%d final=%d override=%@ candidate=0x%016llx caller=%p",
               source,
               sym,
+              mappedName ?: @"",
               original,
               finalValue,
               RGMCOverrideText(ov),
