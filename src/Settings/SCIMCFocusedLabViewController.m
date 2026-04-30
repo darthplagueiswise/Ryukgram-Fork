@@ -200,7 +200,6 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     [self.tableView reloadData];
     self.emptyLabel.hidden = YES;
     if (!self.rows.count) {
-        NSDictionary *active = [self activeTarget];
         self.emptyLabel.text = @"";
     }
 }
