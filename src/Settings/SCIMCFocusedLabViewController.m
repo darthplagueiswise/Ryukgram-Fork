@@ -20,6 +20,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 @property (nonatomic, assign) unsigned long long paramID;
 @property (nonatomic, copy) NSString *paramHex;
 @property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *resolvedName;
 @property (nonatomic, copy) NSString *category;
 @property (nonatomic, copy) NSString *gate;
 @property (nonatomic, copy) NSString *contextClass;
