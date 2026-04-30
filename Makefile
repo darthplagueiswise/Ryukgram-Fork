@@ -14,7 +14,6 @@ before-all::
 
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIMachODexKitResolver.m,$(RYUKGRAM_SRC_FILES))
-RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/Hooks/SCIObjCMobileConfigGetterObserver.xm,$(RYUKGRAM_SRC_FILES))
 RYUKGRAM_SRC_FILES := $(filter-out $(GENERATED_SCHEMA_SRC),$(RYUKGRAM_SRC_FILES))
 
 $(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
