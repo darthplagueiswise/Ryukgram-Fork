@@ -7,6 +7,12 @@ static NSString *const kOvr = @"mc_overrides.json";
 @implementation SCIMobileConfigMapping
 
 + (NSString *)primaryMobileConfigDirectory {
+    // Mirrors InstaMoon's Android layout: context.filesDir/mobileconfig/id_name_mapping.json.
+    // On iOS this is NSHomeDirectory()/mobileconfig/id_name_mapping.json.
+    return [NSHomeDirectory() stringByAppendingPathComponent:kDir];
+}
+
++ (NSString *)legacyApplicationSupportMobileConfigDirectory {
     return [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:kDir];
 }
 
@@ -66,25 +72,50 @@ static NSString *const kOvr = @"mc_overrides.json";
     return bundles.array;
 }
 
-+ (NSArray *)mappingPaths {
++ (NSArray<NSString *> *)dataContainerMappingPaths {
     NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
     NSString *h = NSHomeDirectory();
-
-    [paths addObject:[self primaryIDNameMappingPath]];
     if (h.length) {
-        [paths addObject:[h stringByAppendingPathComponent:@"Documents/mobileconfig/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"Documents/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"Library/mobileconfig/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/mobileconfig/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig/id_name_mapping.json"]];
-        [paths addObject:[h stringByAppendingPathComponent:@"tmp/id_name_mapping.json"]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Documents/mobileconfig"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Library/mobileconfig"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Library/Application Support/mobileconfig"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig"] stringByAppendingPathComponent:kMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"tmp"] stringByAppendingPathComponent:kMap]];
     }
 
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *dataRoots = @[
+        @"/private/var/mobile/Containers/Data/Application",
+        @"/var/mobile/Containers/Data/Application"
+    ];
+    for (NSString *root in dataRoots) {
+        NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:root error:nil];
+        for (NSString *entry in entries) {
+            if (!entry.length || [entry hasPrefix:@"."]) continue;
+            NSString *base = [root stringByAppendingPathComponent:entry];
+            [paths addObject:[[base stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:kMap]];
+            [paths addObject:[[base stringByAppendingPathComponent:@"Documents/mobileconfig"] stringByAppendingPathComponent:kMap]];
+            [paths addObject:[[base stringByAppendingPathComponent:@"Library/Application Support/mobileconfig"] stringByAppendingPathComponent:kMap]];
+        }
+    }
+    return paths.array;
+}
+
++ (NSArray<NSString *> *)bundleMappingPaths {
+    NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
     for (NSString *bundle in [self dynamicInstagramBundlePaths]) {
         [self addIDMapCandidatesForInstagramBundle:bundle toSet:paths];
     }
+    return paths.array;
+}
 
++ (NSArray *)mappingPaths {
+    NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
+    for (NSString *p in [self dataContainerMappingPaths]) [paths addObject:p];
+    for (NSString *p in [self bundleMappingPaths]) [paths addObject:p];
     return paths.array;
 }
 
@@ -104,16 +135,23 @@ static NSString *const kOvr = @"mc_overrides.json";
         NSString *raw = obj;
         NSArray *parts = [raw componentsSeparatedByString:@":"];
         if (parts.count < 2) continue;
-        unsigned long long pid = strtoull([parts[0] UTF8String], NULL, 0);
-        NSString *name = parts[1];
-        if (!pid || !name.length) continue;
+        unsigned long long flagID = strtoull([parts[0] UTF8String], NULL, 0);
+        NSString *flagName = parts[1];
+        if (!flagID || !flagName.length) continue;
+
         NSMutableDictionary *subs = [NSMutableDictionary dictionary];
         for (NSUInteger i = 2; i + 1 < parts.count; i += 2) {
             NSString *k = parts[i];
             NSString *v = parts[i + 1];
             if (k.length && v) subs[k] = v;
+            unsigned long long subID = strtoull(k.UTF8String, NULL, 0);
+            if (subID) {
+                unsigned long long combined = ((flagID & 0xffffffffULL) << 32) | (subID & 0xffffffffULL);
+                NSString *combinedName = v.length ? [NSString stringWithFormat:@"%@ / %@", flagName, v] : flagName;
+                out[@(combined)] = @{@"config_name": combinedName, @"flag_name": flagName, @"param_name": v ?: @"", @"subs": subs, @"source": source ?: kMap, @"raw": raw};
+            }
         }
-        out[@(pid)] = @{@"config_name": name, @"subs": subs, @"source": source ?: kMap, @"raw": raw};
+        out[@(flagID)] = @{@"config_name": flagName, @"subs": subs, @"source": source ?: kMap, @"raw": raw};
     }
     return out;
 }
@@ -126,7 +164,7 @@ static NSString *const kOvr = @"mc_overrides.json";
         NSMutableDictionary *out = [NSMutableDictionary dictionary];
         [(NSDictionary *)obj enumerateKeysAndObjectsUsingBlock:^(id key, id val, BOOL *stop) {
             unsigned long long pid = strtoull([[key description] UTF8String], NULL, 0);
-            NSString *name = [val isKindOfClass:[NSString class]] ? val : ([val isKindOfClass:[NSDictionary class]] ? (val[@"config_name"] ?: val[@"name"]) : nil);
+            NSString *name = [val isKindOfClass:[NSString class]] ? val : ([val isKindOfClass:[NSDictionary class]] ? (val[@"config_name"] ?: val[@"name"] ?: val[@"param_name"]) : nil);
             NSDictionary *subs = [val isKindOfClass:[NSDictionary class]] ? (val[@"subs"] ?: @{}) : @{};
             if (pid && name.length) out[@(pid)] = @{@"config_name": name, @"subs": subs, @"source": source ?: kMap};
         }];
@@ -150,17 +188,34 @@ static NSString *const kOvr = @"mc_overrides.json";
     return cache;
 }
 
-+ (NSDictionary *)mappingForParamID:(unsigned long long)paramID { return [self idNameMapping][@(paramID)]; }
++ (NSDictionary *)mappingForParamID:(unsigned long long)paramID {
+    NSDictionary *direct = [self idNameMapping][@(paramID)];
+    if (direct) return direct;
+
+    unsigned long long flagID = (paramID >> 32) & 0xffffffffULL;
+    unsigned long long subID = paramID & 0xffffffffULL;
+    NSDictionary *flag = [self idNameMapping][@(flagID)];
+    NSDictionary *subs = [flag[@"subs"] isKindOfClass:[NSDictionary class]] ? flag[@"subs"] : nil;
+    NSString *subName = subs[[NSString stringWithFormat:@"%llu", subID]] ?: subs[[NSString stringWithFormat:@"0x%llx", subID]];
+    NSString *flagName = flag[@"config_name"];
+    if (flagName.length && subName.length) {
+        return @{@"config_name": [NSString stringWithFormat:@"%@ / %@", flagName, subName], @"flag_name": flagName, @"param_name": subName, @"source": flag[@"source"] ?: kMap};
+    }
+    if (flagName.length) return flag;
+    return nil;
+}
+
 + (NSString *)resolvedNameForParamID:(unsigned long long)paramID { NSString *s = [self mappingForParamID:paramID][@"config_name"]; return s.length ? s : nil; }
 + (NSString *)sourceForParamID:(unsigned long long)paramID { NSString *s = [self mappingForParamID:paramID][@"source"]; return s.length ? s : nil; }
 
 + (NSString *)mappingStatusLine {
     NSString *active = [self activeIDNameMappingPath];
-    return [NSString stringWithFormat:@"id_name_mapping=%lu · active=%@ · primary=%@", (unsigned long)[self idNameMapping].count, active ?: @"none", [self primaryIDNameMappingPath]];
+    return [NSString stringWithFormat:@"id_name_mapping=%lu · active=%@ · primary=%@ · dataCandidates=%lu · bundleCandidates=%lu", (unsigned long)[self idNameMapping].count, active ?: @"none", [self primaryIDNameMappingPath], (unsigned long)[self dataContainerMappingPaths].count, (unsigned long)[self bundleMappingPaths].count];
 }
 
 + (NSDictionary *)allOverrides {
     id o = [self jsonAtPath:[self primaryOverridesPath]];
+    if (![o isKindOfClass:[NSDictionary class]]) o = [self jsonAtPath:[[self legacyApplicationSupportMobileConfigDirectory] stringByAppendingPathComponent:kOvr]];
     if (![o isKindOfClass:[NSDictionary class]]) return @{};
     id backup = o[@"backup"];
     return [backup isKindOfClass:[NSDictionary class]] ? backup : o;
