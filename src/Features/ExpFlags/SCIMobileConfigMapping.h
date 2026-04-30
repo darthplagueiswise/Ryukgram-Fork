@@ -7,6 +7,9 @@
 + (NSString *)primaryOverridesPath;
 + (NSString *)bundleIGSchemaPath;
 
++ (NSArray<NSString *> *)mappingPaths;
++ (NSString *)activeIDNameMappingPath;
+
 + (NSDictionary<NSNumber *, NSDictionary *> *)idNameMapping;
 + (NSDictionary *)mappingForParamID:(unsigned long long)paramID;
 + (NSString *)resolvedNameForParamID:(unsigned long long)paramID;
