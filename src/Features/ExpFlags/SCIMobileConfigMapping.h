@@ -3,10 +3,13 @@
 @interface SCIMobileConfigMapping : NSObject
 
 + (NSString *)primaryMobileConfigDirectory;
++ (NSString *)legacyApplicationSupportMobileConfigDirectory;
 + (NSString *)primaryIDNameMappingPath;
 + (NSString *)primaryOverridesPath;
 + (NSString *)bundleIGSchemaPath;
 
++ (NSArray<NSString *> *)dataContainerMappingPaths;
++ (NSArray<NSString *> *)bundleMappingPaths;
 + (NSArray<NSString *> *)mappingPaths;
 + (NSString *)activeIDNameMappingPath;
 
