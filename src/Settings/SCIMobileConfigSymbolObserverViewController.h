@@ -1,4 +1,4 @@
-#import <UIKit/UIKit.h>
+#import "SCIMCFocusedLabViewController.h"
 
-@interface SCIMobileConfigSymbolObserverViewController : UIViewController
+@interface SCIMobileConfigSymbolObserverViewController : SCIMCFocusedLabViewController
 @end
