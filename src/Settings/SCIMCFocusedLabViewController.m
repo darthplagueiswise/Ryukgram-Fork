@@ -121,41 +121,100 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self refresh]; }
 
 - (NSArray<NSDictionary *> *)buildTargets {
+
     NSMutableArray *t = [NSMutableArray array];
-    [t addObject:@{@"title": @"C brokers / fishhook", @"subtitle": @"Uses the safe C broker observer already installed by default.", @"key": @"c|all"}];
 
-    NSArray *classes = @[
-        @"IGMobileConfigContextManager",
-        @"IGMobileConfigUserSessionContextManager",
-        @"IGMobileConfigSessionlessContextManager",
-        @"FBMobileConfigContextManager",
-        @"FBMobileConfigUserSessionContextManager",
-        @"FBMobileConfigSessionlessContextManager",
-        @"FBMobileConfigContextObjcImpl",
-        @"FBMobileConfigStartupConfigs"
-    ];
-    NSArray *selectors = @[@"getBool:", @"getBool:withDefault:", @"getBool:withOptions:", @"getBool:withOptions:withDefault:"];
-    for (NSString *cls in classes) {
-        for (NSString *sel in selectors) {
-            [t addObject:@{@"title": cls, @"subtitle": sel, @"key": [NSString stringWithFormat:@"%@|%@", cls, sel]}];
-        }
+    [t addObject:@{@"title": @"All dump/runtime", @"subtitle": @"Tudo observado pelo runtime + filtros do dump completo", @"key": @"all"}];
+
+    [t addObject:@{@"title": @"Patched/stubbed/restored", @"subtitle": @"Só gates que foram testados nos reports offline", @"key": @"status|active"}];
+
+    [t addObject:@{@"title": @"C bool brokers / symbols", @"subtitle": @"Todos os C gates bool testáveis do dump", @"key": @"kind|c"}];
+
+    [t addObject:@{@"title": @"ObjC MobileConfig getters", @"subtitle": @"Todos os ObjC bool getters do dump; para captura ao vivo selecione um getter específico", @"key": @"kind|objc"}];
+
+    [t addObject:@{@"title": @"Update / refresh / override paths", @"subtitle": @"Observe-only; não são bool gates", @"key": @"category|update_refresh_override_paths"}];
+
+    NSArray<NSString *> *categories = @[@"c_bool_brokers", @"objc_mobileconfig_getters_contexts", @"objc_mapped_mobileconfig_class", @"startupconfigs_boot_getters", @"update_refresh_override_paths", @"direct_notes", @"direct_msys_e2ee", @"dogfood_internal_employee", @"quicksnap_instants", @"prism_ui", @"tabbar_navigation_homecoming", @"eligibility_monetization", @"feature_family", @"other_candidates", @"other"];
+
+    for (NSString *cat in categories) {
+
+        [t addObject:@{@"title": @"Category", @"subtitle": cat, @"key": [@"category|" stringByAppendingString:cat]}];
+
     }
+
+    NSArray<NSString *> *groups = @[@"safe_global_boolean_gates", @"setA_v1_c_brokers", @"setA_objc_getBool", @"v2_1_plus_startupconfigs", @"default_only_v1", @"update_override_paths_restored", @"missing_gates", @"global_broker", @"persisted_query", @"feature_family", @"tabbar_navigation", @"direct_notes", @"direct_msys_e2ee", @"prism_ui", @"eligibility_monetization", @"objc_mapped_mobileconfig_class", @"other"];
+
+    for (NSString *grp in groups) {
+
+        [t addObject:@{@"title": @"Group", @"subtitle": grp, @"key": [@"group|" stringByAppendingString:grp]}];
+
+    }
+
+    NSArray<NSString *> *cSymbols = @[@"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse", @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock", @"_EasyGatingPlatformGetBoolean", @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock", @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean", @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_METAExtensionsExperimentGetBoolean", @"_METAExtensionsExperimentGetBooleanWithoutExposure", @"_MSGCSessionedMobileConfigGetBoolean", @"_MEBIsMinosDogfoodMekEncryptionVersionEnabled", @"_IGDirectNotesFriendMapEnabled", @"_IGDirectNotesEnableAudioNoteReplyType", @"_IGDirectNotesEnableAvatarReplyTypes", @"_IGDirectNotesEnableGifsStickersReplyTypes", @"_IGDirectNotesEnablePhotoNoteReplyType", @"_IGTabBarStyleForLauncherSet", @"_IGTabBarShouldEnableBlurDebugListener", @"_IGTabBarDynamicSizingEnabled", @"_IGTabBarHomecomingWithFloatingTabEnabled", @"_IGTabBarEnhancedDynamicSizingEnabled"];
+
+    for (NSString *sym in cSymbols) {
+
+        [t addObject:@{@"title": @"C gate", @"subtitle": sym, @"key": [@"c|" stringByAppendingString:sym]}];
+
+    }
+
+    NSArray<NSArray<NSString *> *> *objcPairs = @[
+
+        @[@"FBMobileConfigStartupConfigsDeprecated", @"getBool_XStackIncompatibleButUsedAcrossFBAndIG:withDefault:"],
+        @[@"FBMobileConfigStartupConfigs", @"getBool:withDefault:"],
+        @[@"FBMobileConfigStartupConfigs", @"getBool:withOptions:withDefault:"],
+        @[@"FBMobileConfigStartupConfigs", @"getBool_XStackIncompatibleButUsedAcrossFBAndIG:withDefault:"],
+        @[@"IGMobileConfigContextManager", @"getBool:"],
+        @[@"IGMobileConfigContextManager", @"getBool:withDefault:"],
+        @[@"IGMobileConfigContextManager", @"getBool:withOptions:"],
+        @[@"IGMobileConfigContextManager", @"getBool:withOptions:withDefault:"],
+        @[@"IGMobileConfigUserSessionContextManager", @"getBool:"],
+        @[@"IGMobileConfigUserSessionContextManager", @"getBool:withOptions:"],
+        @[@"IGMobileConfigSessionlessContextManager", @"getBool:"],
+        @[@"IGMobileConfigSessionlessContextManager", @"getBool:withOptions:"],
+        @[@"FBMobileConfigContextManager", @"getBool:"],
+        @[@"FBMobileConfigContextManager", @"getBool:withDefault:"],
+        @[@"FBMobileConfigContextManager", @"getBool:withOptions:"],
+        @[@"FBMobileConfigContextManager", @"getBool:withOptions:withDefault:"],
+        @[@"FBMobileConfigContextManager", @"getBoolWithoutLogging:"],
+        @[@"FBMobileConfigContextManager", @"getBoolWithoutLogging:withDefault:"],
+        @[@"FBMobileConfigUserSessionContextManager", @"getBool:"],
+        @[@"FBMobileConfigUserSessionContextManager", @"getBool:withOptions:"],
+        @[@"FBMobileConfigSessionlessContextManager", @"getBool:"],
+        @[@"FBMobileConfigSessionlessContextManager", @"getBool:withOptions:"],
+        @[@"FBMobileConfigContextObjcImpl", @"getBool:"],
+        @[@"FBMobileConfigContextObjcImpl", @"getBool:withDefault:"],
+        @[@"FBMobileConfigContextObjcImpl", @"getBool:withOptions:"],
+        @[@"FBMobileConfigContextObjcImpl", @"getBool:withOptions:withDefault:"],
+        @[@"FBMobileConfigEmptyImpl", @"getBool:"],
+        @[@"FBMobileConfigEmptyImpl", @"getBool:withDefault:"],
+        @[@"FBMobileConfigEmptyImpl", @"getBool:withOptions:"],
+        @[@"FBMobileConfigEmptyImpl", @"getBool:withOptions:withDefault:"],
+    ];
+
+    for (NSArray<NSString *> *pair in objcPairs) {
+
+        NSString *cls = pair.firstObject ?: @"";
+
+        NSString *sel = pair.count > 1 ? pair[1] : @"";
+
+        [t addObject:@{
+
+            @"title": cls,
+
+            @"subtitle": sel,
+
+            @"key": [NSString stringWithFormat:@"objc|%@|%@", cls, sel]
+
+        }];
+
+    }
+
     return t;
+
 }
 
-- (NSString *)activeTargetKey { return [[NSUserDefaults standardUserDefaults] stringForKey:kSCIMCFocusTargetKey] ?: @"c|all"; }
-
-- (void)setActiveTargetKey:(NSString *)key {
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    [ud setObject:key ?: @"c|all" forKey:kSCIMCFocusTargetKey];
-    BOOL objc = key.length && ![key isEqualToString:@"c|all"];
-    [ud setBool:objc forKey:kSCIMCFocusEnabledKey];
-    [ud setBool:objc forKey:@"sci_exp_mc_hooks_enabled"];
-    [ud setBool:YES forKey:@"sci_exp_flags_enabled"];
-    [ud setBool:YES forKey:@"sci_exp_mc_c_hooks_enabled"];
-    [ud synchronize];
-    if (objc) SCIInstallFocusedObjCGetterObserver();
-}
+- (NSString *)activeTargetKey { return [[NSUserDefaults standardUserDefaults] stringForKey:kSCIMCFocusTargetKey] ?: @"all"; }
 
 - (NSDictionary *)activeTarget {
     NSString *key = [self activeTargetKey];
@@ -171,9 +230,77 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 }
 
 - (BOOL)observation:(SCIExpMCObservation *)o matchesTarget:(NSString *)target {
-    if ([target isEqualToString:@"c|all"]) return [self isCRow:o];
-    NSString *k = [NSString stringWithFormat:@"%@|%@", o.contextClass ?: @"", o.selectorName ?: @""];
-    return [k isEqualToString:target];
+
+    if (!target.length || [target isEqualToString:@"all"]) return YES;
+
+    NSString *detail = o.lastDefault ?: @"";
+
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@",
+
+                     o.resolvedName ?: @"",
+
+                     detail,
+
+                     o.contextClass ?: @"",
+
+                     o.selectorName ?: @"",
+
+                     [self symbolNameFromDetail:detail] ?: @""].lowercaseString;
+
+    if ([target isEqualToString:@"kind|c"]) return [self isCRow:o];
+
+    if ([target isEqualToString:@"kind|objc"]) return o.contextClass.length > 0;
+
+    if ([target isEqualToString:@"status|active"]) {
+
+        return [hay containsString:@"patched"] ||
+
+               [hay containsString:@"stubbed"] ||
+
+               [hay containsString:@"restored"] ||
+
+               [self isCRow:o] ||
+
+               o.contextClass.length > 0;
+
+    }
+
+    if ([target hasPrefix:@"category|"]) {
+
+        NSString *cat = [target substringFromIndex:9].lowercaseString;
+
+        return [[self categoryForText:hay].lowercaseString isEqualToString:cat] || [hay containsString:cat];
+
+    }
+
+    if ([target hasPrefix:@"group|"]) {
+
+        NSString *grp = [target substringFromIndex:6].lowercaseString;
+
+        return [hay containsString:grp];
+
+    }
+
+    if ([target hasPrefix:@"c|"]) {
+
+        NSString *sym = [target substringFromIndex:2];
+
+        return [self isCRow:o] && ([o.selectorName isEqualToString:sym] || [detail containsString:sym]);
+
+    }
+
+    if ([target hasPrefix:@"objc|"]) {
+
+        NSArray<NSString *> *parts = [target componentsSeparatedByString:@"|"];
+
+        if (parts.count != 3) return NO;
+
+        return [o.contextClass isEqualToString:parts[1]] && [o.selectorName isEqualToString:parts[2]];
+
+    }
+
+    return YES;
+
 }
 
 - (void)refresh {
@@ -262,9 +389,13 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 - (BOOL)string:(NSString *)s containsAny:(NSArray<NSString *> *)needles { for (NSString *n in needles) if ([s containsString:n]) return YES; return NO; }
 
 - (NSString *)symbolNameFromDetail:(NSString *)detail {
-    NSArray *symbols = @[@"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock", @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock", @"_EasyGatingPlatformGetBoolean", @"_MSGCSessionedMobileConfigGetBoolean", @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean", @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_METAExtensionsExperimentGetBooleanWithoutExposure", @"_METAExtensionsExperimentGetBoolean"];
+
+    NSArray *symbols = @[@"_IGMobileConfigBooleanValueForInternalUse", @"_IGMobileConfigSessionlessBooleanValueForInternalUse", @"_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", @"_EasyGatingGetBoolean_Internal_DoNotUseOrMock", @"_EasyGatingPlatformGetBoolean", @"_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", @"_MCQEasyGatingGetBooleanInternalDoNotUseOrMock", @"_MCIMobileConfigGetBoolean", @"_MCIExperimentCacheGetMobileConfigBoolean", @"_MCIExtensionExperimentCacheGetMobileConfigBoolean", @"_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter", @"_METAExtensionsExperimentGetBoolean", @"_METAExtensionsExperimentGetBooleanWithoutExposure", @"_MSGCSessionedMobileConfigGetBoolean", @"_MEBIsMinosDogfoodMekEncryptionVersionEnabled", @"_IGDirectNotesFriendMapEnabled", @"_IGDirectNotesEnableAudioNoteReplyType", @"_IGDirectNotesEnableAvatarReplyTypes", @"_IGDirectNotesEnableGifsStickersReplyTypes", @"_IGDirectNotesEnablePhotoNoteReplyType", @"_IGTabBarStyleForLauncherSet", @"_IGTabBarShouldEnableBlurDebugListener", @"_IGTabBarDynamicSizingEnabled", @"_IGTabBarHomecomingWithFloatingTabEnabled", @"_IGTabBarEnhancedDynamicSizingEnabled"];
+
     for (NSString *s in symbols) if ([detail containsString:s]) return s;
+
     return nil;
+
 }
 
 #pragma mark - Export / bulk

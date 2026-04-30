@@ -84,7 +84,7 @@ static dispatch_queue_t metaQueue(void) {
 
 #pragma mark - MC observations
 
-static NSMutableDictionary<NSNumber *, SCIExpMCObservation *> *gMCObs = nil;
+static NSMutableDictionary<NSString *, SCIExpMCObservation *> *gMCObs = nil;
 static dispatch_queue_t mcQueue(void) {
     static dispatch_queue_t q;
     static dispatch_once_t once;
@@ -111,7 +111,10 @@ static dispatch_queue_t mcQueue(void) {
     dispatch_barrier_async(mcQueue(), ^{
         if (!gMCObs) gMCObs = [NSMutableDictionary dictionary];
 
-        NSNumber *k = @(pid);
+        NSString *k = [NSString stringWithFormat:@"%016llx|%@|%@",
+                       pid,
+                       contextClass ?: @"",
+                       selectorName ?: @""];
         SCIExpMCObservation *o = gMCObs[k];
 
         if (!o) {
@@ -120,6 +123,17 @@ static dispatch_queue_t mcQueue(void) {
             o.type = t;
 
             NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:pid];
+
+            if (!mapped.length && def.length) {
+                NSRange nameRange = [def rangeOfString:@"name="];
+                if (nameRange.location != NSNotFound) {
+                    NSUInteger start = nameRange.location + nameRange.length;
+                    NSString *tail = [def substringFromIndex:start];
+                    NSRange end = [tail rangeOfString:@" ·"];
+                    mapped = end.location == NSNotFound ? tail : [tail substringToIndex:end.location];
+                }
+            }
+
             if (mapped.length) {
                 o.resolvedName = mapped;
             }

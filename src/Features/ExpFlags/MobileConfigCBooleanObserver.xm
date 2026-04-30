@@ -31,13 +31,32 @@ static NSString *RGMCResolvedName(unsigned long long pid) {
     return mapped.length ? mapped : nil;
 }
 
-static SCIExpFlagOverride RGMCOverrideForCandidate(unsigned long long pid) {
+static SCIExpFlagOverride RGMCOverrideForCandidate(const char *symbol, unsigned long long pid) {
     NSString *mapped = RGMCResolvedName(pid);
     if (mapped.length) {
         SCIExpFlagOverride ov = [SCIExpFlags overrideForName:mapped];
         if (ov != SCIExpFlagOverrideOff) return ov;
     }
-    return [SCIExpFlags overrideForName:RGMCHexKey(pid)];
+
+    if (pid != 0) {
+        SCIExpFlagOverride byHex = [SCIExpFlags overrideForName:RGMCHexKey(pid)];
+        if (byHex != SCIExpFlagOverrideOff) return byHex;
+    }
+
+    if (symbol) {
+        NSString *sym = [NSString stringWithUTF8String:symbol];
+        if (sym.length) {
+            SCIExpFlagOverride bySym = [SCIExpFlags overrideForName:sym];
+            if (bySym != SCIExpFlagOverrideOff) return bySym;
+
+            if ([sym hasPrefix:@"_"]) {
+                SCIExpFlagOverride byNoUnderscore = [SCIExpFlags overrideForName:[sym substringFromIndex:1]];
+                if (byNoUnderscore != SCIExpFlagOverrideOff) return byNoUnderscore;
+            }
+        }
+    }
+
+    return SCIExpFlagOverrideOff;
 }
 
 static BOOL RGMCApplyOverride(SCIExpFlagOverride ov, BOOL original) {
@@ -118,12 +137,12 @@ static BOOL RGRecordCBooleanObservation(const char *symbol, BOOL original, uintp
     }
 
     NSString *mappedName = RGMCResolvedName(candidate);
-    SCIExpFlagOverride ov = RGMCOverrideForCandidate(candidate);
+    SCIExpFlagOverride ov = RGMCOverrideForCandidate(symbol, candidate);
     BOOL finalValue = RGMCApplyOverride(ov, original);
 
     NSString *sym = symbol ? [NSString stringWithUTF8String:symbol] : @"unknown";
     NSString *source = RGMCSourceForSymbol(symbol);
-    NSString *namePart = mappedName.length ? [NSString stringWithFormat:@" · name=%@", mappedName] : @"";
+    NSString *namePart = mappedName.length ? [NSString stringWithFormat:@" · name=%@", mappedName] : (candidate == 0 && sym.length ? [NSString stringWithFormat:@" · name=%@", sym] : @"");
     NSString *def = [NSString stringWithFormat:@"source=%@ · symbol=%@%@ · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d · id=0x%llx · a0=0x%lx a1=0x%lx a2=0x%lx a3=0x%lx a4=0x%lx a5=0x%lx · caller=%p",
                      source,
                      sym,
@@ -171,17 +190,31 @@ typedef BOOL (*RGMCBoolRawFn)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintpt
         return RGRecordCBooleanObservation(SYMBOL, original, a0, a1, a2, a3, a4, a5, __builtin_return_address(0)); \
     }
 
+RG_DECLARE_BOOL_OBSERVER(IGMobileConfigBooleanValueForInternalUse, "_IGMobileConfigBooleanValueForInternalUse")
+RG_DECLARE_BOOL_OBSERVER(IGMobileConfigSessionlessBooleanValueForInternalUse, "_IGMobileConfigSessionlessBooleanValueForInternalUse")
+RG_DECLARE_BOOL_OBSERVER(IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, "_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18")
+RG_DECLARE_BOOL_OBSERVER(EasyGatingGetBoolean_Internal_DoNotUseOrMock, "_EasyGatingGetBoolean_Internal_DoNotUseOrMock")
+RG_DECLARE_BOOL_OBSERVER(EasyGatingPlatformGetBoolean, "_EasyGatingPlatformGetBoolean")
+RG_DECLARE_BOOL_OBSERVER(EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, "_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock")
+RG_DECLARE_BOOL_OBSERVER(MCQEasyGatingGetBooleanInternalDoNotUseOrMock, "_MCQEasyGatingGetBooleanInternalDoNotUseOrMock")
 RG_DECLARE_BOOL_OBSERVER(MCIMobileConfigGetBoolean, "_MCIMobileConfigGetBoolean")
 RG_DECLARE_BOOL_OBSERVER(MCIExperimentCacheGetMobileConfigBoolean, "_MCIExperimentCacheGetMobileConfigBoolean")
 RG_DECLARE_BOOL_OBSERVER(MCIExtensionExperimentCacheGetMobileConfigBoolean, "_MCIExtensionExperimentCacheGetMobileConfigBoolean")
+RG_DECLARE_BOOL_OBSERVER(MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, "_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter")
 RG_DECLARE_BOOL_OBSERVER(METAExtensionsExperimentGetBoolean, "_METAExtensionsExperimentGetBoolean")
 RG_DECLARE_BOOL_OBSERVER(METAExtensionsExperimentGetBooleanWithoutExposure, "_METAExtensionsExperimentGetBooleanWithoutExposure")
 RG_DECLARE_BOOL_OBSERVER(MSGCSessionedMobileConfigGetBoolean, "_MSGCSessionedMobileConfigGetBoolean")
-RG_DECLARE_BOOL_OBSERVER(EasyGatingPlatformGetBoolean, "_EasyGatingPlatformGetBoolean")
-RG_DECLARE_BOOL_OBSERVER(EasyGatingGetBoolean_Internal_DoNotUseOrMock, "_EasyGatingGetBoolean_Internal_DoNotUseOrMock")
-RG_DECLARE_BOOL_OBSERVER(EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, "_EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock")
-RG_DECLARE_BOOL_OBSERVER(MCQEasyGatingGetBooleanInternalDoNotUseOrMock, "_MCQEasyGatingGetBooleanInternalDoNotUseOrMock")
-RG_DECLARE_BOOL_OBSERVER(MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, "_MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter")
+RG_DECLARE_BOOL_OBSERVER(MEBIsMinosDogfoodMekEncryptionVersionEnabled, "_MEBIsMinosDogfoodMekEncryptionVersionEnabled")
+RG_DECLARE_BOOL_OBSERVER(IGDirectNotesFriendMapEnabled, "_IGDirectNotesFriendMapEnabled")
+RG_DECLARE_BOOL_OBSERVER(IGDirectNotesEnableAudioNoteReplyType, "_IGDirectNotesEnableAudioNoteReplyType")
+RG_DECLARE_BOOL_OBSERVER(IGDirectNotesEnableAvatarReplyTypes, "_IGDirectNotesEnableAvatarReplyTypes")
+RG_DECLARE_BOOL_OBSERVER(IGDirectNotesEnableGifsStickersReplyTypes, "_IGDirectNotesEnableGifsStickersReplyTypes")
+RG_DECLARE_BOOL_OBSERVER(IGDirectNotesEnablePhotoNoteReplyType, "_IGDirectNotesEnablePhotoNoteReplyType")
+RG_DECLARE_BOOL_OBSERVER(IGTabBarStyleForLauncherSet, "_IGTabBarStyleForLauncherSet")
+RG_DECLARE_BOOL_OBSERVER(IGTabBarShouldEnableBlurDebugListener, "_IGTabBarShouldEnableBlurDebugListener")
+RG_DECLARE_BOOL_OBSERVER(IGTabBarDynamicSizingEnabled, "_IGTabBarDynamicSizingEnabled")
+RG_DECLARE_BOOL_OBSERVER(IGTabBarHomecomingWithFloatingTabEnabled, "_IGTabBarHomecomingWithFloatingTabEnabled")
+RG_DECLARE_BOOL_OBSERVER(IGTabBarEnhancedDynamicSizingEnabled, "_IGTabBarEnhancedDynamicSizingEnabled")
 
 #define RG_REBIND(KEY, SYMBOL) {SYMBOL, (void *)hook_##KEY, (void **)&orig_##KEY}
 
@@ -189,17 +222,31 @@ RG_DECLARE_BOOL_OBSERVER(MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, "_MCDD
     if (!RGMCBoolObserverEnabled()) return;
 
     struct rebinding rebindings[] = {
+        RG_REBIND(IGMobileConfigBooleanValueForInternalUse, "IGMobileConfigBooleanValueForInternalUse"),
+        RG_REBIND(IGMobileConfigSessionlessBooleanValueForInternalUse, "IGMobileConfigSessionlessBooleanValueForInternalUse"),
+        RG_REBIND(IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, "IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"),
+        RG_REBIND(EasyGatingGetBoolean_Internal_DoNotUseOrMock, "EasyGatingGetBoolean_Internal_DoNotUseOrMock"),
+        RG_REBIND(EasyGatingPlatformGetBoolean, "EasyGatingPlatformGetBoolean"),
+        RG_REBIND(EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock"),
+        RG_REBIND(MCQEasyGatingGetBooleanInternalDoNotUseOrMock, "MCQEasyGatingGetBooleanInternalDoNotUseOrMock"),
         RG_REBIND(MCIMobileConfigGetBoolean, "MCIMobileConfigGetBoolean"),
         RG_REBIND(MCIExperimentCacheGetMobileConfigBoolean, "MCIExperimentCacheGetMobileConfigBoolean"),
         RG_REBIND(MCIExtensionExperimentCacheGetMobileConfigBoolean, "MCIExtensionExperimentCacheGetMobileConfigBoolean"),
+        RG_REBIND(MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, "MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter"),
         RG_REBIND(METAExtensionsExperimentGetBoolean, "METAExtensionsExperimentGetBoolean"),
         RG_REBIND(METAExtensionsExperimentGetBooleanWithoutExposure, "METAExtensionsExperimentGetBooleanWithoutExposure"),
         RG_REBIND(MSGCSessionedMobileConfigGetBoolean, "MSGCSessionedMobileConfigGetBoolean"),
-        RG_REBIND(EasyGatingPlatformGetBoolean, "EasyGatingPlatformGetBoolean"),
-        RG_REBIND(EasyGatingGetBoolean_Internal_DoNotUseOrMock, "EasyGatingGetBoolean_Internal_DoNotUseOrMock"),
-        RG_REBIND(EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock, "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock"),
-        RG_REBIND(MCQEasyGatingGetBooleanInternalDoNotUseOrMock, "MCQEasyGatingGetBooleanInternalDoNotUseOrMock"),
-        RG_REBIND(MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, "MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter"),
+        RG_REBIND(MEBIsMinosDogfoodMekEncryptionVersionEnabled, "MEBIsMinosDogfoodMekEncryptionVersionEnabled"),
+        RG_REBIND(IGDirectNotesFriendMapEnabled, "IGDirectNotesFriendMapEnabled"),
+        RG_REBIND(IGDirectNotesEnableAudioNoteReplyType, "IGDirectNotesEnableAudioNoteReplyType"),
+        RG_REBIND(IGDirectNotesEnableAvatarReplyTypes, "IGDirectNotesEnableAvatarReplyTypes"),
+        RG_REBIND(IGDirectNotesEnableGifsStickersReplyTypes, "IGDirectNotesEnableGifsStickersReplyTypes"),
+        RG_REBIND(IGDirectNotesEnablePhotoNoteReplyType, "IGDirectNotesEnablePhotoNoteReplyType"),
+        RG_REBIND(IGTabBarStyleForLauncherSet, "IGTabBarStyleForLauncherSet"),
+        RG_REBIND(IGTabBarShouldEnableBlurDebugListener, "IGTabBarShouldEnableBlurDebugListener"),
+        RG_REBIND(IGTabBarDynamicSizingEnabled, "IGTabBarDynamicSizingEnabled"),
+        RG_REBIND(IGTabBarHomecomingWithFloatingTabEnabled, "IGTabBarHomecomingWithFloatingTabEnabled"),
+        RG_REBIND(IGTabBarEnhancedDynamicSizingEnabled, "IGTabBarEnhancedDynamicSizingEnabled"),
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
     NSLog(@"[RyukGram][MCSymbolObserver] C MobileConfig hooks rc=%d", rc);

@@ -13,6 +13,7 @@ typedef BOOL (*SCIObjCGetBoolIMP)(id, SEL, unsigned long long);
 typedef BOOL (*SCIObjCGetBoolDefaultIMP)(id, SEL, unsigned long long, BOOL);
 typedef BOOL (*SCIObjCGetBoolOptionsIMP)(id, SEL, unsigned long long, id);
 typedef BOOL (*SCIObjCGetBoolOptionsDefaultIMP)(id, SEL, unsigned long long, id, BOOL);
+typedef BOOL (*SCIObjCGetBoolStringDefaultIMP)(id, SEL, id, BOOL);
 
 static NSMutableDictionary<NSString *, NSValue *> *SCIObjCOriginalIMPs(void) {
     static NSMutableDictionary<NSString *, NSValue *> *d;
