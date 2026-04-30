@@ -19,7 +19,7 @@ static IMP SCIObjCMCOriginalIMP(id self, SEL sel) {
     Class cls = [self class];
     while (cls) {
         NSValue *value = SCIObjCMCOriginalIMPs[SCIObjCMCKey(cls, sel)];
-        if (value) return value.pointerValue;
+        if (value) return (IMP)[value pointerValue];
         cls = class_getSuperclass(cls);
     }
     return NULL;
@@ -148,7 +148,7 @@ static void SCIObjCMCInstall(Class cls, NSString *selectorName, IMP replacement)
     IMP original = NULL;
     MSHookMessageEx(cls, sel, replacement, &original);
     if (!SCIObjCMCOriginalIMPs) SCIObjCMCOriginalIMPs = [NSMutableDictionary dictionary];
-    if (original) SCIObjCMCOriginalIMPs[SCIObjCMCKey(cls, sel)] = [NSValue valueWithPointer:original];
+    if (original) SCIObjCMCOriginalIMPs[SCIObjCMCKey(cls, sel)] = [NSValue valueWithPointer:(const void *)original];
 }
 
 static void SCIObjCMCInstallCommonGetters(NSString *className) {
