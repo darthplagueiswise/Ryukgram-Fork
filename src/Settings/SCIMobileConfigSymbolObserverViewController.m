@@ -1,6 +1,7 @@
 #import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Features/ExpFlags/SCIExpMobileConfigMapping.h"
+#import "../Features/ExpFlags/SCIMobileConfigMapping.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
 
@@ -31,11 +32,10 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     [super viewDidLoad];
     self.title = @"MC Override Lab";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.categories = @[@"All", @"Dogfood", @"Direct", @"QuickSnap", @"Prism", @"TabBar", @"Feed", @"Infra", @"Unknown"];
+    self.categories = @[@"All"];
 
-    // Do not use leftBarButtonItem here: it suppresses the navigation back button.
     UIBarButtonItem *exportItem = [[UIBarButtonItem alloc] initWithTitle:@"Export" style:UIBarButtonItemStylePlain target:self action:@selector(exportMenu)];
-    UIBarButtonItem *importItem = [[UIBarButtonItem alloc] initWithTitle:@"Import JSON" style:UIBarButtonItemStylePlain target:self action:@selector(importRuntimeJSON)];
+    UIBarButtonItem *importItem = [[UIBarButtonItem alloc] initWithTitle:@"Import id_map" style:UIBarButtonItemStylePlain target:self action:@selector(importRuntimeJSON)];
     self.navigationItem.rightBarButtonItems = @[exportItem, importItem];
 
     self.modeSeg = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Would change", @"ObjC", @"C", @"Update"]];
@@ -52,7 +52,7 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
     self.searchBar = [UISearchBar new];
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    self.searchBar.placeholder = @"Search name / category / selector / source";
+    self.searchBar.placeholder = @"Search name / category / selector / gate";
     self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
     self.searchBar.delegate = self;
@@ -98,36 +98,48 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self refresh]; }
 - (void)filterChanged { [self refresh]; }
+
 - (void)refresh {
-    self.rows = [self filteredRows];
+    NSArray<SCIExpMCObservation *> *all = [SCIExpFlags allMCObservations] ?: @[];
+    [self rebuildCategoriesFromRows:all];
+    self.rows = [self filteredRowsFromAll:all];
     [self.tableView reloadData];
     self.emptyLabel.hidden = self.rows.count > 0;
     self.emptyLabel.text = self.query.length ? @"No matching gates." : @"Enable MC hooks, restart, then browse Instagram screens to populate gates.";
 }
 
-#pragma mark - Runtime schema import/debug
+- (void)rebuildCategoriesFromRows:(NSArray<SCIExpMCObservation *> *)all {
+    NSString *selected = nil;
+    if (self.categorySeg.selectedSegmentIndex >= 0 && (NSUInteger)self.categorySeg.selectedSegmentIndex < self.categories.count) selected = self.categories[(NSUInteger)self.categorySeg.selectedSegmentIndex];
+
+    NSMutableSet<NSString *> *present = [NSMutableSet set];
+    for (SCIExpMCObservation *o in all ?: @[]) {
+        NSString *cat = [self categoryForObservation:o];
+        if (cat.length) [present addObject:cat];
+    }
+
+    NSArray<NSString *> *order = @[@"Dogfood", @"Direct", @"QuickSnap", @"Prism", @"TabBar", @"Feed", @"Infra", @"Unknown"];
+    NSMutableArray<NSString *> *cats = [NSMutableArray arrayWithObject:@"All"];
+    for (NSString *cat in order) if ([present containsObject:cat]) [cats addObject:cat];
+    for (NSString *cat in [[present allObjects] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)]) if (![cats containsObject:cat]) [cats addObject:cat];
+
+    if ([cats isEqualToArray:self.categories]) return;
+    self.categories = cats;
+    [self.categorySeg removeAllSegments];
+    for (NSUInteger i = 0; i < self.categories.count; i++) [self.categorySeg insertSegmentWithTitle:self.categories[i] atIndex:i animated:NO];
+    NSUInteger idx = selected.length ? [self.categories indexOfObject:selected] : NSNotFound;
+    if (idx == NSNotFound) idx = 0;
+    self.categorySeg.selectedSegmentIndex = (NSInteger)idx;
+}
+
+#pragma mark - id_name_mapping import/debug
 
 - (NSArray<NSString *> *)runtimeJSONCandidatePaths {
-    NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSString *bundle = [NSBundle mainBundle].bundlePath;
-    if (bundle.length) {
-        [paths addObject:[bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/igios-instagram-schema_client-persist.json"]];
-        [paths addObject:[bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/igios-facebook-schema_client-persist.json"]];
-        [paths addObject:[bundle stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"]];
-    }
-    NSArray<NSString *> *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (docs.firstObject) [paths addObject:[docs.firstObject stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"]];
-    NSArray<NSString *> *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
-    if (appSupport.firstObject) [paths addObject:[[appSupport.firstObject stringByAppendingPathComponent:@"RyukGram"] stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"]];
-    return paths;
+    return [SCIMobileConfigMapping mappingPaths] ?: @[];
 }
 
 - (NSString *)persistedRuntimeJSONPath {
-    NSArray<NSString *> *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
-    NSString *base = appSupport.firstObject ?: NSTemporaryDirectory();
-    NSString *dir = [base stringByAppendingPathComponent:@"RyukGram"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    return [dir stringByAppendingPathComponent:@"igios-instagram-schema_client-persist.json"];
+    return [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"";
 }
 
 - (NSDictionary *)runtimeJSONStatus {
@@ -145,8 +157,9 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     }
     out[@"checked"] = checked;
     out[@"found"] = found;
-    out[@"mapping"] = [SCIExpMobileConfigMapping mappingSourceDescription] ?: @"none";
+    out[@"mapping"] = [SCIMobileConfigMapping mappingStatusLine] ?: @"none";
     out[@"persisted"] = [self persistedRuntimeJSONPath] ?: @"";
+    out[@"active"] = [SCIMobileConfigMapping activeIDNameMappingPath] ?: @"";
     return out;
 }
 
@@ -156,31 +169,39 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     NSString *source = nil;
     for (NSDictionary *entry in found) {
         NSString *p = entry[@"path"];
-        if ([p containsString:@"FBSharedFramework.framework/igios-instagram-schema_client-persist.json"]) { source = p; break; }
+        if ([p containsString:@"id_name_mapping.json"] && ![p isEqualToString:[self persistedRuntimeJSONPath]]) { source = p; break; }
         if (!source.length) source = p;
     }
+
     NSMutableString *msg = [NSMutableString string];
     [msg appendFormat:@"Resolver atual:\n%@\n\n", status[@"mapping"] ?: @"none"];
-    [msg appendFormat:@"Destino importado:\n%@\n\n", status[@"persisted"] ?: @""];
+    [msg appendFormat:@"Ativo:\n%@\n\n", status[@"active"] ?: @"none"];
+    [msg appendFormat:@"Destino local:\n%@\n\n", status[@"persisted"] ?: @""];
+
     if (!source.length) {
-        [msg appendString:@"Nenhum JSON runtime encontrado.\n\nChecked:\n"];
+        [msg appendString:@"Nenhum id_name_mapping.json encontrado.\n\nChecked:\n"];
         for (NSString *p in status[@"checked"]) [msg appendFormat:@"- %@\n", p];
-        [self presentText:msg title:@"Import JSON"];
+        [self presentText:msg title:@"Import id_name_mapping"];
         return;
     }
+
     NSString *dest = [self persistedRuntimeJSONPath];
     NSError *err = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
-    BOOL ok = [[NSFileManager defaultManager] copyItemAtPath:source toPath:dest error:&err];
+    BOOL same = [source isEqualToString:dest];
+    BOOL ok = YES;
+    if (!same) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:[dest stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:dest error:nil];
+        ok = [[NSFileManager defaultManager] copyItemAtPath:source toPath:dest error:&err];
+    }
+
     if (ok) {
-        [SCIExpMobileConfigMapping reloadMapping];
-        [msg appendFormat:@"Importado de:\n%@\n\n", source];
-        [msg appendString:@"Cópia local pronta; o caminho runtime resolve o UUID mutável da instalação.\n\n"];
+        [msg appendFormat:@"%@:\n%@\n\n", same ? @"Já estava usando" : @"Importado de", source];
+        [msg appendFormat:@"%@\n", [SCIMobileConfigMapping mappingStatusLine] ?: @""];
     } else {
         [msg appendFormat:@"Falha ao copiar:\n%@\n", err.localizedDescription ?: @"unknown"];
     }
-    [msg appendString:[SCIExpMobileConfigMapping mappingDebugDescription] ?: @""];
-    [self presentText:msg title:ok ? @"JSON importado" : @"Import JSON"];
+    [self presentText:msg title:ok ? @"id_name_mapping pronto" : @"Import id_name_mapping"];
 }
 
 - (void)presentText:(NSString *)text title:(NSString *)title {
@@ -192,15 +213,14 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
 
 #pragma mark - Filtering
 
-- (NSArray<SCIExpMCObservation *> *)filteredRows {
-    NSArray<SCIExpMCObservation *> *all = [SCIExpFlags allMCObservations] ?: @[];
+- (NSArray<SCIExpMCObservation *> *)filteredRowsFromAll:(NSArray<SCIExpMCObservation *> *)all {
     NSMutableArray<SCIExpMCObservation *> *out = [NSMutableArray array];
     NSUInteger categoryIndex = (NSUInteger)MAX(0, self.categorySeg.selectedSegmentIndex);
     if (categoryIndex >= self.categories.count) categoryIndex = 0;
     NSString *selectedCategory = self.categories[categoryIndex];
     NSString *q = self.query.lowercaseString ?: @"";
     SCIMCObserverMode mode = (SCIMCObserverMode)self.modeSeg.selectedSegmentIndex;
-    for (SCIExpMCObservation *o in all) {
+    for (SCIExpMCObservation *o in all ?: @[]) {
         NSString *detail = o.lastDefault ?: @"";
         NSString *display = [self displayNameForObservation:o];
         NSString *category = [self categoryForObservation:o];
@@ -313,7 +333,8 @@ static const void *kSCIMCObserverSwitchKey = &kSCIMCObserverSwitchKey;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [self exportJSON]; [SCIUtils showSuccessHUDWithDescription:@"JSON copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy CSV" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [self exportCSV]; [SCIUtils showSuccessHUDWithDescription:@"CSV copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Share JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[[self exportJSON]] applicationActivities:nil]; if (vc.popoverPresentationController) vc.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem; [self presentViewController:vc animated:YES completion:nil]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Mapping debug" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { NSMutableString *msg = [NSMutableString stringWithString:[SCIExpMobileConfigMapping mappingDebugDescription] ?: @""]; [msg appendString:@"\n\nRuntime JSON candidates:\n"]; for (NSString *p in [self runtimeJSONCandidatePaths]) [msg appendFormat:@"- %@\n", p]; [self presentText:msg title:@"id_name_mapping debug"]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"id_name_mapping debug" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { NSMutableString *msg = [NSMutableString stringWithFormat:@"%@\n\n", [SCIMobileConfigMapping mappingStatusLine] ?: @"none"]; [msg appendString:@"Candidate paths:\n"]; for (NSString *p in [self runtimeJSONCandidatePaths]) [msg appendFormat:@"- %@\n", p]; [self presentText:msg title:@"id_name_mapping debug"]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy active id_name_mapping path" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = [SCIMobileConfigMapping activeIDNameMappingPath] ?: @""; [SCIUtils showSuccessHUDWithDescription:@"Path copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (sheet.popoverPresentationController) sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
     [self presentViewController:sheet animated:YES completion:nil];
