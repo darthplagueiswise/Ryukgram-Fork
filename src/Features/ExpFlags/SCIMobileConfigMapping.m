@@ -30,18 +30,71 @@ static NSString *const kOvr = @"mc_overrides.json";
     return [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
 }
 
-+ (NSArray *)mappingPaths {
-    NSString *h = NSHomeDirectory();
-    NSString *b = [NSBundle mainBundle].bundlePath;
-    return @[
-        [self primaryIDNameMappingPath],
-        [h stringByAppendingPathComponent:@"Documents/mobileconfig/id_name_mapping.json"],
-        [h stringByAppendingPathComponent:@"Library/mobileconfig/id_name_mapping.json"],
-        [b stringByAppendingPathComponent:@"mobileconfig/id_name_mapping.json"],
-        [b stringByAppendingPathComponent:@"id_name_mapping.json"],
-        [b stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/mobileconfig/id_name_mapping.json"],
-        [b stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/id_name_mapping.json"]
++ (void)addIDMapCandidatesForInstagramBundle:(NSString *)bundlePath toSet:(NSMutableOrderedSet<NSString *> *)paths {
+    if (!bundlePath.length) return;
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"mobileconfig/id_name_mapping.json"]];
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"id_name_mapping.json"]];
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/mobileconfig/id_name_mapping.json"]];
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/id_name_mapping.json"]];
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"Frameworks/FBSharedModules.framework/mobileconfig/id_name_mapping.json"]];
+    [paths addObject:[bundlePath stringByAppendingPathComponent:@"Frameworks/FBSharedModules.framework/id_name_mapping.json"]];
+}
+
++ (NSArray<NSString *> *)dynamicInstagramBundlePaths {
+    NSMutableOrderedSet<NSString *> *bundles = [NSMutableOrderedSet orderedSet];
+    NSString *current = [NSBundle mainBundle].bundlePath;
+    if (current.length) [bundles addObject:current];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *roots = @[
+        @"/private/var/containers/Bundle/Application",
+        @"/var/containers/Bundle/Application"
     ];
+
+    for (NSString *root in roots) {
+        NSArray<NSString *> *entries = [fm contentsOfDirectoryAtPath:root error:nil];
+        for (NSString *entry in entries) {
+            if (!entry.length || [entry hasPrefix:@"."]) continue;
+            NSString *candidate = [[root stringByAppendingPathComponent:entry] stringByAppendingPathComponent:@"Instagram.app"];
+            BOOL isDir = NO;
+            if ([fm fileExistsAtPath:candidate isDirectory:&isDir] && isDir) {
+                [bundles addObject:candidate];
+            }
+        }
+    }
+
+    return bundles.array;
+}
+
++ (NSArray *)mappingPaths {
+    NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
+    NSString *h = NSHomeDirectory();
+
+    [paths addObject:[self primaryIDNameMappingPath]];
+    if (h.length) {
+        [paths addObject:[h stringByAppendingPathComponent:@"Documents/mobileconfig/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"Documents/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"Library/mobileconfig/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/mobileconfig/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig/id_name_mapping.json"]];
+        [paths addObject:[h stringByAppendingPathComponent:@"tmp/id_name_mapping.json"]];
+    }
+
+    for (NSString *bundle in [self dynamicInstagramBundlePaths]) {
+        [self addIDMapCandidatesForInstagramBundle:bundle toSet:paths];
+    }
+
+    return paths.array;
+}
+
++ (NSString *)activeIDNameMappingPath {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *p in [self mappingPaths]) {
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:p isDirectory:&isDir] && !isDir) return p;
+    }
+    return nil;
 }
 
 + (NSDictionary<NSNumber *, NSDictionary *> *)parseMappingArray:(NSArray *)arr source:(NSString *)source {
@@ -51,9 +104,9 @@ static NSString *const kOvr = @"mc_overrides.json";
         NSString *raw = obj;
         NSArray *parts = [raw componentsSeparatedByString:@":"];
         if (parts.count < 2) continue;
-        unsigned long long pid = strtoull([parts[0] UTF8String], NULL, 10);
+        unsigned long long pid = strtoull([parts[0] UTF8String], NULL, 0);
         NSString *name = parts[1];
-        if (!name.length) continue;
+        if (!pid || !name.length) continue;
         NSMutableDictionary *subs = [NSMutableDictionary dictionary];
         for (NSUInteger i = 2; i + 1 < parts.count; i += 2) {
             NSString *k = parts[i];
@@ -72,7 +125,7 @@ static NSString *const kOvr = @"mc_overrides.json";
         if ([a isKindOfClass:[NSArray class]]) return [self parseMappingArray:a source:source];
         NSMutableDictionary *out = [NSMutableDictionary dictionary];
         [(NSDictionary *)obj enumerateKeysAndObjectsUsingBlock:^(id key, id val, BOOL *stop) {
-            unsigned long long pid = [[key description] longLongValue];
+            unsigned long long pid = strtoull([[key description] UTF8String], NULL, 0);
             NSString *name = [val isKindOfClass:[NSString class]] ? val : ([val isKindOfClass:[NSDictionary class]] ? (val[@"config_name"] ?: val[@"name"]) : nil);
             NSDictionary *subs = [val isKindOfClass:[NSDictionary class]] ? (val[@"subs"] ?: @{}) : @{};
             if (pid && name.length) out[@(pid)] = @{@"config_name": name, @"subs": subs, @"source": source ?: kMap};
@@ -87,14 +140,11 @@ static NSString *const kOvr = @"mc_overrides.json";
     static NSString *loadedPath;
     static NSDate *loadedDate;
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *path = nil;
+    NSString *path = [self activeIDNameMappingPath];
     NSDate *date = nil;
-    for (NSString *p in [self mappingPaths]) {
-        NSDictionary *attrs = [fm attributesOfItemAtPath:p error:nil];
-        if (attrs) { path = p; date = attrs[NSFileModificationDate]; break; }
-    }
+    if (path.length) date = [fm attributesOfItemAtPath:path error:nil][NSFileModificationDate];
     if (cache && ((path == loadedPath) || [path isEqualToString:loadedPath]) && ((date == loadedDate) || [date isEqualToDate:loadedDate])) return cache;
-    cache = [[self parseMappingObject:[self jsonAtPath:path] source:path.lastPathComponent] copy] ?: @{};
+    cache = [[self parseMappingObject:[self jsonAtPath:path] source:path ?: kMap] copy] ?: @{};
     loadedPath = [path copy];
     loadedDate = date;
     return cache;
@@ -105,7 +155,8 @@ static NSString *const kOvr = @"mc_overrides.json";
 + (NSString *)sourceForParamID:(unsigned long long)paramID { NSString *s = [self mappingForParamID:paramID][@"source"]; return s.length ? s : nil; }
 
 + (NSString *)mappingStatusLine {
-    return [NSString stringWithFormat:@"mapping=%lu · %@", (unsigned long)[self idNameMapping].count, [self primaryIDNameMappingPath]];
+    NSString *active = [self activeIDNameMappingPath];
+    return [NSString stringWithFormat:@"id_name_mapping=%lu · active=%@ · primary=%@", (unsigned long)[self idNameMapping].count, active ?: @"none", [self primaryIDNameMappingPath]];
 }
 
 + (NSDictionary *)allOverrides {
