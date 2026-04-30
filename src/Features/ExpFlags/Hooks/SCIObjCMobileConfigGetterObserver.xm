@@ -4,6 +4,7 @@
 #import <pthread.h>
 #import "../SCIExpFlags.h"
 #import "../SCIExpMobileConfigMapping.h"
+#import "../SCIMobileConfigMapping.h"
 #import "../../../Utils.h"
 
 static NSString *const kHooksKey = @"sci_exp_mc_hooks_enabled";
@@ -54,7 +55,11 @@ static NSString *NameForParam(unsigned long long p) {
     NSString *cached = gNames[n];
     pthread_mutex_unlock(&gLock);
     if (cached) return cached.length ? cached : nil;
-    NSString *r = [SCIExpMobileConfigMapping resolvedNameForSpecifier:p] ?: @"";
+
+    NSString *r = [SCIMobileConfigMapping resolvedNameForParamID:p];
+    if (!r.length) r = [SCIExpMobileConfigMapping resolvedNameForSpecifier:p];
+    if (!r.length) r = @"";
+
     pthread_mutex_lock(&gLock);
     if (!gNames) gNames = [NSMutableDictionary dictionary];
     gNames[n] = r;
@@ -63,10 +68,12 @@ static NSString *NameForParam(unsigned long long p) {
 }
 
 static SCIExpFlagOverride OverrideForParam(unsigned long long p) {
-    SCIExpFlagOverride o = OverrideForKey(Hex(p));
-    if (o != SCIExpFlagOverrideOff) return o;
     NSString *name = NameForParam(p);
-    return name.length ? OverrideForKey(name) : SCIExpFlagOverrideOff;
+    if (name.length) {
+        SCIExpFlagOverride byName = OverrideForKey(name);
+        if (byName != SCIExpFlagOverrideOff) return byName;
+    }
+    return OverrideForKey(Hex(p));
 }
 
 static NSString *NameFromObj(id x) {
@@ -104,7 +111,8 @@ static BOOL ShouldRecord(unsigned long long p, SEL s) {
 
 static void Rec(id x, SEL s, unsigned long long p, NSString *name, BOOL def, BOOL orig, BOOL fin, SCIExpFlagOverride o) {
     if (!ShouldRecord(p, s)) return;
-    NSString *np = name.length ? [NSString stringWithFormat:@" · name=%@", name] : @"";
+    NSString *resolved = name.length ? name : NameForParam(p);
+    NSString *np = resolved.length ? [NSString stringWithFormat:@" · name=%@", resolved] : @"";
     NSString *d = [NSString stringWithFormat:@"source=ObjC MobileConfig getter · selector=%@ · context=%@%@ · default=%d · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d", NSStringFromSelector(s), Ctx(x), np, def ? 1 : 0, orig ? 1 : 0, fin ? 1 : 0, OText(o), orig ? 0 : 1];
     [SCIExpFlags recordMCParamID:p type:SCIExpMCTypeBool defaultValue:d originalValue:orig ? @"YES" : @"NO" contextClass:Ctx(x) selectorName:NSStringFromSelector(s)];
 }
