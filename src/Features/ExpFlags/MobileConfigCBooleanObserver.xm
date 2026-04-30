@@ -83,8 +83,40 @@ static unsigned long long RGMCBestSpecifierCandidate(uintptr_t a0, uintptr_t a1,
     return 0;
 }
 
+
+static NSMutableDictionary<NSString *, NSNumber *> *RGMCRecordCounts(void) {
+    static NSMutableDictionary<NSString *, NSNumber *> *d;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ d = [NSMutableDictionary dictionary]; });
+    return d;
+}
+
+static BOOL RGMCShouldRecordC(const char *symbol, unsigned long long candidate) {
+    static dispatch_queue_t q;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ q = dispatch_queue_create("sci.mc.c.throttle", DISPATCH_QUEUE_SERIAL); });
+
+    NSString *sym = symbol ? [NSString stringWithUTF8String:symbol] : @"unknown";
+    NSString *key = [NSString stringWithFormat:@"%@:%016llx", sym, candidate];
+
+    __block NSUInteger count = 0;
+    dispatch_sync(q, ^{
+        NSMutableDictionary *d = RGMCRecordCounts();
+        count = [d[key] unsignedIntegerValue] + 1;
+        d[key] = @(count);
+    });
+
+    return count <= 2 || (count % 2048) == 0;
+}
+
 static BOOL RGRecordCBooleanObservation(const char *symbol, BOOL original, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, void *caller) {
     unsigned long long candidate = RGMCBestSpecifierCandidate(a0, a1, a2, a3, a4, a5);
+
+    // Hot path: most calls must return immediately. Mapping/name resolution happens only on sampled calls.
+    if (!RGMCShouldRecordC(symbol, candidate)) {
+        return original;
+    }
+
     NSString *mappedName = RGMCResolvedName(candidate);
     SCIExpFlagOverride ov = RGMCOverrideForCandidate(candidate);
     BOOL finalValue = RGMCApplyOverride(ov, original);

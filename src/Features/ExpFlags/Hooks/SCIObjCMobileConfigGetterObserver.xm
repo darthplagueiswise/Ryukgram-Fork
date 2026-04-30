@@ -7,7 +7,7 @@
 #import "../SCIMobileConfigMapping.h"
 #import "../../../Utils.h"
 
-static NSString *const kHooksKey = @"sci_exp_mc_hooks_enabled";
+static NSString *const kHooksKey = @"sci_exp_mc_objc_getter_observer_enabled";
 static NSString *const kStartupKey = @"sci_exp_mc_objc_startup_hooks_enabled";
 static NSString *const kStoreKey = @"sci_exp_overrides_by_name";
 static NSMutableDictionary<NSString *, NSValue *> *gOrig;
@@ -88,6 +88,10 @@ static SCIExpFlagOverride OverrideForNameObj(id x) {
 }
 
 static BOOL Apply(SCIExpFlagOverride o, BOOL v) {
+    // ObjC getters are lifecycle-critical. By default this observer MUST NOT alter return values.
+    // Enable sci_exp_mc_objc_apply_overrides_enabled only after we have identified a safe param/callsite.
+    id enabled = [[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_objc_apply_overrides_enabled"];
+    if (!enabled || ![enabled boolValue]) return v;
     if (o == SCIExpFlagOverrideTrue) return YES;
     if (o == SCIExpFlagOverrideFalse) return NO;
     return v;
@@ -106,7 +110,7 @@ static BOOL ShouldRecord(unsigned long long p, SEL s) {
     NSUInteger c = gHits[k].unsignedIntegerValue + 1;
     gHits[k] = @(c);
     pthread_mutex_unlock(&gLock);
-    return c <= 3 || (c % 256) == 0;
+    return c <= 2 || (c % 2048) == 0;
 }
 
 static void Rec(id x, SEL s, unsigned long long p, NSString *name, BOOL def, BOOL orig, BOOL fin, SCIExpFlagOverride o) {
@@ -226,7 +230,7 @@ static void InstallAll(void) {
 %ctor {
     if (![SCIUtils getBoolPref:kHooksKey]) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if ([SCIUtils getBoolPref:kHooksKey]) InstallAll();
         });
     });
