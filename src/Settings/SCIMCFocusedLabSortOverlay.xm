@@ -4,7 +4,11 @@
 #import "../Utils.h"
 
 @class SCIMCFocusedLabRow;
+#ifdef __cplusplus
+extern "C" void SCIInstallFocusedObjCGetterObserver(void);
+#else
 extern void SCIInstallFocusedObjCGetterObserver(void);
+#endif
 
 @interface SCIMCFocusedLabRow : NSObject
 @property (nonatomic, assign) unsigned long long paramID;
