@@ -7,10 +7,15 @@
 #include "../../../modules/fishhook/fishhook.h"
 
 // C broker hooks for MobileConfig-ish boolean gates.
-// Default behavior: hook only when the explicit MC C hooks toggle is enabled.
-// Verbose logging is separate so normal override testing does not spam console.
+// IMPORTANT: these hooks are not passive. Fishhook changes process-wide C calls,
+// and several of these symbols are hot during auth/session bootstrap. They must
+// be explicitly armed for a focused lab run and must never be enabled by default.
+
+static NSString *const kSCIMCCBrokerArmedKey = @"sci_exp_mc_c_hooks_armed";
 
 static BOOL RGMCBoolObserverEnabled(void) {
+    if (![SCIUtils getBoolPref:kSCIMCCBrokerArmedKey]) return NO;
+
     return [SCIUtils getBoolPref:@"sci_exp_mc_c_hooks_enabled"] ||
            [SCIUtils getBoolPref:@"igt_runtime_mc_symbol_observer_verbose"] ||
            [SCIUtils getBoolPref:@"igt_runtime_mc_true_patcher"];
@@ -102,7 +107,6 @@ static unsigned long long RGMCBestSpecifierCandidate(uintptr_t a0, uintptr_t a1,
     return 0;
 }
 
-
 static NSMutableDictionary<NSString *, NSNumber *> *RGMCRecordCounts(void) {
     static NSMutableDictionary<NSString *, NSNumber *> *d;
     static dispatch_once_t once;
@@ -131,7 +135,6 @@ static BOOL RGMCShouldRecordC(const char *symbol, unsigned long long candidate) 
 static BOOL RGRecordCBooleanObservation(const char *symbol, BOOL original, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, void *caller) {
     unsigned long long candidate = RGMCBestSpecifierCandidate(a0, a1, a2, a3, a4, a5);
 
-    // Hot path: most calls must return immediately. Mapping/name resolution happens only on sampled calls.
     if (!RGMCShouldRecordC(symbol, candidate)) {
         return original;
     }
