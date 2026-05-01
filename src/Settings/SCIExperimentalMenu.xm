@@ -2,6 +2,7 @@
 #import "SCIExpFlagsViewController.h"
 #import "SCIResolverReportViewController.h"
 #import "SCIMobileConfigSymbolObserverViewController.h"
+#import "SCIDogfoodingMainLauncher.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -178,24 +179,22 @@ static void RYDevShowAlert(NSString *title, NSString *message) {
     [top presentViewController:alert animated:YES completion:nil];
 }
 
-static void RYDevCallOpenSelector(NSString *selectorName) {
+static void RYDevOpenMainDogfood(void) {
     UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
-    SEL sel = NSSelectorFromString(selectorName);
-
-    if (top && [top respondsToSelector:sel]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(top, sel, nil);
+    if (!top) {
+        RYDevShowAlert(@"Dogfood unavailable", @"No active presenter was found.");
         return;
     }
+    RYDogOpenMainFrom(top);
+}
 
-    id target = top ?: RYDevRootViewController();
-
-    if (target && [target respondsToSelector:sel]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(target, sel, nil);
+static void RYDevOpenDirectNotesDogfood(void) {
+    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
+    if (!top) {
+        RYDevShowAlert(@"Direct Notes Dogfood unavailable", @"No active presenter was found.");
         return;
     }
-
-    RYDevShowAlert(@"Native tool unavailable",
-                   [NSString stringWithFormat:@"Selector %@ is not available in the current runtime.", selectorName]);
+    RYDogOpenDirectNotesFrom(top);
 }
 
 // -----------------------------------------------------------------------------
@@ -326,23 +325,15 @@ static NSArray *experimentalNavSections(void) {
 static NSArray *developerNavSections(void) {
     return @[
         @{
-            @"header": @"Developer Mode",
-            @"footer": @"Small set of high-level toggles. Old Employee/MC/Internal switches are now treated as internal aliases.",
+            @"header": @"Employee / Dogfood Bootstrap",
+            @"footer": @"InstaEclipse-style path: enable only the known identity gates. Restart Instagram after changing this.",
             @"rows": @[
-                ExpSwitchAction(@"Enable Developer/Internal Mode",
-                                @"Forces known employee, test-user and dogfood identity gates.",
+                ExpSwitchAction(@"Enable Employee / Dogfood Mode",
+                                @"Sets ig_is_employee and ig_is_employee_or_test_user through the validated InternalUse specifiers.",
                                 @"igt_employee_master",
                                 YES,
                                 ^(BOOL on) {
                                     RYSyncDeveloperModeAliases(on);
-                                }),
-
-                ExpSwitchAction(@"Force MobileConfig Boolean Gates",
-                                @"Forces legacy C Boolean patcher aliases. Prefer MC Override Lab for selective testing.",
-                                @"igt_runtime_mc_true_patcher",
-                                YES,
-                                ^(BOOL on) {
-                                    RYSyncForceGateAliases(on);
                                 }),
 
                 ExpSwitchAction(@"Spoof Internal Apps",
@@ -356,8 +347,28 @@ static NSArray *developerNavSections(void) {
         },
 
         @{
+            @"header": @"Native Dogfood Entry Points",
+            @"footer": @"These are the real validated developer selectors in this build. The Developer class is Dogfooding Settings here.",
+            @"rows": @[
+                [SCISetting buttonCellWithTitle:@"Open Main Dogfood Settings"
+                                       subtitle:@"Selector: +[IGDogfoodingSettings openWithConfig:onViewController:userSession:]"
+                                           icon:[SCISymbol symbolWithName:@"pawprint.circle"]
+                                         action:^{
+                                             RYDevOpenMainDogfood();
+                                         }],
+
+                [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
+                                       subtitle:@"Selector: +[IGDirectNotesDogfoodingSettingsStaticFuncs notesDogfoodingSettingsOpenOnViewController:userSession:]"
+                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
+                                         action:^{
+                                             RYDevOpenDirectNotesDogfood();
+                                         }]
+            ]
+        },
+
+        @{
             @"header": @"MobileConfig Override Lab",
-            @"footer": @"Enable hooks, restart, browse IG screens, then use the lab to toggle individual observed gates. Switches in the lab reflect the current effective value; tap a row to clear override.",
+            @"footer": @"Use this to discover exactly which bools pass through each C broker / ObjC getter. The old force-all patcher is intentionally not shown here.",
             @"rows": @[
                 ExpSwitch(@"Enable MC Base Observers",
                           @"Installs the safe MetaLocalExperiment/InternalUse/MobileConfig observer set. Restart required.",
@@ -374,22 +385,17 @@ static NSArray *developerNavSections(void) {
                           @"sci_exp_mc_c_hooks_enabled",
                           YES),
 
-                ExpSwitch(@"Verbose Gate Logging",
-                          @"Logs observed gate calls to console. Debug only, restart required.",
-                          @"igt_runtime_mc_symbol_observer_verbose",
-                          YES),
-
                 [SCISetting navigationCellWithTitle:@"MC Override Lab"
-                                           subtitle:@"Would change, ObjC/C/Update filters, category filters, runtime JSON import and JSON/CSV export."
+                                           subtitle:@"Observed bools by gate/getter, category filters, would-change list and JSON/CSV export."
                                                icon:[SCISymbol symbolWithName:@"waveform.path.ecg.rectangle"]
                                      viewController:[SCIMobileConfigSymbolObserverViewController new]]
             ]
         },
 
         @{
-            @"header": @"Other Diagnostics",
-            @"footer": @"Meta/Internal browser and raw resolver tools."
-            ,@"rows": @[
+            @"header": @"Diagnostics",
+            @"footer": @"Raw observers and resolver tools. Use these for mapping, not for the main Dogfood open flow.",
+            @"rows": @[
                 [SCISetting navigationCellWithTitle:@"Meta/Internal Flags Browser"
                                            subtitle:@"MetaLocalExperiment, InternalUse specifiers and manual per-gate overrides."
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
@@ -399,35 +405,15 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Full symbol and MobileConfig resolver report."
                                                icon:[SCISymbol symbolWithName:@"magnifyingglass"]
                                      viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindFull
-                                                                                                    title:@"Full Resolver Report"]]
-            ]
-        },
-
-        @{
-            @"header": @"Native Tools",
-            @"footer": @"These call native Instagram dogfood/debug entry points when present in the loaded app build.",
-            @"rows": @[
-                [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
-                                       subtitle:@"Calls native Direct Notes dogfooding opener."
-                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
-                                         action:^{
-                                             RYDevCallOpenSelector(@"ryDogOpenNotesButtonTapped:");
-                                         }],
-
-                [SCISetting buttonCellWithTitle:@"Open Main Dogfood Settings"
-                                       subtitle:@"Attempts native main dogfood settings path."
-                                           icon:[SCISymbol symbolWithName:@"pawprint.circle"]
-                                         action:^{
-                                             RYDevCallOpenSelector(@"ryDogOpenMainButtonTapped:");
-                                         }],
+                                                                                                    title:@"Full Resolver Report"]],
 
                 [SCISetting buttonCellWithTitle:@"Reset Developer Mode State"
-                                       subtitle:@"Turns off hidden legacy aliases, MC hooks and employee/test-user overrides."
+                                       subtitle:@"Turns off identity overrides, MC hooks and internal app spoof aliases."
                                            icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
                                          action:^{
                                              RYResetDeveloperModeState();
                                              RYDevShowAlert(@"Developer Mode reset",
-                                                            @"Developer/Internal Mode, Force Gates, MC hooks, Internal Apps spoof and hidden legacy aliases were turned off.");
+                                                            @"Dogfood mode, MC hooks, Internal Apps spoof and legacy force-all aliases were turned off.");
                                          }]
             ]
         }
@@ -482,7 +468,9 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
         [joined containsString:@"developer options gate"] ||
         [joined containsString:@"runtime mc patcher"] ||
         [joined containsString:@"internal apps gate"] ||
-        [joined containsString:@"internaluse observer"]) {
+        [joined containsString:@"internaluse observer"] ||
+        [joined containsString:@"dogfood / developer options"] ||
+        [joined containsString:@"native dogfood"]) {
         return YES;
     }
 
@@ -524,7 +512,9 @@ static void cleanAdvancedDuplicateRows(NSMutableArray *rows) {
                 [combined containsString:@"mc override lab"] ||
                 [combined containsString:@"employee"] ||
                 [combined containsString:@"runtime mc patcher"] ||
-                [combined containsString:@"internaluse observer"];
+                [combined containsString:@"internaluse observer"] ||
+                [combined containsString:@"dogfood / developer options"] ||
+                [combined containsString:@"native dogfood"];
 
             if (sectionLooksDuplicate && cleanRows.count == 0) continue;
 
@@ -548,7 +538,7 @@ static NSDictionary *expDevTopSection(void) {
                                     navSections:experimentalNavSections()],
 
             [SCISetting navigationCellWithTitle:@"Developer Mode"
-                                       subtitle:@"Internal identity, MobileConfig gates, observers and native debug tools."
+                                       subtitle:@"Dogfood bootstrap, validated native selectors and MC Override Lab."
                                            icon:[SCISymbol symbolWithName:@"hammer"]
                                     navSections:developerNavSections()]
         ]
