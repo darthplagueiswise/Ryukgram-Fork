@@ -6,7 +6,7 @@
  * equivalent to InstaMoon's "Open developer mode" dialog option.
  */
 
-#import "../../Utils.h"
+#import "../Utils.h"
 #import "SCIDogfoodingMainLauncher.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
