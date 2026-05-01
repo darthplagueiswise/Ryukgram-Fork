@@ -12,7 +12,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-@interface IGSettingsViewController : UIViewController
+@interface IGSettingsViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
 @end
 
 static BOOL rgEmployeeMasterEnabled(void) { 
@@ -60,9 +60,9 @@ static void RYPresentDeveloperSettings(UIViewController *presenter) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (rgEmployeeMasterEnabled() && indexPath.section == 0) {
-        NSInteger originalRows = %orig(tableView, [NSIndexPath indexPathForRow:0 inSection:0]); // Just to get a cell type or count
-        // Actually we should check if this is our injected row. 
-        // Let's put it at the end of the first section.
+        // Check if this is our injected row (last row of section 0)
+        // We call %orig with a safe index to get the row count from original logic if needed, 
+        // but here we just need to know if we are at the end.
         NSInteger rowCount = [self tableView:tableView numberOfRowsInSection:indexPath.section];
         if (indexPath.row == rowCount - 1) {
             static NSString *identifier = @"RYDevOptionsCell";
