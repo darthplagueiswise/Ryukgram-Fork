@@ -27,6 +27,7 @@ static const RGMC_PatchSpec kRGMCPatches[] = {
     {"_IGMobileConfigTryUpdateConfigsWithCompletion", 0x140b9f5c52800004ULL, "igt_runtime_mc_patch_ig_try_update"},
 
     {"_MCIMobileConfigGetBoolean", 0xa9014ff4a9bd57f6ULL, "igt_runtime_mc_patch_mci_bool"},
+    // METAExtensions symbols often change or have multiple variants; orig8=0 (relaxed) is intentional.
     {"_METAExtensionsExperimentGetBoolean", 0, "igt_runtime_mc_patch_meta_ext_bool"},
     {"_METAExtensionsExperimentGetBooleanWithoutExposure", 0, "igt_runtime_mc_patch_meta_ext_bool_noexp"},
     {"_MCQMEMMobileConfigCqlGetBooleanInternalDoNotUseOrMock", 0xa9014ff4a9bd57f6ULL, "igt_runtime_mc_patch_mcqmem_cql_bool"},

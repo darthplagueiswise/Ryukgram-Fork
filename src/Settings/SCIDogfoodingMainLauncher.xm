@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
+#import "SCIDogfoodingMainLauncher.h"
 
 static const NSInteger RYDogMainButtonTag = 0xD06F00D;
 static const NSInteger RYDogNotesButtonTag = 0xD06F00E;

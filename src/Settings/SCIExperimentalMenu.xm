@@ -48,6 +48,7 @@ static void RYRemovePref(NSString *key) {
 }
 
 static void RYSyncDeveloperModeAliases(BOOL on) {
+    RYSetBoolPref(@"igt_employee_master", on);
     // Keep old/internal keys compatible with the simplified UI.
     RYSetBoolPref(@"igt_employee", on);
     RYSetBoolPref(@"igt_employee_mc", on);
