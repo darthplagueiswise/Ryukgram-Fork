@@ -4,6 +4,7 @@
 #import "../Utils.h"
 
 @class SCIMCFocusedLabRow;
+extern void SCIInstallFocusedObjCGetterObserver(void);
 
 @interface SCIMCFocusedLabRow : NSObject
 @property (nonatomic, assign) unsigned long long paramID;
@@ -31,10 +32,24 @@
 - (NSString *)specifierHex:(unsigned long long)specifier;
 @end
 
+static NSString *const kSCIMCFocusEnabledKey = @"sci_exp_mc_objc_focus_enabled";
+static NSString *const kSCIMCFocusTargetKey = @"sci_exp_mc_objc_focus_target";
+static NSString *const kSCIMCCBrokerArmedKey = @"sci_exp_mc_c_hooks_armed";
 static const void *kSCIMCSortOverlaySwitchKey = &kSCIMCSortOverlaySwitchKey;
 
 static NSString *SCIMCSafe(NSString *value) {
     return value ?: @"";
+}
+
+static void SCIMCDisableBootObservers(void) {
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    [ud setBool:NO forKey:kSCIMCCBrokerArmedKey];
+    [ud setBool:NO forKey:@"sci_exp_mc_c_hooks_enabled"];
+    [ud setBool:NO forKey:@"igt_runtime_mc_true_patcher"];
+    [ud setBool:NO forKey:@"igt_runtime_mc_symbol_observer_verbose"];
+    [ud setBool:NO forKey:@"sci_exp_mc_hooks_enabled"];
+    [ud setBool:NO forKey:kSCIMCFocusEnabledKey];
+    [ud synchronize];
 }
 
 static NSString *SCIMCActiveTargetTitle(SCIMCFocusedLabViewController *vc) {
@@ -50,6 +65,11 @@ static NSString *SCIMCActiveTargetTitle(SCIMCFocusedLabViewController *vc) {
 - (void)viewDidLoad {
     %orig;
 
+    // The original MC lab file used to set MC observer prefs to YES in viewDidLoad.
+    // That persisted across launches and made MC hooks run during IG auth/session
+    // bootstrap, which can force logout. Keep the lab as a viewer by default.
+    SCIMCDisableBootObservers();
+
     UIBarButtonItem *bulkItem = [[UIBarButtonItem alloc] initWithTitle:@"Bulk"
                                                                  style:UIBarButtonItemStylePlain
                                                                 target:self
@@ -61,10 +81,35 @@ static NSString *SCIMCActiveTargetTitle(SCIMCFocusedLabViewController *vc) {
     self.navigationItem.rightBarButtonItems = @[bulkItem, sortItem];
 }
 
+- (void)setActiveTargetKey:(NSString *)key {
+    if (!key.length) key = @"all";
+
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    [ud setObject:key forKey:kSCIMCFocusTargetKey];
+
+    BOOL exactObjC = [key hasPrefix:@"objc|"];
+
+    // C brokers are boot-time fishhooks. Selecting a C gate must only filter
+    // already-observed rows; it must not arm process-wide hooks for the next
+    // launch. ObjC focused getter can be installed during the current session.
+    [ud setBool:NO forKey:kSCIMCCBrokerArmedKey];
+    [ud setBool:NO forKey:@"sci_exp_mc_c_hooks_enabled"];
+    [ud setBool:NO forKey:@"igt_runtime_mc_true_patcher"];
+    [ud setBool:NO forKey:@"igt_runtime_mc_symbol_observer_verbose"];
+
+    [ud setBool:exactObjC forKey:kSCIMCFocusEnabledKey];
+    [ud setBool:exactObjC forKey:@"sci_exp_mc_hooks_enabled"];
+    [ud synchronize];
+
+    if (exactObjC) {
+        SCIInstallFocusedObjCGetterObserver();
+    }
+}
+
 %new
 - (void)showSortMenu {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Sort / Filter"
-                                                                   message:@"Escolha uma categoria, gate C ou getter ObjC. A lista principal mostra os observed bools desse filtro."
+                                                                   message:@"Escolha uma categoria, gate C ou getter ObjC. C gates filtram rows já observadas; não ficam armados no boot."
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
     NSString *active = [self activeTargetKey] ?: @"";
