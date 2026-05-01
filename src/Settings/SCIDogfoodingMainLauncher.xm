@@ -289,7 +289,7 @@ static void RYDogShowAlert(UIViewController *presenter, NSString *title, NSStrin
     });
 }
 
-static void RYDogOpenMainFrom(UIViewController *sourceVC) {
+void RYDogOpenMainFrom(UIViewController *sourceVC) {
     UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogRootViewController());
     if (!presenter) {
         NSLog(@"[RyukGram][Dogfood] main abort: no presenter");
@@ -338,7 +338,7 @@ static void RYDogOpenMainFrom(UIViewController *sourceVC) {
     }
 }
 
-static void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
+void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
     UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogRootViewController());
     if (!presenter) {
         NSLog(@"[RyukGram][Dogfood] notes abort: no presenter");
