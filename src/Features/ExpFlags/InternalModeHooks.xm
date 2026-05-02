@@ -85,15 +85,10 @@ static void rgAddQuickSnapSpecifierSymbol(NSMutableDictionary<NSNumber *, NSStri
 
 static void rgAddKnownQuickSnapGroups(NSMutableDictionary<NSNumber *, NSString *> *nameMap,
                                       NSMutableDictionary<NSNumber *, NSNumber *> *returnMap) {
-    // Static scan of FBSharedFramework(23) / Instagram 426:
-    // QuickSnap/Instants are MobileConfig specifier groups, not one direct C function gate like FriendMap.
-    // Most groups should be YES; the negative hide gate must be NO.
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_instants_hide", @"ig_instants_hide", 1, NO);
-
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
-
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_audience", @"ig_ios_quick_snap_audience", 5, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_burst_photos", @"ig_ios_quick_snap_burst_photos", 4, YES);
@@ -104,7 +99,6 @@ static void rgAddKnownQuickSnapGroups(NSMutableDictionary<NSNumber *, NSString *
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_moods", @"ig_ios_quick_snap_moods", 6, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_new_audience_picker", @"ig_ios_quick_snap_new_audience_picker", 3, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quick_snap_new_zoom_animation", @"ig_ios_quick_snap_new_zoom_animation", 1, YES);
-
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_archive", @"ig_ios_quicksnap_archive", 6, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
@@ -123,7 +117,6 @@ static void rgAddKnownQuickSnapGroups(NSMutableDictionary<NSNumber *, NSString *
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_undo_toast", @"ig_ios_quicksnap_undo_toast", 2, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_valentines_activation", @"ig_ios_quicksnap_valentines_activation", 1, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_quicksnap_wearables", @"ig_ios_quicksnap_wearables", 2, YES);
-
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_infinite_archive", @"ig_ios_instants_infinite_archive", 2, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_tagging", @"ig_ios_instants_tagging", 1, YES);
     rgAddQuickSnapSpecifierSymbol(nameMap, returnMap, "ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
@@ -148,18 +141,13 @@ static NSDictionary<NSNumber *, NSString *> *rgKnownInternalUseSpecifierMap(void
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableDictionary<NSNumber *, NSString *> *m = [NSMutableDictionary dictionary];
-
         rgAddMCSpecifierSymbol(m, "ig_is_employee", @"ig_is_employee", 2);
         rgAddMCSpecifierSymbol(m, "ig_is_employee_or_test_user", @"ig_is_employee_or_test_user", 1);
         rgAddMCSpecifierSymbol(m, "xav_switcher_ig_ios_test_user_check_fdid", @"xav_switcher_ig_ios_test_user_check_fdid", 1);
         rgAddMCSpecifierSymbol(m, "ig_dogfooding_first_client", @"ig_dogfooding_first_client", 1);
         rgAddMCSpecifierSymbol(m, "ig_ios_home_coming_is_dogfooding_option_enabled", @"ig_ios_home_coming_is_dogfooding_option_enabled", 1);
-
         NSMutableDictionary<NSNumber *, NSNumber *> *quickSnapReturns = [NSMutableDictionary dictionary];
         rgAddKnownQuickSnapGroups(m, quickSnapReturns);
-
-        // Hard fallback for this current FBSharedFramework build, in case dlsym does not expose
-        // the data symbols in a sideloaded image.
         m[@(kIGMCEmployeeSpecifierA)] = @"ig_is_employee[0]";
         m[@(kIGMCEmployeeSpecifierB)] = @"ig_is_employee[1]";
         m[@(kIGMCEmployeeOrTestUserSpecifier)] = @"ig_is_employee_or_test_user";
@@ -168,17 +156,11 @@ static NSDictionary<NSNumber *, NSString *> *rgKnownInternalUseSpecifierMap(void
     return map;
 }
 
-static NSString *rgKnownSpecifierName(unsigned long long specifier) {
-    return rgKnownInternalUseSpecifierMap()[@(specifier)];
-}
+static NSString *rgKnownSpecifierName(unsigned long long specifier) { return rgKnownInternalUseSpecifierMap()[@(specifier)]; }
 
 static BOOL rgKnownNameLooksLikeEmployeeGate(NSString *name) {
     NSString *n = name.lowercaseString ?: @"";
-    return [n containsString:@"employee"] ||
-           [n containsString:@"test_user"] ||
-           [n containsString:@"dogfood"] ||
-           [n containsString:@"dogfooding"] ||
-           [n containsString:@"xav_switcher"];
+    return [n containsString:@"employee"] || [n containsString:@"test_user"] || [n containsString:@"dogfood"] || [n containsString:@"dogfooding"] || [n containsString:@"xav_switcher"];
 }
 
 static BOOL specifierMatchesEmployee(unsigned long long specifier) {
@@ -191,9 +173,7 @@ static BOOL specifierMatchesEmployee(unsigned long long specifier) {
     return NO;
 }
 
-static BOOL specifierMatchesQuickSnap(unsigned long long specifier) {
-    return rgQuickSnapSpecifierReturnMap()[@(specifier)] != nil;
-}
+static BOOL specifierMatchesQuickSnap(unsigned long long specifier) { return rgQuickSnapSpecifierReturnMap()[@(specifier)] != nil; }
 
 static NSString *specifierName(unsigned long long specifier) {
     NSString *known = rgKnownSpecifierName(specifier);
@@ -221,9 +201,7 @@ static NSString *rgCallStringForSpecifier(id target, NSString *selectorName, uns
     @try {
         id (*send)(id, SEL, unsigned long long) = (id (*)(id, SEL, unsigned long long))objc_msgSend;
         return rgTrimmedUsefulString(send(target, sel, specifier));
-    } @catch (__unused NSException *e) {
-        return nil;
-    }
+    } @catch (__unused NSException *e) { return nil; }
 }
 
 static unsigned long long rgCallUInt64ForSpecifier(id target, NSString *selectorName, unsigned long long specifier) {
@@ -233,33 +211,25 @@ static unsigned long long rgCallUInt64ForSpecifier(id target, NSString *selector
     @try {
         unsigned long long (*send)(id, SEL, unsigned long long) = (unsigned long long (*)(id, SEL, unsigned long long))objc_msgSend;
         return send(target, sel, specifier);
-    } @catch (__unused NSException *e) {
-        return 0;
-    }
+    } @catch (__unused NSException *e) { return 0; }
 }
 
 static NSString *rgResolveWithMappingFile(unsigned long long specifier) {
     NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
-    if (mapped.length) return mapped;
-    return nil;
+    return mapped.length ? mapped : nil;
 }
 
 static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
     NSString *hardcoded = specifierName(specifier);
     if (![hardcoded isEqualToString:@"unknown"]) return hardcoded;
-
     NSString *mapped = rgResolveWithMappingFile(specifier);
     if (mapped.length) return mapped;
-
     NSString *stable = rgCallStringForSpecifier(ctx, @"getStableIdFromParamSpecifier:", specifier);
     if (stable.length) return stable;
-
     NSString *latestLogging = rgCallStringForSpecifier(ctx, @"getLatestLoggingID:", specifier);
     if (latestLogging.length) return [@"loggingID:" stringByAppendingString:latestLogging];
-
     NSString *logging = rgCallStringForSpecifier(ctx, @"getLoggingID:", specifier);
     if (logging.length) return [@"loggingID:" stringByAppendingString:logging];
-
     unsigned long long translated = rgCallUInt64ForSpecifier(ctx, @"getTranslatedSpecifier:", specifier);
     if (!translated) translated = rgCallUInt64ForSpecifier(ctx, @"_getTranslatedSpecifier:", specifier);
     if (translated && translated != specifier) {
@@ -268,7 +238,6 @@ static NSString *rgResolveSpecifierName(id ctx, unsigned long long specifier) {
         NSString *stableTranslated = rgCallStringForSpecifier(ctx, @"getStableIdFromParamSpecifier:", translated);
         if (stableTranslated.length) return [NSString stringWithFormat:@"%@ (translated 0x%016llx)", stableTranslated, translated];
     }
-
     return @"unknown";
 }
 
@@ -277,12 +246,10 @@ static BOOL applyInternalUseOverride(unsigned long long specifier, BOOL original
     if (manual == SCIExpFlagOverrideTrue) return YES;
     if (manual == SCIExpFlagOverrideFalse) return NO;
     if (specifierMatchesEmployee(specifier)) return YES;
-
     if (rgQuickSnapEnabled()) {
         NSNumber *forced = rgQuickSnapSpecifierReturnMap()[@(specifier)];
         if (forced) return forced.boolValue;
     }
-
     return original;
 }
 
@@ -291,29 +258,10 @@ static void recordInternalUseSpecifier(id ctx, NSString *funcName, unsigned long
     BOOL quickSnapMatch = specifierMatchesQuickSnap(specifier);
     BOOL shouldRecord = rgInternalObserverEnabled() || forced || specifierMatchesEmployee(specifier) || quickSnapMatch || [SCIExpFlags internalUseOverrideForSpecifier:specifier] != SCIExpFlagOverrideOff;
     if (!shouldRecord) return;
-
     NSString *name = rgResolveSpecifierName(ctx, specifier);
-    [SCIExpFlags recordInternalUseSpecifier:specifier
-                               functionName:funcName
-                              specifierName:name
-                               defaultValue:defaultValue
-                                resultValue:returnedValue
-                                forcedValue:forced
-                              callerAddress:callerAddress];
-
+    [SCIExpFlags recordInternalUseSpecifier:specifier functionName:funcName specifierName:name defaultValue:defaultValue resultValue:returnedValue forcedValue:forced callerAddress:callerAddress];
     if ([SCIUtils getBoolPref:@"igt_internaluse_observer"]) {
-        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d quickSnapMatch=%d manual=%ld caller=%p",
-              funcName,
-              specifier,
-              name,
-              defaultValue,
-              originalValue,
-              returnedValue,
-              forced,
-              specifierMatchesEmployee(specifier),
-              quickSnapMatch,
-              (long)[SCIExpFlags internalUseOverrideForSpecifier:specifier],
-              callerAddress);
+        NSLog(@"[RyukGram][MC][%@] spec=0x%016llx (%@) default=%d original=%d returned=%d forced=%d employeeMatch=%d quickSnapMatch=%d manual=%ld caller=%p", funcName, specifier, name, defaultValue, originalValue, returnedValue, forced, specifierMatchesEmployee(specifier), quickSnapMatch, (long)[SCIExpFlags internalUseOverrideForSpecifier:specifier], callerAddress);
     }
 }
 
@@ -322,14 +270,11 @@ static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     [SCIExpMobileConfigDebug noteContext:ctx source:@"IGMobileConfigBooleanValueForInternalUse"];
     void *callerAddress = __builtin_return_address(0);
-
     if (rgEmployeeMasterEnabled() && specifierMatchesEmployee(specifier)) {
         recordInternalUseSpecifier(ctx, @"IG InternalUse", specifier, defaultValue, defaultValue, YES, callerAddress);
         return YES;
     }
-
-    BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
-        orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
+    BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ? orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
     recordInternalUseSpecifier(ctx, @"IG InternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
@@ -339,14 +284,11 @@ static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalU
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     [SCIExpMobileConfigDebug noteContext:ctx source:@"IG Sessionless InternalUse"];
     void *callerAddress = __builtin_return_address(0);
-
     if (rgEmployeeMasterEnabled() && specifierMatchesEmployee(specifier)) {
         recordInternalUseSpecifier(ctx, @"IG Sessionless InternalUse", specifier, defaultValue, defaultValue, YES, callerAddress);
         return YES;
     }
-
-    BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
-        orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
+    BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ? orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
     recordInternalUseSpecifier(ctx, @"IG Sessionless InternalUse", specifier, defaultValue, original, returned, callerAddress);
     return returned;
@@ -355,8 +297,7 @@ static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOO
 static BOOL (*orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18)(void) = NULL;
 static BOOL hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18(void) {
     if ([SCIUtils getBoolPref:@"igt_internal_apps_spoof"] || [SCIUtils getBoolPref:@"igt_internal_apps_gate"] || rgEmployeeMasterEnabled()) return YES;
-    return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ?
-        orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
+    return orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18 ? orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18() : NO;
 }
 
 static NSString *rgKnownMapLogLine(void) {
@@ -379,14 +320,12 @@ static void rgSyncInternalOverrides(void) {
 %ctor {
     rgSyncInternalOverrides();
     if (!rgShouldInstallInternalModeHooks()) return;
-
     struct rebinding rebindings[] = {
         {"IGMobileConfigBooleanValueForInternalUse", (void *)hook_IGMobileConfigBooleanValueForInternalUse, (void **)&orig_IGMobileConfigBooleanValueForInternalUse},
         {"IGMobileConfigSessionlessBooleanValueForInternalUse", (void *)hook_IGMobileConfigSessionlessBooleanValueForInternalUse, (void **)&orig_IGMobileConfigSessionlessBooleanValueForInternalUse},
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)hook_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (void **)&orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18},
     };
     int rc = rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-
     if (!orig_IGMobileConfigBooleanValueForInternalUse) {
         void *addr = [SCIResolverScanner findMobileConfigFunctionAddress];
         if (addr) {
@@ -396,13 +335,5 @@ static void rgSyncInternalOverrides(void) {
             NSLog(@"[RyukGram][MC] IGMobileConfigBooleanValueForInternalUse not found via fishhook or pattern scanner.");
         }
     }
-    NSLog(@"[RyukGram][MC] safe internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu quickSnap=%d quickSnapSpecs=%lu knownGates={%@}",
-          rc,
-          orig_IGMobileConfigBooleanValueForInternalUse,
-          orig_IGMobileConfigSessionlessBooleanValueForInternalUse,
-          orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18,
-          (unsigned long)[SCIExpFlags allOverriddenInternalUseSpecifiers].count,
-          rgQuickSnapEnabled(),
-          (unsigned long)rgQuickSnapSpecifierReturnMap().count,
-          rgKnownMapLogLine());
+    NSLog(@"[RyukGram][MC] safe internal-mode fishhook rc=%d bool=%p sessionless=%p internalApps=%p manualOverrides=%lu quickSnap=%d quickSnapSpecs=%lu knownGates={%@}", rc, orig_IGMobileConfigBooleanValueForInternalUse, orig_IGMobileConfigSessionlessBooleanValueForInternalUse, orig_IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18, (unsigned long)[SCIExpFlags allOverriddenInternalUseSpecifiers].count, rgQuickSnapEnabled(), (unsigned long)rgQuickSnapSpecifierReturnMap().count, rgKnownMapLogLine());
 }
