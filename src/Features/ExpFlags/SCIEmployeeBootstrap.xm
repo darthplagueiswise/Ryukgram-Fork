@@ -6,7 +6,7 @@
  * InstaMoon's Shx.A00.A02 developer options bootstrap.
  *
  * This file implements the "bootstrap" strategy to unlock native developer/dogfood 
- * menus by hooking MobileConfig C-gates and IGUserSession ObjC methods.
+ * menus by hooking MobileConfig C-gates and IGUserSession/IGDeviceSession ObjC methods.
  */
 
 #import "../../Utils.h"
@@ -35,11 +35,9 @@ static BOOL rgInternalObserverEnabled(void) {
 
 typedef BOOL (*IGMCBoolInternalFn)(id, BOOL, unsigned long long);
 static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap = NULL;
+static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap = NULL;
 
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap(id ctx, BOOL defaultValue, unsigned long long specifier) {
-    BOOL original = orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap ?
-        orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap(ctx, defaultValue, specifier) : defaultValue;
-    
     if (rgEmployeeMasterEnabled()) {
         if (specifier == kIGMCEmployeeSpecifierA || 
             specifier == kIGMCEmployeeSpecifierB || 
@@ -50,12 +48,28 @@ static BOOL hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap(id ctx, BOOL
             return YES;
         }
     }
-    
-    return original;
+    return orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap ?
+        orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap(ctx, defaultValue, specifier) : defaultValue;
+}
+
+static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    if (rgEmployeeMasterEnabled()) {
+        if (specifier == kIGMCEmployeeSpecifierA || 
+            specifier == kIGMCEmployeeSpecifierB || 
+            specifier == kIGMCEmployeeOrTestUserSpecifier) {
+            if (rgInternalObserverEnabled()) {
+                NSLog(@"[RyukGram][EmployeeBootstrap] Intercepted MC Sessionless spec=0x%016llx -> returning YES", specifier);
+            }
+            return YES;
+        }
+    }
+    return orig_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap ?
+        orig_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap(ctx, defaultValue, specifier) : defaultValue;
 }
 
 // --- ObjC Hooks ---
 
+// Hooking IGUserSession and IGDeviceSession for all employee-related gates
 %hook IGUserSession
 
 - (BOOL)isEmployee {
@@ -73,6 +87,11 @@ static BOOL hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap(id ctx, BOOL
     return %orig;
 }
 
+- (BOOL)isTestUser {
+    if (rgEmployeeMasterEnabled()) return YES;
+    return %orig;
+}
+
 - (BOOL)isEmployeeOrTestUser {
     if (rgEmployeeMasterEnabled() || [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"]) return YES;
     return %orig;
@@ -80,16 +99,42 @@ static BOOL hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap(id ctx, BOOL
 
 %end
 
+%hook IGDeviceSession
+
+- (BOOL)isEmployee {
+    if (rgEmployeeMasterEnabled()) return YES;
+    return %orig;
+}
+
+- (BOOL)isInternalUser {
+    if (rgEmployeeMasterEnabled()) return YES;
+    return %orig;
+}
+
+%end
+
 // --- Constructor ---
 
+static void performBootstrapRebind() {
+    struct rebinding rebindings[] = {
+        {"IGMobileConfigBooleanValueForInternalUse", (void *)hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap, (void **)&orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap},
+        {"IGMobileConfigSessionlessBooleanValueForInternalUse", (void *)hook_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap, (void **)&orig_IGMobileConfigSessionlessBooleanValueForInternalUse_Bootstrap},
+    };
+    rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
+    NSLog(@"[RyukGram][EmployeeBootstrap] Fishhook rebind complete. Master=%d", rgEmployeeMasterEnabled());
+}
+
 %ctor {
-    // Fishhook rebinding with a short delay to ensure binary is loaded
+    // Perform initial rebind immediately
+    performBootstrapRebind();
+    
+    // Also schedule a delayed rebind to catch symbols that might be loaded later (e.g. in frameworks)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        struct rebinding rebindings[] = {
-            {"IGMobileConfigBooleanValueForInternalUse", (void *)hook_IGMobileConfigBooleanValueForInternalUse_Bootstrap, (void **)&orig_IGMobileConfigBooleanValueForInternalUse_Bootstrap},
-        };
-        rebind_symbols(rebindings, sizeof(rebindings) / sizeof(rebindings[0]));
-        
-        NSLog(@"[RyukGram][EmployeeBootstrap] Fishhook rebind complete. Master=%d", rgEmployeeMasterEnabled());
+        performBootstrapRebind();
+    });
+    
+    // And one more at 2 seconds just to be absolutely sure
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        performBootstrapRebind();
     });
 }
