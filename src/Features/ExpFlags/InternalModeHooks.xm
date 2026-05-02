@@ -322,6 +322,12 @@ static IGMCBoolInternalFn orig_IGMobileConfigBooleanValueForInternalUse = NULL;
 static BOOL hook_IGMobileConfigBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     [SCIExpMobileConfigDebug noteContext:ctx source:@"IGMobileConfigBooleanValueForInternalUse"];
     void *callerAddress = __builtin_return_address(0);
+
+    if (rgEmployeeMasterEnabled() && specifierMatchesEmployee(specifier)) {
+        recordInternalUseSpecifier(ctx, @"IG InternalUse", specifier, defaultValue, defaultValue, YES, callerAddress);
+        return YES;
+    }
+
     BOOL original = orig_IGMobileConfigBooleanValueForInternalUse ?
         orig_IGMobileConfigBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);
@@ -333,6 +339,12 @@ static IGMCBoolInternalFn orig_IGMobileConfigSessionlessBooleanValueForInternalU
 static BOOL hook_IGMobileConfigSessionlessBooleanValueForInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
     [SCIExpMobileConfigDebug noteContext:ctx source:@"IG Sessionless InternalUse"];
     void *callerAddress = __builtin_return_address(0);
+
+    if (rgEmployeeMasterEnabled() && specifierMatchesEmployee(specifier)) {
+        recordInternalUseSpecifier(ctx, @"IG Sessionless InternalUse", specifier, defaultValue, defaultValue, YES, callerAddress);
+        return YES;
+    }
+
     BOOL original = orig_IGMobileConfigSessionlessBooleanValueForInternalUse ?
         orig_IGMobileConfigSessionlessBooleanValueForInternalUse(ctx, defaultValue, specifier) : defaultValue;
     BOOL returned = applyInternalUseOverride(specifier, original);

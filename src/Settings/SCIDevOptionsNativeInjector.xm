@@ -124,8 +124,10 @@ static void RYDogAttachFloatingButton(UIViewController *vc) {
     %orig;
     @try {
         UITableView *tableView = nil;
-        if ([self respondsToSelector:@selector(tableView)]) {
-            tableView = ((UITableView *(*)(id, SEL))objc_msgSend)(self, @selector(tableView));
+        id obj = (id)self;
+        SEL tableViewSel = @selector(tableView);
+        if ([obj respondsToSelector:tableViewSel]) {
+            tableView = ((UITableView *(*)(id, SEL))objc_msgSend)(obj, tableViewSel);
         }
         [tableView reloadData];
     } @catch (__unused id e) {
