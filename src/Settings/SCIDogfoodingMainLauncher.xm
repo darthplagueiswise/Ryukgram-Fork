@@ -10,8 +10,11 @@ static const NSInteger RYDogNotesButtonTag = 0xD06F00E;
 
 static __weak id RYDogCachedUserSession = nil;
 static __weak id RYDogCachedConfig = nil;
+static __weak UIViewController *RYDogCachedPresenter = nil;
 
 static id (*origRYDogVCInitWithConfig)(id self, SEL _cmd, id config, id userSession);
+static void (*origRYDogNativeOpenWithConfig)(id cls, SEL _cmd, id config, id viewController, id userSession);
+static void (*origRYDogNativeNotesOpen)(id cls, SEL _cmd, id viewController, id userSession);
 static void (*origSCIExpFlagsViewDidAppear)(id self, SEL _cmd, BOOL animated);
 static id (*origIGMainAppUserSession)(id self, SEL _cmd);
 static id (*origIGTabBarUserSession)(id self, SEL _cmd);
@@ -307,16 +310,38 @@ static void RYDogShowAlert(UIViewController *presenter, NSString *title, NSStrin
     });
 }
 
-static id hookRYDogVCInitWithConfig(id self, SEL _cmd, id config, id userSession) {
+static void RYDogCacheNativeOpenArguments(id config, id viewController, id userSession, NSString *source) {
     if (RYDogLooksLikeConfig(config)) RYDogCachedConfig = config;
+    if ([viewController isKindOfClass:UIViewController.class]) RYDogCachedPresenter = viewController;
     if (RYDogLooksLikeUserSession(userSession)) RYDogCachedUserSession = userSession;
-    NSLog(@"[RyukGram][Dogfood] cached native initWithConfig config=%@ <%p> session=%@ <%p>",
-          RYDogClassName(config), config, RYDogClassName(userSession), userSession);
+    NSLog(@"[RyukGram][Dogfood] cached %@ config=%@ <%p> presenter=%@ <%p> session=%@ <%p>",
+          source ?: @"native args",
+          RYDogClassName(config), config,
+          RYDogClassName(viewController), viewController,
+          RYDogClassName(userSession), userSession);
+}
+
+static id hookRYDogVCInitWithConfig(id self, SEL _cmd, id config, id userSession) {
+    RYDogCacheNativeOpenArguments(config, self, userSession, @"-initWithConfig:userSession:");
     return origRYDogVCInitWithConfig ? origRYDogVCInitWithConfig(self, _cmd, config, userSession) : self;
 }
 
+static void hookRYDogNativeOpenWithConfig(id cls, SEL _cmd, id config, id viewController, id userSession) {
+    RYDogCacheNativeOpenArguments(config, viewController, userSession, @"+openWithConfig:onViewController:userSession:");
+    if (origRYDogNativeOpenWithConfig) {
+        origRYDogNativeOpenWithConfig(cls, _cmd, config, viewController, userSession);
+    }
+}
+
+static void hookRYDogNativeNotesOpen(id cls, SEL _cmd, id viewController, id userSession) {
+    RYDogCacheNativeOpenArguments(nil, viewController, userSession, @"+notesDogfoodingSettingsOpenOnViewController:userSession:");
+    if (origRYDogNativeNotesOpen) {
+        origRYDogNativeNotesOpen(cls, _cmd, viewController, userSession);
+    }
+}
+
 void RYDogOpenMainFrom(UIViewController *sourceVC) {
-    UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogRootViewController());
+    UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogCachedPresenter ?: RYDogRootViewController());
     if (!presenter) {
         NSLog(@"[RyukGram][Dogfood] main abort: no presenter");
         return;
@@ -339,11 +364,11 @@ void RYDogOpenMainFrom(UIViewController *sourceVC) {
         return;
     }
 
-    NSMutableString *configLog = [NSMutableString string];
-    id config = RYDogFindLiveConfig(presenter, configLog);
+    id config = RYDogLooksLikeConfig(RYDogCachedConfig) ? RYDogCachedConfig : nil;
     if (!config) {
-        NSString *msg = [NSString stringWithFormat:@"Selector encontrado, mas não há IGDogfoodingSettingsConfig vivo para passar como argumento.\n\n%@\nSem fallback/alloc fake aplicado.", configLog];
-        RYDogShowAlert(presenter, @"Dogfooding", msg);
+        RYDogShowAlert(presenter,
+                       @"Dogfooding",
+                       @"Selector existe, mas nenhum IGDogfoodingSettingsConfig nativo foi observado ainda. Sem fallback: não cria config fake, não usa alloc/init sintético. O hook agora cacheia o config quando o próprio Instagram chamar +openWithConfig ou -initWithConfig.");
         return;
     }
 
@@ -359,7 +384,7 @@ void RYDogOpenMainFrom(UIViewController *sourceVC) {
 }
 
 void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
-    UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogRootViewController());
+    UIViewController *presenter = RYDogTopViewControllerFrom(sourceVC ?: RYDogCachedPresenter ?: RYDogRootViewController());
     if (!presenter) {
         NSLog(@"[RyukGram][Dogfood] notes abort: no presenter");
         return;
@@ -494,6 +519,30 @@ static void RYDogInstallRuntimeHooks(void) {
                         (IMP *)&origIGTabBarUserSession);
     }
 
+    Class dogEntry = RYDogResolveClass(@[
+        @"IGDogfoodingSettings.IGDogfoodingSettings",
+        @"_TtC20IGDogfoodingSettings20IGDogfoodingSettings"
+    ]);
+    SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
+    if (dogEntry && class_getClassMethod(dogEntry, openSel) && !origRYDogNativeOpenWithConfig) {
+        MSHookMessageEx(object_getClass(dogEntry),
+                        openSel,
+                        (IMP)hookRYDogNativeOpenWithConfig,
+                        (IMP *)&origRYDogNativeOpenWithConfig);
+    }
+
+    Class notesEntry = RYDogResolveClass(@[
+        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs"
+    ]);
+    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    if (notesEntry && class_getClassMethod(notesEntry, notesSel) && !origRYDogNativeNotesOpen) {
+        MSHookMessageEx(object_getClass(notesEntry),
+                        notesSel,
+                        (IMP)hookRYDogNativeNotesOpen,
+                        (IMP *)&origRYDogNativeNotesOpen);
+    }
+
     Class dogVC = RYDogResolveClass(@[
         @"IGDogfoodingSettings.IGDogfoodingSettingsViewController",
         @"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController"
@@ -517,6 +566,9 @@ static void RYDogNativeOpenersInit(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             RYDogInstallRuntimeHooks();
         });
-        NSLog(@"[RyukGram][Dogfood] direct selector caller loaded");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            RYDogInstallRuntimeHooks();
+        });
+        NSLog(@"[RyukGram][Dogfood] native selector hooks loaded");
     }
 }
