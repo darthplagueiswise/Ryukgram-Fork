@@ -1,5 +1,7 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
+#import "SCIExperimentRuntimeBrowserViewController.h"
+#import "../Features/ExpFlags/SCIAutofillInternalDevMode.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -14,6 +16,35 @@ static SCISetting *ExpSwitch(NSString *title, NSString *subtitle, NSString *key,
 
 static SCISetting *ExpButton(NSString *title, NSString *subtitle, NSString *symbol, void (^action)(void)) {
     return [SCISetting buttonCellWithTitle:title subtitle:subtitle icon:[SCISymbol symbolWithName:symbol] action:action];
+}
+
+static UIViewController *SCIExpTopViewController(void) {
+    UIWindow *window = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *candidate in ((UIWindowScene *)scene).windows) {
+            if (candidate.isKeyWindow) { window = candidate; break; }
+        }
+        if (window) break;
+    }
+    UIViewController *vc = window.rootViewController;
+    while (vc.presentedViewController) vc = vc.presentedViewController;
+    if ([vc isKindOfClass:UINavigationController.class]) vc = ((UINavigationController *)vc).topViewController;
+    if ([vc isKindOfClass:UITabBarController.class]) vc = ((UITabBarController *)vc).selectedViewController;
+    return vc;
+}
+
+static void SCIExpPresentTextAlert(NSString *title, NSString *message) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = SCIExpTopViewController();
+        if (!vc) return;
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+            UIPasteboard.generalPasteboard.string = message ?: @"";
+        }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [vc presentViewController:a animated:YES completion:nil];
+    });
 }
 
 static NSArray *expNavSections(void) {
@@ -63,6 +94,26 @@ static NSArray *expNavSections(void) {
                 ExpSwitch(@"Internal Apps Installed Gate", @"Pretends Instagram internal apps are installed/not hidden", @"igt_internal", YES),
                 ExpSwitch(@"Observe InternalUse MobileConfig", @"Logs InternalUse boolean calls into MC IDs without changing values", @"igt_internaluse_observer", YES),
                 ExpSwitch(@"Screenshot Blocking", @"Stores a dedicated toggle for future experiment hooks", @"igt_screenshot_block", NO)
+            ]
+        },
+        @{
+            @"header": @"Developer Mode / runtime experiments",
+            @"footer": @"Runtime browser scans the loaded Objective-C classes in the main Instagram executable and frameworks. It is view-first: copy/test methods before adding risky hooks.",
+            @"rows": @[
+                [SCISetting navigationCellWithTitle:@"Runtime experiment browser"
+                                           subtitle:@"Search every loaded Experiment/Enabled/BOOL method, property and ivar"
+                                               icon:[SCISymbol symbolWithName:@"books.vertical"]
+                                     viewController:[SCIExperimentRuntimeBrowserViewController new]],
+                ExpSwitch(@"Autofill debug footer", @"Calls IGAutofillInternalSettings setDebugFooterEnabledWithEnabled:YES", @"sci_dev_autofill_debug_footer", NO),
+                ExpSwitch(@"Force Bloks experience", @"Calls setForceBloksExperienceOn at launch/foreground", @"sci_dev_autofill_force_bloks", NO),
+                ExpSwitch(@"Bloks prefetch", @"Calls setBloksPrefetchEnabledWithEnabled:YES", @"sci_dev_autofill_bloks_prefetch", NO),
+                ExpButton(@"Apply Autofill internal now", @"Runs selected Autofill internal actions immediately", @"bolt.circle", ^{
+                    [SCIAutofillInternalDevMode applyEnabledToggles];
+                    SCIExpPresentTextAlert(@"Autofill Internal Status", [SCIAutofillInternalDevMode statusText]);
+                }),
+                ExpButton(@"Show Autofill internal status", @"Reads getDebugFooterEnabled, getForceBloksExperience and Bloks getters", @"doc.text.magnifyingglass", ^{
+                    SCIExpPresentTextAlert(@"Autofill Internal Status", [SCIAutofillInternalDevMode statusText]);
+                })
             ]
         },
         @{
@@ -150,6 +201,7 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
 }
 
 %ctor {
+    [SCIAutofillInternalDevMode registerDefaults];
     Class cls = NSClassFromString(@"SCITweakSettings");
     if (!cls) return;
     Class meta = object_getClass(cls);
