@@ -65,12 +65,11 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     self.searchBar.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.searchBar];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleSubtitle];
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"];
     [self.view addSubview:self.tableView];
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
@@ -142,8 +141,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     NSMutableArray *out = [NSMutableArray array];
     for (unsigned int i = 0; i < count; i++) {
         Method m = methods[i];
-        SEL sel = method_getName(m);
-        NSString *name = NSStringFromSelector(sel);
+        NSString *name = NSStringFromSelector(method_getName(m));
         if (![self stringLooksInteresting:name]) continue;
         SCIRuntimeMethodEntry *e = [SCIRuntimeMethodEntry new];
         e.className = className;
@@ -164,8 +162,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     objc_property_t *props = class_copyPropertyList(cls, &count);
     NSMutableArray *out = [NSMutableArray array];
     for (unsigned int i = 0; i < count; i++) {
-        const char *n = property_getName(props[i]);
-        NSString *s = n ? @(n) : @"";
+        NSString *s = property_getName(props[i]) ? @(property_getName(props[i])) : @"";
         if ([self stringLooksInteresting:s]) [out addObject:s];
     }
     if (props) free(props);
@@ -177,8 +174,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     Ivar *ivars = class_copyIvarList(cls, &count);
     NSMutableArray *out = [NSMutableArray array];
     for (unsigned int i = 0; i < count; i++) {
-        const char *n = ivar_getName(ivars[i]);
-        NSString *s = n ? @(n) : @"";
+        NSString *s = ivar_getName(ivars[i]) ? @(ivar_getName(ivars[i])) : @"";
         if ([self stringLooksInteresting:s]) [out addObject:s];
     }
     if (ivars) free(ivars);
@@ -188,31 +184,26 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (void)scanRuntime {
     unsigned int n = 0;
     Class *all = objc_copyClassList(&n);
-    NSMutableArray<SCIRuntimeClassEntry *> *classes = [NSMutableArray array];
-    NSMutableArray<SCIRuntimeMethodEntry *> *boolMethods = [NSMutableArray array];
-    NSMutableArray<SCIRuntimeMethodEntry *> *enabledMethods = [NSMutableArray array];
+    NSMutableArray *classes = [NSMutableArray array];
+    NSMutableArray *boolMethods = [NSMutableArray array];
+    NSMutableArray *enabledMethods = [NSMutableArray array];
 
     for (unsigned int i = 0; i < n; i++) {
         Class cls = all[i];
         NSString *className = NSStringFromClass(cls);
         if (!className.length) continue;
 
-        NSArray *inst = [self methodEntriesForClass:cls meta:NO className:className];
-        NSArray *meta = [self methodEntriesForClass:cls meta:YES className:className];
+        NSMutableArray *methods = [NSMutableArray array];
+        [methods addObjectsFromArray:[self methodEntriesForClass:cls meta:NO className:className]];
+        [methods addObjectsFromArray:[self methodEntriesForClass:cls meta:YES className:className]];
         NSArray *props = [self propertyNamesForClass:cls];
         NSArray *ivars = [self ivarNamesForClass:cls];
-        NSMutableArray *methods = [NSMutableArray array];
-        [methods addObjectsFromArray:inst];
-        [methods addObjectsFromArray:meta];
 
-        BOOL classInteresting = [self stringLooksInteresting:className] || methods.count || props.count || ivars.count;
-        if (!classInteresting) continue;
+        if (![self stringLooksInteresting:className] && !methods.count && !props.count && !ivars.count) continue;
 
         SCIRuntimeClassEntry *ce = [SCIRuntimeClassEntry new];
         ce.name = className;
-        ce.methods = [methods sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeMethodEntry *a, SCIRuntimeMethodEntry *b) {
-            return [a.methodName caseInsensitiveCompare:b.methodName];
-        }];
+        ce.methods = [methods sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeMethodEntry *a, SCIRuntimeMethodEntry *b) { return [a.methodName caseInsensitiveCompare:b.methodName]; }];
         ce.properties = props;
         ce.ivars = ivars;
         [classes addObject:ce];
@@ -227,22 +218,17 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 
     NSComparator methodSort = ^NSComparisonResult(SCIRuntimeMethodEntry *a, SCIRuntimeMethodEntry *b) {
         NSComparisonResult c = [a.className caseInsensitiveCompare:b.className];
-        if (c != NSOrderedSame) return c;
-        return [a.methodName caseInsensitiveCompare:b.methodName];
+        return c != NSOrderedSame ? c : [a.methodName caseInsensitiveCompare:b.methodName];
     };
-    self.classes = [classes sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeClassEntry *a, SCIRuntimeClassEntry *b) {
-        return [a.name caseInsensitiveCompare:b.name];
-    }];
+    self.classes = [classes sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeClassEntry *a, SCIRuntimeClassEntry *b) { return [a.name caseInsensitiveCompare:b.name]; }];
     self.boolMethods = [boolMethods sortedArrayUsingComparator:methodSort];
     self.enabledMethods = [enabledMethods sortedArrayUsingComparator:methodSort];
 }
 
 - (NSArray *)baseRows {
-    switch (self.tab) {
-        case SCIRuntimeBrowserTabClasses: return self.classes ?: @[];
-        case SCIRuntimeBrowserTabBoolMethods: return self.boolMethods ?: @[];
-        case SCIRuntimeBrowserTabEnabled: return self.enabledMethods ?: @[];
-    }
+    if (self.tab == SCIRuntimeBrowserTabClasses) return self.classes ?: @[];
+    if (self.tab == SCIRuntimeBrowserTabBoolMethods) return self.boolMethods ?: @[];
+    return self.enabledMethods ?: @[];
 }
 
 - (NSArray *)filteredRows {
@@ -267,10 +253,12 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip];
+    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.numberOfLines = 2;
+    cell.detailTextLabel.numberOfLines = 3;
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
     id row = [self filteredRows][ip.row];
@@ -321,17 +309,15 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy selector" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.methodName; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy class.method" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@ %@", entry.className, entry.methodName]; }]];
-
     if (entry.classMethod && entry.returnsBool && entry.argCount == 2) {
         [a addAction:[UIAlertAction actionWithTitle:@"Call BOOL getter" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
             Class cls = NSClassFromString(entry.className);
             SEL sel = NSSelectorFromString(entry.methodName);
             if (!cls || ![cls respondsToSelector:sel]) { [SCIUtils showErrorHUDWithDescription:@"Selector missing"]; return; }
             BOOL value = ((BOOL (*)(Class, SEL))objc_msgSend)(cls, sel);
-            [SCIUtils showToastForDuration:2.0 title:[NSString stringWithFormat:@"%@", value ? @"YES" : @"NO"] subtitle:entry.methodName];
+            [SCIUtils showToastForDuration:2.0 title:(value ? @"YES" : @"NO") subtitle:entry.methodName];
         }]];
     }
-
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }
     [self presentViewController:a animated:YES completion:nil];
