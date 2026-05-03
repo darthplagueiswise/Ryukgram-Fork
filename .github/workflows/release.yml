@@ -81,7 +81,18 @@ jobs:
                 path: packages/RyukGram_${{ env.VERSION }}_rootless.deb
                 if-no-files-found: error
 
+            - name: Check if release
+              id: check_release
+              run: |
+                COMMIT_MSG=$(git log -1 --pretty=%B)
+                if [[ "$COMMIT_MSG" == *"[release]"* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+                  echo "should_release=true" >> "$GITHUB_OUTPUT"
+                else
+                  echo "should_release=false" >> "$GITHUB_OUTPUT"
+                fi
+
             - name: Generate release notes
+              if: steps.check_release.outputs.should_release == 'true'
               run: |
                 PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${VERSION}$" | head -n1 || true)
                 {
@@ -93,7 +104,7 @@ jobs:
                   echo ""
                   echo "| File | Description |"
                   echo "|------|-------------|"
-                  echo "| \`RyukGram_rootless.deb\` | Rootless .deb for sideload/rootless injection. |"
+                  echo "| \`RyukGram_rootless.deb\` | Rootless .deb (Dopamine/palera1n). Also works for sideloading via Feather/cyan. |"
                   echo ""
                   if [ -n "$PREV_TAG" ]; then
                     echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
@@ -103,6 +114,7 @@ jobs:
                 } > /tmp/release_notes.md
 
             - name: Create Release
+              if: steps.check_release.outputs.should_release == 'true'
               run: |
                 SUBJECT=$(git log -1 --pretty=%s | sed 's/\[release\]//g' | xargs)
                 TITLE="${SUBJECT:-RyukGram v${VERSION}}"
