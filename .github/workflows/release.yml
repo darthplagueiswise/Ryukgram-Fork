@@ -1,6 +1,9 @@
-name: Build and Release RyukGram
+name: Build RyukGram Rootless Test
 
 on:
+    push:
+        branches:
+            - 'test'
     workflow_dispatch:
 
 concurrency:
@@ -9,7 +12,7 @@ concurrency:
 
 jobs:
     build:
-        name: Build RyukGram
+        name: Build RyukGram rootless
         runs-on: macos-latest
         permissions:
             contents: read
@@ -56,13 +59,17 @@ jobs:
               env:
                 THEOS: ${{ github.workspace }}/theos
 
-            - name: Get Version
+            - name: Set test package version
               id: version
               run: |
-                VERSION=$(awk '/Version:/ {print $2}' control)
-                echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-                echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-                echo "Using package version ${VERSION}"
+                BASE_VERSION=$(awk '/Version:/ {print $2}' control)
+                BUILD_VERSION="${BASE_VERSION}.0.0.${GITHUB_RUN_NUMBER}"
+                sed -i '' "s/^Version:.*/Version: ${BUILD_VERSION}/" control
+                echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
+                echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+                echo "base_version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+                echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
+                echo "Using package version ${BUILD_VERSION}"
                 grep '^Version:' control
 
             - name: Setup FFmpegKit
@@ -74,12 +81,12 @@ jobs:
                 ./build.sh rootless
                 cd packages
                 DEB="$(ls -t *-rootless.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootless.deb"
+                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${BUILD_VERSION}_rootless.deb"
                 ls -la
 
             - name: Upload rootless artifact
               uses: actions/upload-artifact@v4
               with:
-                name: RyukGram_v${{ steps.version.outputs.version }}_rootless
-                path: packages/RyukGram_${{ env.VERSION }}_rootless.deb
+                name: RyukGram_v${{ steps.version.outputs.build_version }}_rootless
+                path: packages/RyukGram_${{ env.BUILD_VERSION }}_rootless.deb
                 if-no-files-found: error
