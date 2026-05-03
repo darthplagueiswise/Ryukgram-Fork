@@ -1,5 +1,6 @@
 #import "SCIExperimentRuntimeBrowserViewController.h"
 #import "../Utils.h"
+#import "../Features/ExpFlags/SCIExpFlags.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -7,15 +8,20 @@
 @property (nonatomic, copy) NSString *className;
 @property (nonatomic, copy) NSString *methodName;
 @property (nonatomic, copy) NSString *typeEncoding;
+@property (nonatomic, copy) NSString *source;
 @property (nonatomic, assign) BOOL classMethod;
 @property (nonatomic, assign) BOOL returnsBool;
 @property (nonatomic, assign) unsigned int argCount;
 @end
 @implementation SCIRuntimeMethodEntry
+- (NSString *)overrideKey {
+    return [NSString stringWithFormat:@"objc:%@%@ %@", self.classMethod ? @"+" : @"-", self.className ?: @"", self.methodName ?: @""];
+}
 @end
 
 @interface SCIRuntimeClassEntry : NSObject
 @property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *source;
 @property (nonatomic, strong) NSArray<SCIRuntimeMethodEntry *> *methods;
 @property (nonatomic, strong) NSArray<NSString *> *properties;
 @property (nonatomic, strong) NSArray<NSString *> *ivars;
@@ -58,7 +64,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 
     self.searchBar = [UISearchBar new];
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    self.searchBar.placeholder = @"Search experiment / enabled / class / method";
+    self.searchBar.placeholder = @"Search experiment / enabled / source / method";
     self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
     self.searchBar.delegate = self;
@@ -129,10 +135,35 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     return [l containsString:@"experiment"] || [l containsString:@"enabled"] || [l containsString:@"isenabled"] || [l containsString:@"shouldenable"] || [l containsString:@"shouldshow"] || [l containsString:@"eligib"] || [l containsString:@"launcher"] || [l containsString:@"dogfood"] || [l containsString:@"internal"];
 }
 
+- (NSString *)sourceForClassName:(NSString *)name method:(NSString *)method {
+    NSString *s = [NSString stringWithFormat:@"%@ %@", name ?: @"", method ?: @""].lowercaseString;
+    if ([s containsString:@"fbcustomexperimentmanager"]) return @"FBCustomExperimentManager";
+    if ([s containsString:@"fdidexperimentgenerator"]) return @"FDIDExperimentGenerator";
+    if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
+    if ([s containsString:@"metalocalexperiment"]) return @"MetaLocalExperiment";
+    if ([s containsString:@"mobileconfig"] || [s containsString:@"easygating"]) return @"MobileConfig/EasyGating";
+    if ([s containsString:@"launcherset"]) return @"IGUserLauncherSet";
+    if ([s containsString:@"dogfood"]) return @"Dogfood/Internal";
+    if ([s containsString:@"quick"] || [s containsString:@"snap"]) return @"QuickSnap/Direct";
+    if ([s containsString:@"friend"] || [s containsString:@"friending"]) return @"Friending/FriendsTab";
+    if ([s containsString:@"feed"]) return @"Feed";
+    if ([s containsString:@"direct"] || [s containsString:@"inbox"] || [s containsString:@"thread"]) return @"Direct/Inbox";
+    if ([s containsString:@"blend"]) return @"Blend";
+    if ([s containsString:@"magicmode"] || [s containsString:@"genai"]) return @"GenAI/MagicMod";
+    return @"Runtime ObjC";
+}
+
 - (BOOL)methodReturnsBool:(Method)m {
     char rt[64] = {0};
     method_getReturnType(m, rt, sizeof(rt));
     return rt[0] == 'B' || rt[0] == 'c';
+}
+
+- (NSString *)overrideLabelForEntry:(SCIRuntimeMethodEntry *)entry {
+    SCIExpFlagOverride o = [SCIExpFlags overrideForName:[entry overrideKey]];
+    if (o == SCIExpFlagOverrideTrue) return @"FORCED ON";
+    if (o == SCIExpFlagOverrideFalse) return @"FORCED OFF";
+    return @"Default";
 }
 
 - (NSArray<SCIRuntimeMethodEntry *> *)methodEntriesForClass:(Class)cls meta:(BOOL)meta className:(NSString *)className {
@@ -146,6 +177,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
         SCIRuntimeMethodEntry *e = [SCIRuntimeMethodEntry new];
         e.className = className;
         e.methodName = name;
+        e.source = [self sourceForClassName:className method:name];
         e.classMethod = meta;
         e.returnsBool = [self methodReturnsBool:m];
         e.argCount = method_getNumberOfArguments(m);
@@ -203,6 +235,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 
         SCIRuntimeClassEntry *ce = [SCIRuntimeClassEntry new];
         ce.name = className;
+        ce.source = [self sourceForClassName:className method:nil];
         ce.methods = [methods sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeMethodEntry *a, SCIRuntimeMethodEntry *b) { return [a.methodName caseInsensitiveCompare:b.methodName]; }];
         ce.properties = props;
         ce.ivars = ivars;
@@ -217,10 +250,15 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     if (all) free(all);
 
     NSComparator methodSort = ^NSComparisonResult(SCIRuntimeMethodEntry *a, SCIRuntimeMethodEntry *b) {
-        NSComparisonResult c = [a.className caseInsensitiveCompare:b.className];
+        NSComparisonResult c = [a.source caseInsensitiveCompare:b.source];
+        if (c != NSOrderedSame) return c;
+        c = [a.className caseInsensitiveCompare:b.className];
         return c != NSOrderedSame ? c : [a.methodName caseInsensitiveCompare:b.methodName];
     };
-    self.classes = [classes sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeClassEntry *a, SCIRuntimeClassEntry *b) { return [a.name caseInsensitiveCompare:b.name]; }];
+    self.classes = [classes sortedArrayUsingComparator:^NSComparisonResult(SCIRuntimeClassEntry *a, SCIRuntimeClassEntry *b) {
+        NSComparisonResult c = [a.source caseInsensitiveCompare:b.source];
+        return c != NSOrderedSame ? c : [a.name caseInsensitiveCompare:b.name];
+    }];
     self.boolMethods = [boolMethods sortedArrayUsingComparator:methodSort];
     self.enabledMethods = [enabledMethods sortedArrayUsingComparator:methodSort];
 }
@@ -240,10 +278,10 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
         NSString *hay = nil;
         if ([row isKindOfClass:SCIRuntimeClassEntry.class]) {
             SCIRuntimeClassEntry *c = row;
-            hay = [NSString stringWithFormat:@"%@ %@ %@", c.name, [c.properties componentsJoinedByString:@" "], [c.ivars componentsJoinedByString:@" "]];
+            hay = [NSString stringWithFormat:@"%@ %@ %@ %@", c.source, c.name, [c.properties componentsJoinedByString:@" "], [c.ivars componentsJoinedByString:@" "]];
         } else {
             SCIRuntimeMethodEntry *m = row;
-            hay = [NSString stringWithFormat:@"%@ %@ %@", m.className, m.methodName, m.typeEncoding];
+            hay = [NSString stringWithFormat:@"%@ %@ %@ %@", m.source, m.className, m.methodName, m.typeEncoding];
         }
         if ([hay.lowercaseString containsString:q]) [out addObject:row];
     }
@@ -258,18 +296,22 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.numberOfLines = 3;
+    cell.detailTextLabel.numberOfLines = 4;
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
     id row = [self filteredRows][ip.row];
     if ([row isKindOfClass:SCIRuntimeClassEntry.class]) {
         SCIRuntimeClassEntry *c = row;
         cell.textLabel.text = c.name;
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"methods=%lu · props=%lu · ivars=%lu", (unsigned long)c.methods.count, (unsigned long)c.properties.count, (unsigned long)c.ivars.count];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"source=%@ · methods=%lu · props=%lu · ivars=%lu", c.source, (unsigned long)c.methods.count, (unsigned long)c.properties.count, (unsigned long)c.ivars.count];
+        cell.textLabel.textColor = UIColor.labelColor;
     } else {
         SCIRuntimeMethodEntry *m = row;
-        cell.textLabel.text = [NSString stringWithFormat:@"%@ %@", m.classMethod ? @"+" : @"-", m.methodName];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · args=%u · %@", m.className, m.argCount, m.typeEncoding ?: @""];
+        NSString *state = [self overrideLabelForEntry:m];
+        NSString *prefix = [state isEqualToString:@"FORCED ON"] ? @"● " : [state isEqualToString:@"FORCED OFF"] ? @"○ " : @"";
+        cell.textLabel.text = [NSString stringWithFormat:@"%@%@ %@", prefix, m.classMethod ? @"+" : @"-", m.methodName];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"source=%@ · state=%@ · %@ · args=%u · %@", m.source, state, m.className, m.argCount, m.typeEncoding ?: @""];
+        cell.textLabel.textColor = [state isEqualToString:@"Default"] ? UIColor.labelColor : UIColor.systemOrangeColor;
     }
     return cell;
 }
@@ -283,7 +325,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 }
 
 - (void)presentClassEntry:(SCIRuntimeClassEntry *)entry fromCell:(UITableViewCell *)cell {
-    NSMutableString *msg = [NSMutableString string];
+    NSMutableString *msg = [NSMutableString stringWithFormat:@"Source: %@\n\n", entry.source ?: @"Runtime ObjC"];
     if (entry.properties.count) [msg appendFormat:@"Properties:\n%@\n\n", [entry.properties componentsJoinedByString:@"\n"]];
     if (entry.ivars.count) [msg appendFormat:@"Ivars:\n%@\n\n", [entry.ivars componentsJoinedByString:@"\n"]];
     if (entry.methods.count) {
@@ -291,7 +333,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
         NSUInteger max = MIN(entry.methods.count, 80);
         for (NSUInteger i = 0; i < max; i++) {
             SCIRuntimeMethodEntry *m = entry.methods[i];
-            [msg appendFormat:@"%@ %@\n", m.classMethod ? @"+" : @"-", m.methodName];
+            [msg appendFormat:@"%@ %@ [%@]\n", m.classMethod ? @"+" : @"-", m.methodName, [self overrideLabelForEntry:m]];
         }
         if (entry.methods.count > max) [msg appendFormat:@"… +%lu more", (unsigned long)(entry.methods.count - max)];
     }
@@ -303,14 +345,34 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
+- (void)setOverride:(SCIExpFlagOverride)o forMethodEntry:(SCIRuntimeMethodEntry *)entry {
+    [SCIExpFlags setOverride:o forName:[entry overrideKey]];
+    [self.tableView reloadData];
+    if (o == SCIExpFlagOverrideOff) {
+        [SCIUtils showToastForDuration:2.0 title:@"Default restored" subtitle:@"Restart if it was already hooked this launch"];
+    } else {
+        [SCIUtils showToastForDuration:2.5 title:@"Override saved" subtitle:@"Restart Instagram to install the method hook"];
+    }
+}
+
 - (void)presentMethodEntry:(SCIRuntimeMethodEntry *)entry fromCell:(UITableViewCell *)cell {
+    NSString *state = [self overrideLabelForEntry:entry];
     NSString *title = [NSString stringWithFormat:@"%@ %@", entry.classMethod ? @"+" : @"-", entry.methodName];
-    NSString *msg = [NSString stringWithFormat:@"%@\nargs=%u\n%@", entry.className, entry.argCount, entry.typeEncoding ?: @""];
+    NSString *msg = [NSString stringWithFormat:@"Source: %@\nState: %@\nClass: %@\nArgs: %u\nEncoding: %@\nKey: %@", entry.source, state, entry.className, entry.argCount, entry.typeEncoding ?: @"", [entry overrideKey]];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+
+    if (entry.returnsBool) {
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"Default"] ? @"Default ✓" : @"Default / original" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideOff forMethodEntry:entry]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"FORCED ON"] ? @"Force YES ✓" : @"Force YES" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideTrue forMethodEntry:entry]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"FORCED OFF"] ? @"Force NO ✓" : @"Force NO" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideFalse forMethodEntry:entry]; }]];
+    }
+
     [a addAction:[UIAlertAction actionWithTitle:@"Copy selector" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.methodName; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy class.method" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@ %@", entry.className, entry.methodName]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Copy override key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = [entry overrideKey]; }]];
+
     if (entry.classMethod && entry.returnsBool && entry.argCount == 2) {
-        [a addAction:[UIAlertAction actionWithTitle:@"Call BOOL getter" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+        [a addAction:[UIAlertAction actionWithTitle:@"Call default BOOL getter now" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
             Class cls = NSClassFromString(entry.className);
             SEL sel = NSSelectorFromString(entry.methodName);
             if (!cls || ![cls respondsToSelector:sel]) { [SCIUtils showErrorHUDWithDescription:@"Selector missing"]; return; }
@@ -318,6 +380,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
             [SCIUtils showToastForDuration:2.0 title:(value ? @"YES" : @"NO") subtitle:entry.methodName];
         }]];
     }
+
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }
     [self presentViewController:a animated:YES completion:nil];
