@@ -5,8 +5,14 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 extern void RGTryUpdateMobileConfigAction(void);
 extern void RGForceUpdateMobileConfigAction(void);
+#ifdef __cplusplus
+}
+#endif
 
 static NSArray *(*orig_sections_exp)(id, SEL);
 
