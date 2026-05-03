@@ -7,7 +7,14 @@
 
 static const NSInteger RYDogMainButtonTag = 0xD06F00D;
 static const NSInteger RYDogNotesButtonTag = 0xD06F00E;
+
 static __weak id RYDogCachedUserSession = nil;
+static __weak id RYDogCachedConfig = nil;
+
+static id (*origRYDogVCInitWithConfig)(id self, SEL _cmd, id config, id userSession);
+static void (*origSCIExpFlagsViewDidAppear)(id self, SEL _cmd, BOOL animated);
+static id (*origIGMainAppUserSession)(id self, SEL _cmd);
+static id (*origIGTabBarUserSession)(id self, SEL _cmd);
 
 static NSString *RYDogClassName(id obj) {
     if (!obj) return @"nil";
@@ -53,7 +60,17 @@ static id RYDogSafeObjectIvar(id target, Ivar ivar) {
 static BOOL RYDogLooksLikeUserSession(id obj) {
     if (!obj) return NO;
     NSString *name = RYDogClassName(obj);
-    return [name isEqualToString:@"IGUserSession"] || [name hasSuffix:@"IGUserSession"] || [name hasSuffix:@"UserSession"];
+    return [name isEqualToString:@"IGUserSession"] ||
+           [name hasSuffix:@"IGUserSession"] ||
+           [name hasSuffix:@"UserSession"];
+}
+
+static BOOL RYDogLooksLikeConfig(id obj) {
+    if (!obj) return NO;
+    NSString *name = RYDogClassName(obj);
+    return [name isEqualToString:@"IGDogfoodingSettingsConfig"] ||
+           [name hasSuffix:@"IGDogfoodingSettingsConfig"] ||
+           [name containsString:@"DogfoodingSettingsConfig"];
 }
 
 static id RYDogUserSessionFromObject(id obj) {
@@ -94,13 +111,6 @@ static id RYDogUserSessionFromObject(id obj) {
     }
 
     return nil;
-}
-
-static void RYDogRememberUserSession(id maybeSession, NSString *source) {
-    id session = RYDogUserSessionFromObject(maybeSession);
-    if (!session) return;
-    RYDogCachedUserSession = session;
-    NSLog(@"[RyukGram][Dogfood] cached IGUserSession from %@ -> %@ <%p>", source ?: @"?", RYDogClassName(session), session);
 }
 
 static UIViewController *RYDogTopViewControllerFrom(UIViewController *vc) {
@@ -158,44 +168,6 @@ static UIViewController *RYDogRootViewController(void) {
     return nil;
 }
 
-static id RYDogFindUserSession(UIViewController *presenter) {
-    if (RYDogLooksLikeUserSession(RYDogCachedUserSession)) return RYDogCachedUserSession;
-
-    NSMutableArray *roots = [NSMutableArray array];
-    if (presenter) [roots addObject:presenter];
-    if (presenter.navigationController) [roots addObject:presenter.navigationController];
-    if (presenter.tabBarController) [roots addObject:presenter.tabBarController];
-    if (presenter.view.window) [roots addObject:presenter.view.window];
-    if (presenter.view.window.rootViewController) [roots addObject:presenter.view.window.rootViewController];
-
-    UIViewController *root = RYDogRootViewController();
-    if (root) [roots addObject:root];
-    UIViewController *top = RYDogTopViewControllerFrom(root);
-    if (top) [roots addObject:top];
-
-    UIApplication *app = UIApplication.sharedApplication;
-    if (app.delegate) [roots addObject:app.delegate];
-
-    for (UIScene *scene in app.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-            [roots addObject:window];
-            if (window.rootViewController) [roots addObject:window.rootViewController];
-        }
-    }
-
-    for (id obj in roots) {
-        id session = RYDogUserSessionFromObject(obj);
-        if (session) {
-            RYDogCachedUserSession = session;
-            NSLog(@"[RyukGram][Dogfood] found IGUserSession from %@ -> %@ <%p>", RYDogClassName(obj), RYDogClassName(session), session);
-            return session;
-        }
-    }
-
-    return nil;
-}
-
 static BOOL RYDogUsefulIvarName(NSString *name) {
     NSString *n = name.lowercaseString;
     return [n containsString:@"dogfood"] ||
@@ -207,34 +179,53 @@ static BOOL RYDogUsefulIvarName(NSString *name) {
            [n containsString:@"tabbar"] ||
            [n containsString:@"root"] ||
            [n containsString:@"delegate"] ||
-           [n containsString:@"context"];
+           [n containsString:@"context"] ||
+           [n containsString:@"manager"];
 }
 
-static id RYDogFindLiveObjectNamed(UIViewController *presenter, NSString *className, NSMutableString *log) {
+static void RYDogQueuePush(NSMutableArray *queue, NSMutableSet *seen, id obj) {
+    if (!obj || ![obj isKindOfClass:NSObject.class]) return;
+    NSString *key = RYDogPtr(obj);
+    if ([seen containsObject:key]) return;
+    [seen addObject:key];
+    [queue addObject:obj];
+}
+
+static void RYDogSeedObjectGraph(NSMutableArray *queue, NSMutableSet *seen, UIViewController *presenter) {
+    RYDogQueuePush(queue, seen, presenter);
+    RYDogQueuePush(queue, seen, presenter.navigationController);
+    RYDogQueuePush(queue, seen, presenter.tabBarController);
+    RYDogQueuePush(queue, seen, presenter.view.window);
+    RYDogQueuePush(queue, seen, presenter.view.window.rootViewController);
+    RYDogQueuePush(queue, seen, RYDogRootViewController());
+    RYDogQueuePush(queue, seen, UIApplication.sharedApplication.delegate);
+
+    UIApplication *app = UIApplication.sharedApplication;
+    for (UIScene *scene in app.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            RYDogQueuePush(queue, seen, window);
+            RYDogQueuePush(queue, seen, window.rootViewController);
+        }
+    }
+}
+
+static id RYDogFindObjectInGraph(UIViewController *presenter, BOOL (^match)(id obj), NSMutableString *log) {
     NSMutableArray *queue = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
-
-    void (^push)(id) = ^(id obj) {
-        if (!obj || ![obj isKindOfClass:NSObject.class]) return;
-        NSString *key = RYDogPtr(obj);
-        if ([seen containsObject:key]) return;
-        [seen addObject:key];
-        [queue addObject:obj];
-    };
-
-    push(presenter);
-    push(presenter.navigationController);
-    push(presenter.tabBarController);
-    push(presenter.view.window);
-    push(presenter.view.window.rootViewController);
-    push(RYDogRootViewController());
-    push(UIApplication.sharedApplication.delegate);
+    RYDogSeedObjectGraph(queue, seen, presenter);
 
     NSArray<NSString *> *selectors = @[
         @"config",
         @"settingsConfig",
         @"dogfoodingConfig",
         @"dogfoodingSettingsConfig",
+        @"userSession",
+        @"igUserSession",
+        @"currentUserSession",
+        @"activeUserSession",
+        @"mainUserSession",
+        @"loggedInUserSession",
         @"mainAppViewController",
         @"rootViewController",
         @"selectedViewController",
@@ -246,16 +237,16 @@ static id RYDogFindLiveObjectNamed(UIViewController *presenter, NSString *classN
     ];
 
     NSUInteger cursor = 0;
-    NSUInteger budget = 900;
+    NSUInteger budget = 1200;
     while (cursor < queue.count && budget-- > 0) {
         id obj = queue[cursor++];
-        if ([RYDogClassName(obj) isEqualToString:className]) {
+        if (match && match(obj)) {
             if (log) [log appendFormat:@"FOUND %@ <%@>\n", RYDogClassName(obj), RYDogPtr(obj)];
             return obj;
         }
 
         for (NSString *selectorName in selectors) {
-            push(RYDogSafeNoArg(obj, NSSelectorFromString(selectorName)));
+            RYDogQueuePush(queue, seen, RYDogSafeNoArg(obj, NSSelectorFromString(selectorName)));
         }
 
         unsigned int count = 0;
@@ -263,30 +254,65 @@ static id RYDogFindLiveObjectNamed(UIViewController *presenter, NSString *classN
         for (unsigned int i = 0; i < count; i++) {
             NSString *name = [NSString stringWithUTF8String:ivar_getName(ivars[i]) ?: ""];
             if (!RYDogUsefulIvarName(name)) continue;
-            id child = RYDogSafeObjectIvar(obj, ivars[i]);
-            if ([RYDogClassName(child) isEqualToString:className]) {
-                if (log) [log appendFormat:@"%@ <%@> ivar %@ -> %@ <%@>\n", RYDogClassName(obj), RYDogPtr(obj), name, RYDogClassName(child), RYDogPtr(child)];
-                if (ivars) free(ivars);
-                return child;
-            }
-            push(child);
+            RYDogQueuePush(queue, seen, RYDogSafeObjectIvar(obj, ivars[i]));
         }
         if (ivars) free(ivars);
     }
 
-    if (log) [log appendFormat:@"No %@ found. visited=%lu\n", className, (unsigned long)seen.count];
+    if (log) [log appendFormat:@"No match found. visited=%lu\n", (unsigned long)seen.count];
+    return nil;
+}
+
+static id RYDogFindUserSession(UIViewController *presenter) {
+    if (RYDogLooksLikeUserSession(RYDogCachedUserSession)) return RYDogCachedUserSession;
+
+    id session = RYDogFindObjectInGraph(presenter, ^BOOL(id obj) {
+        return RYDogLooksLikeUserSession(obj) || RYDogLooksLikeUserSession(RYDogUserSessionFromObject(obj));
+    }, nil);
+
+    if (!RYDogLooksLikeUserSession(session)) session = RYDogUserSessionFromObject(session);
+    if (RYDogLooksLikeUserSession(session)) {
+        RYDogCachedUserSession = session;
+        NSLog(@"[RyukGram][Dogfood] found IGUserSession %@ <%p>", RYDogClassName(session), session);
+        return session;
+    }
+
+    return nil;
+}
+
+static id RYDogFindLiveConfig(UIViewController *presenter, NSMutableString *log) {
+    if (RYDogLooksLikeConfig(RYDogCachedConfig)) return RYDogCachedConfig;
+
+    id config = RYDogFindObjectInGraph(presenter, ^BOOL(id obj) {
+        return RYDogLooksLikeConfig(obj);
+    }, log);
+
+    if (RYDogLooksLikeConfig(config)) {
+        RYDogCachedConfig = config;
+        return config;
+    }
+
     return nil;
 }
 
 static void RYDogShowAlert(UIViewController *presenter, NSString *title, NSString *message) {
-    if (!presenter) return;
     dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *top = RYDogTopViewControllerFrom(presenter ?: RYDogRootViewController());
+        if (!top) return;
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:title ?: @"Dogfooding"
                                                                        message:message ?: @""
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [presenter presentViewController:alert animated:YES completion:nil];
+        [top presentViewController:alert animated:YES completion:nil];
     });
+}
+
+static id hookRYDogVCInitWithConfig(id self, SEL _cmd, id config, id userSession) {
+    if (RYDogLooksLikeConfig(config)) RYDogCachedConfig = config;
+    if (RYDogLooksLikeUserSession(userSession)) RYDogCachedUserSession = userSession;
+    NSLog(@"[RyukGram][Dogfood] cached native initWithConfig config=%@ <%p> session=%@ <%p>",
+          RYDogClassName(config), config, RYDogClassName(userSession), userSession);
+    return origRYDogVCInitWithConfig ? origRYDogVCInitWithConfig(self, _cmd, config, userSession) : self;
 }
 
 void RYDogOpenMainFrom(UIViewController *sourceVC) {
@@ -296,43 +322,37 @@ void RYDogOpenMainFrom(UIViewController *sourceVC) {
         return;
     }
 
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    BOOL master = [ud boolForKey:@"igt_employee_master"];
-    BOOL gate = [ud boolForKey:@"igt_employee_devoptions_gate"];
-    if (!master && !gate) {
-        RYDogShowAlert(presenter, @"Employee required", @"É necessário ativar 'Employee Master' ou 'Employee DevOptions gate' primeiro nas configurações experimentais e reiniciar o app.");
-        return;
-    }
-
-    id userSession = RYDogFindUserSession(presenter);
-    if (!userSession) {
-        RYDogShowAlert(presenter, @"Dogfooding", @"Não achei IGUserSession vivo. Abre feed/perfil/configurações e tenta de novo.");
-        return;
-    }
-
     Class entryClass = RYDogResolveClass(@[
         @"IGDogfoodingSettings.IGDogfoodingSettings",
         @"_TtC20IGDogfoodingSettings20IGDogfoodingSettings"
     ]);
     SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
-    if (!entryClass || !class_getClassMethod(entryClass, openSel)) {
-        RYDogShowAlert(presenter, @"Dogfooding", @"Não achei o entrypoint principal do Dogfooding Settings.");
+    Method openMethod = entryClass ? class_getClassMethod(entryClass, openSel) : NULL;
+    if (!entryClass || !openMethod) {
+        RYDogShowAlert(presenter, @"Dogfooding", @"Runtime não expôs +openWithConfig:onViewController:userSession: nesta build.");
+        return;
+    }
+
+    id userSession = RYDogFindUserSession(presenter);
+    if (!userSession) {
+        RYDogShowAlert(presenter, @"Dogfooding", @"Selector encontrado, mas não achei IGUserSession vivo. Abre feed/perfil/configurações e tenta de novo.");
         return;
     }
 
     NSMutableString *configLog = [NSMutableString string];
-    id config = RYDogFindLiveObjectNamed(presenter, @"IGDogfoodingSettingsConfig", configLog);
+    id config = RYDogFindLiveConfig(presenter, configLog);
     if (!config) {
-        NSString *msg = [NSString stringWithFormat:@"Não achei IGDogfoodingSettingsConfig vivo.\n\n%@\nSem alloc/init fake para evitar crash.", configLog];
+        NSString *msg = [NSString stringWithFormat:@"Selector encontrado, mas não há IGDogfoodingSettingsConfig vivo para passar como argumento.\n\n%@\nSem fallback/alloc fake aplicado.", configLog];
         RYDogShowAlert(presenter, @"Dogfooding", msg);
         return;
     }
 
-    NSLog(@"[RyukGram][Dogfood] opening main entrypoint config=%@ <%p> presenter=%@ <%p> userSession=%@ <%p>",
-          RYDogClassName(config), config, RYDogClassName(presenter), presenter, RYDogClassName(userSession), userSession);
+    NSLog(@"[RyukGram][Dogfood] CALL selector +[%@ openWithConfig:onViewController:userSession:] config=%@ <%p> presenter=%@ <%p> userSession=%@ <%p>",
+          NSStringFromClass(entryClass), RYDogClassName(config), config, RYDogClassName(presenter), presenter, RYDogClassName(userSession), userSession);
 
     @try {
-        ((void (*)(id, SEL, id, id, id))objc_msgSend)((id)entryClass, openSel, config, presenter, userSession);
+        IMP imp = method_getImplementation(openMethod);
+        ((void (*)(id, SEL, id, id, id))imp)((id)entryClass, openSel, config, presenter, userSession);
     } @catch (id e) {
         RYDogShowAlert(presenter, @"Dogfooding", [NSString stringWithFormat:@"openWithConfig exception: %@", e]);
     }
@@ -345,34 +365,29 @@ void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
         return;
     }
 
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    BOOL master = [ud boolForKey:@"igt_employee_master"];
-    BOOL gate = [ud boolForKey:@"igt_employee_devoptions_gate"];
-    if (!master && !gate) {
-        RYDogShowAlert(presenter, @"Employee required", @"É necessário ativar 'Employee Master' ou 'Employee DevOptions gate' primeiro nas configurações experimentais e reiniciar o app.");
+    Class notesClass = RYDogResolveClass(@[
+        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs"
+    ]);
+    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    Method notesMethod = notesClass ? class_getClassMethod(notesClass, notesSel) : NULL;
+    if (!notesClass || !notesMethod) {
+        RYDogShowAlert(presenter, @"Dogfooding Notes", @"Runtime não expôs +notesDogfoodingSettingsOpenOnViewController:userSession: nesta build.");
         return;
     }
 
     id userSession = RYDogFindUserSession(presenter);
     if (!userSession) {
-        RYDogShowAlert(presenter, @"Dogfooding Notes", @"Não achei IGUserSession vivo. Abre feed/perfil/configurações e tenta de novo.");
+        RYDogShowAlert(presenter, @"Dogfooding Notes", @"Selector encontrado, mas não achei IGUserSession vivo.");
         return;
     }
 
-    Class notesClass = RYDogResolveClass(@[
-        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs"
-    ]);
-    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
-    if (!notesClass || !class_getClassMethod(notesClass, notesSel)) {
-        RYDogShowAlert(presenter, @"Dogfooding Notes", @"Não achei o opener nativo do Direct Notes Dogfooding.");
-        return;
-    }
-
-    NSLog(@"[RyukGram][Dogfood] opening Direct Notes native opener presenter=%@ <%p> userSession=%@ <%p>",
-          RYDogClassName(presenter), presenter, RYDogClassName(userSession), userSession);
+    NSLog(@"[RyukGram][Dogfood] CALL selector +[%@ notesDogfoodingSettingsOpenOnViewController:userSession:] presenter=%@ <%p> userSession=%@ <%p>",
+          NSStringFromClass(notesClass), RYDogClassName(presenter), presenter, RYDogClassName(userSession), userSession);
 
     @try {
-        ((void (*)(id, SEL, id, id))objc_msgSend)((id)notesClass, notesSel, presenter, userSession);
+        IMP imp = method_getImplementation(notesMethod);
+        ((void (*)(id, SEL, id, id))imp)((id)notesClass, notesSel, presenter, userSession);
     } @catch (id e) {
         RYDogShowAlert(presenter, @"Dogfooding Notes", [NSString stringWithFormat:@"notes opener exception: %@", e]);
     }
@@ -435,56 +450,73 @@ static void RYDogAttachButtons(UIViewController *vc) {
     ]];
 }
 
-static void (*origSCIExpFlagsViewDidAppear)(id self, SEL _cmd, BOOL animated);
 static void hookSCIExpFlagsViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (origSCIExpFlagsViewDidAppear) origSCIExpFlagsViewDidAppear(self, _cmd, animated);
     if ([self isKindOfClass:UIViewController.class]) {
-        RYDogRememberUserSession(self, @"SCIExpFlagsViewController");
         RYDogAttachButtons((UIViewController *)self);
     }
 }
 
-static id (*origIGMainAppUserSession)(id self, SEL _cmd);
 static id hookIGMainAppUserSession(id self, SEL _cmd) {
     id ret = origIGMainAppUserSession ? origIGMainAppUserSession(self, _cmd) : nil;
-    RYDogRememberUserSession(ret ?: self, @"IGMainAppViewController.userSession");
+    if (RYDogLooksLikeUserSession(ret)) RYDogCachedUserSession = ret;
     return ret;
 }
 
-static id (*origIGTabBarUserSession)(id self, SEL _cmd);
 static id hookIGTabBarUserSession(id self, SEL _cmd) {
     id ret = origIGTabBarUserSession ? origIGTabBarUserSession(self, _cmd) : nil;
-    RYDogRememberUserSession(ret ?: self, @"IGTabBarController.userSession");
+    if (RYDogLooksLikeUserSession(ret)) RYDogCachedUserSession = ret;
     return ret;
+}
+
+static void RYDogInstallRuntimeHooks(void) {
+    Class expCls = NSClassFromString(@"SCIExpFlagsViewController");
+    if (expCls && class_getInstanceMethod(expCls, @selector(viewDidAppear:)) && !origSCIExpFlagsViewDidAppear) {
+        MSHookMessageEx(expCls,
+                        @selector(viewDidAppear:),
+                        (IMP)hookSCIExpFlagsViewDidAppear,
+                        (IMP *)&origSCIExpFlagsViewDidAppear);
+    }
+
+    Class mainAppCls = NSClassFromString(@"IGMainAppViewController");
+    if (mainAppCls && class_getInstanceMethod(mainAppCls, @selector(userSession)) && !origIGMainAppUserSession) {
+        MSHookMessageEx(mainAppCls,
+                        @selector(userSession),
+                        (IMP)hookIGMainAppUserSession,
+                        (IMP *)&origIGMainAppUserSession);
+    }
+
+    Class tabCls = NSClassFromString(@"IGTabBarController");
+    if (tabCls && class_getInstanceMethod(tabCls, @selector(userSession)) && !origIGTabBarUserSession) {
+        MSHookMessageEx(tabCls,
+                        @selector(userSession),
+                        (IMP)hookIGTabBarUserSession,
+                        (IMP *)&origIGTabBarUserSession);
+    }
+
+    Class dogVC = RYDogResolveClass(@[
+        @"IGDogfoodingSettings.IGDogfoodingSettingsViewController",
+        @"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController"
+    ]);
+    SEL initSel = NSSelectorFromString(@"initWithConfig:userSession:");
+    if (dogVC && class_getInstanceMethod(dogVC, initSel) && !origRYDogVCInitWithConfig) {
+        MSHookMessageEx(dogVC,
+                        initSel,
+                        (IMP)hookRYDogVCInitWithConfig,
+                        (IMP *)&origRYDogVCInitWithConfig);
+    }
 }
 
 __attribute__((constructor))
 static void RYDogNativeOpenersInit(void) {
     @autoreleasepool {
-        Class expCls = NSClassFromString(@"SCIExpFlagsViewController");
-        if (expCls) {
-            MSHookMessageEx(expCls,
-                            @selector(viewDidAppear:),
-                            (IMP)hookSCIExpFlagsViewDidAppear,
-                            (IMP *)&origSCIExpFlagsViewDidAppear);
-        }
-
-        Class mainAppCls = NSClassFromString(@"IGMainAppViewController");
-        if (mainAppCls && class_getInstanceMethod(mainAppCls, @selector(userSession))) {
-            MSHookMessageEx(mainAppCls,
-                            @selector(userSession),
-                            (IMP)hookIGMainAppUserSession,
-                            (IMP *)&origIGMainAppUserSession);
-        }
-
-        Class tabCls = NSClassFromString(@"IGTabBarController");
-        if (tabCls && class_getInstanceMethod(tabCls, @selector(userSession))) {
-            MSHookMessageEx(tabCls,
-                            @selector(userSession),
-                            (IMP)hookIGTabBarUserSession,
-                            (IMP *)&origIGTabBarUserSession);
-        }
-
-        NSLog(@"[RyukGram][Dogfood] bottom native openers loaded");
+        RYDogInstallRuntimeHooks();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            RYDogInstallRuntimeHooks();
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            RYDogInstallRuntimeHooks();
+        });
+        NSLog(@"[RyukGram][Dogfood] direct selector caller loaded");
     }
 }
