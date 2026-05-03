@@ -27,6 +27,8 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 @property (nonatomic, assign) unsigned long long paramID;
 @property (nonatomic, assign) SCIExpMCType type;
 @property (nonatomic, copy) NSString *lastDefault;
+@property (nonatomic, copy) NSString *sourceClass;
+@property (nonatomic, copy) NSString *selectorName;
 @property (nonatomic, assign) NSUInteger hitCount;
 @end
 
@@ -44,6 +46,7 @@ typedef NS_ENUM(NSInteger, SCIExpMCType) {
 
 // MC id observations (live, view-only)
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def;
++ (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def sourceClass:(NSString *)sourceClass selector:(NSString *)selector;
 + (NSArray<SCIExpMCObservation *> *)allMCObservations;
 
 // binary-scanned names (bg, cb on main)
