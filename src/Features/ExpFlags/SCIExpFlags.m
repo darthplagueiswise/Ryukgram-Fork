@@ -84,12 +84,19 @@ static dispatch_queue_t mcQueue(void) {
 }
 
 + (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def {
+    [self recordMCParamID:pid type:t defaultValue:def sourceClass:nil selector:nil];
+}
+
++ (void)recordMCParamID:(unsigned long long)pid type:(SCIExpMCType)t defaultValue:(NSString *)def sourceClass:(NSString *)sourceClass selector:(NSString *)selector {
     dispatch_barrier_async(mcQueue(), ^{
         if (!gMCObs) gMCObs = [NSMutableDictionary dictionary];
         NSNumber *k = @(pid);
         SCIExpMCObservation *o = gMCObs[k];
         if (!o) { o = [SCIExpMCObservation new]; o.paramID = pid; o.type = t; gMCObs[k] = o; }
+        o.type = t;
         o.lastDefault = def ?: @"";
+        if (sourceClass.length) o.sourceClass = sourceClass;
+        if (selector.length) o.selectorName = selector;
         o.hitCount++;
     });
 }
