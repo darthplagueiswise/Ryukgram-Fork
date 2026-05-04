@@ -132,7 +132,12 @@ static NSString * const kSCIMCBrokerObservedPrefix = @"dexkit.observed.cbool:";
     return [out sortedArrayUsingSelector:@selector(compare:)];
 }
 
-+ (BOOL)parseOverrideKey:(NSString *)key brokerID:(NSString **)brokerID image:(NSString **)image symbol:(NSString **)symbol kind:(NSString **)kind value:(uint64_t *)value {
++ (BOOL)parseOverrideKey:(NSString *)key
+                brokerID:(NSString * _Nullable * _Nullable)brokerID
+                   image:(NSString * _Nullable * _Nullable)image
+                  symbol:(NSString * _Nullable * _Nullable)symbol
+                    kind:(NSString * _Nullable * _Nullable)kind
+                   value:(uint64_t * _Nullable)value {
     if (![key hasPrefix:@"dexkit.cbool:"]) return NO;
     NSString *body = [key substringFromIndex:@"dexkit.cbool:".length];
     NSArray<NSString *> *parts = [body componentsSeparatedByString:@":"];
