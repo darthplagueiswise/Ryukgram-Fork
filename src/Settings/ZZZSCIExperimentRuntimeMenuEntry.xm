@@ -1,7 +1,9 @@
 #import "TweakSettings.h"
 #import "SCIExperimentRuntimeBrowserViewController.h"
 #import "SCIEnabledExperimentTogglesViewController.h"
+#import "SCIExpPersistedQueryViewController.h"
 #import "../Features/ExpFlags/SCIAutofillInternalDevMode.h"
+#import "../Features/ExpFlags/SCIPersistedQueryCatalog.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -46,12 +48,23 @@ static NSDictionary *RYUnifiedDeveloperSection(void) {
 
     return @{
         @"header": @"SCI DexKit",
-        @"footer": @"Unified developer/runtime surface. Use the main screen for grouped getter probes, observed system ON/OFF and overrides. Low-level runtime and Autofill tools stay here as fallbacks.",
+        @"footer": @"Unified developer/runtime surface. Primary path: grouped getter probes with observed system ON/OFF. Persisted GraphQL catalog is exposed here because QuickSnap/Instants and Dogfood also depend on server-side operation surfaces, not only local BOOL getters.",
         @"rows": @[
             [SCISetting navigationCellWithTitle:@"SCI DexKit"
                                        subtitle:@"Grouped providers, native-looking ON/OFF switches, observed defaults and override routing."
                                            icon:[SCISymbol symbolWithName:@"square.stack.3d.up"]
                                  viewController:mainVC],
+            [SCISetting navigationCellWithTitle:@"Persisted GraphQL Mapping"
+                                       subtitle:@"QuickSnap/Instants, Dogfood, Homecoming and client_doc_id operation catalog from schema JSON."
+                                           icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
+                                 viewController:[SCIExpPersistedQueryViewController new]],
+            RYUnifiedButton(@"Persisted GraphQL Diagnostic",
+                            @"Shows loaded schema source plus priority QuickSnap and Dogfood operation matches.",
+                            @"list.bullet.clipboard",
+                            ^{
+                                [[SCIPersistedQueryCatalog sharedCatalog] reload];
+                                RYUnifiedPresentTextAlert(@"Persisted GraphQL", [[SCIPersistedQueryCatalog sharedCatalog] diagnosticReport]);
+                            }),
             [SCISetting navigationCellWithTitle:@"Runtime Browser"
                                        subtitle:@"Low-level classes/properties/ivars fallback."
                                            icon:[SCISymbol symbolWithName:@"books.vertical"]
@@ -135,6 +148,7 @@ static void RYInstallUnifiedDeveloperMenuHook(void) {
 
 %ctor {
     [SCIAutofillInternalDevMode registerDefaults];
+    [SCIPersistedQueryCatalog prewarmInBackground];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         RYInstallUnifiedDeveloperMenuHook();
     });
