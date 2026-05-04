@@ -1,123 +1,120 @@
 #import "SCIEnabledExperimentTogglesViewController.h"
 #import "../Features/ExpFlags/SCIEnabledExperimentRuntime.h"
-#import "../Utils.h"
-#import <objc/runtime.h>
+#import <UIKit/UIKit.h>
 
-@interface SCIEnabledExperimentCell : UITableViewCell
-@property (nonatomic, strong) UILabel *title;
-@property (nonatomic, strong) UILabel *detail;
+@interface SCIDexKitGetterCell : UITableViewCell
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *stateLabel;
 @property (nonatomic, strong) UISwitch *toggleSwitch;
-@property (nonatomic, strong) UIButton *resetButton;
+@property (nonatomic, strong) UIButton *systemButton;
 @property (nonatomic, copy) void (^toggleChanged)(BOOL on);
-@property (nonatomic, copy) void (^resetPressed)(void);
+@property (nonatomic, copy) void (^systemPressed)(void);
 @end
 
-@implementation SCIEnabledExperimentCell
-
+@implementation SCIDexKitGetterCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
     self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if (!self) return nil;
     self.selectionStyle = UITableViewCellSelectionStyleDefault;
 
-    self.title = [UILabel new];
-    self.title.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-    self.title.numberOfLines = 2;
-    self.title.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.title];
+    _titleLabel = [UILabel new];
+    _titleLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+    _titleLabel.numberOfLines = 2;
+    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:_titleLabel];
 
-    self.detail = [UILabel new];
-    self.detail.font = [UIFont systemFontOfSize:10];
-    self.detail.textColor = UIColor.secondaryLabelColor;
-    self.detail.numberOfLines = 2;
-    self.detail.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.detail];
+    _stateLabel = [UILabel new];
+    _stateLabel.font = [UIFont systemFontOfSize:11];
+    _stateLabel.textColor = UIColor.secondaryLabelColor;
+    _stateLabel.numberOfLines = 1;
+    _stateLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:_stateLabel];
 
-    self.toggleSwitch = [UISwitch new];
-    self.toggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.toggleSwitch addTarget:self action:@selector(switchChanged) forControlEvents:UIControlEventValueChanged];
-    [self.contentView addSubview:self.toggleSwitch];
+    _toggleSwitch = [UISwitch new];
+    _toggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [_toggleSwitch addTarget:self action:@selector(switchChanged) forControlEvents:UIControlEventValueChanged];
+    [self.contentView addSubview:_toggleSwitch];
 
-    self.resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.resetButton setTitle:@"System" forState:UIControlStateNormal];
-    self.resetButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-    self.resetButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.resetButton addTarget:self action:@selector(resetTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:self.resetButton];
+    _systemButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_systemButton setTitle:@"System" forState:UIControlStateNormal];
+    _systemButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _systemButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_systemButton addTarget:self action:@selector(systemTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:_systemButton];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.toggleSwitch.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
-        [self.toggleSwitch.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
-        [self.resetButton.centerYAnchor constraintEqualToAnchor:self.toggleSwitch.centerYAnchor],
-        [self.resetButton.trailingAnchor constraintEqualToAnchor:self.toggleSwitch.leadingAnchor constant:-12],
+        [_toggleSwitch.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+        [_toggleSwitch.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+        [_systemButton.centerYAnchor constraintEqualToAnchor:_toggleSwitch.centerYAnchor],
+        [_systemButton.trailingAnchor constraintEqualToAnchor:_toggleSwitch.leadingAnchor constant:-12],
 
-        [self.title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
-        [self.title.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:18],
-        [self.title.trailingAnchor constraintEqualToAnchor:self.resetButton.leadingAnchor constant:-10],
-        [self.detail.topAnchor constraintEqualToAnchor:self.title.bottomAnchor constant:3],
-        [self.detail.leadingAnchor constraintEqualToAnchor:self.title.leadingAnchor],
-        [self.detail.trailingAnchor constraintEqualToAnchor:self.title.trailingAnchor],
-        [self.detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-9],
+        [_titleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:9],
+        [_titleLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:18],
+        [_titleLabel.trailingAnchor constraintEqualToAnchor:_systemButton.leadingAnchor constant:-10],
+        [_stateLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:3],
+        [_stateLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+        [_stateLabel.trailingAnchor constraintEqualToAnchor:_titleLabel.trailingAnchor],
+        [_stateLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-9],
     ]];
     return self;
 }
-
 - (void)switchChanged { if (self.toggleChanged) self.toggleChanged(self.toggleSwitch.isOn); }
-- (void)resetTapped { if (self.resetPressed) self.resetPressed(); }
+- (void)systemTapped { if (self.systemPressed) self.systemPressed(); }
 @end
 
-@interface SCIEnabledGetterHeaderView : UITableViewHeaderFooterView
-@property (nonatomic, strong) UILabel *title;
-@property (nonatomic, strong) UILabel *detail;
+@interface SCIDexKitGetterHeaderView : UITableViewHeaderFooterView
+@property (nonatomic, strong) UILabel *titleLabel;
+@property (nonatomic, strong) UILabel *stateLabel;
 @property (nonatomic, strong) UISwitch *masterSwitch;
 @property (nonatomic, strong) UIButton *systemButton;
 @property (nonatomic, copy) void (^masterChanged)(BOOL on);
 @property (nonatomic, copy) void (^systemPressed)(void);
 @end
 
-@implementation SCIEnabledGetterHeaderView
+@implementation SCIDexKitGetterHeaderView
 - (instancetype)initWithReuseIdentifier:(NSString *)reuseIdentifier {
     self = [super initWithReuseIdentifier:reuseIdentifier];
     if (!self) return nil;
     self.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
 
-    self.title = [UILabel new];
-    self.title.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightSemibold];
-    self.title.numberOfLines = 2;
-    self.title.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.title];
+    _titleLabel = [UILabel new];
+    _titleLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightSemibold];
+    _titleLabel.numberOfLines = 2;
+    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:_titleLabel];
 
-    self.detail = [UILabel new];
-    self.detail.font = [UIFont systemFontOfSize:10];
-    self.detail.textColor = UIColor.secondaryLabelColor;
-    self.detail.numberOfLines = 2;
-    self.detail.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:self.detail];
+    _stateLabel = [UILabel new];
+    _stateLabel.font = [UIFont systemFontOfSize:10];
+    _stateLabel.textColor = UIColor.secondaryLabelColor;
+    _stateLabel.numberOfLines = 1;
+    _stateLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:_stateLabel];
 
-    self.masterSwitch = [UISwitch new];
-    self.masterSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.masterSwitch addTarget:self action:@selector(masterSwitchChanged) forControlEvents:UIControlEventValueChanged];
-    [self.contentView addSubview:self.masterSwitch];
+    _masterSwitch = [UISwitch new];
+    _masterSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [_masterSwitch addTarget:self action:@selector(masterSwitchChanged) forControlEvents:UIControlEventValueChanged];
+    [self.contentView addSubview:_masterSwitch];
 
-    self.systemButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.systemButton setTitle:@"System" forState:UIControlStateNormal];
-    self.systemButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-    self.systemButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.systemButton addTarget:self action:@selector(systemTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.contentView addSubview:self.systemButton];
+    _systemButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_systemButton setTitle:@"System" forState:UIControlStateNormal];
+    _systemButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _systemButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_systemButton addTarget:self action:@selector(systemTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:_systemButton];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.masterSwitch.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
-        [self.masterSwitch.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
-        [self.systemButton.centerYAnchor constraintEqualToAnchor:self.masterSwitch.centerYAnchor],
-        [self.systemButton.trailingAnchor constraintEqualToAnchor:self.masterSwitch.leadingAnchor constant:-12],
+        [_masterSwitch.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+        [_masterSwitch.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+        [_systemButton.centerYAnchor constraintEqualToAnchor:_masterSwitch.centerYAnchor],
+        [_systemButton.trailingAnchor constraintEqualToAnchor:_masterSwitch.leadingAnchor constant:-12],
 
-        [self.title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
-        [self.title.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
-        [self.title.trailingAnchor constraintEqualToAnchor:self.systemButton.leadingAnchor constant:-10],
-        [self.detail.topAnchor constraintEqualToAnchor:self.title.bottomAnchor constant:2],
-        [self.detail.leadingAnchor constraintEqualToAnchor:self.title.leadingAnchor],
-        [self.detail.trailingAnchor constraintEqualToAnchor:self.title.trailingAnchor],
-        [self.detail.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-7],
+        [_titleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
+        [_titleLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
+        [_titleLabel.trailingAnchor constraintEqualToAnchor:_systemButton.leadingAnchor constant:-10],
+        [_stateLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:3],
+        [_stateLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+        [_stateLabel.trailingAnchor constraintEqualToAnchor:_titleLabel.trailingAnchor],
+        [_stateLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-8],
     ]];
     return self;
 }
@@ -144,6 +141,7 @@
     self.title = @"SCI DexKit";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
 
+    // Intentionally menu-scoped. This scans metadata when the DexKit screen opens.
     [SCIEnabledExperimentRuntime install];
 
     self.filterControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Seen", @"ON", @"OFF", @"Forced"]];
@@ -172,11 +170,11 @@
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 76;
+    self.tableView.estimatedRowHeight = 58;
     self.tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedSectionHeaderHeight = 62;
-    [self.tableView registerClass:SCIEnabledExperimentCell.class forCellReuseIdentifier:@"enabledCell"];
-    [self.tableView registerClass:SCIEnabledGetterHeaderView.class forHeaderFooterViewReuseIdentifier:@"getterHeader"];
+    self.tableView.estimatedSectionHeaderHeight = 54;
+    [self.tableView registerClass:SCIDexKitGetterCell.class forCellReuseIdentifier:@"getterCell"];
+    [self.tableView registerClass:SCIDexKitGetterHeaderView.class forHeaderFooterViewReuseIdentifier:@"getterHeader"];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
 
@@ -209,7 +207,8 @@
 - (NSString *)getterOwnerKeyForEntry:(SCIEnabledExperimentEntry *)entry {
     NSString *owner = entry.className.length ? entry.className : @"UnknownOwner";
     NSString *source = entry.source.length ? entry.source : @"Main Executable";
-    return [NSString stringWithFormat:@"%@|%@", source, owner];
+    NSString *image = entry.imageName.length ? entry.imageName : @"?";
+    return [NSString stringWithFormat:@"%@|%@|%@", image, source, owner];
 }
 
 - (NSString *)compactGetterOwnerName:(NSString *)className {
@@ -219,12 +218,7 @@
 }
 
 - (NSArray<NSString *> *)preferredSourceOrder {
-    return @[
-        @"Autofill/Internal", @"Prism/Menu", @"Direct Notes", @"QuickSnap/Direct", @"Homecoming", @"LiquidGlass/TabBar",
-        @"FBCustomExperimentManager", @"FDIDExperimentGenerator", @"LID/MetaLocalExperiment", @"MetaLocalExperiment",
-        @"MobileConfig/EasyGating", @"IGUserLauncherSet", @"Dogfood/Internal", @"Friending/FriendsTab",
-        @"Feed", @"Direct/Inbox", @"Blend", @"GenAI/MagicMod", @"Main Executable", @"Other / Main Executable"
-    ];
+    return @[@"Autofill/Internal", @"Prism/Menu", @"Direct Notes", @"QuickSnap/Direct", @"Homecoming", @"LiquidGlass/TabBar", @"FBCustomExperimentManager", @"FDIDExperimentGenerator", @"LID/MetaLocalExperiment", @"MetaLocalExperiment", @"MobileConfig/EasyGating", @"IGUserLauncherSet", @"Dogfood/Internal", @"Friending/FriendsTab", @"Feed", @"Direct/Inbox", @"Blend", @"GenAI/MagicMod", @"Main Executable", @"FBSharedFramework / Autofill/Internal", @"FBSharedFramework / Prism/Menu", @"FBSharedFramework / Direct Notes", @"FBSharedFramework / QuickSnap/Direct", @"FBSharedFramework / MobileConfig/EasyGating", @"FBSharedFramework / Bool Getter"];
 }
 
 - (NSInteger)sourceRank:(NSString *)source {
@@ -233,47 +227,37 @@
 }
 
 - (void)rebuildGroups {
-    NSArray<SCIEnabledExperimentEntry *> *rows = [self flatRows];
     NSMutableDictionary<NSString *, NSMutableArray<SCIEnabledExperimentEntry *> *> *groups = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString *, NSString *> *names = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString *, NSString *> *sources = [NSMutableDictionary dictionary];
-
-    for (SCIEnabledExperimentEntry *entry in rows) {
+    for (SCIEnabledExperimentEntry *entry in [self flatRows]) {
         NSString *key = [self getterOwnerKeyForEntry:entry];
         if (!groups[key]) groups[key] = [NSMutableArray array];
         [groups[key] addObject:entry];
         names[key] = [self compactGetterOwnerName:entry.className];
         sources[key] = entry.source.length ? entry.source : @"Main Executable";
     }
-
-    NSArray *ordered = [[groups allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
-        NSString *sa = sources[a] ?: @"";
-        NSString *sb = sources[b] ?: @"";
-        NSInteger ra = [self sourceRank:sa];
-        NSInteger rb = [self sourceRank:sb];
+    self.sectionKeys = [[groups allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSInteger ra = [self sourceRank:sources[a]];
+        NSInteger rb = [self sourceRank:sources[b]];
         if (ra < rb) return NSOrderedAscending;
         if (ra > rb) return NSOrderedDescending;
         return [names[a] caseInsensitiveCompare:names[b]];
     }];
-
-    NSMutableDictionary *immutableGroups = [NSMutableDictionary dictionary];
-    for (NSString *key in ordered) {
-        NSArray *bucket = groups[key] ?: @[];
-        immutableGroups[key] = [bucket sortedArrayUsingComparator:^NSComparisonResult(SCIEnabledExperimentEntry *a, SCIEnabledExperimentEntry *b) {
+    NSMutableDictionary *immutable = [NSMutableDictionary dictionary];
+    for (NSString *key in self.sectionKeys) {
+        immutable[key] = [(groups[key] ?: @[]) sortedArrayUsingComparator:^NSComparisonResult(SCIEnabledExperimentEntry *a, SCIEnabledExperimentEntry *b) {
             return [a.methodName caseInsensitiveCompare:b.methodName];
         }];
     }
-
-    self.sectionKeys = ordered;
-    self.groupedRows = immutableGroups;
+    self.groupedRows = immutable;
     self.sectionDisplayNames = names;
     self.sectionSources = sources;
 }
 
 - (NSArray<SCIEnabledExperimentEntry *> *)rowsForSection:(NSInteger)section {
     if (section < 0 || section >= (NSInteger)self.sectionKeys.count) return @[];
-    NSString *key = self.sectionKeys[(NSUInteger)section];
-    return self.groupedRows[key] ?: @[];
+    return self.groupedRows[self.sectionKeys[(NSUInteger)section]] ?: @[];
 }
 
 - (SCIEnabledExperimentEntry *)entryAtIndexPath:(NSIndexPath *)indexPath {
@@ -291,8 +275,8 @@
 - (void)updateFooter {
     NSUInteger total = [SCIEnabledExperimentRuntime allEntries].count;
     NSUInteger shown = [self flatRows].count;
-    NSUInteger installed = [SCIEnabledExperimentRuntime installedCount];
-    self.footerLabel.text = [NSString stringWithFormat:@"Grouped by getter owner · main exec only · installed=%lu · total=%lu · showing=%lu · getters=%lu · header switch is master override for that getter owner.", (unsigned long)installed, (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count];
+    NSUInteger live = [SCIEnabledExperimentRuntime installedCount];
+    self.footerLabel.text = [NSString stringWithFormat:@"Getter owner groups · Instagram + FBSharedFramework · total=%lu · showing=%lu · groups=%lu · live hooks=%lu", (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count, (unsigned long)live];
 }
 
 - (BOOL)effectiveSwitchValueForEntry:(SCIEnabledExperimentEntry *)entry {
@@ -303,68 +287,53 @@
 }
 
 - (NSDictionary *)statsForRows:(NSArray<SCIEnabledExperimentEntry *> *)rows {
-    NSUInteger observed = 0, systemOn = 0, forced = 0, forcedOn = 0, forcedOff = 0, effectiveOn = 0;
+    NSUInteger observed = 0, effectiveOn = 0, forced = 0;
     for (SCIEnabledExperimentEntry *entry in rows) {
-        if (entry.defaultKnown) {
-            observed++;
-            if (entry.defaultValue) systemOn++;
-        }
-        SCIExpFlagOverride state = [SCIEnabledExperimentRuntime savedStateForEntry:entry];
-        if (state != SCIExpFlagOverrideOff) forced++;
-        if (state == SCIExpFlagOverrideTrue) forcedOn++;
-        if (state == SCIExpFlagOverrideFalse) forcedOff++;
+        if (entry.defaultKnown) observed++;
         if ([self effectiveSwitchValueForEntry:entry]) effectiveOn++;
+        if ([SCIEnabledExperimentRuntime savedStateForEntry:entry] != SCIExpFlagOverrideOff) forced++;
     }
-    return @{@"observed": @(observed), @"systemOn": @(systemOn), @"forced": @(forced), @"forcedOn": @(forcedOn), @"forcedOff": @(forcedOff), @"effectiveOn": @(effectiveOn)};
+    return @{@"observed": @(observed), @"effectiveOn": @(effectiveOn), @"forced": @(forced)};
 }
 
 - (BOOL)masterSwitchValueForRows:(NSArray<SCIEnabledExperimentEntry *> *)rows {
-    NSDictionary *s = [self statsForRows:rows];
-    return [s[@"effectiveOn"] unsignedIntegerValue] > 0;
+    if (!rows.count) return NO;
+    return [[self statsForRows:rows][@"effectiveOn"] unsignedIntegerValue] == rows.count;
 }
 
 - (void)setOverride:(SCIExpFlagOverride)state forRows:(NSArray<SCIEnabledExperimentEntry *> *)rows {
-    for (SCIEnabledExperimentEntry *entry in rows) {
-        [SCIEnabledExperimentRuntime setSavedState:state forEntry:entry];
-    }
+    for (SCIEnabledExperimentEntry *entry in rows) [SCIEnabledExperimentRuntime setSavedState:state forEntry:entry];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.sectionKeys.count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self rowsForSection:section].count; }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    SCIEnabledGetterHeaderView *header = [tableView dequeueReusableHeaderFooterViewWithIdentifier:@"getterHeader"];
+    SCIDexKitGetterHeaderView *header = [tableView dequeueReusableHeaderFooterViewWithIdentifier:@"getterHeader"];
     NSArray<SCIEnabledExperimentEntry *> *rows = [self rowsForSection:section];
     NSString *key = self.sectionKeys[(NSUInteger)section];
     NSString *name = self.sectionDisplayNames[key] ?: key;
     NSString *source = self.sectionSources[key] ?: @"Main Executable";
     NSDictionary *stats = [self statsForRows:rows];
     NSUInteger observed = [stats[@"observed"] unsignedIntegerValue];
-    NSUInteger systemOn = [stats[@"systemOn"] unsignedIntegerValue];
-    NSUInteger forced = [stats[@"forced"] unsignedIntegerValue];
     NSUInteger effectiveOn = [stats[@"effectiveOn"] unsignedIntegerValue];
+    NSUInteger forced = [stats[@"forced"] unsignedIntegerValue];
+    NSString *mix = effectiveOn == 0 ? @"all OFF" : (effectiveOn == rows.count ? @"all ON" : @"mixed");
 
-    header.title.text = name;
-    header.detail.text = [NSString stringWithFormat:@"%@ · funcs=%lu · observed=%lu · systemON=%lu · effectiveON=%lu · forced=%lu", source, (unsigned long)rows.count, (unsigned long)observed, (unsigned long)systemOn, (unsigned long)effectiveOn, (unsigned long)forced];
+    header.titleLabel.text = name;
+    header.stateLabel.text = [NSString stringWithFormat:@"%@ · %@ · funcs %lu · observed %lu · forced %lu", source, mix, (unsigned long)rows.count, (unsigned long)observed, (unsigned long)forced];
     [header.masterSwitch setOn:[self masterSwitchValueForRows:rows] animated:NO];
-    header.masterSwitch.enabled = rows.count > 0;
     header.systemButton.enabled = forced > 0;
     header.systemButton.alpha = forced > 0 ? 1.0 : 0.35;
 
     __weak typeof(self) weakSelf = self;
-    __block NSArray<SCIEnabledExperimentEntry *> *capturedRows = [rows copy];
-    header.masterChanged = ^(BOOL on) {
-        [weakSelf setOverride:(on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forRows:capturedRows];
-        [weakSelf reload];
-    };
-    header.systemPressed = ^{
-        [weakSelf setOverride:SCIExpFlagOverrideOff forRows:capturedRows];
-        [weakSelf reload];
-    };
+    NSArray<SCIEnabledExperimentEntry *> *capturedRows = [rows copy];
+    header.masterChanged = ^(BOOL on) { [weakSelf setOverride:(on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forRows:capturedRows]; [weakSelf reload]; };
+    header.systemPressed = ^{ [weakSelf setOverride:SCIExpFlagOverrideOff forRows:capturedRows]; [weakSelf reload]; };
     return header;
 }
 
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 66.0; }
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 56.0; }
 
 - (NSArray<NSString *> *)sectionIndexTitlesForTableView:(UITableView *)tableView {
     NSMutableArray *titles = [NSMutableArray array];
@@ -377,33 +346,25 @@
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    SCIEnabledExperimentCell *cell = [tv dequeueReusableCellWithIdentifier:@"enabledCell" forIndexPath:ip];
+    SCIDexKitGetterCell *cell = [tv dequeueReusableCellWithIdentifier:@"getterCell" forIndexPath:ip];
     SCIEnabledExperimentEntry *entry = [self entryAtIndexPath:ip];
-    cell.title.text = entry.methodName ?: @"?";
+    cell.titleLabel.text = entry.methodName ?: @"?";
 
     NSString *system = [SCIEnabledExperimentRuntime defaultLabelForEntry:entry];
     NSString *state = [SCIEnabledExperimentRuntime stateLabelForEntry:entry];
-    cell.detail.text = [NSString stringWithFormat:@"system=%@ · state=%@ · hits=%lu · %@", system, state, (unsigned long)entry.hitCount, entry.typeEncoding ?: @""];
-    if (!entry.defaultKnown && [SCIEnabledExperimentRuntime savedStateForEntry:entry] == SCIExpFlagOverrideOff) {
-        cell.detail.text = [cell.detail.text stringByAppendingString:@" · waiting for call"];
-    }
+    NSString *router = [[SCIEnabledExperimentRuntime summaryTextForEntry:entry] containsString:@"router=live"] ? @"live" : @"off";
+    cell.stateLabel.text = [NSString stringWithFormat:@"system %@ · %@ · %@", system, state, router];
 
     SCIExpFlagOverride override = [SCIEnabledExperimentRuntime savedStateForEntry:entry];
     [cell.toggleSwitch setOn:[self effectiveSwitchValueForEntry:entry] animated:NO];
     cell.toggleSwitch.enabled = entry.defaultKnown || override != SCIExpFlagOverrideOff;
-    cell.resetButton.enabled = override != SCIExpFlagOverrideOff;
-    cell.resetButton.alpha = cell.resetButton.enabled ? 1.0 : 0.35;
+    cell.systemButton.enabled = override != SCIExpFlagOverrideOff;
+    cell.systemButton.alpha = cell.systemButton.enabled ? 1.0 : 0.35;
 
     __weak typeof(self) weakSelf = self;
     __weak SCIEnabledExperimentEntry *weakEntry = entry;
-    cell.toggleChanged = ^(BOOL on) {
-        [SCIEnabledExperimentRuntime setSavedState:(on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forEntry:weakEntry];
-        [weakSelf reload];
-    };
-    cell.resetPressed = ^{
-        [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideOff forEntry:weakEntry];
-        [weakSelf reload];
-    };
+    cell.toggleChanged = ^(BOOL on) { [SCIEnabledExperimentRuntime setSavedState:(on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forEntry:weakEntry]; [weakSelf reload]; };
+    cell.systemPressed = ^{ [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideOff forEntry:weakEntry]; [weakSelf reload]; };
     return cell;
 }
 
@@ -411,14 +372,12 @@
     [tv deselectRowAtIndexPath:ip animated:YES];
     SCIEnabledExperimentEntry *entry = [self entryAtIndexPath:ip];
     if (!entry) return;
-    NSString *message = [NSString stringWithFormat:@"Getter owner:\n%@\n\nFunction:\n%@\n\nSource: %@\nSystem: %@\nOverride: %@\nSwitch value: %@\nHits: %lu\nEncoding: %@\n\nKey:\n%@", entry.className ?: @"?", entry.methodName ?: @"?", entry.source ?: @"?", [SCIEnabledExperimentRuntime defaultLabelForEntry:entry], [SCIEnabledExperimentRuntime stateLabelForEntry:entry], [self effectiveSwitchValueForEntry:entry] ? @"ON" : @"OFF", (unsigned long)entry.hitCount, entry.typeEncoding ?: @"", entry.key ?: @""];
+    NSString *message = [NSString stringWithFormat:@"Getter owner:\n%@\n\nFunction:\n%@\n\nImage: %@\nSource: %@\nSystem: %@\nOverride: %@\nSwitch: %@\nType: %@\n\nKey:\n%@", entry.className ?: @"?", entry.methodName ?: @"?", entry.imageName ?: @"?", entry.source ?: @"?", [SCIEnabledExperimentRuntime defaultLabelForEntry:entry], [SCIEnabledExperimentRuntime stateLabelForEntry:entry], [self effectiveSwitchValueForEntry:entry] ? @"ON" : @"OFF", entry.typeEncoding ?: @"", entry.key ?: @""];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.methodName message:message preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideTrue forEntry:entry]; [self reload]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideFalse forEntry:entry]; [self reload]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"System default" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideOff forEntry:entry]; [self reload]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [SCIEnabledExperimentRuntime setSavedState:SCIExpFlagOverrideOff forEntry:entry]; [self reload]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.key ?: @""; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Copy getter owner" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.className ?: @""; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Copy function" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.methodName ?: @""; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
     if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }
