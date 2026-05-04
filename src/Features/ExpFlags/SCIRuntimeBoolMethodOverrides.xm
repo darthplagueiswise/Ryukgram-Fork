@@ -4,7 +4,9 @@
 #import <substrate.h>
 
 static NSString *const kSCIRuntimeObjCOverridePrefix = @"objc:";
-static NSDictionary<NSString *, NSNumber *> *gSCIRuntimeForcedBoolValues = nil;
+static NSString *const kSCIRuntimeBoolObservedDefaultsKey = @"sci_runtime_bool_observed_defaults";
+static NSMutableDictionary<NSString *, NSValue *> *gSCIRuntimeOriginalBoolIMPs = nil;
+static dispatch_once_t gSCIRuntimeInstallOnce;
 
 static BOOL SCIRuntimeMethodReturnsBool(Method m) {
     if (!m) return NO;
@@ -13,74 +15,106 @@ static BOOL SCIRuntimeMethodReturnsBool(Method m) {
     return rt[0] == 'B' || rt[0] == 'c';
 }
 
-static BOOL SCIRuntimeForcedBoolIMP(id self, SEL _cmd, ...) {
-    BOOL isClassMethod = object_isClass(self);
-    NSString *className = isClassMethod ? NSStringFromClass((Class)self) : NSStringFromClass(object_getClass(self));
-    NSString *methodName = NSStringFromSelector(_cmd);
-    NSString *key = [NSString stringWithFormat:@"objc:%@%@ %@", isClassMethod ? @"+" : @"-", className ?: @"", methodName ?: @""];
-    NSNumber *forced = gSCIRuntimeForcedBoolValues[key];
-    if (forced) return forced.boolValue;
-
-    if (!isClassMethod) {
-        Class cls = object_getClass(self);
-        while ((cls = class_getSuperclass(cls))) {
-            NSString *superKey = [NSString stringWithFormat:@"objc:-%@ %@", NSStringFromClass(cls), methodName ?: @""];
-            forced = gSCIRuntimeForcedBoolValues[superKey];
-            if (forced) return forced.boolValue;
-        }
-    }
-
-    return NO;
+static NSString *SCIRuntimeOverrideKey(BOOL isClassMethod, NSString *className, NSString *methodName) {
+    return [NSString stringWithFormat:@"objc:%@%@ %@", isClassMethod ? @"+" : @"-", className ?: @"", methodName ?: @""];
 }
 
-static BOOL SCIParseRuntimeOverrideKey(NSString *key, BOOL *isClassMethod, NSString **className, NSString **methodName) {
-    if (![key hasPrefix:kSCIRuntimeObjCOverridePrefix]) return NO;
-    NSString *body = [key substringFromIndex:kSCIRuntimeObjCOverridePrefix.length];
-    if (body.length < 3) return NO;
-    unichar kind = [body characterAtIndex:0];
-    if (kind != '+' && kind != '-') return NO;
-    NSRange space = [body rangeOfString:@" "];
-    if (space.location == NSNotFound || space.location <= 1 || space.location + 1 >= body.length) return NO;
-    if (isClassMethod) *isClassMethod = (kind == '+');
-    if (className) *className = [body substringWithRange:NSMakeRange(1, space.location - 1)];
-    if (methodName) *methodName = [body substringFromIndex:space.location + 1];
-    return YES;
+static BOOL SCIRuntimeStringLooksInteresting(NSString *className, NSString *methodName) {
+    NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
+    return [s containsString:@"experiment"] || [s containsString:@"enabled"] || [s containsString:@"isenabled"] || [s containsString:@"shouldenable"] || [s containsString:@"shouldshow"] || [s containsString:@"eligib"] || [s containsString:@"launcher"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] || [s containsString:@"mobileconfig"] || [s containsString:@"easygating"] || [s containsString:@"blend"] || [s containsString:@"autofill"];
+}
+
+static NSMutableDictionary *SCIRuntimeLoadObservedDefaults(void) {
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kSCIRuntimeBoolObservedDefaultsKey];
+    return d ? [d mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static void SCIRuntimePersistObservedDefault(NSString *key, BOOL value) {
+    if (!key.length) return;
+    NSMutableDictionary *d = SCIRuntimeLoadObservedDefaults();
+    NSNumber *old = d[key];
+    if (old && old.boolValue == value) return;
+    d[key] = @(value);
+    [[NSUserDefaults standardUserDefaults] setObject:d forKey:kSCIRuntimeBoolObservedDefaultsKey];
+}
+
+static NSString *SCIRuntimeKeyForReceiver(id receiver, SEL sel) {
+    NSString *methodName = NSStringFromSelector(sel);
+    BOOL isClassMethod = object_isClass(receiver);
+    Class cls = isClassMethod ? (Class)receiver : object_getClass(receiver);
+    while (cls) {
+        NSString *className = NSStringFromClass(cls);
+        NSString *key = SCIRuntimeOverrideKey(isClassMethod, className, methodName);
+        if (gSCIRuntimeOriginalBoolIMPs[key]) return key;
+        cls = class_getSuperclass(cls);
+    }
+    return nil;
+}
+
+static BOOL SCIRuntimeObservedBoolIMP(id self, SEL _cmd) {
+    NSString *key = SCIRuntimeKeyForReceiver(self, _cmd);
+    NSValue *origValue = key ? gSCIRuntimeOriginalBoolIMPs[key] : nil;
+
+    BOOL original = NO;
+    if (origValue) {
+        BOOL (*orig)(id, SEL) = (BOOL (*)(id, SEL))origValue.pointerValue;
+        if (orig) original = orig(self, _cmd);
+    }
+
+    if (key) {
+        SCIRuntimePersistObservedDefault(key, original);
+        SCIExpFlagOverride override = [SCIExpFlags overrideForName:key];
+        if (override == SCIExpFlagOverrideTrue) return YES;
+        if (override == SCIExpFlagOverrideFalse) return NO;
+    }
+    return original;
 }
 
 static void SCIInstallRuntimeBoolMethodOverrides(void) {
-    NSArray<NSString *> *names = [SCIExpFlags allOverriddenNames];
-    NSMutableDictionary<NSString *, NSNumber *> *forcedValues = [NSMutableDictionary dictionary];
+    dispatch_once(&gSCIRuntimeInstallOnce, ^{
+        gSCIRuntimeOriginalBoolIMPs = [NSMutableDictionary dictionary];
+        NSUInteger installed = 0;
 
-    for (NSString *key in names) {
-        if (![key hasPrefix:kSCIRuntimeObjCOverridePrefix]) continue;
-        SCIExpFlagOverride override = [SCIExpFlags overrideForName:key];
-        if (override != SCIExpFlagOverrideTrue && override != SCIExpFlagOverrideFalse) continue;
-        forcedValues[key] = @(override == SCIExpFlagOverrideTrue);
-    }
+        unsigned int classCount = 0;
+        Class *classes = objc_copyClassList(&classCount);
+        for (unsigned int c = 0; c < classCount; c++) {
+            Class cls = classes[c];
+            NSString *className = NSStringFromClass(cls);
+            if (!className.length) continue;
 
-    gSCIRuntimeForcedBoolValues = [forcedValues copy];
-    if (!gSCIRuntimeForcedBoolValues.count) return;
+            for (int pass = 0; pass < 2; pass++) {
+                BOOL isClassMethod = (pass == 1);
+                Class methodClass = isClassMethod ? object_getClass(cls) : cls;
+                if (!methodClass) continue;
 
-    NSUInteger installed = 0;
-    for (NSString *key in gSCIRuntimeForcedBoolValues) {
-        BOOL isClassMethod = NO;
-        NSString *className = nil;
-        NSString *methodName = nil;
-        if (!SCIParseRuntimeOverrideKey(key, &isClassMethod, &className, &methodName)) continue;
+                unsigned int methodCount = 0;
+                Method *methods = class_copyMethodList(methodClass, &methodCount);
+                for (unsigned int i = 0; i < methodCount; i++) {
+                    Method method = methods[i];
+                    if (!SCIRuntimeMethodReturnsBool(method)) continue;
+                    if (method_getNumberOfArguments(method) != 2) continue;
 
-        Class cls = NSClassFromString(className);
-        if (!cls) continue;
-        SEL sel = NSSelectorFromString(methodName);
-        Method method = isClassMethod ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
-        if (!SCIRuntimeMethodReturnsBool(method)) continue;
+                    SEL sel = method_getName(method);
+                    NSString *methodName = NSStringFromSelector(sel);
+                    if (!SCIRuntimeStringLooksInteresting(className, methodName)) continue;
 
-        Class hookClass = isClassMethod ? object_getClass(cls) : cls;
-        if (!hookClass) continue;
-        MSHookMessageEx(hookClass, sel, (IMP)SCIRuntimeForcedBoolIMP, NULL);
-        installed++;
-    }
+                    NSString *key = SCIRuntimeOverrideKey(isClassMethod, className, methodName);
+                    if (gSCIRuntimeOriginalBoolIMPs[key]) continue;
 
-    NSLog(@"[RyukGram][RuntimeExperiments] installed %lu forced BOOL method overrides", (unsigned long)installed);
+                    IMP original = NULL;
+                    MSHookMessageEx(methodClass, sel, (IMP)SCIRuntimeObservedBoolIMP, &original);
+                    if (original) {
+                        gSCIRuntimeOriginalBoolIMPs[key] = [NSValue valueWithPointer:original];
+                        installed++;
+                    }
+                }
+                if (methods) free(methods);
+            }
+        }
+        if (classes) free(classes);
+
+        NSLog(@"[RyukGram][RuntimeExperiments] installed %lu observed BOOL getter hooks", (unsigned long)installed);
+    });
 }
 
 %ctor {
