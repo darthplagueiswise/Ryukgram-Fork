@@ -141,9 +141,9 @@
     self.title = @"SCI DexKit";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
 
-    // Menu-scoped: the inventory scan and live observation start only when DexKit opens.
+    // Menu-scoped scan only. Hooks are not started here; overrides are installed
+    // through setSavedState:forEntry: and persisted/reapplied by the hook router.
     [SCIEnabledExperimentRuntime install];
-    [SCIEnabledExperimentRuntime enableLiveObservationForVisibleEntries];
 
     self.filterControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Seen", @"ON", @"OFF", @"Forced"]];
     self.filterControl.selectedSegmentIndex = 0;
@@ -199,7 +199,6 @@
     ]];
 
     [self reload];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self reload]; });
 }
 
 - (NSArray<SCIEnabledExperimentEntry *> *)flatRows {
@@ -278,8 +277,7 @@
     NSUInteger total = [SCIEnabledExperimentRuntime allEntries].count;
     NSUInteger shown = [self flatRows].count;
     NSUInteger live = [SCIEnabledExperimentRuntime installedCount];
-    NSString *observer = [SCIEnabledExperimentRuntime liveObservationEnabled] ? @"live" : @"off";
-    self.footerLabel.text = [NSString stringWithFormat:@"Getter owner groups · Instagram + FBSharedFramework · observer=%@ · total=%lu · showing=%lu · groups=%lu · hooks=%lu", observer, (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count, (unsigned long)live];
+    self.footerLabel.text = [NSString stringWithFormat:@"Getter owner groups · Instagram + FBSharedFramework · menu scan only · total=%lu · showing=%lu · groups=%lu · override hooks=%lu", (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count, (unsigned long)live];
 }
 
 - (BOOL)effectiveSwitchValueForEntry:(SCIEnabledExperimentEntry *)entry {
