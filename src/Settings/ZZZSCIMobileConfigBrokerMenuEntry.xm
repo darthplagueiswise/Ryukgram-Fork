@@ -1,79 +1,64 @@
 #import "TweakSettings.h"
 #import "SCIMobileConfigBrokerViewController.h"
-#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 
-static NSArray *(*orig_mcb_sections)(id, SEL);
+static NSArray *(*orig_mcbr_sections)(id, SEL);
 
-static BOOL MCBRowExists(NSArray *sections) {
+static BOOL SCISectionAlreadyHasMCBroker(NSArray *sections) {
     for (NSDictionary *section in sections) {
         if (![section isKindOfClass:NSDictionary.class]) continue;
         NSArray *rows = [section[@"rows"] isKindOfClass:NSArray.class] ? section[@"rows"] : nil;
-        for (id obj in rows) {
-            SCISetting *row = [obj isKindOfClass:SCISetting.class] ? obj : nil;
-            if ([row.title isEqualToString:@"MC Brokers v2"] || [row.title isEqualToString:@"MobileConfig Brokers v2"]) return YES;
-            NSString *vc = row.navViewController ? NSStringFromClass(row.navViewController.class) : @"";
-            if ([vc isEqualToString:@"SCIMobileConfigBrokerViewController"]) return YES;
+        for (id rowObj in rows) {
+            SCISetting *row = [rowObj isKindOfClass:SCISetting.class] ? rowObj : nil;
+            if (!row) continue;
+            if ([row.title isEqualToString:@"MobileConfig C Brokers v2"] || [NSStringFromClass([row.navViewController class]) isEqualToString:@"SCIMobileConfigBrokerViewController"]) return YES;
         }
     }
     return NO;
 }
 
-static SCISetting *MCBRow(void) {
-    return [SCISetting navigationCellWithTitle:@"MC Brokers v2"
-                                      subtitle:@"C broker router for FBSharedFramework MobileConfig/EasyGating: mcbr:<id> overrides, mcob:<id> observed."
-                                          icon:[SCISymbol symbolWithName:@"switch.2"]
-                                viewController:[SCIMobileConfigBrokerViewController new]];
-}
+static NSArray *new_mcbr_sections(id self, SEL _cmd) {
+    NSArray *orig = orig_mcbr_sections ? orig_mcbr_sections(self, _cmd) : @[];
+    NSMutableArray *sections = [orig mutableCopy] ?: [NSMutableArray array];
+    if (SCISectionAlreadyHasMCBroker(sections)) return sections;
 
-static NSArray *MCBAppendToDeveloperMode(NSArray *sections) {
-    if (MCBRowExists(sections)) return sections;
-    NSMutableArray *out = [sections mutableCopy] ?: [NSMutableArray array];
+    SCISetting *row = [SCISetting navigationCellWithTitle:@"MobileConfig C Brokers v2"
+                                                 subtitle:@"C-function router for IGMobileConfig, EasyGating and MCI. Separate from DexKit ObjC getters."
+                                                     icon:[SCISymbol symbolWithName:@"switch.2"]
+                                           viewController:[SCIMobileConfigBrokerViewController new]];
 
-    for (NSUInteger s = 0; s < out.count; s++) {
-        NSDictionary *section = [out[s] isKindOfClass:NSDictionary.class] ? out[s] : nil;
-        NSMutableArray *rows = [[section[@"rows"] isKindOfClass:NSArray.class] ? section[@"rows"] : @[] mutableCopy];
-        BOOL changedRows = NO;
-        for (NSUInteger r = 0; r < rows.count; r++) {
-            SCISetting *row = [rows[r] isKindOfClass:SCISetting.class] ? rows[r] : nil;
-            if (![row.title isEqualToString:@"Developer Mode"]) continue;
-            NSMutableArray *nav = [[row.navSections isKindOfClass:NSArray.class] ? row.navSections : @[] mutableCopy];
-            [nav addObject:@{
-                @"header": @"MobileConfig / EasyGating C Brokers",
-                @"footer": @"Separated from DexKit ObjC getter scanner. Installs real-body C hooks only for saved overrides or explicit pass-through observer toggles.",
-                @"rows": @[MCBRow()]
-            }];
-            row.navSections = nav;
-            rows[r] = row;
-            changedRows = YES;
-            break;
+    BOOL inserted = NO;
+    for (NSUInteger i = 0; i < sections.count; i++) {
+        NSDictionary *section = [sections[i] isKindOfClass:NSDictionary.class] ? sections[i] : nil;
+        NSArray *rows = [section[@"rows"] isKindOfClass:NSArray.class] ? section[@"rows"] : nil;
+        if (!rows.count) continue;
+        for (id obj in rows) {
+            SCISetting *candidate = [obj isKindOfClass:SCISetting.class] ? obj : nil;
+            if ([candidate.title isEqualToString:@"Developer Mode"]) {
+                NSMutableArray *newRows = [rows mutableCopy];
+                [newRows addObject:row];
+                NSMutableDictionary *newSection = [section mutableCopy];
+                newSection[@"rows"] = newRows;
+                sections[i] = newSection;
+                inserted = YES;
+                break;
+            }
         }
-        if (changedRows) {
-            NSMutableDictionary *newSection = [section mutableCopy];
-            newSection[@"rows"] = rows;
-            out[s] = newSection;
-            return out;
-        }
+        if (inserted) break;
     }
 
-    // Fallback if the simplified Developer Mode section was not installed yet.
-    [out addObject:@{
-        @"header": @"Developer Tools",
-        @"rows": @[MCBRow()]
-    }];
-    return out;
-}
-
-static NSArray *new_mcb_sections(id self, SEL _cmd) {
-    NSArray *orig = orig_mcb_sections ? orig_mcb_sections(self, _cmd) : @[];
-    return MCBAppendToDeveloperMode(orig);
+    if (!inserted) {
+        [sections insertObject:@{@"header": @"Developer Tools", @"rows": @[row]} atIndex:sections.count > 0 ? sections.count - 1 : 0];
+    }
+    return sections;
 }
 
 %ctor {
     Class cls = NSClassFromString(@"SCITweakSettings");
-    Class meta = cls ? object_getClass(cls) : Nil;
+    if (!cls) return;
+    Class meta = object_getClass(cls);
     SEL sel = @selector(sections);
     if (!meta || !class_getInstanceMethod(meta, sel)) return;
-    MSHookMessageEx(meta, sel, (IMP)new_mcb_sections, (IMP *)&orig_mcb_sections);
+    MSHookMessageEx(meta, sel, (IMP)new_mcbr_sections, (IMP *)&orig_mcbr_sections);
 }

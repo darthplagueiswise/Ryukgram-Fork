@@ -3,13 +3,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface SCIMobileConfigBrokerRouter : NSObject
-+ (void)bootstrap;
-+ (BOOL)installBroker:(SCIMobileConfigBrokerDescriptor *)descriptor error:(NSError **)error;
-+ (BOOL)isInstalled:(NSString *)brokerID;
-+ (NSUInteger)installedCount;
-+ (NSDictionary<NSString *, NSString *> *)installErrors;
-+ (void)installEnabledBrokers;
-@end
+FOUNDATION_EXPORT void SCIMCBrokerBootstrap(void);
+FOUNDATION_EXPORT BOOL SCIMCBrokerInstall(SCIMobileConfigBrokerDescriptor *broker, NSError **error);
+FOUNDATION_EXPORT BOOL SCIMCBrokerIsInstalled(NSString *brokerID);
+FOUNDATION_EXPORT NSUInteger SCIMCBrokerInstalledCount(void);
+FOUNDATION_EXPORT NSString *SCIMCBrokerRuntimeSummary(void);
 
 NS_ASSUME_NONNULL_END

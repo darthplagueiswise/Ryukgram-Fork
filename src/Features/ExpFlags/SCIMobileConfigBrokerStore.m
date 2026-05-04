@@ -1,165 +1,156 @@
 #import "SCIMobileConfigBrokerStore.h"
 
-NSString * const SCIMCBrokerStoreDidChangeNotification = @"SCIMCBrokerStoreDidChangeNotification";
-
-static NSString * const kMCBRIndexKey = @"mcbr.idx";
-static NSString * const kMCBRHookPrefix = @"mcbr.hook:";
-static NSString * const kMCBRHitPrefix = @"mcbr.hit:";
-static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
+NSString * const SCIMCBrokerIndexKey = @"dexkit.cbool.__index";
+NSString * const SCIMCBrokerHookIndexKey = @"dexkit.cbool.hooks";
+static NSString * const kSCIMCBrokerObservedPrefix = @"dexkit.observed.cbool:";
 
 @implementation SCIMobileConfigBrokerStore
 
-+ (void)registerDefaultsAndMigrate {
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{kMCBRIndexKey: @[]}];
-
-    // Conservative migration from the initial long namespace, if it was ever used locally.
-    NSDictionary *all = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-    NSMutableArray *idx = [[[NSUserDefaults standardUserDefaults] arrayForKey:kMCBRIndexKey] mutableCopy] ?: [NSMutableArray array];
-    for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
-        NSString *longKey = [NSString stringWithFormat:@"dexkit.cbroker:%@:%@", d.imageName, d.symbol];
-        id value = all[longKey];
-        if ([value isKindOfClass:NSNumber.class]) {
-            NSString *shortKey = [self overrideKeyForBrokerID:d.brokerID];
-            [[NSUserDefaults standardUserDefaults] setBool:[value boolValue] forKey:shortKey];
-            if (![idx containsObject:d.brokerID]) [idx addObject:d.brokerID];
-        }
-    }
-    [[NSUserDefaults standardUserDefaults] setObject:idx forKey:kMCBRIndexKey];
++ (void)registerDefaults {
+    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
+        SCIMCBrokerIndexKey: @[],
+        SCIMCBrokerHookIndexKey: @[],
+    }];
 }
 
-+ (NSString *)overrideKeyForBrokerID:(NSString *)brokerID { return [@"mcbr:" stringByAppendingString:brokerID ?: @""]; }
-+ (NSString *)observedKeyForBrokerID:(NSString *)brokerID { return [@"mcob:" stringByAppendingString:brokerID ?: @""]; }
-+ (NSString *)lastErrorKeyForBrokerID:(NSString *)brokerID { return [@"mcer:" stringByAppendingString:brokerID ?: @""]; }
-+ (NSString *)hookEnabledKeyForBrokerID:(NSString *)brokerID { return [kMCBRHookPrefix stringByAppendingString:brokerID ?: @""]; }
-+ (NSString *)hitKeyForBrokerID:(NSString *)brokerID { return [kMCBRHitPrefix stringByAppendingString:brokerID ?: @""]; }
-+ (NSString *)forcedHitKeyForBrokerID:(NSString *)brokerID { return [kMCBRForcedHitPrefix stringByAppendingString:brokerID ?: @""]; }
-
-+ (NSArray<NSString *> *)activeOverrideBrokerIDs {
-    NSArray *idx = [[NSUserDefaults standardUserDefaults] arrayForKey:kMCBRIndexKey];
-    NSMutableArray *out = [NSMutableArray array];
-    for (id obj in idx ?: @[]) {
-        if (![obj isKindOfClass:NSString.class]) continue;
-        NSString *bid = obj;
-        if ([self overrideValueForBrokerID:bid] != nil) [out addObject:bid];
-    }
-    return out;
++ (NSString *)overrideKeyForBroker:(SCIMobileConfigBrokerDescriptor *)broker value:(uint64_t)value {
+    NSString *symbol = [broker namespaceSymbol] ?: @"";
+    NSString *kind = [broker kindLabel] ?: @"specifier";
+    return [NSString stringWithFormat:@"dexkit.cbool:%@:%@:%@:%016llx",
+            broker.imageName ?: @"FBSharedFramework",
+            symbol,
+            kind,
+            (unsigned long long)value];
 }
 
-+ (NSNumber *)overrideValueForBrokerID:(NSString *)brokerID {
-    if (!brokerID.length) return nil;
-    id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self overrideKeyForBrokerID:brokerID]];
++ (NSString *)observedKeyForOverrideKey:(NSString *)overrideKey {
+    if (![overrideKey hasPrefix:@"dexkit.cbool:"]) return @"";
+    return [kSCIMCBrokerObservedPrefix stringByAppendingString:[overrideKey substringFromIndex:@"dexkit.cbool:".length]];
+}
+
++ (NSString *)hookEnabledKeyForBrokerID:(NSString *)brokerID {
+    return [@"dexkit.cbool.hook:" stringByAppendingString:brokerID ?: @""];
+}
+
++ (NSString *)errorKeyForBrokerID:(NSString *)brokerID {
+    return [@"dexkit.cbool.err:" stringByAppendingString:brokerID ?: @""];
+}
+
++ (NSArray *)arrayForKey:(NSString *)key {
+    NSArray *arr = [[NSUserDefaults standardUserDefaults] arrayForKey:key];
+    return [arr isKindOfClass:NSArray.class] ? arr : @[];
+}
+
++ (void)setIndexedKey:(NSString *)item enabled:(BOOL)enabled indexKey:(NSString *)indexKey {
+    if (!item.length || !indexKey.length) return;
+    NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:indexKey]];
+    if (enabled) [set addObject:item];
+    else [set removeObject:item];
+    [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:indexKey];
+}
+
++ (nullable NSNumber *)overrideValueForKey:(NSString *)key {
+    if (!key.length) return nil;
+    id v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
     return [v isKindOfClass:NSNumber.class] ? v : nil;
 }
 
-+ (void)setOverrideValue:(NSNumber *)value forBrokerID:(NSString *)brokerID {
-    if (!brokerID.length) return;
++ (void)setOverrideValue:(nullable NSNumber *)value forKey:(NSString *)key {
+    if (!key.length) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    NSMutableArray *idx = [[ud arrayForKey:kMCBRIndexKey] mutableCopy] ?: [NSMutableArray array];
-    NSString *key = [self overrideKeyForBrokerID:brokerID];
     if (value) {
         [ud setBool:value.boolValue forKey:key];
-        if (![idx containsObject:brokerID]) [idx addObject:brokerID];
+        [self setIndexedKey:key enabled:YES indexKey:SCIMCBrokerIndexKey];
     } else {
         [ud removeObjectForKey:key];
-        [idx removeObject:brokerID];
+        [self setIndexedKey:key enabled:NO indexKey:SCIMCBrokerIndexKey];
     }
-    [ud setObject:idx forKey:kMCBRIndexKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"brokerID": brokerID}];
 }
 
-+ (NSNumber *)observedValueForBrokerID:(NSString *)brokerID {
-    id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self observedKeyForBrokerID:brokerID]];
++ (BOOL)hookEnabledForBrokerID:(NSString *)brokerID {
+    if (!brokerID.length) return NO;
+    return [[NSUserDefaults standardUserDefaults] boolForKey:[self hookEnabledKeyForBrokerID:brokerID]] || [[self enabledHookBrokerIDs] containsObject:brokerID];
+}
+
++ (void)setHookEnabled:(BOOL)enabled forBrokerID:(NSString *)brokerID {
+    if (!brokerID.length) return;
+    NSString *key = [self hookEnabledKeyForBrokerID:brokerID];
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:key];
+    [self setIndexedKey:brokerID enabled:enabled indexKey:SCIMCBrokerHookIndexKey];
+}
+
++ (void)noteObservedValue:(BOOL)value forOverrideKey:(NSString *)overrideKey {
+    NSString *key = [self observedKeyForOverrideKey:overrideKey];
+    if (!key.length) return;
+    [[NSUserDefaults standardUserDefaults] setBool:value forKey:key];
+}
+
++ (nullable NSNumber *)observedValueForOverrideKey:(NSString *)overrideKey {
+    NSString *key = [self observedKeyForOverrideKey:overrideKey];
+    if (!key.length) return nil;
+    id v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
     return [v isKindOfClass:NSNumber.class] ? v : nil;
 }
 
-+ (void)noteObservedValue:(BOOL)value brokerID:(NSString *)brokerID {
++ (void)setLastError:(nullable NSString *)error forBrokerID:(NSString *)brokerID {
     if (!brokerID.length) return;
-    [[NSUserDefaults standardUserDefaults] setBool:value forKey:[self observedKeyForBrokerID:brokerID]];
-}
-
-+ (void)noteLastError:(NSString *)error brokerID:(NSString *)brokerID {
-    if (!brokerID.length) return;
-    NSString *key = [self lastErrorKeyForBrokerID:brokerID];
+    NSString *key = [self errorKeyForBrokerID:brokerID];
     if (error.length) [[NSUserDefaults standardUserDefaults] setObject:error forKey:key];
     else [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
 }
 
-+ (NSString *)lastErrorForBrokerID:(NSString *)brokerID {
-    id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self lastErrorKeyForBrokerID:brokerID]];
++ (nullable NSString *)lastErrorForBrokerID:(NSString *)brokerID {
+    id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self errorKeyForBrokerID:brokerID]];
     return [v isKindOfClass:NSString.class] ? v : nil;
 }
 
-+ (BOOL)isBrokerHookEnabledForID:(NSString *)brokerID {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:[self hookEnabledKeyForBrokerID:brokerID]];
-}
-
-+ (void)setBrokerHookEnabled:(BOOL)enabled brokerID:(NSString *)brokerID {
-    if (!brokerID.length) return;
-    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:[self hookEnabledKeyForBrokerID:brokerID]];
-    [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"brokerID": brokerID}];
-}
-
-+ (SCIMCBrokerBoolState)effectiveStateForBrokerID:(NSString *)brokerID {
-    NSNumber *forced = [self overrideValueForBrokerID:brokerID];
-    if (forced) return forced.boolValue ? SCIMCBrokerBoolStateOn : SCIMCBrokerBoolStateOff;
-    NSNumber *observed = [self observedValueForBrokerID:brokerID];
-    if (observed) return observed.boolValue ? SCIMCBrokerBoolStateOn : SCIMCBrokerBoolStateOff;
-    return SCIMCBrokerBoolStateSystem;
-}
-
-+ (NSString *)stateLabelForBrokerID:(NSString *)brokerID {
-    SCIMCBrokerBoolState s = [self effectiveStateForBrokerID:brokerID];
-    if (s == SCIMCBrokerBoolStateOn) return @"ON";
-    if (s == SCIMCBrokerBoolStateOff) return @"OFF";
-    return @"Unknown";
-}
-
-+ (NSString *)systemLabelForBrokerID:(NSString *)brokerID {
-    NSNumber *observed = [self observedValueForBrokerID:brokerID];
-    if (!observed) return @"Unknown";
-    return observed.boolValue ? @"ON" : @"OFF";
-}
-
-+ (NSString *)overrideLabelForBrokerID:(NSString *)brokerID {
-    NSNumber *forced = [self overrideValueForBrokerID:brokerID];
-    if (!forced) return @"System";
-    return forced.boolValue ? @"Forced ON" : @"Forced OFF";
-}
-
-+ (void)noteHitForBrokerID:(NSString *)brokerID forced:(BOOL)forced {
-    if (!brokerID.length) return;
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    NSString *hitKey = [self hitKeyForBrokerID:brokerID];
-    [ud setInteger:([ud integerForKey:hitKey] + 1) forKey:hitKey];
-    if (forced) {
-        NSString *fKey = [self forcedHitKeyForBrokerID:brokerID];
-        [ud setInteger:([ud integerForKey:fKey] + 1) forKey:fKey];
++ (NSArray<NSString *> *)activeOverrideKeys {
+    NSMutableArray *out = [NSMutableArray array];
+    for (id obj in [self arrayForKey:SCIMCBrokerIndexKey]) {
+        if (![obj isKindOfClass:NSString.class]) continue;
+        if ([self overrideValueForKey:obj]) [out addObject:obj];
     }
+    return out;
 }
 
-+ (NSUInteger)hitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self hitKeyForBrokerID:brokerID]]; }
-+ (NSUInteger)forcedHitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self forcedHitKeyForBrokerID:brokerID]]; }
-
-+ (NSDictionary *)snapshotDictionary {
-    NSMutableDictionary *d = [NSMutableDictionary dictionary];
-    for (SCIMobileConfigBrokerDescriptor *desc in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
-        d[desc.brokerID] = @{
-            @"key": [self overrideKeyForBrokerID:desc.brokerID],
-            @"symbol": desc.symbol ?: @"",
-            @"override": [self overrideValueForBrokerID:desc.brokerID] ?: [NSNull null],
-            @"observed": [self observedValueForBrokerID:desc.brokerID] ?: [NSNull null],
-            @"hookEnabled": @([self isBrokerHookEnabledForID:desc.brokerID]),
-            @"hits": @([self hitCountForBrokerID:desc.brokerID]),
-            @"forcedHits": @([self forcedHitCountForBrokerID:desc.brokerID]),
-            @"lastError": [self lastErrorForBrokerID:desc.brokerID] ?: @""
-        };
++ (NSArray<NSString *> *)enabledHookBrokerIDs {
+    NSMutableArray *out = [NSMutableArray array];
+    for (id obj in [self arrayForKey:SCIMCBrokerHookIndexKey]) {
+        if ([obj isKindOfClass:NSString.class]) [out addObject:obj];
     }
-    return d;
+    return out;
 }
 
-+ (void)resetAllBrokerOverrides {
-    NSArray *ids = [self activeOverrideBrokerIDs];
-    for (NSString *bid in ids) [self setOverrideValue:nil forBrokerID:bid];
++ (NSArray<NSString *> *)observedOverrideKeys {
+    NSDictionary *all = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSString *key in all.allKeys) {
+        if (![key hasPrefix:kSCIMCBrokerObservedPrefix]) continue;
+        NSString *overrideKey = [@"dexkit.cbool:" stringByAppendingString:[key substringFromIndex:kSCIMCBrokerObservedPrefix.length]];
+        [out addObject:overrideKey];
+    }
+    return [out sortedArrayUsingSelector:@selector(compare:)];
+}
+
++ (BOOL)parseOverrideKey:(NSString *)key brokerID:(NSString **)brokerID image:(NSString **)image symbol:(NSString **)symbol kind:(NSString **)kind value:(uint64_t *)value {
+    if (![key hasPrefix:@"dexkit.cbool:"]) return NO;
+    NSString *body = [key substringFromIndex:@"dexkit.cbool:".length];
+    NSArray<NSString *> *parts = [body componentsSeparatedByString:@":"];
+    if (parts.count < 4) return NO;
+    NSString *img = parts[0];
+    NSString *sym = parts[1];
+    NSString *k = parts[2];
+    NSString *hex = parts[3];
+    uint64_t parsed = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:hex];
+    if (![scanner scanHexLongLong:&parsed]) return NO;
+    SCIMobileConfigBrokerDescriptor *d = [SCIMobileConfigBrokerDescriptor descriptorForSymbol:[@"_" stringByAppendingString:sym]] ?: [SCIMobileConfigBrokerDescriptor descriptorForSymbol:sym];
+    if (brokerID) *brokerID = d.brokerID ?: @"";
+    if (image) *image = img;
+    if (symbol) *symbol = sym;
+    if (kind) *kind = k;
+    if (value) *value = parsed;
+    return YES;
 }
 
 @end
