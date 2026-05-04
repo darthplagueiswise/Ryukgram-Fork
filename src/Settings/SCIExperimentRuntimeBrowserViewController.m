@@ -4,6 +4,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+static NSString *const kSCIRuntimeBoolObservedDefaultsKey = @"sci_runtime_bool_observed_defaults";
+
 @interface SCIRuntimeMethodEntry : NSObject
 @property (nonatomic, copy) NSString *className;
 @property (nonatomic, copy) NSString *methodName;
@@ -28,6 +30,60 @@
 @property (nonatomic, strong) NSArray<NSString *> *ivars;
 @end
 @implementation SCIRuntimeClassEntry
+@end
+
+@interface SCIRuntimeBoolToggleCell : UITableViewCell
+@property (nonatomic, strong) UILabel *title;
+@property (nonatomic, strong) UILabel *detail;
+@property (nonatomic, strong) UISwitch *toggleSwitch;
+@property (nonatomic, strong) UIButton *systemButton;
+@property (nonatomic, copy) void (^toggleChanged)(BOOL on);
+@property (nonatomic, copy) void (^systemPressed)(void);
+@end
+
+@implementation SCIRuntimeBoolToggleCell
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
+    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+    if (!self) return nil;
+    self.selectionStyle = UITableViewCellSelectionStyleDefault;
+    self.title = [UILabel new];
+    self.title.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+    self.title.numberOfLines = 0;
+    self.title.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.title];
+    self.detail = [UILabel new];
+    self.detail.font = [UIFont systemFontOfSize:10];
+    self.detail.textColor = UIColor.secondaryLabelColor;
+    self.detail.numberOfLines = 0;
+    self.detail.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.contentView addSubview:self.detail];
+    self.toggleSwitch = [UISwitch new];
+    self.toggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.toggleSwitch addTarget:self action:@selector(switchChanged) forControlEvents:UIControlEventValueChanged];
+    [self.contentView addSubview:self.toggleSwitch];
+    self.systemButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.systemButton setTitle:@"System" forState:UIControlStateNormal];
+    self.systemButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.systemButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.systemButton addTarget:self action:@selector(systemTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.contentView addSubview:self.systemButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:8],
+        [self.title.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:12],
+        [self.title.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-12],
+        [self.detail.topAnchor constraintEqualToAnchor:self.title.bottomAnchor constant:4],
+        [self.detail.leadingAnchor constraintEqualToAnchor:self.title.leadingAnchor],
+        [self.detail.trailingAnchor constraintEqualToAnchor:self.title.trailingAnchor],
+        [self.toggleSwitch.topAnchor constraintEqualToAnchor:self.detail.bottomAnchor constant:8],
+        [self.toggleSwitch.leadingAnchor constraintEqualToAnchor:self.title.leadingAnchor],
+        [self.toggleSwitch.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-10],
+        [self.systemButton.centerYAnchor constraintEqualToAnchor:self.toggleSwitch.centerYAnchor],
+        [self.systemButton.leadingAnchor constraintEqualToAnchor:self.toggleSwitch.trailingAnchor constant:18],
+    ]];
+    return self;
+}
+- (void)switchChanged { if (self.toggleChanged) self.toggleChanged(self.toggleSwitch.isOn); }
+- (void)systemTapped { if (self.systemPressed) self.systemPressed(); }
 @end
 
 typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
@@ -76,6 +132,9 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 112;
+    [self.tableView registerClass:SCIRuntimeBoolToggleCell.class forCellReuseIdentifier:@"boolToggleCell"];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
 
@@ -130,14 +189,36 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     [self updateEmpty];
 }
 
+- (NSDictionary *)observedDefaults { return [[NSUserDefaults standardUserDefaults] dictionaryForKey:kSCIRuntimeBoolObservedDefaultsKey] ?: @{}; }
+- (NSNumber *)observedDefaultForEntry:(SCIRuntimeMethodEntry *)entry { return [self observedDefaults][entry.overrideKey]; }
+- (BOOL)effectiveSwitchForEntry:(SCIRuntimeMethodEntry *)entry {
+    SCIExpFlagOverride o = [SCIExpFlags overrideForName:entry.overrideKey];
+    if (o == SCIExpFlagOverrideTrue) return YES;
+    if (o == SCIExpFlagOverrideFalse) return NO;
+    NSNumber *n = [self observedDefaultForEntry:entry];
+    return n ? n.boolValue : NO;
+}
+- (NSString *)stateLabelForEntry:(SCIRuntimeMethodEntry *)entry {
+    SCIExpFlagOverride o = [SCIExpFlags overrideForName:entry.overrideKey];
+    if (o == SCIExpFlagOverrideTrue) return @"OVERRIDE ON";
+    if (o == SCIExpFlagOverrideFalse) return @"OVERRIDE OFF";
+    return @"SYSTEM";
+}
+- (NSString *)systemLabelForEntry:(SCIRuntimeMethodEntry *)entry {
+    NSNumber *n = [self observedDefaultForEntry:entry];
+    if (!n) return @"unknown";
+    return n.boolValue ? @"ON" : @"OFF";
+}
+
 - (BOOL)stringLooksInteresting:(NSString *)s {
     if (!s.length) return NO;
     NSString *l = s.lowercaseString;
-    return [l containsString:@"experiment"] || [l containsString:@"enabled"] || [l containsString:@"isenabled"] || [l containsString:@"shouldenable"] || [l containsString:@"shouldshow"] || [l containsString:@"eligib"] || [l containsString:@"launcher"] || [l containsString:@"dogfood"] || [l containsString:@"internal"] || [l containsString:@"mobileconfig"] || [l containsString:@"easygating"];
+    return [l containsString:@"experiment"] || [l containsString:@"enabled"] || [l containsString:@"isenabled"] || [l containsString:@"shouldenable"] || [l containsString:@"shouldshow"] || [l containsString:@"eligib"] || [l containsString:@"launcher"] || [l containsString:@"dogfood"] || [l containsString:@"internal"] || [l containsString:@"mobileconfig"] || [l containsString:@"easygating"] || [l containsString:@"blend"] || [l containsString:@"autofill"];
 }
 
 - (NSString *)sourceForClassName:(NSString *)name method:(NSString *)method {
     NSString *s = [NSString stringWithFormat:@"%@ %@", name ?: @"", method ?: @""].lowercaseString;
+    if ([s containsString:@"autofillinternalsettings"] || [s containsString:@"autofill"]) return @"Autofill/Internal";
     if ([s containsString:@"fbcustomexperimentmanager"]) return @"FBCustomExperimentManager";
     if ([s containsString:@"fdidexperimentgenerator"]) return @"FDIDExperimentGenerator";
     if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
@@ -161,10 +242,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 }
 
 - (NSString *)overrideLabelForEntry:(SCIRuntimeMethodEntry *)entry {
-    SCIExpFlagOverride o = [SCIExpFlags overrideForName:[entry overrideKey]];
-    if (o == SCIExpFlagOverrideTrue) return @"FORCED ON";
-    if (o == SCIExpFlagOverrideFalse) return @"FORCED OFF";
-    return @"Default";
+    return [self stateLabelForEntry:entry];
 }
 
 - (NSArray<SCIRuntimeMethodEntry *> *)methodEntriesForClass:(Class)cls meta:(BOOL)meta className:(NSString *)className {
@@ -174,7 +252,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     for (unsigned int i = 0; i < count; i++) {
         Method m = methods[i];
         NSString *name = NSStringFromSelector(method_getName(m));
-        if (![self stringLooksInteresting:name]) continue;
+        if (![self stringLooksInteresting:name] && ![self stringLooksInteresting:className]) continue;
         SCIRuntimeMethodEntry *e = [SCIRuntimeMethodEntry new];
         e.className = className;
         e.methodName = name;
@@ -294,6 +372,36 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    id row = [self filteredRows][ip.row];
+    if (![row isKindOfClass:SCIRuntimeClassEntry.class]) {
+        SCIRuntimeMethodEntry *m = row;
+        if (m.returnsBool && m.argCount == 2) {
+            SCIRuntimeBoolToggleCell *cell = [tv dequeueReusableCellWithIdentifier:@"boolToggleCell" forIndexPath:ip];
+            NSString *prefix = m.classMethod ? @"+" : @"-";
+            cell.title.text = [NSString stringWithFormat:@"%@[%@ %@]", prefix, m.className, m.methodName];
+            cell.detail.text = [NSString stringWithFormat:@"getter=%@ · source=%@ · system=%@ · state=%@ · args=%u · %@", m.methodName, m.source, [self systemLabelForEntry:m], [self stateLabelForEntry:m], m.argCount, m.typeEncoding ?: @""];
+            SCIExpFlagOverride state = [SCIExpFlags overrideForName:m.overrideKey];
+            [cell.toggleSwitch setOn:[self effectiveSwitchForEntry:m] animated:NO];
+            cell.toggleSwitch.enabled = ([self observedDefaultForEntry:m] != nil || state != SCIExpFlagOverrideOff);
+            cell.systemButton.enabled = state != SCIExpFlagOverrideOff;
+            cell.systemButton.alpha = cell.systemButton.enabled ? 1.0 : 0.35;
+            if ([self observedDefaultForEntry:m] == nil && state == SCIExpFlagOverrideOff) {
+                cell.detail.text = [cell.detail.text stringByAppendingString:@" · waiting for app call"];
+            }
+            __weak typeof(self) weakSelf = self;
+            __weak SCIRuntimeMethodEntry *weakEntry = m;
+            cell.toggleChanged = ^(BOOL on) {
+                [SCIExpFlags setOverride:(on ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse) forName:weakEntry.overrideKey];
+                [weakSelf.tableView reloadData];
+            };
+            cell.systemPressed = ^{
+                [SCIExpFlags setOverride:SCIExpFlagOverrideOff forName:weakEntry.overrideKey];
+                [weakSelf.tableView reloadData];
+            };
+            return cell;
+        }
+    }
+
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -303,7 +411,6 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:11];
 
-    id row = [self filteredRows][ip.row];
     if ([row isKindOfClass:SCIRuntimeClassEntry.class]) {
         SCIRuntimeClassEntry *c = row;
         cell.textLabel.text = c.name;
@@ -311,11 +418,10 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
         cell.textLabel.textColor = UIColor.labelColor;
     } else {
         SCIRuntimeMethodEntry *m = row;
-        NSString *state = [self overrideLabelForEntry:m];
-        NSString *prefix = [state isEqualToString:@"FORCED ON"] ? @"● " : [state isEqualToString:@"FORCED OFF"] ? @"○ " : @"";
-        cell.textLabel.text = [NSString stringWithFormat:@"%@%@ %@", prefix, m.classMethod ? @"+" : @"-", m.methodName];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"source=%@ · state=%@ · %@ · args=%u · %@", m.source, state, m.className, m.argCount, m.typeEncoding ?: @""];
-        cell.textLabel.textColor = [state isEqualToString:@"Default"] ? UIColor.labelColor : UIColor.systemOrangeColor;
+        NSString *prefix = [self stateLabelForEntry:m];
+        cell.textLabel.text = [NSString stringWithFormat:@"%@ %@", m.classMethod ? @"+" : @"-", m.methodName];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"getter=%@ · source=%@ · system=%@ · state=%@ · %@ · args=%u · %@", m.methodName, m.source, [self systemLabelForEntry:m], prefix, m.className, m.argCount, m.typeEncoding ?: @""];
+        cell.textLabel.textColor = [prefix isEqualToString:@"SYSTEM"] ? UIColor.labelColor : UIColor.systemOrangeColor;
     }
     return cell;
 }
@@ -341,7 +447,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
         }
         if (entry.methods.count > max) [msg appendFormat:@"… +%lu more", (unsigned long)(entry.methods.count - max)];
     }
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.name message:msg preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.name message:msg.length ? msg : @"No focused members." preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy class name" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.name; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy summary" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = msg; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -352,36 +458,25 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (void)setOverride:(SCIExpFlagOverride)o forMethodEntry:(SCIRuntimeMethodEntry *)entry {
     [SCIExpFlags setOverride:o forName:[entry overrideKey]];
     [self.tableView reloadData];
-    if (o == SCIExpFlagOverrideOff) [SCIUtils showToastForDuration:2.0 title:@"Default restored" subtitle:@"Restart if already hooked this launch"];
-    else [SCIUtils showToastForDuration:2.5 title:@"Override saved" subtitle:@"Restart Instagram to install hook"];
+    if (o == SCIExpFlagOverrideOff) [SCIUtils showToastForDuration:2.0 title:@"System restored" subtitle:@"Following original getter return"];
+    else [SCIUtils showToastForDuration:2.5 title:@"Override saved" subtitle:@"Switch now forces getter return"];
 }
 
 - (void)presentMethodEntry:(SCIRuntimeMethodEntry *)entry fromCell:(UITableViewCell *)cell {
-    NSString *state = [self overrideLabelForEntry:entry];
+    NSString *state = [self stateLabelForEntry:entry];
     NSString *title = [NSString stringWithFormat:@"%@ %@", entry.classMethod ? @"+" : @"-", entry.methodName];
-    NSString *msg = [NSString stringWithFormat:@"Source: %@\nState: %@\nClass: %@\nArgs: %u\nEncoding: %@\nKey: %@", entry.source, state, entry.className, entry.argCount, entry.typeEncoding ?: @"", [entry overrideKey]];
+    NSString *msg = [NSString stringWithFormat:@"Getter: %@\nSource: %@\nSystem: %@\nState: %@\nClass: %@\nArgs: %u\nEncoding: %@\nKey: %@", entry.methodName, entry.source, [self systemLabelForEntry:entry], state, entry.className, entry.argCount, entry.typeEncoding ?: @"", [entry overrideKey]];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:msg preferredStyle:UIAlertControllerStyleActionSheet];
 
-    if (entry.returnsBool) {
-        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"Default"] ? @"Default ✓" : @"Default / original" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideOff forMethodEntry:entry]; }]];
-        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"FORCED ON"] ? @"Force YES ✓" : @"Force YES" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideTrue forMethodEntry:entry]; }]];
-        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"FORCED OFF"] ? @"Force NO ✓" : @"Force NO" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideFalse forMethodEntry:entry]; }]];
+    if (entry.returnsBool && entry.argCount == 2) {
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"SYSTEM"] ? @"System default ✓" : @"System default" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideOff forMethodEntry:entry]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"OVERRIDE ON"] ? @"Force ON ✓" : @"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideTrue forMethodEntry:entry]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:[state isEqualToString:@"OVERRIDE OFF"] ? @"Force OFF ✓" : @"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { [self setOverride:SCIExpFlagOverrideFalse forMethodEntry:entry]; }]];
     }
 
     [a addAction:[UIAlertAction actionWithTitle:@"Copy selector" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = entry.methodName; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy class.method" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@ %@", entry.className, entry.methodName]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy override key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) { UIPasteboard.generalPasteboard.string = [entry overrideKey]; }]];
-
-    if (entry.classMethod && entry.returnsBool && entry.argCount == 2) {
-        [a addAction:[UIAlertAction actionWithTitle:@"Call default BOOL getter now" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
-            Class cls = NSClassFromString(entry.className);
-            SEL sel = NSSelectorFromString(entry.methodName);
-            if (!cls || ![cls respondsToSelector:sel]) { [SCIUtils showErrorHUDWithDescription:@"Selector missing"]; return; }
-            BOOL value = ((BOOL (*)(Class, SEL))objc_msgSend)(cls, sel);
-            [SCIUtils showToastForDuration:2.0 title:(value ? @"YES" : @"NO") subtitle:entry.methodName];
-        }]];
-    }
-
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }
     [self presentViewController:a animated:YES completion:nil];
