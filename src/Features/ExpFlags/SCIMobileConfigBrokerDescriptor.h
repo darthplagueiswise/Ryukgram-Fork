@@ -2,6 +2,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSInteger, SCIMCBrokerKind) {
+    SCIMCBrokerKindPrimary = 0,
+    SCIMCBrokerKindComplement = 1,
+    SCIMCBrokerKindCompat = 2,
+    SCIMCBrokerKindAdvanced = 3,
+};
+
 typedef NS_ENUM(NSInteger, SCIMCBrokerABI) {
     SCIMCBrokerABIIGInternalBool = 0,
     SCIMCBrokerABIGeneric8Bool = 1,
@@ -10,13 +17,6 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerABI) {
 typedef NS_ENUM(NSInteger, SCIMCBrokerKeyKind) {
     SCIMCBrokerKeyKindSpecifier = 0,
     SCIMCBrokerKeyKindGate = 1,
-};
-
-typedef NS_ENUM(NSInteger, SCIMCBrokerTier) {
-    SCIMCBrokerTierPrimary = 0,
-    SCIMCBrokerTierComplement = 1,
-    SCIMCBrokerTierCompat = 2,
-    SCIMCBrokerTierAdvanced = 3,
 };
 
 @interface SCIMobileConfigBrokerDescriptor : NSObject
@@ -28,19 +28,18 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerTier) {
 @property (nonatomic, assign) uint64_t expectedOrig8;
 @property (nonatomic, assign) uintptr_t vmAddress;
 @property (nonatomic, assign) NSUInteger xrefCount;
+@property (nonatomic, assign) SCIMCBrokerKind kind;
 @property (nonatomic, assign) SCIMCBrokerABI abi;
 @property (nonatomic, assign) SCIMCBrokerKeyKind keyKind;
-@property (nonatomic, assign) SCIMCBrokerTier tier;
 @property (nonatomic, assign) NSUInteger keyArgumentIndex;
 @property (nonatomic, assign) NSUInteger defaultArgumentIndex;
-@property (nonatomic, assign) BOOL enabledByDefault;
-
+@property (nonatomic, assign) BOOL exactIGInternalSignature;
 + (NSArray<SCIMobileConfigBrokerDescriptor *> *)allDescriptors;
 + (nullable SCIMobileConfigBrokerDescriptor *)descriptorForID:(NSString *)brokerID;
 + (nullable SCIMobileConfigBrokerDescriptor *)descriptorForSymbol:(NSString *)symbol;
 - (NSString *)namespaceSymbol;
-- (NSString *)tierLabel;
 - (NSString *)kindLabel;
+- (NSString *)tierLabel;
 @end
 
 NS_ASSUME_NONNULL_END

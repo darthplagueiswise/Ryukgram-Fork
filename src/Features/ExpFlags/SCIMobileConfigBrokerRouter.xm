@@ -2,229 +2,295 @@
 #import "SCIMobileConfigBrokerStore.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
 #import <substrate.h>
 
-// C-broker router for FBSharedFramework MobileConfig/EasyGating bool readers.
-// This is deliberately separate from DexKit ObjC getter scanning.
+typedef BOOL (*MCBRIGInternalFn)(id, BOOL, unsigned long long);
+typedef uintptr_t (*MCBRGeneric8Fn)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 
-typedef BOOL (*SCIIGMCBoolFn)(id ctx, BOOL defaultValue, uint64_t specifier);
-typedef uintptr_t (*SCIGeneric8Fn)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+static NSMutableDictionary<NSString *, NSValue *> *gMCBROriginals;
+static NSMutableSet<NSString *> *gMCBRInstalledIDs;
+static NSMutableSet<NSString *> *gMCBRPendingIDs;
+static NSMutableDictionary<NSString *, NSString *> *gMCBRErrors;
 
-static NSMutableDictionary<NSString *, NSValue *> *gOriginals;
-static NSMutableDictionary<NSString *, SCIMobileConfigBrokerDescriptor *> *gInstalled;
-
-static void SCIEnsureMaps(void) {
-    if (!gOriginals) gOriginals = [NSMutableDictionary dictionary];
-    if (!gInstalled) gInstalled = [NSMutableDictionary dictionary];
+static void MCBREnsureState(void) {
+    if (!gMCBROriginals) gMCBROriginals = [NSMutableDictionary dictionary];
+    if (!gMCBRInstalledIDs) gMCBRInstalledIDs = [NSMutableSet set];
+    if (!gMCBRPendingIDs) gMCBRPendingIDs = [NSMutableSet set];
+    if (!gMCBRErrors) gMCBRErrors = [NSMutableDictionary dictionary];
 }
 
-static NSString *SCIDescForError(NSError **error, NSInteger code, NSString *msg) {
-    if (error) *error = [NSError errorWithDomain:@"SCIMobileConfigBrokerRouter" code:code userInfo:@{NSLocalizedDescriptionKey: msg ?: @"unknown"}];
-    return msg ?: @"unknown";
+static NSString *MCBRBasename(const char *path) {
+    if (!path) return @"";
+    const char *slash = strrchr(path, '/');
+    return [NSString stringWithUTF8String:(slash ? slash + 1 : path)] ?: @"";
 }
 
-static void *SCIDlsymFlexible(const char *symbol) {
-    if (!symbol || !symbol[0]) return NULL;
-    void *p = dlsym(RTLD_DEFAULT, symbol);
+static void *MCBRDlsymFlexible(NSString *symbol) {
+    if (!symbol.length) return NULL;
+    const char *s = symbol.UTF8String;
+    void *p = dlsym(RTLD_DEFAULT, s);
     if (p) return p;
-    if (symbol[0] == '_') return dlsym(RTLD_DEFAULT, symbol + 1);
-    char buf[512];
-    snprintf(buf, sizeof(buf), "_%s", symbol);
-    return dlsym(RTLD_DEFAULT, buf);
+    if (s[0] == '_') return dlsym(RTLD_DEFAULT, s + 1);
+    NSString *underscored = [@"_" stringByAppendingString:symbol];
+    return dlsym(RTLD_DEFAULT, underscored.UTF8String);
 }
 
-static BOOL SCIValidateOwner(void *sym, SCIMobileConfigBrokerDescriptor *broker, NSError **error) {
-    if (!sym) { SCIDescForError(error, 1, @"symbol not found"); return NO; }
+static NSError *MCBRError(NSInteger code, NSString *message) {
+    return [NSError errorWithDomain:@"SCIMobileConfigBrokerRouter" code:code userInfo:@{NSLocalizedDescriptionKey: message ?: @"unknown"}];
+}
+
+static BOOL MCBRAddressIsExpectedOwner(void *addr, SCIMobileConfigBrokerDescriptor *d, NSString **ownerOut) {
     Dl_info info; memset(&info, 0, sizeof(info));
-    if (dladdr(sym, &info) == 0 || !info.dli_fname) { SCIDescForError(error, 2, @"dladdr failed"); return NO; }
-    NSString *base = @(info.dli_fname).lastPathComponent;
-    if (![base isEqualToString:broker.imageName]) {
-        SCIDescForError(error, 3, [NSString stringWithFormat:@"owner mismatch: %@", base ?: @"nil"]);
-        return NO;
-    }
-    if (broker.expectedOrig8 != 0) {
-        uint64_t cur = 0;
-        memcpy(&cur, sym, sizeof(cur));
-        if (cur != broker.expectedOrig8) {
-            SCIDescForError(error, 4, [NSString stringWithFormat:@"fingerprint mismatch cur=0x%016llx expected=0x%016llx", (unsigned long long)cur, (unsigned long long)broker.expectedOrig8]);
-            return NO;
-        }
-    }
-    return YES;
+    if (!addr || dladdr(addr, &info) == 0 || !info.dli_fname) return NO;
+    NSString *base = MCBRBasename(info.dli_fname);
+    if (ownerOut) *ownerOut = base;
+    return [base isEqualToString:d.imageName ?: @""];
 }
 
-static NSString *SCIOverrideKey(SCIMobileConfigBrokerDescriptor *broker, uint64_t value) {
-    return [SCIMobileConfigBrokerStore overrideKeyForBroker:broker value:value];
+static NSString *MCBRThreadKey(NSString *brokerID) {
+    return [@"scimcbr.reentry." stringByAppendingString:(brokerID ?: @"")];
 }
 
-static BOOL SCIThreadGuardEnter(NSString *name) {
+static BOOL MCBRThreadEnter(NSString *brokerID) {
+    NSString *key = MCBRThreadKey(brokerID);
     NSMutableDictionary *td = NSThread.currentThread.threadDictionary;
-    NSString *key = [@"scimcbr.reentry." stringByAppendingString:name ?: @""];
     if ([td[key] boolValue]) return NO;
     td[key] = @YES;
     return YES;
 }
 
-static void SCIThreadGuardExit(NSString *name) {
-    NSString *key = [@"scimcbr.reentry." stringByAppendingString:name ?: @""];
-    [NSThread.currentThread.threadDictionary removeObjectForKey:key];
+static void MCBRThreadExit(NSString *brokerID) {
+    [NSThread.currentThread.threadDictionary removeObjectForKey:MCBRThreadKey(brokerID)];
 }
 
-static BOOL SCIHandleForcedOrObserved(SCIMobileConfigBrokerDescriptor *broker, uint64_t keyValue, BOOL original, BOOL *outValue) {
-    NSString *key = SCIOverrideKey(broker, keyValue);
-    NSNumber *forced = [SCIMobileConfigBrokerStore overrideValueForKey:key];
-    if (forced) {
-        [SCIMobileConfigBrokerStore noteObservedValue:forced.boolValue forOverrideKey:key];
-        if (outValue) *outValue = forced.boolValue;
-        return YES;
+static NSValue *MCBROriginalValue(NSString *brokerID) {
+    @synchronized([SCIMobileConfigBrokerRouter class]) {
+        MCBREnsureState();
+        return gMCBROriginals[brokerID ?: @""];
     }
-    [SCIMobileConfigBrokerStore noteObservedValue:original forOverrideKey:key];
-    if (outValue) *outValue = original;
-    return NO;
 }
 
-static SCIMobileConfigBrokerDescriptor *SCIBroker(NSString *brokerID) {
+static SCIMobileConfigBrokerDescriptor *MCBRDesc(NSString *brokerID) {
     return [SCIMobileConfigBrokerDescriptor descriptorForID:brokerID];
 }
 
-static SCIIGMCBoolFn orig_ig = NULL;
-static BOOL hook_ig(id ctx, BOOL defaultValue, uint64_t specifier) {
-    SCIMobileConfigBrokerDescriptor *broker = SCIBroker(@"ig");
-    NSString *name = @"ig";
-    if (!SCIThreadGuardEnter(name)) return orig_ig ? orig_ig(ctx, defaultValue, specifier) : defaultValue;
-    BOOL original = orig_ig ? orig_ig(ctx, defaultValue, specifier) : defaultValue;
-    BOOL ret = original;
-    SCIHandleForcedOrObserved(broker, specifier, original, &ret);
-    SCIThreadGuardExit(name);
-    return ret;
-}
-
-static SCIIGMCBoolFn orig_igsl = NULL;
-static BOOL hook_igsl(id ctx, BOOL defaultValue, uint64_t specifier) {
-    SCIMobileConfigBrokerDescriptor *broker = SCIBroker(@"igsl");
-    NSString *name = @"igsl";
-    if (!SCIThreadGuardEnter(name)) return orig_igsl ? orig_igsl(ctx, defaultValue, specifier) : defaultValue;
-    BOOL original = orig_igsl ? orig_igsl(ctx, defaultValue, specifier) : defaultValue;
-    BOOL ret = original;
-    SCIHandleForcedOrObserved(broker, specifier, original, &ret);
-    SCIThreadGuardExit(name);
-    return ret;
-}
-
-static SCIGeneric8Fn orig_egp = NULL;
-static uintptr_t hook_egp(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    SCIMobileConfigBrokerDescriptor *broker = SCIBroker(@"egp");
-    if (!SCIThreadGuardEnter(@"egp")) return orig_egp ? orig_egp(a0,a1,a2,a3,a4,a5,a6,a7) : (a2 & 1);
-    uintptr_t raw = orig_egp ? orig_egp(a0,a1,a2,a3,a4,a5,a6,a7) : (a2 & 1);
-    BOOL ret = raw ? YES : NO;
-    SCIHandleForcedOrObserved(broker, (uint64_t)a1, ret, &ret);
-    SCIThreadGuardExit(@"egp");
-    return ret ? 1 : 0;
-}
-
-static SCIGeneric8Fn orig_mci = NULL;
-static uintptr_t hook_mci(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    SCIMobileConfigBrokerDescriptor *broker = SCIBroker(@"mci");
-    if (!SCIThreadGuardEnter(@"mci")) return orig_mci ? orig_mci(a0,a1,a2,a3,a4,a5,a6,a7) : 0;
-    uintptr_t raw = orig_mci ? orig_mci(a0,a1,a2,a3,a4,a5,a6,a7) : 0;
-    BOOL ret = raw ? YES : NO;
-    SCIHandleForcedOrObserved(broker, (uint64_t)a2, ret, &ret);
-    SCIThreadGuardExit(@"mci");
-    return ret ? 1 : 0;
-}
-
-#define SCI_GENERIC_HOOK(ID, ORIGVAR, KEYARG, DEFARG) \
-static SCIGeneric8Fn ORIGVAR = NULL; \
-static uintptr_t hook_##ID(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) { \
-    SCIMobileConfigBrokerDescriptor *broker = SCIBroker(@#ID); \
-    if (!SCIThreadGuardEnter(@#ID)) return ORIGVAR ? ORIGVAR(a0,a1,a2,a3,a4,a5,a6,a7) : 0; \
-    uintptr_t args[8] = {a0,a1,a2,a3,a4,a5,a6,a7}; \
-    uintptr_t raw = ORIGVAR ? ORIGVAR(a0,a1,a2,a3,a4,a5,a6,a7) : (args[DEFARG] & 1); \
-    BOOL ret = raw ? YES : NO; \
-    SCIHandleForcedOrObserved(broker, (uint64_t)args[KEYARG], ret, &ret); \
-    SCIThreadGuardExit(@#ID); \
-    return ret ? 1 : 0; \
-}
-
-SCI_GENERIC_HOOK(egi, orig_egi, 0, 2)
-SCI_GENERIC_HOOK(ega, orig_ega, 1, 2)
-SCI_GENERIC_HOOK(mcic, orig_mcic, 2, 2)
-SCI_GENERIC_HOOK(mcie, orig_mcie, 2, 2)
-SCI_GENERIC_HOOK(meta, orig_meta, 1, 2)
-SCI_GENERIC_HOOK(metanx, orig_metanx, 1, 2)
-SCI_GENERIC_HOOK(msgc, orig_msgc, 2, 2)
-
-static void *SCIDetourForBroker(NSString *brokerID, void ***origOut) {
-    if ([brokerID isEqualToString:@"ig"]) { if (origOut) *origOut = (void **)&orig_ig; return (void *)&hook_ig; }
-    if ([brokerID isEqualToString:@"igsl"]) { if (origOut) *origOut = (void **)&orig_igsl; return (void *)&hook_igsl; }
-    if ([brokerID isEqualToString:@"egp"]) { if (origOut) *origOut = (void **)&orig_egp; return (void *)&hook_egp; }
-    if ([brokerID isEqualToString:@"mci"]) { if (origOut) *origOut = (void **)&orig_mci; return (void *)&hook_mci; }
-    if ([brokerID isEqualToString:@"egi"]) { if (origOut) *origOut = (void **)&orig_egi; return (void *)&hook_egi; }
-    if ([brokerID isEqualToString:@"ega"]) { if (origOut) *origOut = (void **)&orig_ega; return (void *)&hook_ega; }
-    if ([brokerID isEqualToString:@"mcic"]) { if (origOut) *origOut = (void **)&orig_mcic; return (void *)&hook_mcic; }
-    if ([brokerID isEqualToString:@"mcie"]) { if (origOut) *origOut = (void **)&orig_mcie; return (void *)&hook_mcie; }
-    if ([brokerID isEqualToString:@"meta"]) { if (origOut) *origOut = (void **)&orig_meta; return (void *)&hook_meta; }
-    if ([brokerID isEqualToString:@"metanx"]) { if (origOut) *origOut = (void **)&orig_metanx; return (void *)&hook_metanx; }
-    if ([brokerID isEqualToString:@"msgc"]) { if (origOut) *origOut = (void **)&orig_msgc; return (void *)&hook_msgc; }
-    return NULL;
-}
-
-BOOL SCIMCBrokerInstall(SCIMobileConfigBrokerDescriptor *broker, NSError **error) {
-    if (!broker.brokerID.length || !broker.symbol.length) return NO;
-    @synchronized([SCIMobileConfigBrokerDescriptor class]) {
-        SCIEnsureMaps();
-        if (gInstalled[broker.brokerID]) return YES;
-    }
-    void *sym = SCIDlsymFlexible(broker.symbol.UTF8String);
-    if (!SCIValidateOwner(sym, broker, error)) {
-        [SCIMobileConfigBrokerStore setLastError:(error && *error) ? (*error).localizedDescription : @"validation failed" forBrokerID:broker.brokerID];
-        return NO;
-    }
-    void **origPtr = NULL;
-    void *detour = SCIDetourForBroker(broker.brokerID, &origPtr);
-    if (!detour || !origPtr) {
-        [SCIMobileConfigBrokerStore setLastError:@"no detour for broker" forBrokerID:broker.brokerID];
-        return NO;
-    }
-    MSHookFunction(sym, detour, origPtr);
-    @synchronized([SCIMobileConfigBrokerDescriptor class]) {
-        SCIEnsureMaps();
-        gInstalled[broker.brokerID] = broker;
-        if (*origPtr) gOriginals[broker.brokerID] = [NSValue valueWithPointer:*origPtr];
-    }
-    [SCIMobileConfigBrokerStore setLastError:nil forBrokerID:broker.brokerID];
-    NSLog(@"[RyukGram][MCBroker] installed %@ %@", broker.brokerID, broker.symbol);
+static BOOL MCBRForcedValueIfPresent(SCIMobileConfigBrokerDescriptor *d, uint64_t value, BOOL *outValue) {
+    if (!d.brokerID.length) return NO;
+    NSString *key = [SCIMobileConfigBrokerStore overrideKeyForBroker:d value:value];
+    NSNumber *forced = [SCIMobileConfigBrokerStore overrideValueForKey:key];
+    if (!forced) return NO;
+    if (outValue) *outValue = forced.boolValue;
+    [SCIMobileConfigBrokerStore noteHitForBrokerID:d.brokerID value:value forced:YES];
     return YES;
 }
 
-BOOL SCIMCBrokerIsInstalled(NSString *brokerID) {
-    @synchronized([SCIMobileConfigBrokerDescriptor class]) { return gInstalled[brokerID] != nil; }
+static BOOL MCBRRecordOriginalAndReturn(SCIMobileConfigBrokerDescriptor *d, uint64_t value, BOOL original) {
+    if (!d.brokerID.length) return original;
+    NSString *key = [SCIMobileConfigBrokerStore overrideKeyForBroker:d value:value];
+    [SCIMobileConfigBrokerStore noteObservedValue:original forOverrideKey:key];
+    [SCIMobileConfigBrokerStore noteHitForBrokerID:d.brokerID value:value forced:NO];
+    return original;
 }
 
-NSUInteger SCIMCBrokerInstalledCount(void) {
-    @synchronized([SCIMobileConfigBrokerDescriptor class]) { return gInstalled.count; }
+static BOOL hook_IGInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    SCIMobileConfigBrokerDescriptor *d = MCBRDesc(@"ig");
+    BOOL forced = NO;
+    if (MCBRForcedValueIfPresent(d, specifier, &forced)) return forced;
+
+    MCBRIGInternalFn orig = (MCBRIGInternalFn)MCBROriginalValue(@"ig").pointerValue;
+    if (!MCBRThreadEnter(@"ig")) return orig ? orig(ctx, defaultValue, specifier) : defaultValue;
+    BOOL original = orig ? orig(ctx, defaultValue, specifier) : defaultValue;
+    MCBRThreadExit(@"ig");
+    return MCBRRecordOriginalAndReturn(d, specifier, original);
 }
 
-NSString *SCIMCBrokerRuntimeSummary(void) {
-    return [NSString stringWithFormat:@"installed=%lu hooks=%lu overrides=%lu", (unsigned long)SCIMCBrokerInstalledCount(), (unsigned long)[SCIMobileConfigBrokerStore enabledHookBrokerIDs].count, (unsigned long)[SCIMobileConfigBrokerStore activeOverrideKeys].count];
+static BOOL hook_IGSessionlessInternalUse(id ctx, BOOL defaultValue, unsigned long long specifier) {
+    SCIMobileConfigBrokerDescriptor *d = MCBRDesc(@"igsl");
+    BOOL forced = NO;
+    if (MCBRForcedValueIfPresent(d, specifier, &forced)) return forced;
+
+    MCBRIGInternalFn orig = (MCBRIGInternalFn)MCBROriginalValue(@"igsl").pointerValue;
+    if (!MCBRThreadEnter(@"igsl")) return orig ? orig(ctx, defaultValue, specifier) : defaultValue;
+    BOOL original = orig ? orig(ctx, defaultValue, specifier) : defaultValue;
+    MCBRThreadExit(@"igsl");
+    return MCBRRecordOriginalAndReturn(d, specifier, original);
 }
 
-void SCIMCBrokerBootstrap(void) {
-    [SCIMobileConfigBrokerStore registerDefaults];
-    NSMutableSet<NSString *> *ids = [NSMutableSet setWithArray:[SCIMobileConfigBrokerStore enabledHookBrokerIDs]];
-    for (NSString *key in [SCIMobileConfigBrokerStore activeOverrideKeys]) {
-        NSString *bid = nil;
-        [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid image:NULL symbol:NULL kind:NULL value:NULL];
-        if (bid.length) [ids addObject:bid];
+static uintptr_t MCBRGenericHook(NSString *brokerID,
+                                 uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
+                                 uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
+    SCIMobileConfigBrokerDescriptor *d = MCBRDesc(brokerID);
+    uintptr_t args[8] = {a0,a1,a2,a3,a4,a5,a6,a7};
+    NSUInteger keyIndex = MIN((NSUInteger)7, d.keyArgumentIndex);
+    NSUInteger defIndex = MIN((NSUInteger)7, d.defaultArgumentIndex);
+    uint64_t keyValue = (uint64_t)args[keyIndex];
+    BOOL forced = NO;
+    if (MCBRForcedValueIfPresent(d, keyValue, &forced)) return forced ? 1 : 0;
+
+    MCBRGeneric8Fn orig = (MCBRGeneric8Fn)MCBROriginalValue(brokerID).pointerValue;
+    if (!MCBRThreadEnter(brokerID)) return orig ? orig(a0,a1,a2,a3,a4,a5,a6,a7) : (args[defIndex] & 1);
+    uintptr_t raw = orig ? orig(a0,a1,a2,a3,a4,a5,a6,a7) : (args[defIndex] & 1);
+    MCBRThreadExit(brokerID);
+    BOOL original = raw ? YES : NO;
+    return MCBRRecordOriginalAndReturn(d, keyValue, original) ? 1 : 0;
+}
+
+#define MCBR_GENERIC_WRAPPER(NAME, BID) \
+static uintptr_t NAME(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) { \
+    return MCBRGenericHook(@BID, a0, a1, a2, a3, a4, a5, a6, a7); \
+}
+
+MCBR_GENERIC_WRAPPER(hook_EasyGatingPlatformGetBoolean, "eg")
+MCBR_GENERIC_WRAPPER(hook_MCIMobileConfigGetBoolean, "mci")
+MCBR_GENERIC_WRAPPER(hook_EasyGatingInternalGetBoolean, "egi")
+MCBR_GENERIC_WRAPPER(hook_EasyGatingAuthDataGetBoolean, "ega")
+MCBR_GENERIC_WRAPPER(hook_MCIExperimentCacheBool, "mcic")
+MCBR_GENERIC_WRAPPER(hook_MCIExtensionExperimentCacheBool, "mcie")
+MCBR_GENERIC_WRAPPER(hook_METAExtensionsBool, "meta")
+MCBR_GENERIC_WRAPPER(hook_METAExtensionsBoolNoExposure, "metanx")
+MCBR_GENERIC_WRAPPER(hook_MSGCSessionedBool, "msgc")
+
+static void *MCBRReplacementForID(NSString *brokerID) {
+    if ([brokerID isEqualToString:@"ig"]) return (void *)hook_IGInternalUse;
+    if ([brokerID isEqualToString:@"igsl"]) return (void *)hook_IGSessionlessInternalUse;
+    if ([brokerID isEqualToString:@"eg"]) return (void *)hook_EasyGatingPlatformGetBoolean;
+    if ([brokerID isEqualToString:@"mci"]) return (void *)hook_MCIMobileConfigGetBoolean;
+    if ([brokerID isEqualToString:@"egi"]) return (void *)hook_EasyGatingInternalGetBoolean;
+    if ([brokerID isEqualToString:@"ega"]) return (void *)hook_EasyGatingAuthDataGetBoolean;
+    if ([brokerID isEqualToString:@"mcic"]) return (void *)hook_MCIExperimentCacheBool;
+    if ([brokerID isEqualToString:@"mcie"]) return (void *)hook_MCIExtensionExperimentCacheBool;
+    if ([brokerID isEqualToString:@"meta"]) return (void *)hook_METAExtensionsBool;
+    if ([brokerID isEqualToString:@"metanx"]) return (void *)hook_METAExtensionsBoolNoExposure;
+    if ([brokerID isEqualToString:@"msgc"]) return (void *)hook_MSGCSessionedBool;
+    return NULL;
+}
+
+static NSString *MCBRBasenameForHeader(const struct mach_header *mh) {
+    Dl_info info; memset(&info, 0, sizeof(info));
+    if (!mh || dladdr((const void *)mh, &info) == 0 || !info.dli_fname) return @"";
+    return MCBRBasename(info.dli_fname);
+}
+
+static void MCBRImageAdded(const struct mach_header *mh, intptr_t slide) {
+    (void)slide;
+    NSString *base = MCBRBasenameForHeader(mh);
+    if (![base isEqualToString:@"FBSharedFramework"]) return;
+    [SCIMobileConfigBrokerRouter retryPendingBrokersForImageBasename:base];
+}
+
+@implementation SCIMobileConfigBrokerRouter
+
++ (BOOL)installBroker:(SCIMobileConfigBrokerDescriptor *)descriptor error:(NSError * _Nullable * _Nullable)error {
+    if (!descriptor.brokerID.length || !descriptor.symbol.length) {
+        if (error) *error = MCBRError(1, @"Missing broker descriptor fields");
+        return NO;
     }
+
+    @synchronized(self) {
+        MCBREnsureState();
+        if ([gMCBRInstalledIDs containsObject:descriptor.brokerID]) return YES;
+    }
+
+    void *addr = MCBRDlsymFlexible(descriptor.symbol);
+    if (!addr) {
+        NSString *msg = [NSString stringWithFormat:@"Symbol not found yet: %@", descriptor.symbol];
+        [SCIMobileConfigBrokerStore noteLastError:msg brokerID:descriptor.brokerID];
+        @synchronized(self) { MCBREnsureState(); [gMCBRPendingIDs addObject:descriptor.brokerID]; }
+        if (error) *error = MCBRError(2, msg);
+        return NO;
+    }
+
+    NSString *owner = nil;
+    if (!MCBRAddressIsExpectedOwner(addr, descriptor, &owner)) {
+        NSString *msg = [NSString stringWithFormat:@"Owner mismatch %@ for %@", owner ?: @"?", descriptor.symbol];
+        [SCIMobileConfigBrokerStore noteLastError:msg brokerID:descriptor.brokerID];
+        @synchronized(self) { MCBREnsureState(); [gMCBRPendingIDs addObject:descriptor.brokerID]; }
+        if (error) *error = MCBRError(3, msg);
+        return NO;
+    }
+
+    uint64_t cur = 0;
+    memcpy(&cur, addr, sizeof(cur));
+    if (descriptor.expectedOrig8 != 0 && cur != descriptor.expectedOrig8) {
+        NSString *msg = [NSString stringWithFormat:@"Build guard mismatch %@ cur=0x%016llx expected=0x%016llx", descriptor.symbol, (unsigned long long)cur, (unsigned long long)descriptor.expectedOrig8];
+        [SCIMobileConfigBrokerStore noteLastError:msg brokerID:descriptor.brokerID];
+        if (error) *error = MCBRError(4, msg);
+        return NO;
+    }
+
+    void *replacement = MCBRReplacementForID(descriptor.brokerID);
+    if (!replacement) {
+        NSString *msg = [NSString stringWithFormat:@"No replacement for broker id %@", descriptor.brokerID];
+        [SCIMobileConfigBrokerStore noteLastError:msg brokerID:descriptor.brokerID];
+        if (error) *error = MCBRError(5, msg);
+        return NO;
+    }
+
+    void *orig = NULL;
+    MSHookFunction(addr, replacement, &orig);
+    if (!orig) {
+        NSString *msg = [NSString stringWithFormat:@"MSHookFunction returned nil original for %@", descriptor.symbol];
+        [SCIMobileConfigBrokerStore noteLastError:msg brokerID:descriptor.brokerID];
+        if (error) *error = MCBRError(6, msg);
+        return NO;
+    }
+
+    @synchronized(self) {
+        MCBREnsureState();
+        gMCBROriginals[descriptor.brokerID] = [NSValue valueWithPointer:orig];
+        [gMCBRInstalledIDs addObject:descriptor.brokerID];
+        [gMCBRPendingIDs removeObject:descriptor.brokerID];
+        [gMCBRErrors removeObjectForKey:descriptor.brokerID];
+    }
+    [SCIMobileConfigBrokerStore noteLastError:nil brokerID:descriptor.brokerID];
+    NSLog(@"[RyukGram][MCBR] installed %@ %@ addr=%p", descriptor.brokerID, descriptor.symbol, addr);
+    return YES;
+}
+
++ (BOOL)isInstalled:(NSString *)brokerID {
+    @synchronized(self) { MCBREnsureState(); return [gMCBRInstalledIDs containsObject:(brokerID ?: @"")]; }
+}
+
++ (NSUInteger)installedCount {
+    @synchronized(self) { MCBREnsureState(); return gMCBRInstalledIDs.count; }
+}
+
++ (NSDictionary<NSString *,NSString *> *)installErrors {
+    @synchronized(self) { MCBREnsureState(); return [gMCBRErrors copy] ?: @{}; }
+}
+
++ (void)installEnabledBrokers {
+    for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
+        if (![SCIMobileConfigBrokerStore shouldInstallBrokerID:d.brokerID]) continue;
+        NSError *err = nil;
+        if (![self installBroker:d error:&err]) NSLog(@"[RyukGram][MCBR] install failed %@: %@", d.brokerID, err.localizedDescription ?: @"?");
+    }
+}
+
++ (void)retryPendingBrokersForImageBasename:(NSString *)basename {
+    if (![basename isEqualToString:@"FBSharedFramework"]) return;
+    NSArray<NSString *> *ids = nil;
+    @synchronized(self) { MCBREnsureState(); ids = gMCBRPendingIDs.allObjects; }
     for (NSString *bid in ids) {
         SCIMobileConfigBrokerDescriptor *d = [SCIMobileConfigBrokerDescriptor descriptorForID:bid];
-        if (!d) continue;
-        NSError *error = nil;
-        SCIMCBrokerInstall(d, &error);
+        if (!d || ![SCIMobileConfigBrokerStore shouldInstallBrokerID:bid]) continue;
+        NSError *err = nil;
+        [self installBroker:d error:&err];
     }
 }
 
++ (void)bootstrap {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [SCIMobileConfigBrokerStore registerDefaultsAndMigrate];
+        _dyld_register_func_for_add_image(MCBRImageAdded);
+        [self installEnabledBrokers];
+    });
+}
+
+@end
+
 %ctor {
-    SCIMCBrokerBootstrap();
+    [SCIMobileConfigBrokerRouter bootstrap];
 }

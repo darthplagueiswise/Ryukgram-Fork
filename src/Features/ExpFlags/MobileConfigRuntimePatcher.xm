@@ -1,4 +1,5 @@
 #import "../../Utils.h"
+#import "SCIMobileConfigBrokerStore.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
 #import <errno.h>
@@ -129,6 +130,10 @@ static BOOL RGPatchOneSymbol(const RGMC_PatchSpec *spec, BOOL relaxed) {
 
 %ctor {
     if (!RGMCEnabled()) return;
+    if ([SCIMobileConfigBrokerStore hasAnyActiveOverridesOrHooks]) {
+        NSLog(@"[RyukGram][RGMC] skipped runtime true patcher because SCIMobileConfigBrokerRouter has active overrides/hooks");
+        return;
+    }
 
     BOOL relaxed = RGMCRelaxed();
     NSUInteger okCount = 0;
