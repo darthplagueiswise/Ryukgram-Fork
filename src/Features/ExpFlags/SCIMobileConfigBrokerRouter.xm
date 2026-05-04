@@ -214,7 +214,7 @@ void SCIMCBrokerBootstrap(void) {
     NSMutableSet<NSString *> *ids = [NSMutableSet setWithArray:[SCIMobileConfigBrokerStore enabledHookBrokerIDs]];
     for (NSString *key in [SCIMobileConfigBrokerStore activeOverrideKeys]) {
         NSString *bid = nil;
-        [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid image:nil symbol:nil kind:nil value:nil];
+        [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid image:NULL symbol:NULL kind:NULL value:NULL];
         if (bid.length) [ids addObject:bid];
     }
     for (NSString *bid in ids) {
