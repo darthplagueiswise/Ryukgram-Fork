@@ -25,6 +25,14 @@ static NSString *SCIImageBasename(const char *path) {
     return [NSString stringWithUTF8String:(slash ? slash + 1 : path)] ?: @"";
 }
 
+static BOOL SCIEnabledImageAllowed(NSString *imageName) {
+    if (!imageName.length) return NO;
+    NSString *mainImageName = NSBundle.mainBundle.executablePath.lastPathComponent ?: @"";
+    if ([imageName isEqualToString:mainImageName]) return YES;
+    if ([imageName isEqualToString:@"FBSharedFramework"]) return YES;
+    return NO;
+}
+
 static BOOL SCIEnabledMethodReturnsBool(Method m) {
     if (!m) return NO;
     char rt[32] = {0};
@@ -60,27 +68,28 @@ static BOOL SCIEnabledStringLooksWanted(NSString *className, NSString *methodNam
     return hasEnabled && hasExperiment;
 }
 
-static NSString *SCIEnabledSource(NSString *className, NSString *methodName) {
+static NSString *SCIEnabledSource(NSString *className, NSString *methodName, NSString *imageName) {
     NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
 
-    if (SCIEnabledContainsAny(s, @[@"autofillinternalsettings", @"autofill"])) return @"Autofill/Internal";
-    if (SCIEnabledContainsAny(s, @[@"prism", @"prismmenu", @"igdsprism"])) return @"Prism/Menu";
-    if (SCIEnabledContainsAny(s, @[@"directnotes", @"notesdogfooding", @"notestray"])) return @"Direct Notes";
-    if (SCIEnabledContainsAny(s, @[@"quicksnap", @"quick_snap", @"instant"])) return @"QuickSnap/Direct";
-    if ([s containsString:@"homecoming"]) return @"Homecoming";
-    if (SCIEnabledContainsAny(s, @[@"liquidglass", @"tabbar", @"launcherset"])) return @"LiquidGlass/TabBar";
-    if ([s containsString:@"fbcustomexperimentmanager"]) return @"FBCustomExperimentManager";
-    if ([s containsString:@"fdidexperimentgenerator"]) return @"FDIDExperimentGenerator";
-    if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
-    if ([s containsString:@"metalocalexperiment"]) return @"MetaLocalExperiment";
-    if ([s containsString:@"mobileconfig"] || [s containsString:@"easygating"]) return @"MobileConfig/EasyGating";
-    if ([s containsString:@"dogfood"] || [s containsString:@"internal"]) return @"Dogfood/Internal";
-    if ([s containsString:@"friend"] || [s containsString:@"friending"]) return @"Friending/FriendsTab";
-    if ([s containsString:@"feed"]) return @"Feed";
-    if ([s containsString:@"direct"] || [s containsString:@"inbox"] || [s containsString:@"thread"]) return @"Direct/Inbox";
-    if ([s containsString:@"blend"]) return @"Blend";
-    if ([s containsString:@"magicmode"] || [s containsString:@"genai"]) return @"GenAI/MagicMod";
-    return @"Main Executable";
+    NSString *prefix = [imageName isEqualToString:@"FBSharedFramework"] ? @"FBSharedFramework / " : @"";
+    if (SCIEnabledContainsAny(s, @[@"autofillinternalsettings", @"autofill"])) return [prefix stringByAppendingString:@"Autofill/Internal"];
+    if (SCIEnabledContainsAny(s, @[@"prism", @"prismmenu", @"igdsprism"])) return [prefix stringByAppendingString:@"Prism/Menu"];
+    if (SCIEnabledContainsAny(s, @[@"directnotes", @"notesdogfooding", @"notestray"])) return [prefix stringByAppendingString:@"Direct Notes"];
+    if (SCIEnabledContainsAny(s, @[@"quicksnap", @"quick_snap", @"instant"])) return [prefix stringByAppendingString:@"QuickSnap/Direct"];
+    if ([s containsString:@"homecoming"]) return [prefix stringByAppendingString:@"Homecoming"];
+    if (SCIEnabledContainsAny(s, @[@"liquidglass", @"tabbar", @"launcherset"])) return [prefix stringByAppendingString:@"LiquidGlass/TabBar"];
+    if ([s containsString:@"fbcustomexperimentmanager"]) return [prefix stringByAppendingString:@"FBCustomExperimentManager"];
+    if ([s containsString:@"fdidexperimentgenerator"]) return [prefix stringByAppendingString:@"FDIDExperimentGenerator"];
+    if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return [prefix stringByAppendingString:@"LID/MetaLocalExperiment"];
+    if ([s containsString:@"metalocalexperiment"]) return [prefix stringByAppendingString:@"MetaLocalExperiment"];
+    if ([s containsString:@"mobileconfig"] || [s containsString:@"easygating"]) return [prefix stringByAppendingString:@"MobileConfig/EasyGating"];
+    if ([s containsString:@"dogfood"] || [s containsString:@"internal"]) return [prefix stringByAppendingString:@"Dogfood/Internal"];
+    if ([s containsString:@"friend"] || [s containsString:@"friending"]) return [prefix stringByAppendingString:@"Friending/FriendsTab"];
+    if ([s containsString:@"feed"]) return [prefix stringByAppendingString:@"Feed"];
+    if ([s containsString:@"direct"] || [s containsString:@"inbox"] || [s containsString:@"thread"]) return [prefix stringByAppendingString:@"Direct/Inbox"];
+    if ([s containsString:@"blend"]) return [prefix stringByAppendingString:@"Blend"];
+    if ([s containsString:@"magicmode"] || [s containsString:@"genai"]) return [prefix stringByAppendingString:@"GenAI/MagicMod"];
+    return prefix.length ? [prefix stringByAppendingString:@"Bool Getter"] : @"Main Executable";
 }
 
 static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
@@ -97,7 +106,6 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
 + (void)install {
     dispatch_once(&gSCIEnabledInstallOnce, ^{
         gSCIEnabledEntries = [NSMutableDictionary dictionary];
-        NSString *mainImageName = NSBundle.mainBundle.executablePath.lastPathComponent ?: @"";
 
         unsigned int classCount = 0;
         Class *classes = objc_copyClassList(&classCount);
@@ -127,7 +135,7 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
                     if (dladdr((void *)method_getImplementation(m), &info) == 0) continue;
 
                     NSString *imageName = SCIImageBasename(info.dli_fname);
-                    if (![imageName isEqualToString:mainImageName]) continue;
+                    if (!SCIEnabledImageAllowed(imageName)) continue;
 
                     NSString *key = [SCIDexKitStore boolGetterKeyWithClassName:className methodName:methodName classMethod:classMethod];
                     if (gSCIEnabledEntries[key]) continue;
@@ -136,7 +144,7 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
                     entry.key = key;
                     entry.className = className;
                     entry.methodName = methodName;
-                    entry.source = SCIEnabledSource(className, methodName);
+                    entry.source = SCIEnabledSource(className, methodName, imageName);
                     entry.imageName = imageName;
                     entry.typeEncoding = SCIEnabledMethodTypes(m);
                     entry.classMethod = classMethod;
@@ -154,7 +162,7 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
             }
         }
         if (classes) free(classes);
-        NSLog(@"[RyukGram][EnabledExperiments] DexKit store scan entries=%lu", (unsigned long)gSCIEnabledEntries.count);
+        NSLog(@"[RyukGram][EnabledExperiments] DexKit scan entries=%lu images=Instagram+FBSharedFramework", (unsigned long)gSCIEnabledEntries.count);
     });
 }
 
@@ -166,7 +174,9 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
         for (SCIEnabledExperimentEntry *e in values) SCIEnabledRefreshEntry(e);
     }
     return [values sortedArrayUsingComparator:^NSComparisonResult(SCIEnabledExperimentEntry *a, SCIEnabledExperimentEntry *b) {
-        NSComparisonResult c = [a.source caseInsensitiveCompare:b.source];
+        NSComparisonResult c = [a.imageName caseInsensitiveCompare:b.imageName];
+        if (c != NSOrderedSame) return c;
+        c = [a.source caseInsensitiveCompare:b.source];
         if (c != NSOrderedSame) return c;
         c = [a.className caseInsensitiveCompare:b.className];
         if (c != NSOrderedSame) return c;
@@ -183,7 +193,7 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
         if (mode == 3 && (!e.defaultKnown || e.defaultValue)) continue;
         if (mode == 4 && [SCIDexKitStore overrideForKey:e.key] == SCIExpFlagOverrideOff) continue;
         if (q.length) {
-            NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@", e.source, e.className, e.methodName, e.typeEncoding, e.key].lowercaseString;
+            NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@", e.imageName, e.source, e.className, e.methodName, e.typeEncoding, e.key].lowercaseString;
             if (![hay containsString:q]) continue;
         }
         [out addObject:e];
@@ -214,7 +224,7 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
 
 + (NSString *)summaryTextForEntry:(SCIEnabledExperimentEntry *)entry {
     NSString *router = SCIDexKitIsBoolGetterHooked(entry.key) ? @"live" : @"off";
-    return [NSString stringWithFormat:@"%@ · system=%@ · %@ · router=%@", entry.source ?: @"?", [self defaultLabelForEntry:entry], [self stateLabelForEntry:entry], router];
+    return [NSString stringWithFormat:@"%@ · %@ · system=%@ · %@ · router=%@", entry.imageName ?: @"?", entry.source ?: @"?", [self defaultLabelForEntry:entry], [self stateLabelForEntry:entry], router];
 }
 
 + (NSUInteger)installedCount {
