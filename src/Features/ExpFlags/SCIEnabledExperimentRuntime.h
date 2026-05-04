@@ -17,6 +17,8 @@
 
 @interface SCIEnabledExperimentRuntime : NSObject
 + (void)install;
++ (void)enableLiveObservationForVisibleEntries;
++ (BOOL)liveObservationEnabled;
 + (NSArray<SCIEnabledExperimentEntry *> *)allEntries;
 + (NSArray<SCIEnabledExperimentEntry *> *)filteredEntriesForQuery:(NSString *)query mode:(NSInteger)mode;
 + (void)setSavedState:(SCIExpFlagOverride)state forEntry:(SCIEnabledExperimentEntry *)entry;
