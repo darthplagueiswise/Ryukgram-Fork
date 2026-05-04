@@ -21,10 +21,10 @@ typedef struct {
 static const uint64_t kRGStubTrue = 0xd65f03c052800020ULL;
 
 static const RGMC_PatchSpec kRGMCPatches[] = {
-    {"_IGMobileConfigBooleanValueForInternalUse", 0xa90157f6a9bc5ff8ULL, "igt_runtime_mc_patch_ig_internaluse"},
-    {"_IGMobileConfigForceUpdateConfigs", 0x97e1c552a9bf7bfdULL, "igt_runtime_mc_patch_ig_force_update"},
-    {"_IGMobileConfigSetConfigOverrides", 0x97e1c70ea9bf7bfdULL, "igt_runtime_mc_patch_ig_set_overrides"},
-    {"_IGMobileConfigTryUpdateConfigsWithCompletion", 0x140b9f5c52800004ULL, "igt_runtime_mc_patch_ig_try_update"},
+    {"_IGMobileConfigBooleanValueForInternalUse", 0xd503201f10fdae23ULL, "igt_runtime_mc_patch_ig_internaluse"},
+    {"_IGMobileConfigForceUpdateConfigs", 0x97b64676a9bf7bfdULL, "igt_runtime_mc_patch_ig_force_update"},
+    {"_IGMobileConfigSetConfigOverrides", 0x97b642faa9bf7bfdULL, "igt_runtime_mc_patch_ig_set_overrides"},
+    {"_IGMobileConfigTryUpdateConfigsWithCompletion", 0x17fff76652800004ULL, "igt_runtime_mc_patch_ig_try_update"},
 
     {"_MCIMobileConfigGetBoolean", 0xa9014ff4a9bd57f6ULL, "igt_runtime_mc_patch_mci_bool"},
     // METAExtensions symbols often change or have multiple variants; orig8=0 (relaxed) is intentional.
