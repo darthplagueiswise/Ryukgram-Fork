@@ -45,20 +45,35 @@ static NSString *SCIDexKitKeyForReceiver(id receiver, SEL sel) {
 
 static BOOL SCIDexKitBoolGetterReplacement(id self, SEL _cmd) {
     NSString *key = SCIDexKitKeyForReceiver(self, _cmd);
-    NSValue *origValue = key ? gSCIDexKitOriginalBoolIMPs[key] : nil;
-    BOOL original = NO;
+    if (!key.length) return NO;
 
-    if (origValue) {
+    // If the user explicitly changed the switch, do not call the original getter.
+    // This prevents the classic loop/crash case where the original implementation
+    // re-enters the same selector path while an override is already active.
+    SCIExpFlagOverride override = [SCIDexKitStore overrideForKey:key];
+    if (override == SCIExpFlagOverrideTrue) return YES;
+    if (override == SCIExpFlagOverrideFalse) return NO;
+
+    NSValue *origValue = gSCIDexKitOriginalBoolIMPs[key];
+    if (!origValue) return NO;
+
+    NSString *reentryKey = [@"sci.dexkit.reentry." stringByAppendingString:key];
+    NSMutableDictionary *td = NSThread.currentThread.threadDictionary;
+    if ([td[reentryKey] boolValue]) {
+        NSNumber *known = [SCIDexKitStore observedBoolGetterValueForKey:key];
+        return known ? known.boolValue : NO;
+    }
+
+    BOOL original = NO;
+    td[reentryKey] = @YES;
+    @try {
         BOOL (*orig)(id, SEL) = (BOOL (*)(id, SEL))origValue.pointerValue;
         if (orig) original = orig(self, _cmd);
+    } @finally {
+        [td removeObjectForKey:reentryKey];
     }
 
-    if (key.length) {
-        [SCIDexKitStore setObservedBoolGetterValue:original forKey:key];
-        SCIExpFlagOverride override = [SCIDexKitStore overrideForKey:key];
-        if (override == SCIExpFlagOverrideTrue) return YES;
-        if (override == SCIExpFlagOverrideFalse) return NO;
-    }
+    [SCIDexKitStore setObservedBoolGetterValue:original forKey:key];
     return original;
 }
 
