@@ -42,27 +42,45 @@ static NSString *SCIEnabledMethodTypes(Method m) {
     return types ? @(types) : @"";
 }
 
+static BOOL SCIEnabledContainsAny(NSString *s, NSArray<NSString *> *tokens) {
+    for (NSString *token in tokens) {
+        if ([s containsString:token]) return YES;
+    }
+    return NO;
+}
+
 static BOOL SCIEnabledStringLooksWanted(NSString *className, NSString *methodName) {
     NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
-    BOOL isAutofill = [s containsString:@"autofillinternalsettings"] || ([s containsString:@"autofill"] && ([s containsString:@"debugfooter"] || [s containsString:@"bloks"] || [s containsString:@"forcebloks"]));
-    if (isAutofill) return YES;
 
-    BOOL hasEnabled = [s containsString:@"enabled"] || [s containsString:@"isenabled"] || [s containsString:@"shouldenable"] || [s containsString:@"shouldshow"] || [s containsString:@"eligib"];
-    BOOL hasExperiment = [s containsString:@"experiment"] || [s containsString:@"mobileconfig"] || [s containsString:@"easygating"] || [s containsString:@"launcherset"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] || [s containsString:@"feature"];
+    // Explicit product surfaces that must be routed through the same DexKit getter logic.
+    // Some of these are not named "experiment" even though they are feature gates.
+    if (SCIEnabledContainsAny(s, @[
+        @"autofillinternalsettings", @"autofill",
+        @"prism", @"prismmenu", @"igdsprism",
+        @"directnotes", @"notesdogfooding", @"notestray",
+        @"quicksnap", @"quick_snap", @"instant",
+        @"homecoming", @"liquidglass", @"tabbar", @"launcherset"
+    ])) return YES;
+
+    BOOL hasEnabled = SCIEnabledContainsAny(s, @[@"enabled", @"isenabled", @"shouldenable", @"shouldshow", @"eligib", @"available"]);
+    BOOL hasExperiment = SCIEnabledContainsAny(s, @[@"experiment", @"mobileconfig", @"easygating", @"dogfood", @"internal", @"feature", @"rollout"]);
     return hasEnabled && hasExperiment;
 }
 
 static NSString *SCIEnabledSource(NSString *className, NSString *methodName) {
     NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
-    if ([s containsString:@"autofillinternalsettings"] || [s containsString:@"autofill"]) return @"Autofill/Internal";
+    if (SCIEnabledContainsAny(s, @[@"autofillinternalsettings", @"autofill"])) return @"Autofill/Internal";
+    if (SCIEnabledContainsAny(s, @[@"prism", @"prismmenu", @"igdsprism"])) return @"Prism/Menu";
+    if (SCIEnabledContainsAny(s, @[@"directnotes", @"notesdogfooding", @"notestray"])) return @"Direct Notes";
+    if (SCIEnabledContainsAny(s, @[@"quicksnap", @"quick_snap", @"instant"])) return @"QuickSnap/Direct";
+    if ([s containsString:@"homecoming"]) return @"Homecoming";
+    if (SCIEnabledContainsAny(s, @[@"liquidglass", @"tabbar", @"launcherset"])) return @"LiquidGlass/TabBar";
     if ([s containsString:@"fbcustomexperimentmanager"]) return @"FBCustomExperimentManager";
     if ([s containsString:@"fdidexperimentgenerator"]) return @"FDIDExperimentGenerator";
     if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
     if ([s containsString:@"metalocalexperiment"]) return @"MetaLocalExperiment";
     if ([s containsString:@"mobileconfig"] || [s containsString:@"easygating"]) return @"MobileConfig/EasyGating";
-    if ([s containsString:@"launcherset"]) return @"IGUserLauncherSet";
     if ([s containsString:@"dogfood"] || [s containsString:@"internal"]) return @"Dogfood/Internal";
-    if ([s containsString:@"quick"] || [s containsString:@"snap"]) return @"QuickSnap/Direct";
     if ([s containsString:@"friend"] || [s containsString:@"friending"]) return @"Friending/FriendsTab";
     if ([s containsString:@"feed"]) return @"Feed";
     if ([s containsString:@"direct"] || [s containsString:@"inbox"] || [s containsString:@"thread"]) return @"Direct/Inbox";
@@ -148,6 +166,8 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
             for (int pass = 0; pass < 2; pass++) {
                 BOOL classMethod = (pass == 1);
                 Class methodClass = classMethod ? object_getClass(cls) : cls;
+                if (!methodClass) continue;
+
                 unsigned int methodCount = 0;
                 Method *methods = class_copyMethodList(methodClass, &methodCount);
                 for (unsigned int i = 0; i < methodCount; i++) {
@@ -187,7 +207,7 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
                     IMP original = NULL;
                     MSHookMessageEx(hookClass, sel, (IMP)SCIEnabledBoolReplacement, &original);
                     if (original) {
-                        gSCIEnabledOriginalIMPs[key] = [NSValue valueWithPointer:original];
+                        gSCIEnabledOriginalIMPs[key] = [NSValue valueWithPointer:(const void *)original];
                         gSCIEnabledInstalledCount++;
                     } else {
                         [gSCIEnabledEntries removeObjectForKey:key];
@@ -210,7 +230,7 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
         for (SCIEnabledExperimentEntry *e in values) {
             e.savedState = [SCIExpFlags overrideForName:e.key];
             NSNumber *observed = observedDefaults[e.key];
-            if (observed) {
+            if (observed != nil) {
                 e.defaultKnown = YES;
                 e.defaultValue = observed.boolValue;
             }
@@ -280,3 +300,8 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
 }
 
 @end
+
+__attribute__((constructor))
+static void SCIEnabledExperimentRuntimeEarlyInstall(void) {
+    [SCIEnabledExperimentRuntime install];
+}
