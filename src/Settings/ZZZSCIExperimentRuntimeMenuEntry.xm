@@ -1,5 +1,6 @@
 #import "TweakSettings.h"
 #import "SCIExperimentRuntimeBrowserViewController.h"
+#import "SCIEnabledExperimentTogglesViewController.h"
 #import "../Features/ExpFlags/SCIAutofillInternalDevMode.h"
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -46,33 +47,37 @@ static void RYRuntimeExpPresentTextAlert(NSString *title, NSString *message) {
 static NSDictionary *RYRuntimeExperimentSection(void) {
     return @{
         @"header": @"Runtime ObjC Experiments",
-        @"footer": @"Source-aware browser for loaded Experiment/Enabled/BOOL methods. Rows show Default / Force YES / Force NO and source such as FBCustomExperimentManager, FDIDExperimentGenerator, LauncherSet, MobileConfig/EasyGating, Feed, Direct, Friending, Blend and GenAI. Method overrides install on next launch.",
+        @"footer": @"Main executable experiment tools. Enabled Experiment Toggles lists no-argument BOOL getters from the Instagram exec whose class/method contains enabled + experiment/feature/launcher/mobileconfig/internal. Default is shown from the original return once the app naturally calls the getter; override is Default / Force YES / Force NO.",
         @"rows": @[
+            [SCISetting navigationCellWithTitle:@"Enabled Experiment Toggles"
+                                       subtitle:@"Main exec only: all enabled/experiment BOOL getters with observed default + override toggle."
+                                           icon:[SCISymbol symbolWithName:@"switch.2"]
+                                 viewController:[SCIEnabledExperimentTogglesViewController new]],
             [SCISetting navigationCellWithTitle:@"Runtime Experiment Browser"
-                                       subtitle:@"List loaded Experiment/Enabled/BOOL classes, methods, properties and ivars with source + override state."
+                                       subtitle:@"Broader runtime browser for Experiment/Enabled/BOOL classes, methods, properties and ivars."
                                            icon:[SCISymbol symbolWithName:@"books.vertical"]
                                  viewController:[SCIExperimentRuntimeBrowserViewController new]],
             RYRuntimeExpSwitch(@"Autofill Debug Footer",
-                               @"Calls IGAutofillInternalSettings setDebugFooterEnabledWithEnabled:YES when applied.",
+                               @"Writes autofill_internal_settings_debug_footer_enabled = YES when applied.",
                                @"sci_dev_autofill_debug_footer",
                                NO),
             RYRuntimeExpSwitch(@"Force Bloks Experience",
-                               @"Calls setForceBloksExperienceOn when applied.",
+                               @"Writes autofill_internal_settings_force_bloks_experience = 1 when applied.",
                                @"sci_dev_autofill_force_bloks",
                                NO),
             RYRuntimeExpSwitch(@"Bloks Prefetch",
-                               @"Calls setBloksPrefetchEnabledWithEnabled:YES when applied.",
+                               @"Writes autofill_internal_settings_bloks_prefetch_enabled = YES when applied.",
                                @"sci_dev_autofill_bloks_prefetch",
                                NO),
             RYRuntimeExpButton(@"Apply Autofill Internal Now",
-                               @"Runs the selected Autofill internal runtime actions immediately.",
+                               @"Runs the selected Autofill internal defaults writes immediately.",
                                @"bolt.circle",
                                ^{
                                    [SCIAutofillInternalDevMode applyEnabledToggles];
                                    RYRuntimeExpPresentTextAlert(@"Autofill Internal Status", [SCIAutofillInternalDevMode statusText]);
                                }),
             RYRuntimeExpButton(@"Show Autofill Internal Status",
-                               @"Reads getDebugFooterEnabled, getForceBloksExperience and Bloks getters.",
+                               @"Safe status: reads backing defaults and selector availability without calling Swift getters.",
                                @"doc.text.magnifyingglass",
                                ^{
                                    RYRuntimeExpPresentTextAlert(@"Autofill Internal Status", [SCIAutofillInternalDevMode statusText]);
@@ -89,7 +94,7 @@ static BOOL RYRuntimeSectionAlreadyPresent(NSArray *navSections) {
         NSArray *rows = [section[@"rows"] isKindOfClass:NSArray.class] ? section[@"rows"] : @[];
         for (id rowObj in rows) {
             SCISetting *row = [rowObj isKindOfClass:SCISetting.class] ? rowObj : nil;
-            if ([row.title isEqualToString:@"Runtime Experiment Browser"]) return YES;
+            if ([row.title isEqualToString:@"Enabled Experiment Toggles"]) return YES;
         }
     }
     return NO;
