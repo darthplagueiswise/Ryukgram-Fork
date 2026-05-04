@@ -113,6 +113,24 @@ extern "C" BOOL SCIDexKitIsBoolGetterHooked(NSString *key) {
     }
 }
 
+static void SCIDexKitReapplySavedGetterOverrides(void) {
+    NSUInteger attempted = 0;
+    NSUInteger installed = 0;
+    for (NSString *key in [SCIDexKitStore allBoolGetterOverrideKeys]) {
+        if ([SCIDexKitStore overrideForKey:key] == SCIExpFlagOverrideOff) continue;
+        NSString *className = nil;
+        NSString *methodName = nil;
+        BOOL classMethod = NO;
+        if (![SCIDexKitStore parseBoolGetterKey:key className:&className methodName:&methodName classMethod:&classMethod]) continue;
+        attempted++;
+        if (SCIDexKitInstallBoolGetterHook(key, className, methodName, classMethod)) installed++;
+    }
+    NSLog(@"[RyukGram][DexKitRouter] reapply saved getter overrides attempted=%lu installed=%lu", (unsigned long)attempted, (unsigned long)installed);
+}
+
 %ctor {
     NSLog(@"[RyukGram][DexKitRouter] ready; no runtime sweep is installed from ctor");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        SCIDexKitReapplySavedGetterOverrides();
+    });
 }
