@@ -6,6 +6,7 @@
 #import <substrate.h>
 
 static NSString *const kSCIEnabledOverridePrefix = @"objc-enabled:";
+static NSString *const kSCIEnabledObservedDefaultsKey = @"sci_enabled_experiment_observed_defaults";
 
 @implementation SCIEnabledExperimentEntry
 @end
@@ -66,6 +67,21 @@ static NSString *SCIEnabledSource(NSString *className, NSString *methodName) {
     return @"Main Executable";
 }
 
+static NSMutableDictionary *SCIEnabledLoadObservedDefaults(void) {
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kSCIEnabledObservedDefaultsKey];
+    return d ? [d mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static void SCIEnabledPersistObservedDefault(NSString *key, BOOL value) {
+    if (!key.length) return;
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *d = SCIEnabledLoadObservedDefaults();
+    NSNumber *old = d[key];
+    if (old && old.boolValue == value) return;
+    d[key] = @(value);
+    [ud setObject:d forKey:kSCIEnabledObservedDefaultsKey];
+}
+
 static NSString *SCIEnabledKeyForReceiver(id receiver, SEL sel, NSString **declaredClassOut) {
     NSString *methodName = NSStringFromSelector(sel);
     BOOL classMethod = object_isClass(receiver);
@@ -93,6 +109,7 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
     }
 
     if (key) {
+        SCIEnabledPersistObservedDefault(key, original);
         @synchronized([SCIEnabledExperimentRuntime class]) {
             SCIEnabledExperimentEntry *entry = gSCIEnabledEntries[key];
             entry.defaultKnown = YES;
@@ -113,6 +130,7 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
     dispatch_once(&gSCIEnabledInstallOnce, ^{
         gSCIEnabledEntries = [NSMutableDictionary dictionary];
         gSCIEnabledOriginalIMPs = [NSMutableDictionary dictionary];
+        NSDictionary *observedDefaults = SCIEnabledLoadObservedDefaults();
 
         NSString *mainImageName = NSBundle.mainBundle.executablePath.lastPathComponent ?: @"";
         unsigned int classCount = 0;
@@ -154,8 +172,9 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
                     entry.imageName = imageName;
                     entry.typeEncoding = SCIEnabledMethodTypes(m);
                     entry.classMethod = classMethod;
-                    entry.defaultKnown = NO;
-                    entry.defaultValue = NO;
+                    NSNumber *observed = observedDefaults[key];
+                    entry.defaultKnown = observed != nil;
+                    entry.defaultValue = observed ? observed.boolValue : NO;
                     entry.hitCount = 0;
                     entry.savedState = [SCIExpFlags overrideForName:key];
                     gSCIEnabledEntries[key] = entry;
@@ -183,7 +202,15 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
     NSArray *values = nil;
     @synchronized(self) {
         values = [gSCIEnabledEntries.allValues copy];
-        for (SCIEnabledExperimentEntry *e in values) e.savedState = [SCIExpFlags overrideForName:e.key];
+        NSDictionary *observedDefaults = SCIEnabledLoadObservedDefaults();
+        for (SCIEnabledExperimentEntry *e in values) {
+            e.savedState = [SCIExpFlags overrideForName:e.key];
+            NSNumber *observed = observedDefaults[e.key];
+            if (observed) {
+                e.defaultKnown = YES;
+                e.defaultValue = observed.boolValue;
+            }
+        }
     }
     return [values sortedArrayUsingComparator:^NSComparisonResult(SCIEnabledExperimentEntry *a, SCIEnabledExperimentEntry *b) {
         NSComparisonResult c = [a.source caseInsensitiveCompare:b.source];
@@ -223,18 +250,18 @@ static BOOL SCIEnabledBoolReplacement(id self, SEL _cmd) {
 
 + (NSString *)stateLabelForEntry:(SCIEnabledExperimentEntry *)entry {
     SCIExpFlagOverride state = [self savedStateForEntry:entry];
-    if (state == SCIExpFlagOverrideTrue) return @"FORCE YES";
-    if (state == SCIExpFlagOverrideFalse) return @"FORCE NO";
-    return @"DEFAULT";
+    if (state == SCIExpFlagOverrideTrue) return @"OVERRIDE ON";
+    if (state == SCIExpFlagOverrideFalse) return @"OVERRIDE OFF";
+    return @"SYSTEM";
 }
 
 + (NSString *)defaultLabelForEntry:(SCIEnabledExperimentEntry *)entry {
-    if (!entry.defaultKnown) return @"not observed yet";
-    return entry.defaultValue ? @"YES" : @"NO";
+    if (!entry.defaultKnown) return @"unknown";
+    return entry.defaultValue ? @"ON" : @"OFF";
 }
 
 + (NSString *)summaryTextForEntry:(SCIEnabledExperimentEntry *)entry {
-    return [NSString stringWithFormat:@"source=%@ · default=%@ · state=%@ · hits=%lu · %@ · %@",
+    return [NSString stringWithFormat:@"source=%@ · system=%@ · state=%@ · hits=%lu · %@ · %@",
             entry.source ?: @"?",
             [self defaultLabelForEntry:entry],
             [self stateLabelForEntry:entry],
