@@ -104,7 +104,7 @@ static void SCIInstallRuntimeBoolMethodOverrides(void) {
                     IMP original = NULL;
                     MSHookMessageEx(methodClass, sel, (IMP)SCIRuntimeObservedBoolIMP, &original);
                     if (original) {
-                        gSCIRuntimeOriginalBoolIMPs[key] = [NSValue valueWithPointer:original];
+                        gSCIRuntimeOriginalBoolIMPs[key] = [NSValue valueWithPointer:(const void *)original];
                         installed++;
                     }
                 }
