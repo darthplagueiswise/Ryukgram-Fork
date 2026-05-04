@@ -141,8 +141,9 @@
     self.title = @"SCI DexKit";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
 
-    // Intentionally menu-scoped. This scans metadata when the DexKit screen opens.
+    // Menu-scoped: the inventory scan and live observation start only when DexKit opens.
     [SCIEnabledExperimentRuntime install];
+    [SCIEnabledExperimentRuntime enableLiveObservationForVisibleEntries];
 
     self.filterControl = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Seen", @"ON", @"OFF", @"Forced"]];
     self.filterControl.selectedSegmentIndex = 0;
@@ -198,6 +199,7 @@
     ]];
 
     [self reload];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self reload]; });
 }
 
 - (NSArray<SCIEnabledExperimentEntry *> *)flatRows {
@@ -276,7 +278,8 @@
     NSUInteger total = [SCIEnabledExperimentRuntime allEntries].count;
     NSUInteger shown = [self flatRows].count;
     NSUInteger live = [SCIEnabledExperimentRuntime installedCount];
-    self.footerLabel.text = [NSString stringWithFormat:@"Getter owner groups · Instagram + FBSharedFramework · total=%lu · showing=%lu · groups=%lu · live hooks=%lu", (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count, (unsigned long)live];
+    NSString *observer = [SCIEnabledExperimentRuntime liveObservationEnabled] ? @"live" : @"off";
+    self.footerLabel.text = [NSString stringWithFormat:@"Getter owner groups · Instagram + FBSharedFramework · observer=%@ · total=%lu · showing=%lu · groups=%lu · hooks=%lu", observer, (unsigned long)total, (unsigned long)shown, (unsigned long)self.sectionKeys.count, (unsigned long)live];
 }
 
 - (BOOL)effectiveSwitchValueForEntry:(SCIEnabledExperimentEntry *)entry {
@@ -357,7 +360,7 @@
 
     SCIExpFlagOverride override = [SCIEnabledExperimentRuntime savedStateForEntry:entry];
     [cell.toggleSwitch setOn:[self effectiveSwitchValueForEntry:entry] animated:NO];
-    cell.toggleSwitch.enabled = entry.defaultKnown || override != SCIExpFlagOverrideOff;
+    cell.toggleSwitch.enabled = YES;
     cell.systemButton.enabled = override != SCIExpFlagOverrideOff;
     cell.systemButton.alpha = cell.systemButton.enabled ? 1.0 : 0.35;
 
