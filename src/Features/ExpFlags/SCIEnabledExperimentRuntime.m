@@ -100,6 +100,10 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
     }
 }
 
+static BOOL SCIEnabledEffectiveValue(SCIEnabledExperimentEntry *entry) {
+    return [SCIDexKitStore effectiveBoolValueForKey:entry.key defaultKnown:entry.defaultKnown defaultValue:entry.defaultValue];
+}
+
 @implementation SCIEnabledExperimentRuntime
 
 + (void)install {
@@ -205,9 +209,10 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
     NSString *q = query.lowercaseString ?: @"";
     NSMutableArray *out = [NSMutableArray array];
     for (SCIEnabledExperimentEntry *e in [self allEntries]) {
+        BOOL effective = SCIEnabledEffectiveValue(e);
         if (mode == 1 && !e.defaultKnown) continue;
-        if (mode == 2 && (!e.defaultKnown || !e.defaultValue)) continue;
-        if (mode == 3 && (!e.defaultKnown || e.defaultValue)) continue;
+        if (mode == 2 && !effective) continue;
+        if (mode == 3 && effective) continue;
         if (mode == 4 && [SCIDexKitStore overrideForKey:e.key] == SCIExpFlagOverrideOff) continue;
         if (q.length) {
             NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@", e.imageName, e.source, e.className, e.methodName, e.typeEncoding, e.key].lowercaseString;
@@ -241,7 +246,8 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
 
 + (NSString *)summaryTextForEntry:(SCIEnabledExperimentEntry *)entry {
     NSString *router = SCIDexKitIsBoolGetterHooked(entry.key) ? @"live" : @"off";
-    return [NSString stringWithFormat:@"%@ · %@ · system=%@ · %@ · router=%@", entry.imageName ?: @"?", entry.source ?: @"?", [self defaultLabelForEntry:entry], [self stateLabelForEntry:entry], router];
+    NSString *effective = SCIEnabledEffectiveValue(entry) ? @"ON" : @"OFF";
+    return [NSString stringWithFormat:@"%@ · %@ · effective=%@ · system=%@ · %@ · router=%@", entry.imageName ?: @"?", entry.source ?: @"?", effective, [self defaultLabelForEntry:entry], [self stateLabelForEntry:entry], router];
 }
 
 + (NSUInteger)installedCount {
