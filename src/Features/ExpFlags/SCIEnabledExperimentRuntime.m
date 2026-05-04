@@ -18,6 +18,7 @@ BOOL SCIDexKitIsBoolGetterHooked(NSString *key);
 
 static NSMutableDictionary<NSString *, SCIEnabledExperimentEntry *> *gSCIEnabledEntries;
 static dispatch_once_t gSCIEnabledInstallOnce;
+static BOOL gSCIEnabledLiveObservation = NO;
 
 static NSString *SCIImageBasename(const char *path) {
     if (!path) return @"";
@@ -46,9 +47,7 @@ static NSString *SCIEnabledMethodTypes(Method m) {
 }
 
 static BOOL SCIEnabledContainsAny(NSString *s, NSArray<NSString *> *tokens) {
-    for (NSString *token in tokens) {
-        if ([s containsString:token]) return YES;
-    }
+    for (NSString *token in tokens) if ([s containsString:token]) return YES;
     return NO;
 }
 
@@ -166,6 +165,24 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
     });
 }
 
++ (void)enableLiveObservationForVisibleEntries {
+    [self install];
+    NSUInteger attempted = 0;
+    NSUInteger installed = 0;
+    @synchronized(self) {
+        for (SCIEnabledExperimentEntry *entry in gSCIEnabledEntries.allValues) {
+            attempted++;
+            if (SCIDexKitInstallBoolGetterHook(entry.key, entry.className, entry.methodName, entry.classMethod)) installed++;
+        }
+        gSCIEnabledLiveObservation = YES;
+    }
+    NSLog(@"[RyukGram][EnabledExperiments] menu-scoped live observation attempted=%lu installed=%lu", (unsigned long)attempted, (unsigned long)installed);
+}
+
++ (BOOL)liveObservationEnabled {
+    return gSCIEnabledLiveObservation;
+}
+
 + (NSArray<SCIEnabledExperimentEntry *> *)allEntries {
     [self install];
     NSArray *values = nil;
@@ -203,10 +220,10 @@ static void SCIEnabledRefreshEntry(SCIEnabledExperimentEntry *entry) {
 
 + (void)setSavedState:(SCIExpFlagOverride)state forEntry:(SCIEnabledExperimentEntry *)entry {
     if (!entry.key.length) return;
+    [SCIDexKitStore setOverride:state forKey:entry.key];
     if (state != SCIExpFlagOverrideOff) {
         SCIDexKitInstallBoolGetterHook(entry.key, entry.className, entry.methodName, entry.classMethod);
     }
-    [SCIDexKitStore setOverride:state forKey:entry.key];
     entry.savedState = state;
 }
 
