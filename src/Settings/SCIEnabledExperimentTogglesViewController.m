@@ -16,6 +16,8 @@
     self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
     if (!self) return nil;
     self.selectionStyle = UITableViewCellSelectionStyleDefault;
+    self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    self.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
     _titleLabel = [UILabel new];
     _titleLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
@@ -75,7 +77,7 @@
 - (instancetype)initWithReuseIdentifier:(NSString *)reuseIdentifier {
     self = [super initWithReuseIdentifier:reuseIdentifier];
     if (!self) return nil;
-    self.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+    self.contentView.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     _titleLabel = [UILabel new];
     _titleLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightSemibold];
@@ -139,7 +141,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"SCI DexKit";
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     // Menu-scoped scan only. Hooks are not started here; overrides are installed
     // through setSavedState:forEntry: and persisted/reapplied by the hook router.
@@ -167,13 +169,15 @@
     self.footerLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.footerLabel];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 58;
     self.tableView.sectionHeaderHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedSectionHeaderHeight = 54;
+    self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.tableView.separatorInset = UIEdgeInsetsMake(0, 18, 0, 18);
     [self.tableView registerClass:SCIDexKitGetterCell.class forCellReuseIdentifier:@"getterCell"];
     [self.tableView registerClass:SCIDexKitGetterHeaderView.class forHeaderFooterViewReuseIdentifier:@"getterHeader"];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -336,15 +340,7 @@
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 56.0; }
 
-- (NSArray<NSString *> *)sectionIndexTitlesForTableView:(UITableView *)tableView {
-    NSMutableArray *titles = [NSMutableArray array];
-    for (NSString *key in self.sectionKeys) {
-        NSString *name = self.sectionDisplayNames[key] ?: key;
-        NSString *clean = [name stringByReplacingOccurrencesOfString:@"IG" withString:@""];
-        [titles addObject:[clean substringToIndex:MIN((NSUInteger)3, clean.length)]];
-    }
-    return titles;
-}
+- (NSArray<NSString *> *)sectionIndexTitlesForTableView:(UITableView *)tableView { return nil; }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     SCIDexKitGetterCell *cell = [tv dequeueReusableCellWithIdentifier:@"getterCell" forIndexPath:ip];
