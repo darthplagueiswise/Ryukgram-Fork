@@ -21,11 +21,14 @@
     d.curatedScore = self.curatedScore;
     return d;
 }
+
 - (NSString *)ownerDisplayName {
     if (!self.className.length) return @"Unknown owner";
-    NSArray *parts = [self.className componentsSeparatedByString:@"."];
-    return parts.lastObject.length ? parts.lastObject : self.className;
+    NSArray<NSString *> *parts = [self.className componentsSeparatedByString:@"."];
+    NSString *lastPart = parts.lastObject;
+    return lastPart.length ? lastPart : self.className;
 }
+
 - (NSString *)ownerGroupKey {
     return [NSString stringWithFormat:@"%@|%@|%@", self.imageBasename ?: @"?", self.imagePath ?: @"", self.className ?: @"?"];
 }
