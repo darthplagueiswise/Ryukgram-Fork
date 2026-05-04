@@ -14,6 +14,14 @@ static NSString *SCIDexKitBasename(const char *path) {
     return [NSString stringWithUTF8String:(slash ? slash + 1 : path)] ?: @"";
 }
 
+static BOOL SCIDexKitImageAllowed(NSString *imageName) {
+    if (!imageName.length) return NO;
+    NSString *mainImageName = NSBundle.mainBundle.executablePath.lastPathComponent ?: @"";
+    if ([imageName isEqualToString:mainImageName]) return YES;
+    if ([imageName isEqualToString:@"FBSharedFramework"]) return YES;
+    return NO;
+}
+
 static BOOL SCIDexKitMethodReturnsBool(Method m) {
     if (!m) return NO;
     char rt[32] = {0};
@@ -79,9 +87,8 @@ extern "C" BOOL SCIDexKitInstallBoolGetterHook(NSString *key,
         if (dladdr((void *)method_getImplementation(method), &info) == 0) return NO;
 
         NSString *imageName = SCIDexKitBasename(info.dli_fname);
-        NSString *mainImageName = NSBundle.mainBundle.executablePath.lastPathComponent ?: @"";
-        if (![imageName isEqualToString:mainImageName]) {
-            NSLog(@"[RyukGram][DexKitRouter] refused non-main-exec getter %@ image=%@", key, imageName);
+        if (!SCIDexKitImageAllowed(imageName)) {
+            NSLog(@"[RyukGram][DexKitRouter] refused unsafe/non-target getter %@ image=%@", key, imageName);
             return NO;
         }
 
@@ -95,7 +102,7 @@ extern "C" BOOL SCIDexKitInstallBoolGetterHook(NSString *key,
 
         gSCIDexKitOriginalBoolIMPs[key] = [NSValue valueWithPointer:(const void *)original];
         [gSCIDexKitInstalledKeys addObject:key];
-        NSLog(@"[RyukGram][DexKitRouter] installed %@", key);
+        NSLog(@"[RyukGram][DexKitRouter] installed %@ image=%@", key, imageName);
         return YES;
     }
 }
