@@ -23,7 +23,12 @@ FOUNDATION_EXPORT NSString * const SCIMCBrokerHookIndexKey;
 + (NSArray<NSString *> *)activeOverrideKeys;
 + (NSArray<NSString *> *)enabledHookBrokerIDs;
 + (NSArray<NSString *> *)observedOverrideKeys;
-+ (BOOL)parseOverrideKey:(NSString *)key brokerID:(NSString **)brokerID image:(NSString **)image symbol:(NSString **)symbol kind:(NSString **)kind value:(uint64_t *)value;
++ (BOOL)parseOverrideKey:(NSString *)key
++               brokerID:(NSString * _Nullable * _Nullable)brokerID
++                  image:(NSString * _Nullable * _Nullable)image
++                 symbol:(NSString * _Nullable * _Nullable)symbol
++                   kind:(NSString * _Nullable * _Nullable)kind
++                  value:(uint64_t * _Nullable)value;
 @end
 
 NS_ASSUME_NONNULL_END
