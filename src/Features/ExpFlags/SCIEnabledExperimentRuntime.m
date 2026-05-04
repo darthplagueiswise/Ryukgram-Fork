@@ -44,6 +44,9 @@ static NSString *SCIEnabledMethodTypes(Method m) {
 
 static BOOL SCIEnabledStringLooksWanted(NSString *className, NSString *methodName) {
     NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
+    BOOL isAutofill = [s containsString:@"autofillinternalsettings"] || ([s containsString:@"autofill"] && ([s containsString:@"debugfooter"] || [s containsString:@"bloks"] || [s containsString:@"forcebloks"]));
+    if (isAutofill) return YES;
+
     BOOL hasEnabled = [s containsString:@"enabled"] || [s containsString:@"isenabled"] || [s containsString:@"shouldenable"] || [s containsString:@"shouldshow"] || [s containsString:@"eligib"];
     BOOL hasExperiment = [s containsString:@"experiment"] || [s containsString:@"mobileconfig"] || [s containsString:@"easygating"] || [s containsString:@"launcherset"] || [s containsString:@"dogfood"] || [s containsString:@"internal"] || [s containsString:@"feature"];
     return hasEnabled && hasExperiment;
@@ -51,6 +54,7 @@ static BOOL SCIEnabledStringLooksWanted(NSString *className, NSString *methodNam
 
 static NSString *SCIEnabledSource(NSString *className, NSString *methodName) {
     NSString *s = [NSString stringWithFormat:@"%@ %@", className ?: @"", methodName ?: @""].lowercaseString;
+    if ([s containsString:@"autofillinternalsettings"] || [s containsString:@"autofill"]) return @"Autofill/Internal";
     if ([s containsString:@"fbcustomexperimentmanager"]) return @"FBCustomExperimentManager";
     if ([s containsString:@"fdidexperimentgenerator"]) return @"FDIDExperimentGenerator";
     if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
