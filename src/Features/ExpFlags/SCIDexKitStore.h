@@ -1,22 +1,32 @@
 #import <Foundation/Foundation.h>
-#import "SCIExpFlags.h"
+#import "SCIDexKitDescriptor.h"
+
+NS_ASSUME_NONNULL_BEGIN
 
 @interface SCIDexKitStore : NSObject
++ (void)registerDefaults;
++ (void)migrateIfNeeded;
++ (void)invalidateObservedCacheIfBuildChanged;
++ (NSString *)currentAppBuildToken;
 
-+ (NSString *)boolGetterKeyWithClassName:(NSString *)className methodName:(NSString *)methodName classMethod:(BOOL)classMethod;
-+ (BOOL)parseBoolGetterKey:(NSString *)key className:(NSString **)className methodName:(NSString **)methodName classMethod:(BOOL *)classMethod;
++ (NSString *)overrideKeyForImage:(NSString *)image sign:(NSString *)sign className:(NSString *)className selector:(NSString *)selector;
++ (NSString *)observedKeyForImage:(NSString *)image sign:(NSString *)sign className:(NSString *)className selector:(NSString *)selector;
++ (NSString *)observedKeyForOverrideKey:(NSString *)overrideKey;
++ (BOOL)parseBoolKey:(NSString *)key image:(NSString **)image sign:(NSString **)sign className:(NSString **)className selector:(NSString **)selector;
 
-+ (SCIExpFlagOverride)overrideForKey:(NSString *)key;
-+ (void)setOverride:(SCIExpFlagOverride)override forKey:(NSString *)key;
-+ (NSArray<NSString *> *)allOverrideKeys;
-+ (NSArray<NSString *> *)allBoolGetterOverrideKeys;
++ (NSArray<NSString *> *)activeOverrideKeys;
++ (nullable NSNumber *)overrideValueForKey:(NSString *)overrideKey;
++ (void)setOverrideValue:(nullable NSNumber *)value forKey:(NSString *)overrideKey;
++ (nullable NSNumber *)observedValueForKey:(NSString *)observedKey;
++ (void)noteObservedValue:(BOOL)value forKey:(NSString *)observedKey;
++ (SCIDexKitKnownBoolState)effectiveStateForOverrideKey:(NSString *)overrideKey observedKey:(NSString *)observedKey;
 
-+ (NSDictionary<NSString *, NSNumber *> *)observedBoolGetterValues;
-+ (NSNumber *)observedBoolGetterValueForKey:(NSString *)key;
-+ (void)setObservedBoolGetterValue:(BOOL)value forKey:(NSString *)key;
-
-+ (BOOL)effectiveBoolValueForKey:(NSString *)key defaultKnown:(BOOL)defaultKnown defaultValue:(BOOL)defaultValue;
-+ (NSString *)systemLabelForKnown:(BOOL)known value:(BOOL)value;
-+ (NSString *)overrideLabelForKey:(NSString *)key;
-
++ (void)beginBootGuard;
++ (void)markLaunchStable;
++ (void)noteApplyingOverrideKey:(NSString *)key;
++ (BOOL)isOverrideQuarantined:(NSString *)key;
++ (NSArray<NSString *> *)quarantinedOverrideKeys;
++ (void)clearQuarantineForKey:(NSString *)key;
 @end
+
+NS_ASSUME_NONNULL_END

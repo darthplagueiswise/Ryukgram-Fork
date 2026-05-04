@@ -1,4 +1,3 @@
-#import <UIKit/UIKit.h>
-
-@interface SCIEnabledExperimentTogglesViewController : UIViewController
+#import "SCIDexKitViewController.h"
+@interface SCIEnabledExperimentTogglesViewController : SCIDexKitViewController
 @end

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>DefaultMode</key>
+    <string>CuratedBOnly</string>
+    <key>OwnerIncludeTokens</key>
+    <array>
+        <string>experiment</string><string>feature</string><string>config</string><string>provider</string>
+        <string>gating</string><string>rollout</string><string>settings</string><string>internal</string>
+        <string>dogfood</string><string>mobileconfig</string><string>autofill</string><string>prism</string>
+        <string>directnotes</string><string>quicksnap</string><string>homecoming</string><string>liquidglass</string>
+        <string>tabbar</string><string>launcher</string>
+    </array>
+    <key>SelectorIncludeTokens</key>
+    <array>
+        <string>enabled</string><string>eligible</string><string>available</string><string>shouldshow</string><string>shouldenable</string>
+    </array>
+    <key>ExcludedSelectors</key>
+    <array>
+        <string>isEmpty</string><string>isVisible</string><string>isHidden</string><string>isSelected</string>
+        <string>supportsSecureCoding</string><string>isAccessibilityElement</string><string>isScrollEnabled</string>
+        <string>scrollEnabled</string><string>userInteractionEnabled</string><string>requiresPageWorld</string>
+    </array>
+    <key>ExcludeClassPrefixes</key>
+    <array><string>UI</string><string>NS</string><string>WK</string><string>AV</string><string>CA</string></array>
+</dict>
+</plist>
