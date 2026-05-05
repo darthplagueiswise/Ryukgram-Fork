@@ -1,9 +1,9 @@
-name: Build RyukGram Rootless Test
+name: Build RyukGram Rootless Dev
 
 on:
     push:
         branches:
-            - 'test'
+            - 'dev'
     workflow_dispatch:
 
 concurrency:
@@ -59,7 +59,7 @@ jobs:
               env:
                 THEOS: ${{ github.workspace }}/theos
 
-            - name: Set test package version
+            - name: Set dev package version
               id: version
               run: |
                 BASE_VERSION=$(awk '/Version:/ {print $2}' control)
