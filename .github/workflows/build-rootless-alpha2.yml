@@ -1,0 +1,104 @@
+name: Build RyukGram Rootless Alpha2
+
+on:
+  push:
+    branches:
+      - 'alpha2'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build RyukGram rootless
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: brew install ldid dpkg make
+
+      - name: Set PATH
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Setup Theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
+
+      - name: SDK Caching
+        id: SDK
+        uses: actions/cache@v4
+        env:
+          cache-name: iPhoneOS16.2.sdk
+        with:
+          path: ${{ github.workspace }}/theos/sdks/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Download iOS SDK
+        if: steps.SDK.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
+          cd iOS-SDKs
+          git sparse-checkout set --no-cone iPhoneOS16.2.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Set alpha2 package version
+        id: version
+        run: |
+          BASE_VERSION=$(awk '/Version:/ {print $2}' control)
+          BRANCH_NAME="alpha2"
+          COMMIT_NUMBER="$(git rev-list --count HEAD)"
+          COMMIT_SUFFIX="commit${COMMIT_NUMBER}"
+          BUILD_VERSION="${BASE_VERSION}.0.0.${GITHUB_RUN_NUMBER}"
+          BUILD_LABEL="${BRANCH_NAME}_${COMMIT_SUFFIX}"
+          sed -i '' "s/^Version:.*/Version: ${BUILD_VERSION}/" control
+          echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> "$GITHUB_ENV"
+          echo "COMMIT_NUMBER=${COMMIT_NUMBER}" >> "$GITHUB_ENV"
+          echo "COMMIT_SUFFIX=${COMMIT_SUFFIX}" >> "$GITHUB_ENV"
+          echo "BUILD_LABEL=${BUILD_LABEL}" >> "$GITHUB_ENV"
+          echo "base_version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          echo "commit_number=${COMMIT_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "commit_suffix=${COMMIT_SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "build_label=${BUILD_LABEL}" >> "$GITHUB_OUTPUT"
+          echo "Using package version ${BUILD_VERSION} (${BUILD_LABEL})"
+          grep '^Version:' control
+
+      - name: Setup FFmpegKit
+        run: ./scripts/setup-ffmpegkit.sh
+
+      - name: Build rootless deb
+        run: |
+          export THEOS="${{ github.workspace }}/theos"
+          ./build.sh rootless
+          cd packages
+          DEB="$(ls -t *-rootless.deb | head -n1)"
+          [ -n "$DEB" ] && mv "$DEB" "RyukGram_${BRANCH_NAME}_${BUILD_VERSION}_${COMMIT_SUFFIX}_rootless.deb"
+          ls -la
+
+      - name: Upload rootless artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RyukGram_${{ steps.version.outputs.branch_name }}_v${{ steps.version.outputs.build_version }}_${{ steps.version.outputs.commit_suffix }}_rootless
+          path: packages/RyukGram_${{ env.BRANCH_NAME }}_${{ env.BUILD_VERSION }}_${{ env.COMMIT_SUFFIX }}_rootless.deb
+          if-no-files-found: error
