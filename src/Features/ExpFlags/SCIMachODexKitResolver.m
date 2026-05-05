@@ -108,8 +108,8 @@ static BOOL SCILooksLikeMCSpecifier(unsigned long long value) {
     unsigned int b0 = (unsigned int)((value >> 56) & 0xff);
     unsigned int b1 = (unsigned int)((value >> 48) & 0xff);
 
-    BOOL prefixLooksValid = (b0 == 0x00 || b0 == 0x20);
-    BOOL familyLooksValid = (b1 >= 0x81 && b1 <= 0x84);
+    BOOL prefixLooksValid = (b0 == 0x00 || b0 == 0x20 || b0 == 0x21 || b0 == 0x24);
+    BOOL familyLooksValid = (b1 == 0x41 || (b1 >= 0x81 && b1 <= 0x84));
 
     return prefixLooksValid && familyLooksValid;
 }
@@ -168,6 +168,51 @@ static BOOL SCIReadCStringAt(uintptr_t addr, NSArray<NSValue *> *stringRanges, N
     if (outString) *outString = s;
     return YES;
 }
+
+static BOOL SCIStringLooksLikeNameCandidate(NSString *s) {
+    if (!s.length || s.length > 220) return NO;
+    NSString *l = s.lowercaseString;
+
+    if ([l hasPrefix:@"http"] || [l containsString:@"://"]) return NO;
+    if ([l containsString:@"/"] && ![l containsString:@"ig_"] && ![l containsString:@"mobileconfig"]) return NO;
+    if ([l containsString:@"%@"] || [l containsString:@"%s"] || [l containsString:@"%d"] || [l containsString:@"%llu"]) return NO;
+    if ([l hasPrefix:@"__"] || [l hasPrefix:@"_$s"]) return NO;
+
+    if (SCIStringHasUsefulToken(s)) return YES;
+
+    // MobileConfig names are often lowercase snake-case without a prefix; accept them only
+    // when they look like a real feature key rather than a random UI string.
+    BOOL hasUnderscore = [s containsString:@"_"];
+    BOOL hasSpace = [s containsString:@" "];
+    BOOL hasDot = [s containsString:@"."];
+    if (hasUnderscore && !hasSpace && !hasDot && s.length >= 6) return YES;
+
+    return NO;
+}
+
+static BOOL SCIReadPossibleStringFromDataPointer(uintptr_t ptr, NSArray<NSValue *> *stringRanges, NSArray<NSValue *> *dataRanges, NSString **outString) {
+    if (!ptr) return NO;
+
+    NSString *direct = nil;
+    if (SCIReadCStringAt(ptr, stringRanges, &direct) && SCIStringLooksLikeNameCandidate(direct)) {
+        if (outString) *outString = direct;
+        return YES;
+    }
+
+    // Constant NSString / CFString style object. On arm64 the C string pointer is normally
+    // at +0x10. Guard every read by range checks so this remains resolver-only and safe.
+    if (SCIAddrInRanges(ptr, dataRanges) && SCIAddrInRanges(ptr + 0x18, dataRanges)) {
+        uintptr_t cstr = *(const uintptr_t *)(ptr + 0x10);
+        NSString *boxed = nil;
+        if (SCIReadCStringAt(cstr, stringRanges, &boxed) && SCIStringLooksLikeNameCandidate(boxed)) {
+            if (outString) *outString = boxed;
+            return YES;
+        }
+    }
+
+    return NO;
+}
+
 
 static uint64_t SCIReadULEB128(SCIByteCursor *cursor, BOOL *ok) {
     uint64_t result = 0;
@@ -406,6 +451,7 @@ static void *SCIDlsymFlexible(NSString *symbolName) {
     [self discoverCandidateSymbolsFromSymtabs];
     [self discoverCandidateSymbolsFromExportTries];
     [self buildSpecifierMapFromDiscoveredSymbols];
+    [self buildSpecifierMapFromNearbyDataTables];
     [self addHardcodedSafetySpecifiers];
 
     @synchronized (self) {
@@ -837,6 +883,84 @@ static void *SCIDlsymFlexible(NSString *symbolName) {
                                  (unsigned long)dlsymResolved,
                                  (unsigned long)addressResolved,
                                  (unsigned long)specifiersAdded]];
+    }
+}
+
+- (void)buildSpecifierMapFromNearbyDataTables {
+    NSUInteger slotsScanned = 0;
+    NSUInteger specifierSlots = 0;
+    NSUInteger named = 0;
+
+    for (SCIMachOImageInfo *img in self.images) {
+        NSMutableArray<NSValue *> *mergedDataRanges = [NSMutableArray array];
+        for (NSValue *v in img.dataRanges ?: @[]) [mergedDataRanges addObject:v];
+        for (NSValue *v in img.stringRanges ?: @[]) [mergedDataRanges addObject:v];
+
+        for (NSValue *rangeValue in img.dataRanges ?: @[]) {
+            NSRange range = rangeValue.rangeValue;
+            uintptr_t start = (uintptr_t)range.location;
+            uintptr_t end = start + (uintptr_t)range.length;
+            if (!start || end <= start) continue;
+
+            for (uintptr_t slot = start; slot + sizeof(unsigned long long) <= end; slot += sizeof(unsigned long long)) {
+                slotsScanned++;
+
+                unsigned long long raw = *(const unsigned long long *)slot;
+                unsigned long long normalized = [SCIMobileConfigIDResolver normalizedSpecifierValue:raw];
+                if (!SCILooksLikeMCSpecifier(normalized)) continue;
+
+                specifierSlots++;
+
+                NSString *best = nil;
+                NSInteger bestScore = NSIntegerMin;
+                intptr_t bestDistance = 0;
+
+                const intptr_t window = 0x90;
+                uintptr_t windowStart = slot > (uintptr_t)window ? slot - (uintptr_t)window : start;
+                if (windowStart < start) windowStart = start;
+                uintptr_t windowEnd = slot + (uintptr_t)window;
+                if (windowEnd > end) windowEnd = end;
+
+                for (uintptr_t p = windowStart; p + sizeof(uintptr_t) <= windowEnd; p += sizeof(uintptr_t)) {
+                    if (p == slot) continue;
+
+                    uintptr_t candidatePtr = *(const uintptr_t *)p;
+                    NSString *candidate = nil;
+                    if (!SCIReadPossibleStringFromDataPointer(candidatePtr, img.stringRanges, mergedDataRanges, &candidate)) continue;
+
+                    NSInteger score = SCIStringScore(candidate);
+                    if ([candidate containsString:@"_"]) score += 15;
+                    if ([candidate.lowercaseString containsString:@"mobileconfig"]) score -= 10;
+                    intptr_t distance = (p > slot) ? (intptr_t)(p - slot) : (intptr_t)(slot - p);
+                    score -= (NSInteger)(distance / 16);
+
+                    if (!best.length || score > bestScore) {
+                        best = candidate;
+                        bestScore = score;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (best.length && bestScore > 0) {
+                    NSString *name = best;
+                    NSString *source = [NSString stringWithFormat:@"data-xref:%@:slot=0x%lx:distance=0x%lx",
+                                        img.name ?: @"image",
+                                        (unsigned long)slot,
+                                        (unsigned long)bestDistance];
+                    if ([self addSpecifier:normalized name:name source:source replaceWeak:YES]) named++;
+                    if (raw != normalized) {
+                        [self addSpecifier:raw name:name source:[source stringByAppendingString:@":raw-alias"] replaceWeak:YES];
+                    }
+                }
+            }
+        }
+    }
+
+    @synchronized (self) {
+        [self.reports addObject:[NSString stringWithFormat:@"[MachoDex] data-table scan slots=%lu specifierSlots=%lu named=%lu",
+                                 (unsigned long)slotsScanned,
+                                 (unsigned long)specifierSlots,
+                                 (unsigned long)named]];
     }
 }
 

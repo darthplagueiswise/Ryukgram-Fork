@@ -2,6 +2,7 @@
 #import "SCIMobileConfigMapping.h"
 #import "SCIExpMobileConfigMapping.h"
 #import "SCIExpFlags.h"
+#import "SCIMachODexKitResolver.h"
 
 static NSString *const kSCIMCIDManualPrefix = @"sci_mc_id_manual_name:";
 static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
@@ -116,6 +117,21 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
 
     mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:value];
     if (mapped.length) { if (sourceOut) *sourceOut = @"SCIExpMobileConfigMapping-raw"; return mapped; }
+
+    // DexKit 2.0: resolver-only path. This does not install hooks, does not patch C broker,
+    // and does not change startup timing. It only asks the Mach-O index for names that were
+    // recovered from real in-memory MobileConfig data tables.
+    NSDictionary<NSNumber *, NSString *> *dexNames = [[SCIMachODexKitResolver sharedResolver] allKnownSpecifierNames];
+    NSString *dexName = dexNames[@(n)];
+    if (!dexName.length && value != n) dexName = dexNames[@(value)];
+    if (dexName.length &&
+        ![dexName isEqualToString:@"unknown"] &&
+        ![dexName hasPrefix:@"unknown 0x"] &&
+        ![dexName hasPrefix:@"callsite "] &&
+        ![dexName hasPrefix:@"spec_0x"]) {
+        if (sourceOut) *sourceOut = @"SCIMachODexKitResolver";
+        return dexName;
+    }
 
     for (SCIExpMCObservation *obs in [SCIExpFlags allMCObservations] ?: @[]) {
         if ([self normalizedSpecifierValue:obs.paramID] != n) continue;
