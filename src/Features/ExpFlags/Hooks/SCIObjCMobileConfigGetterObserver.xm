@@ -8,12 +8,14 @@
 static NSString *const kSCIObjCFocusEnabledKey = @"sci_exp_mc_objc_focus_enabled";
 static NSString *const kSCIObjCFocusTargetKey = @"sci_exp_mc_objc_focus_target";
 static NSString *const kSCIObjCVerboseKey = @"igt_runtime_mc_symbol_observer_verbose";
+static NSString *const kSCIObjCAllowUnaryGetBoolKey = @"sci_exp_mc_objc_allow_getbool_unary";
 
 typedef BOOL (*SCIObjCGetBoolIMP)(id, SEL, unsigned long long);
 typedef BOOL (*SCIObjCGetBoolDefaultIMP)(id, SEL, unsigned long long, BOOL);
 typedef BOOL (*SCIObjCGetBoolOptionsIMP)(id, SEL, unsigned long long, id);
 typedef BOOL (*SCIObjCGetBoolOptionsDefaultIMP)(id, SEL, unsigned long long, id, BOOL);
-typedef BOOL (*SCIObjCGetBoolStringDefaultIMP)(id, SEL, id, BOOL);
+
+static __thread int gSCIObjCReentryDepth = 0;
 
 static NSMutableDictionary<NSString *, NSValue *> *SCIObjCOriginalIMPs(void) {
     static NSMutableDictionary<NSString *, NSValue *> *d;
@@ -84,25 +86,26 @@ static BOOL SCIObjCShouldRecord(NSString *key, unsigned long long pid, BOOL chan
     @synchronized (d) {
         NSUInteger count = [d[countKey] unsignedIntegerValue] + 1;
         d[countKey] = @(count);
-        return count <= 8 || (count % 256) == 0;
+        return count <= 3 || (count % 512) == 0;
     }
 }
 
-static BOOL SCIObjCRecordAndReturn(NSString *className,
-                                   NSString *selectorName,
-                                   unsigned long long pid,
-                                   BOOL defaultValue,
-                                   BOOL hasDefault,
-                                   BOOL original) {
-    NSString *key = SCIObjCKey(className, selectorName);
-    SCIExpFlagOverride ov = SCIObjCOverrideForParam(pid);
-    BOOL finalValue = SCIObjCApplyOverride(ov, original);
-    BOOL changed = (original != finalValue);
-
-    if (SCIObjCShouldRecord(key, pid, changed || !original, ov)) {
+static void SCIObjCRecordAsync(NSString *className,
+                               NSString *selectorName,
+                               unsigned long long pid,
+                               BOOL defaultValue,
+                               BOOL hasDefault,
+                               BOOL original,
+                               BOOL finalValue,
+                               SCIExpFlagOverride ov) {
+    NSString *classCopy = [className copy] ?: @"";
+    NSString *selectorCopy = [selectorName copy] ?: @"";
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *key = SCIObjCKey(classCopy, selectorCopy);
+        if (!SCIObjCShouldRecord(key, pid, original != finalValue, ov)) return;
         NSString *resolved = SCIObjCResolvedName(pid);
         NSString *ovText = ov == SCIExpFlagOverrideTrue ? @"ForceON" : (ov == SCIExpFlagOverrideFalse ? @"ForceOFF" : @"Off");
-        NSString *def = [NSString stringWithFormat:@"ObjC MobileConfig getter · focused=1 · target=%@ · name=%@ · default=%@ · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d",
+        NSString *def = [NSString stringWithFormat:@"ObjC MobileConfig getter · safe=1 · target=%@ · name=%@ · default=%@ · original=%d · final=%d · override=%@ · shadowTrue=1 · wouldChangeIfTrue=%d",
                          key,
                          resolved ?: @"",
                          hasDefault ? (defaultValue ? @"YES" : @"NO") : @"n/a",
@@ -114,8 +117,22 @@ static BOOL SCIObjCRecordAndReturn(NSString *className,
                                 type:SCIExpMCTypeBool
                         defaultValue:def
                        originalValue:original ? @"YES" : @"NO"
-                        contextClass:className
-                        selectorName:selectorName];
+                        contextClass:classCopy
+                        selectorName:selectorCopy];
+    });
+}
+
+static BOOL SCIObjCRecordAndReturn(NSString *className,
+                                   NSString *selectorName,
+                                   unsigned long long pid,
+                                   BOOL defaultValue,
+                                   BOOL hasDefault,
+                                   BOOL original) {
+    SCIExpFlagOverride ov = SCIObjCOverrideForParam(pid);
+    BOOL finalValue = SCIObjCApplyOverride(ov, original);
+
+    if (gSCIObjCReentryDepth <= 1) {
+        SCIObjCRecordAsync(className, selectorName, pid, defaultValue, hasDefault, original, finalValue, ov);
     }
 
     if ([[NSUserDefaults standardUserDefaults] boolForKey:kSCIObjCVerboseKey]) {
@@ -130,9 +147,12 @@ static BOOL hook_getBool(id self, SEL _cmd, unsigned long long pid) {
     NSString *sel = NSStringFromSelector(_cmd);
     NSString *key = SCIObjCKey(cls, sel);
     SCIObjCGetBoolIMP orig = (SCIObjCGetBoolIMP)SCIObjCOriginalForKey(key);
+    if (gSCIObjCReentryDepth > 0) return orig ? orig(self, _cmd, pid) : NO;
+    gSCIObjCReentryDepth++;
     BOOL original = orig ? orig(self, _cmd, pid) : NO;
-    if (!SCIObjCIsActiveKey(key)) return original;
-    return SCIObjCRecordAndReturn(cls, sel, pid, NO, NO, original);
+    BOOL ret = SCIObjCIsActiveKey(key) ? SCIObjCRecordAndReturn(cls, sel, pid, NO, NO, original) : original;
+    gSCIObjCReentryDepth--;
+    return ret;
 }
 
 static BOOL hook_getBool_withDefault(id self, SEL _cmd, unsigned long long pid, BOOL def) {
@@ -140,9 +160,12 @@ static BOOL hook_getBool_withDefault(id self, SEL _cmd, unsigned long long pid, 
     NSString *sel = NSStringFromSelector(_cmd);
     NSString *key = SCIObjCKey(cls, sel);
     SCIObjCGetBoolDefaultIMP orig = (SCIObjCGetBoolDefaultIMP)SCIObjCOriginalForKey(key);
+    if (gSCIObjCReentryDepth > 0) return orig ? orig(self, _cmd, pid, def) : def;
+    gSCIObjCReentryDepth++;
     BOOL original = orig ? orig(self, _cmd, pid, def) : def;
-    if (!SCIObjCIsActiveKey(key)) return original;
-    return SCIObjCRecordAndReturn(cls, sel, pid, def, YES, original);
+    BOOL ret = SCIObjCIsActiveKey(key) ? SCIObjCRecordAndReturn(cls, sel, pid, def, YES, original) : original;
+    gSCIObjCReentryDepth--;
+    return ret;
 }
 
 static BOOL hook_getBool_withOptions(id self, SEL _cmd, unsigned long long pid, id options) {
@@ -150,9 +173,12 @@ static BOOL hook_getBool_withOptions(id self, SEL _cmd, unsigned long long pid, 
     NSString *sel = NSStringFromSelector(_cmd);
     NSString *key = SCIObjCKey(cls, sel);
     SCIObjCGetBoolOptionsIMP orig = (SCIObjCGetBoolOptionsIMP)SCIObjCOriginalForKey(key);
+    if (gSCIObjCReentryDepth > 0) return orig ? orig(self, _cmd, pid, options) : NO;
+    gSCIObjCReentryDepth++;
     BOOL original = orig ? orig(self, _cmd, pid, options) : NO;
-    if (!SCIObjCIsActiveKey(key)) return original;
-    return SCIObjCRecordAndReturn(cls, sel, pid, NO, NO, original);
+    BOOL ret = SCIObjCIsActiveKey(key) ? SCIObjCRecordAndReturn(cls, sel, pid, NO, NO, original) : original;
+    gSCIObjCReentryDepth--;
+    return ret;
 }
 
 static BOOL hook_getBool_withOptions_withDefault(id self, SEL _cmd, unsigned long long pid, id options, BOOL def) {
@@ -160,17 +186,50 @@ static BOOL hook_getBool_withOptions_withDefault(id self, SEL _cmd, unsigned lon
     NSString *sel = NSStringFromSelector(_cmd);
     NSString *key = SCIObjCKey(cls, sel);
     SCIObjCGetBoolOptionsDefaultIMP orig = (SCIObjCGetBoolOptionsDefaultIMP)SCIObjCOriginalForKey(key);
+    if (gSCIObjCReentryDepth > 0) return orig ? orig(self, _cmd, pid, options, def) : def;
+    gSCIObjCReentryDepth++;
     BOOL original = orig ? orig(self, _cmd, pid, options, def) : def;
-    if (!SCIObjCIsActiveKey(key)) return original;
-    return SCIObjCRecordAndReturn(cls, sel, pid, def, YES, original);
+    BOOL ret = SCIObjCIsActiveKey(key) ? SCIObjCRecordAndReturn(cls, sel, pid, def, YES, original) : original;
+    gSCIObjCReentryDepth--;
+    return ret;
 }
 
 static IMP SCIObjCNewIMPForSelector(NSString *selectorName) {
-    if ([selectorName isEqualToString:@"getBool:"]) return (IMP)hook_getBool;
+    if ([selectorName isEqualToString:@"getBool:"]) {
+        if (![[NSUserDefaults standardUserDefaults] boolForKey:kSCIObjCAllowUnaryGetBoolKey]) return NULL;
+        return (IMP)hook_getBool;
+    }
     if ([selectorName isEqualToString:@"getBool:withDefault:"]) return (IMP)hook_getBool_withDefault;
     if ([selectorName isEqualToString:@"getBool:withOptions:"]) return (IMP)hook_getBool_withOptions;
     if ([selectorName isEqualToString:@"getBool:withOptions:withDefault:"]) return (IMP)hook_getBool_withOptions_withDefault;
     return NULL;
+}
+
+static BOOL SCIClassDefinesInstanceSelector(Class cls, SEL sel) {
+    if (!cls || !sel) return NO;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(cls, &count);
+    BOOL found = NO;
+    for (unsigned int i = 0; methods && i < count; i++) {
+        if (method_getName(methods[i]) == sel) { found = YES; break; }
+    }
+    if (methods) free(methods);
+    return found;
+}
+
+static BOOL SCIMethodHasExpectedBoolSignature(Class cls, SEL sel, NSString *selectorName) {
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return NO;
+    char ret[16] = {0};
+    method_getReturnType(m, ret, sizeof(ret));
+    if (!(ret[0] == 'B' || ret[0] == 'c')) return NO;
+
+    unsigned int argc = method_getNumberOfArguments(m);
+    if ([selectorName isEqualToString:@"getBool:"]) return argc == 3;
+    if ([selectorName isEqualToString:@"getBool:withDefault:"]) return argc == 4;
+    if ([selectorName isEqualToString:@"getBool:withOptions:"]) return argc == 4;
+    if ([selectorName isEqualToString:@"getBool:withOptions:withDefault:"]) return argc == 5;
+    return NO;
 }
 
 static void SCIInstallOneFocusedObjCGetter(NSString *className, NSString *selectorName) {
@@ -181,9 +240,19 @@ static void SCIInstallOneFocusedObjCGetter(NSString *className, NSString *select
     Class cls = NSClassFromString(className);
     if (!cls) return;
     SEL sel = NSSelectorFromString(selectorName);
-    if (!class_getInstanceMethod(cls, sel)) return;
+    if (!SCIClassDefinesInstanceSelector(cls, sel)) {
+        NSLog(@"[RyukGram][MCObjCFocus] skip inherited/missing %@", key);
+        return;
+    }
+    if (!SCIMethodHasExpectedBoolSignature(cls, sel, selectorName)) {
+        NSLog(@"[RyukGram][MCObjCFocus] skip bad signature %@", key);
+        return;
+    }
     IMP newImp = SCIObjCNewIMPForSelector(selectorName);
-    if (!newImp) return;
+    if (!newImp) {
+        NSLog(@"[RyukGram][MCObjCFocus] skip disabled selector %@", key);
+        return;
+    }
 
     IMP original = NULL;
     MSHookMessageEx(cls, sel, newImp, &original);
@@ -205,11 +274,12 @@ extern "C" void SCIInstallFocusedObjCGetterObserver(void) {
 %ctor {
     NSDictionary *defaults = @{
         @"sci_exp_flags_enabled": @YES,
-        @"sci_exp_mc_c_hooks_enabled": @YES,
+        @"sci_exp_mc_c_hooks_enabled": @NO,
         @"sci_exp_mc_hooks_enabled": @NO,
         kSCIObjCFocusEnabledKey: @NO,
         kSCIObjCFocusTargetKey: @"off",
-        kSCIObjCVerboseKey: @NO
+        kSCIObjCVerboseKey: @NO,
+        kSCIObjCAllowUnaryGetBoolKey: @NO
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
     SCIInstallFocusedObjCGetterObserver();
