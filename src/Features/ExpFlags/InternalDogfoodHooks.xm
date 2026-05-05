@@ -1,5 +1,6 @@
 // Filtered dogfood/internal gates.
-// Never forces all MobileConfig booleans. Only targets known employee/test-user specifiers.
+// Sideload-safe policy: do not install runtime body hooks into signed __TEXT pages.
+// The known employee/test-user specifiers are still recorded through SCIExpFlags when a safe observer sees them.
 
 #import "../../Utils.h"
 #import "SCIExpFlags.h"
@@ -42,8 +43,9 @@ static void RGRecordInternalBool(NSString *symbol, unsigned long long spec, BOOL
     [SCIExpFlags recordMCParamID:spec
                             type:SCIExpMCTypeBool
                     defaultValue:value
-                     sourceClass:@"IGMobileConfigInternalUse"
-                        selector:selector];
+                   originalValue:original ? @"YES" : @"NO"
+                    contextClass:@"IGMobileConfigInternalUse"
+                    selectorName:selector];
 }
 
 static void *RGFindSymbol(const char *machOSymbol) {
@@ -80,21 +82,23 @@ static BOOL hook_InternalAppsInstalled(void) {
         [SCIExpFlags recordMCParamID:0x1ULL
                                 type:SCIExpMCTypeBool
                         defaultValue:@"FORCED YES"
-                         sourceClass:@"IGInternalAppsGate"
-                            selector:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"];
+                       originalValue:@"NO"
+                        contextClass:@"IGInternalAppsGate"
+                        selectorName:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"];
         return YES;
     }
     return orig_InternalAppsInstalled ? orig_InternalAppsInstalled() : NO;
 }
 
 static void RGInstallFunction(const char *symbol, void *replacement, void **original) {
+    (void)replacement;
+    (void)original;
     void *target = RGFindSymbol(symbol);
     if (!target) {
         SCILog(@"Dogfood gate symbol not found: %s", symbol);
         return;
     }
-    MSHookFunction(target, replacement, original);
-    SCILog(@"Dogfood gate hook installed: %s", symbol);
+    SCILog(@"Dogfood gate hook skipped in sideload-safe mode: %s addr=%p", symbol, target);
 }
 
 // Manual actions exposed to the settings menu. These are intentionally not run at launch.
