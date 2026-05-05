@@ -1,6 +1,7 @@
 #import "SCIMCFocusedLabViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Features/ExpFlags/SCIMobileConfigMapping.h"
+#import "../Features/ExpFlags/SCIMobileConfigIDResolver.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
 
@@ -356,12 +357,15 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     SCIMCFocusedLabRow *r = [SCIMCFocusedLabRow new];
     r.paramID = o.paramID;
     r.paramHex = [self specifierHex:o.paramID];
-    r.resolvedName = [SCIMobileConfigMapping resolvedNameForParamID:o.paramID];
-    r.name = r.resolvedName.length ? r.resolvedName : [NSString stringWithFormat:@"mc:%@", r.paramHex];
+    NSString *brokerID = [o.contextClass containsString:@"Sessionless"] ? @"igsl" : @"ig";
+    SCIMobileConfigIDResolution *resolution = [SCIMobileConfigIDResolver resolutionForBrokerID:brokerID value:o.paramID];
+    r.resolvedName = resolution.resolvedName.length ? resolution.resolvedName : [SCIMobileConfigMapping resolvedNameForParamID:o.paramID];
+    r.name = resolution.title.length ? resolution.title : (r.resolvedName.length ? r.resolvedName : [NSString stringWithFormat:@"mc:%@", r.paramHex]);
     r.contextClass = o.contextClass ?: @"";
     r.selectorName = o.selectorName ?: @"";
-    r.source = o.source ?: @"";
-    r.detail = o.lastDefault ?: @"";
+    r.source = resolution.source.length ? resolution.source : (o.source ?: @"");
+    NSString *resolverDetail = resolution.resolvedDetail.length ? [NSString stringWithFormat:@"Resolver: %@\n", resolution.resolvedDetail] : @"";
+    r.detail = [resolverDetail stringByAppendingString:(o.lastDefault ?: @"")];
     r.original = o.lastOriginalValue ?: @"";
     r.hits = o.hitCount;
     r.gate = r.contextClass.length ? [NSString stringWithFormat:@"%@ %@", r.contextClass, r.selectorName ?: @""] : [self symbolNameFromDetail:r.detail] ?: @"C MobileConfig broker";

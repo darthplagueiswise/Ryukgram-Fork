@@ -2,6 +2,7 @@
 #import "../Features/ExpFlags/SCIMobileConfigBrokerDescriptor.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerStore.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerRouter.h"
+#import "../Features/ExpFlags/SCIMobileConfigIDResolver.h"
 
 @interface SCIMCBrokerCell : UITableViewCell
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -116,8 +117,9 @@
     [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
     NSNumber *forced = [SCIMobileConfigBrokerStore overrideValueForKey:key];
     SCIMCBrokerBoolState state = [SCIMobileConfigBrokerStore effectiveStateForOverrideKey:key];
-    cell.titleLabel.text = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
-    cell.detailLabel2.text = [NSString stringWithFormat:@"%@ · system %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key]];
+    SCIMobileConfigIDResolution *resolved = [SCIMobileConfigIDResolver resolutionForBrokerID:(bid ?: self.broker.brokerID) value:value];
+    cell.titleLabel.text = resolved.title.length ? resolved.title : [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
+    cell.detailLabel2.text = [NSString stringWithFormat:@"%@ · system %@ · %@ · %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key], resolved.source ?: @"", resolved.resolvedDetail ?: @""];
     [cell.switchView setOn:(state == SCIMCBrokerBoolStateOn) animated:NO];
     __weak typeof(self) weakSelf = self;
     cell.switchChanged = ^(BOOL on) {
@@ -135,11 +137,25 @@
     NSString *key = self.keys[indexPath.row];
     NSString *bid = nil; uint64_t value = 0;
     [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"0x%016llx", (unsigned long long)value] message:key preferredStyle:UIAlertControllerStyleActionSheet];
+    SCIMobileConfigIDResolution *resolved = [SCIMobileConfigIDResolver resolutionForBrokerID:(bid ?: self.broker.brokerID) value:value];
+    NSString *message = [NSString stringWithFormat:@"%@\n\n%@", key ?: @"", resolved.dictionaryRepresentation.description ?: @""];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:(resolved.title.length ? resolved.title : [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value]) message:message preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:@YES forKey:key]; [SCIMobileConfigBrokerRouter installBroker:self.broker error:nil]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:@NO forKey:key]; [SCIMobileConfigBrokerRouter installBroker:self.broker error:nil]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:nil forKey:key]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = key; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Copy resolved JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){
+        NSData *data = [NSJSONSerialization dataWithJSONObject:resolved.dictionaryRepresentation options:NSJSONWritingPrettyPrinted error:nil];
+        UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Set manual label" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){
+        UIAlertController *prompt = [UIAlertController alertControllerWithTitle:@"Manual label" message:key preferredStyle:UIAlertControllerStyleAlert];
+        [prompt addTextFieldWithConfigurationHandler:^(UITextField *tf){ tf.placeholder = @"feature/name"; tf.text = [SCIMobileConfigIDResolver manualLabelForBrokerID:(bid ?: self.broker.brokerID) value:value] ?: @""; }];
+        [prompt addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *y){ [SCIMobileConfigIDResolver setManualLabel:nil brokerID:(bid ?: self.broker.brokerID) value:value]; [self reloadKeys]; }]];
+        [prompt addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *y){ NSString *label = prompt.textFields.firstObject.text ?: @""; [SCIMobileConfigIDResolver setManualLabel:label brokerID:(bid ?: self.broker.brokerID) value:value]; [self reloadKeys]; }]];
+        [prompt addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:prompt animated:YES completion:nil];
+    }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }

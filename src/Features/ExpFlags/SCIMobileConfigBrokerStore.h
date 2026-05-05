@@ -51,6 +51,7 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerBoolState) {
 + (NSString *)stateLabelForOverrideKey:(NSString *)overrideKey;
 + (NSString *)systemLabelForOverrideKey:(NSString *)overrideKey;
 + (NSString *)overrideLabelForOverrideKey:(NSString *)overrideKey;
++ (NSDictionary *)resolvedDictionaryForOverrideKey:(NSString *)overrideKey;
 + (NSDictionary *)snapshotDictionary;
 + (void)resetAllBrokerOverrides;
 

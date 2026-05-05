@@ -1,5 +1,6 @@
 #import "SCIMachODexKitResolver.h"
 #import "SCIExpMobileConfigMapping.h"
+#import "SCIMobileConfigIDResolver.h"
 
 #import <Foundation/Foundation.h>
 #import <mach-o/dyld.h>
@@ -328,6 +329,14 @@ static void *SCIDlsymFlexible(NSString *symbolName) {
         return [self makeResult:existingName
                           source:@"hook-provided"
                       confidence:@"exact"
+                       specifier:specifier];
+    }
+
+    SCIMobileConfigIDResolution *unified = [SCIMobileConfigIDResolver resolutionForBrokerID:@"ig" value:specifier];
+    if (unified.resolvedName.length) {
+        return [self makeResult:unified.resolvedName
+                          source:unified.source.length ? unified.source : @"SCIMobileConfigIDResolver"
+                      confidence:@"exact-map"
                        specifier:specifier];
     }
 

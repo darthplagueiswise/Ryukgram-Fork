@@ -1,5 +1,6 @@
 #import "SCIMachODexKitResolver.h"
 #import "SCIExpMobileConfigMapping.h"
+#import "SCIMobileConfigIDResolver.h"
 
 @implementation SCIMachODexKitResolvedName
 @end
@@ -32,6 +33,9 @@
     if (existingName.length && ![existingName isEqualToString:@"unknown"] && ![existingName hasPrefix:@"callsite "] && ![existingName hasPrefix:@"spec_0x"]) {
         return [self makeResult:existingName source:@"provided" confidence:@"exact" specifier:specifier];
     }
+
+    SCIMobileConfigIDResolution *unified = [SCIMobileConfigIDResolver resolutionForBrokerID:@"ig" value:specifier];
+    if (unified.resolvedName.length) return [self makeResult:unified.resolvedName source:(unified.source ?: @"SCIMobileConfigIDResolver") confidence:@"exact" specifier:specifier];
 
     NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
     if (mapped.length) return [self makeResult:mapped source:@"igios-schema-json" confidence:@"exact" specifier:specifier];

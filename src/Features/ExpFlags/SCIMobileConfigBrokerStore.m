@@ -1,4 +1,5 @@
 #import "SCIMobileConfigBrokerStore.h"
+#import "SCIMobileConfigIDResolver.h"
 
 NSString * const SCIMCBrokerStoreDidChangeNotification = @"SCIMCBrokerStoreDidChangeNotification";
 NSString * const SCIMCBrokerIndexKey = @"mcbr.idx";
@@ -243,6 +244,13 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     return forced.boolValue ? @"Forced ON" : @"Forced OFF";
 }
 
+
++ (NSDictionary *)resolvedDictionaryForOverrideKey:(NSString *)overrideKey {
+    NSString *bid = nil; uint64_t value = 0;
+    if (![self parseOverrideKey:overrideKey brokerID:&bid value:&value]) return @{};
+    return [SCIMobileConfigIDResolver resolvedDictionaryForBrokerID:bid value:value];
+}
+
 + (NSDictionary *)snapshotDictionary {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     for (SCIMobileConfigBrokerDescriptor *desc in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
@@ -250,12 +258,15 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
         for (NSString *key in [self observedOverrideKeysForBrokerID:desc.brokerID]) {
             NSString *bid = nil; uint64_t value = 0;
             [self parseOverrideKey:key brokerID:&bid value:&value];
-            [items addObject:@{
+            NSMutableDictionary *item = [NSMutableDictionary dictionaryWithDictionary:@{
                 @"key": key ?: @"",
                 @"value": [self hexForValue:value],
                 @"override": [self overrideValueForKey:key] ?: [NSNull null],
                 @"observed": [self observedValueForOverrideKey:key] ?: [NSNull null]
             }];
+            NSDictionary *resolved = [SCIMobileConfigIDResolver resolvedDictionaryForBrokerID:(bid ?: desc.brokerID) value:value];
+            if (resolved.count) [item addEntriesFromDictionary:resolved];
+            [items addObject:item];
         }
         d[desc.brokerID] = @{
             @"symbol": desc.symbol ?: @"",

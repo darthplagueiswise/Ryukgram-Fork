@@ -1,6 +1,7 @@
 #import "SCIExpFlags.h"
 #import "SCIExpCallsiteResolver.h"
 #import "SCIExpMobileConfigMapping.h"
+#import "SCIMobileConfigIDResolver.h"
 #import <objc/runtime.h>
 
 typedef void (*SCIRecordInternalUseIMP)(id, SEL, unsigned long long, NSString *, NSString *, BOOL, BOOL, BOOL, void *);
@@ -17,7 +18,8 @@ static void hook_SCIRecordInternalUse(id self,
                                       void *callerAddress) {
     NSString *resolved = specifierName;
     if (!resolved.length || [resolved isEqualToString:@"unknown"]) {
-        NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
+        SCIMobileConfigIDResolution *unified = [SCIMobileConfigIDResolver resolutionForBrokerID:@"ig" value:specifier];
+        NSString *mapped = unified.resolvedName.length ? unified.resolvedName : [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
         if (mapped.length) {
             resolved = mapped;
         } else {
