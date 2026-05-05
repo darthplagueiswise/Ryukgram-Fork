@@ -65,8 +65,8 @@ jobs:
           BASE_VERSION=$(awk '/Version:/ {print $2}' control)
           BRANCH_NAME="alpha3"
           COMMIT_NUMBER="$(git rev-list --count HEAD)"
-          COMMIT_SUFFIX="commit${COMMIT_NUMBER}"
-          BUILD_VERSION="${BASE_VERSION}.0.0.${GITHUB_RUN_NUMBER}"
+          COMMIT_SUFFIX="${COMMIT_NUMBER}"
+          BUILD_VERSION="${BASE_VERSION}.0.0.${COMMIT_NUMBER}"
           BUILD_LABEL="${BRANCH_NAME}_${COMMIT_SUFFIX}"
           sed -i '' "s/^Version:.*/Version: ${BUILD_VERSION}/" control
           echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
