@@ -1,19 +1,23 @@
 #import "SCIAutofillInternalDevMode.h"
 #import "../../Utils.h"
 #import <objc/runtime.h>
-#import <objc/message.h>
 
-static NSString *const kAutofillDebugFooterKey = @"sci_dev_autofill_debug_footer";
-static NSString *const kAutofillForceBloksKey  = @"sci_dev_autofill_force_bloks";
-static NSString *const kAutofillBloksPrefetchKey = @"sci_dev_autofill_bloks_prefetch";
+static NSString *const kAutofillDebugFooterToggleKey = @"sci_dev_autofill_debug_footer";
+static NSString *const kAutofillBloksModeToggleKey  = @"sci_dev_autofill_force_bloks";
+static NSString *const kAutofillBloksPrefetchToggleKey = @"sci_dev_autofill_bloks_prefetch";
+
+static NSString *const kIGAutofillDebugFooterDefaultsKey = @"autofill_internal_settings_debug_footer_enabled";
+static NSString *const kIGAutofillForceBloksDefaultsKey = @"autofill_internal_settings_force_bloks_experience";
+static NSString *const kIGAutofillBloksPrefetchDefaultsKey = @"autofill_internal_settings_bloks_prefetch_enabled";
+static NSString *const kIGAutofillHideBloksIndicatorDefaultsKey = @"autofill_internal_settings_hide_bloks_view_indicator";
 
 @implementation SCIAutofillInternalDevMode
 
 + (void)registerDefaults {
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-        kAutofillDebugFooterKey: @(NO),
-        kAutofillForceBloksKey: @(NO),
-        kAutofillBloksPrefetchKey: @(NO),
+        kAutofillDebugFooterToggleKey: @(NO),
+        kAutofillBloksModeToggleKey: @(NO),
+        kAutofillBloksPrefetchToggleKey: @(NO),
     }];
 }
 
@@ -21,93 +25,92 @@ static NSString *const kAutofillBloksPrefetchKey = @"sci_dev_autofill_bloks_pref
     return NSClassFromString(@"AutofillInternalSettingsInstagram.IGAutofillInternalSettings");
 }
 
-+ (BOOL)classResponds:(SEL)sel {
-    Class cls = [self autofillSettingsClass];
-    return cls && [cls respondsToSelector:sel];
++ (NSString *)returnTypeForMethod:(Method)m {
+    if (!m) return @"missing";
+    char rt[128] = {0};
+    method_getReturnType(m, rt, sizeof(rt));
+    return @(rt);
 }
 
-+ (void)sendVoidSelector:(SEL)sel {
++ (NSString *)availabilityForSelectorName:(NSString *)selectorName {
     Class cls = [self autofillSettingsClass];
-    if (!cls || ![cls respondsToSelector:sel]) return;
-    ((void (*)(Class, SEL))objc_msgSend)(cls, sel);
+    if (!cls) return @"class-missing";
+
+    SEL sel = NSSelectorFromString(selectorName);
+    Method classMethod = class_getClassMethod(cls, sel);
+    if (classMethod) {
+        return [NSString stringWithFormat:@"class · args=%u · ret=%@",
+                method_getNumberOfArguments(classMethod),
+                [self returnTypeForMethod:classMethod]];
+    }
+
+    Method instanceMethod = class_getInstanceMethod(cls, sel);
+    if (instanceMethod) {
+        return [NSString stringWithFormat:@"instance · args=%u · ret=%@",
+                method_getNumberOfArguments(instanceMethod),
+                [self returnTypeForMethod:instanceMethod]];
+    }
+
+    return @"missing";
 }
 
-+ (void)sendBoolSelector:(SEL)sel value:(BOOL)value {
-    Class cls = [self autofillSettingsClass];
-    if (!cls || ![cls respondsToSelector:sel]) return;
-    ((void (*)(Class, SEL, BOOL))objc_msgSend)(cls, sel, value);
-}
-
-+ (id)sendObjectGetter:(SEL)sel {
-    Class cls = [self autofillSettingsClass];
-    if (!cls || ![cls respondsToSelector:sel]) return nil;
-    return ((id (*)(Class, SEL))objc_msgSend)(cls, sel);
-}
-
-+ (BOOL)sendBoolGetter:(SEL)sel fallback:(BOOL)fallback {
-    Class cls = [self autofillSettingsClass];
-    if (!cls || ![cls respondsToSelector:sel]) return fallback;
-    return ((BOOL (*)(Class, SEL))objc_msgSend)(cls, sel);
++ (NSString *)valueDescriptionForDefaultsKey:(NSString *)key {
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    id obj = [ud objectForKey:key];
+    if (!obj) return @"unset";
+    return [obj description] ?: @"?";
 }
 
 + (void)applyEnabledToggles {
-    if (![self autofillSettingsClass]) return;
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
 
-    if ([SCIUtils getBoolPref:kAutofillDebugFooterKey]) {
-        [self sendBoolSelector:NSSelectorFromString(@"setDebugFooterEnabledWithEnabled:") value:YES];
+    if ([SCIUtils getBoolPref:kAutofillDebugFooterToggleKey]) {
+        [ud setBool:YES forKey:kIGAutofillDebugFooterDefaultsKey];
     }
 
-    if ([SCIUtils getBoolPref:kAutofillForceBloksKey]) {
-        [self sendVoidSelector:NSSelectorFromString(@"setForceBloksExperienceOn")];
+    if ([SCIUtils getBoolPref:kAutofillBloksModeToggleKey]) {
+        // The app exposes setForceBloksExperienceOn / Off / clear around this key.
+        // Avoid calling the Swift instance directly here; writing the backing key
+        // is safer for sideloaded runtime testing.
+        [ud setInteger:1 forKey:kIGAutofillForceBloksDefaultsKey];
     }
 
-    if ([SCIUtils getBoolPref:kAutofillBloksPrefetchKey]) {
-        [self sendBoolSelector:NSSelectorFromString(@"setBloksPrefetchEnabledWithEnabled:") value:YES];
+    if ([SCIUtils getBoolPref:kAutofillBloksPrefetchToggleKey]) {
+        [ud setBool:YES forKey:kIGAutofillBloksPrefetchDefaultsKey];
     }
-}
 
-+ (NSString *)stringForObject:(id)obj {
-    if (!obj || obj == (id)kCFNull) return @"nil";
-    if ([obj isKindOfClass:[NSString class]]) return obj;
-    if ([obj respondsToSelector:@selector(stringValue)]) return [obj stringValue];
-    return [obj description] ?: @"?";
+    [ud synchronize];
 }
 
 + (NSDictionary<NSString *, id> *)statusSnapshot {
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     Class cls = [self autofillSettingsClass];
     d[@"class"] = cls ? NSStringFromClass(cls) : @"missing";
-    d[@"has_setDebugFooterEnabledWithEnabled"] = @([self classResponds:NSSelectorFromString(@"setDebugFooterEnabledWithEnabled:")]);
-    d[@"has_getDebugFooterEnabled"] = @([self classResponds:NSSelectorFromString(@"getDebugFooterEnabled")]);
-    d[@"has_setForceBloksExperienceOn"] = @([self classResponds:NSSelectorFromString(@"setForceBloksExperienceOn")]);
-    d[@"has_setForceBloksExperienceOff"] = @([self classResponds:NSSelectorFromString(@"setForceBloksExperienceOff")]);
-    d[@"has_getForceBloksExperience"] = @([self classResponds:NSSelectorFromString(@"getForceBloksExperience")]);
-    d[@"has_isForceBloksExperienceOn"] = @([self classResponds:NSSelectorFromString(@"isForceBloksExperienceOn")]);
-    d[@"has_isForceBloksExperienceOff"] = @([self classResponds:NSSelectorFromString(@"isForceBloksExperienceOff")]);
-    d[@"has_shouldForceBloksExperienceOnOrOff"] = @([self classResponds:NSSelectorFromString(@"shouldForceBloksExperienceOnOrOff")]);
-    d[@"has_setBloksPrefetchEnabledWithEnabled"] = @([self classResponds:NSSelectorFromString(@"setBloksPrefetchEnabledWithEnabled:")]);
-    d[@"has_isBloksPrefetchEnabled"] = @([self classResponds:NSSelectorFromString(@"isBloksPrefetchEnabled")]);
+    d[@"mode"] = @"safe-defaults-only";
 
-    if (cls) {
-        if ([self classResponds:NSSelectorFromString(@"getDebugFooterEnabled")]) {
-            d[@"getDebugFooterEnabled"] = @([self sendBoolGetter:NSSelectorFromString(@"getDebugFooterEnabled") fallback:NO]);
-        }
-        if ([self classResponds:NSSelectorFromString(@"getForceBloksExperience")]) {
-            d[@"getForceBloksExperience"] = [self stringForObject:[self sendObjectGetter:NSSelectorFromString(@"getForceBloksExperience")]];
-        }
-        if ([self classResponds:NSSelectorFromString(@"isForceBloksExperienceOn")]) {
-            d[@"isForceBloksExperienceOn"] = @([self sendBoolGetter:NSSelectorFromString(@"isForceBloksExperienceOn") fallback:NO]);
-        }
-        if ([self classResponds:NSSelectorFromString(@"isForceBloksExperienceOff")]) {
-            d[@"isForceBloksExperienceOff"] = @([self sendBoolGetter:NSSelectorFromString(@"isForceBloksExperienceOff") fallback:NO]);
-        }
-        if ([self classResponds:NSSelectorFromString(@"shouldForceBloksExperienceOnOrOff")]) {
-            d[@"shouldForceBloksExperienceOnOrOff"] = @([self sendBoolGetter:NSSelectorFromString(@"shouldForceBloksExperienceOnOrOff") fallback:NO]);
-        }
-        if ([self classResponds:NSSelectorFromString(@"isBloksPrefetchEnabled")]) {
-            d[@"isBloksPrefetchEnabled"] = @([self sendBoolGetter:NSSelectorFromString(@"isBloksPrefetchEnabled") fallback:NO]);
-        }
+    NSArray<NSString *> *selectors = @[
+        @"setDebugFooterEnabledWithEnabled:",
+        @"getDebugFooterEnabled",
+        @"setForceBloksExperienceOn",
+        @"setForceBloksExperienceOff",
+        @"clearForceBloksExperience",
+        @"getForceBloksExperience",
+        @"isForceBloksExperienceOn",
+        @"isForceBloksExperienceOff",
+        @"shouldForceBloksExperienceOnOrOff",
+        @"setBloksPrefetchEnabledWithEnabled:",
+        @"isBloksPrefetchEnabled"
+    ];
+
+    for (NSString *selectorName in selectors) {
+        d[[@"has_" stringByAppendingString:selectorName]] = [self availabilityForSelectorName:selectorName];
     }
+
+    d[@"debugFooter"] = [self valueDescriptionForDefaultsKey:kIGAutofillDebugFooterDefaultsKey];
+    d[@"forceBloks"] = [self valueDescriptionForDefaultsKey:kIGAutofillForceBloksDefaultsKey];
+    d[@"bloksPrefetch"] = [self valueDescriptionForDefaultsKey:kIGAutofillBloksPrefetchDefaultsKey];
+    d[@"hideBloksIndicator"] = [self valueDescriptionForDefaultsKey:kIGAutofillHideBloksIndicatorDefaultsKey];
+
     return d;
 }
 
@@ -115,12 +118,24 @@ static NSString *const kAutofillBloksPrefetchKey = @"sci_dev_autofill_bloks_pref
     NSDictionary *d = [self statusSnapshot];
     NSMutableArray *lines = [NSMutableArray array];
     [lines addObject:[NSString stringWithFormat:@"class: %@", d[@"class"] ?: @"missing"]];
-    [lines addObject:[NSString stringWithFormat:@"debugFooter: %@", d[@"getDebugFooterEnabled"] ?: @"unavailable"]];
-    [lines addObject:[NSString stringWithFormat:@"forceBloks: %@", d[@"getForceBloksExperience"] ?: @"unavailable"]];
-    [lines addObject:[NSString stringWithFormat:@"forceBloksOn: %@", d[@"isForceBloksExperienceOn"] ?: @"unavailable"]];
-    [lines addObject:[NSString stringWithFormat:@"forceBloksOff: %@", d[@"isForceBloksExperienceOff"] ?: @"unavailable"]];
-    [lines addObject:[NSString stringWithFormat:@"shouldForceOnOrOff: %@", d[@"shouldForceBloksExperienceOnOrOff"] ?: @"unavailable"]];
-    [lines addObject:[NSString stringWithFormat:@"bloksPrefetch: %@", d[@"isBloksPrefetchEnabled"] ?: @"unavailable"]];
+    [lines addObject:[NSString stringWithFormat:@"mode: %@", d[@"mode"] ?: @"unknown"]];
+    [lines addObject:[NSString stringWithFormat:@"debugFooter defaults: %@", d[@"debugFooter"] ?: @"unset"]];
+    [lines addObject:[NSString stringWithFormat:@"forceBloks defaults: %@", d[@"forceBloks"] ?: @"unset"]];
+    [lines addObject:[NSString stringWithFormat:@"bloksPrefetch defaults: %@", d[@"bloksPrefetch"] ?: @"unset"]];
+    [lines addObject:[NSString stringWithFormat:@"hideBloksIndicator defaults: %@", d[@"hideBloksIndicator"] ?: @"unset"]];
+    [lines addObject:@""];
+    [lines addObject:@"selector availability (no calls):"];
+    [lines addObject:[NSString stringWithFormat:@"setDebugFooterEnabledWithEnabled: %@", d[@"has_setDebugFooterEnabledWithEnabled:"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"getDebugFooterEnabled: %@", d[@"has_getDebugFooterEnabled"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"setForceBloksExperienceOn: %@", d[@"has_setForceBloksExperienceOn"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"setForceBloksExperienceOff: %@", d[@"has_setForceBloksExperienceOff"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"clearForceBloksExperience: %@", d[@"has_clearForceBloksExperience"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"getForceBloksExperience: %@", d[@"has_getForceBloksExperience"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"isForceBloksExperienceOn: %@", d[@"has_isForceBloksExperienceOn"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"isForceBloksExperienceOff: %@", d[@"has_isForceBloksExperienceOff"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"shouldForceBloksExperienceOnOrOff: %@", d[@"has_shouldForceBloksExperienceOnOrOff"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"setBloksPrefetchEnabledWithEnabled: %@", d[@"has_setBloksPrefetchEnabledWithEnabled:"] ?: @"missing"]];
+    [lines addObject:[NSString stringWithFormat:@"isBloksPrefetchEnabled: %@", d[@"has_isBloksPrefetchEnabled"] ?: @"missing"]];
     return [lines componentsJoinedByString:@"\n"];
 }
 
