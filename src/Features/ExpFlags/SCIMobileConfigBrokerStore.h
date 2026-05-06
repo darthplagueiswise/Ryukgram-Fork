@@ -17,7 +17,7 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerBoolState) {
 @interface SCIMobileConfigBrokerStore : NSObject
 + (void)registerDefaultsAndMigrate;
 
-// Short per-value namespace: mcbr:<brokerID>:<hex64>. This is the compact form of dexkit.cbool.
+// Short per-value namespace: mcbr:<brokerID>:<hex64>.
 + (NSString *)overrideKeyForBroker:(SCIMobileConfigBrokerDescriptor *)broker value:(uint64_t)value;
 + (NSString *)overrideKeyForBrokerID:(NSString *)brokerID value:(uint64_t)value;
 + (NSString *)observedKeyForOverrideKey:(NSString *)overrideKey;
@@ -29,6 +29,11 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerBoolState) {
 + (void)setOverrideValue:(nullable NSNumber *)value forKey:(NSString *)key;
 + (nullable NSNumber *)observedValueForOverrideKey:(NSString *)overrideKey;
 + (void)noteObservedValue:(BOOL)value forOverrideKey:(NSString *)overrideKey;
+
++ (nullable NSNumber *)overrideValueForBrokerID:(NSString *)brokerID value:(uint64_t)value;
++ (void)setOverrideValue:(nullable NSNumber *)value brokerID:(NSString *)brokerID value:(uint64_t)specifier;
++ (nullable NSNumber *)observedValueForBrokerID:(NSString *)brokerID value:(uint64_t)value;
++ (void)noteObservedValue:(BOOL)observed brokerID:(NSString *)brokerID value:(uint64_t)value;
 
 + (NSArray<NSString *> *)activeOverrideKeys;
 + (NSArray<NSString *> *)activeOverrideKeysForBrokerID:(NSString *)brokerID;
@@ -55,7 +60,7 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerBoolState) {
 + (NSDictionary *)snapshotDictionary;
 + (void)resetAllBrokerOverrides;
 
-// Compatibility for older menu code. These keys are broker-wide lab keys and are not used by the v2 router.
+// Compatibility for older menu/router code. These keys are broker-wide lab keys and are kept only to avoid breaking old callsites.
 + (NSString *)overrideKeyForBrokerID:(NSString *)brokerID;
 + (NSString *)observedKeyForBrokerID:(NSString *)brokerID;
 + (nullable NSNumber *)overrideValueForBrokerID:(NSString *)brokerID;

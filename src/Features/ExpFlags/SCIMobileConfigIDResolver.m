@@ -1,8 +1,6 @@
 #import "SCIMobileConfigIDResolver.h"
-#import "SCIMobileConfigMapping.h"
-#import "SCIExpMobileConfigMapping.h"
-#import "SCIExpFlags.h"
 #import "SCIMachODexKitResolver.h"
+#import <objc/message.h>
 
 static NSString *const kSCIMCIDManualPrefix = @"sci_mc_id_manual_name:";
 static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
@@ -99,6 +97,22 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
     return value >= 0x100000000ULL;
 }
 
++ (NSString *)callStringResolverClass:(NSString *)className selector:(SEL)selector value:(unsigned long long)value {
+    Class cls = NSClassFromString(className);
+    if (!cls || ![cls respondsToSelector:selector]) return nil;
+    NSString *(*fn)(id, SEL, unsigned long long) = (NSString *(*)(id, SEL, unsigned long long))objc_msgSend;
+    id out = fn(cls, selector, value);
+    return [out isKindOfClass:NSString.class] && [out length] ? out : nil;
+}
+
++ (NSString *)callStringResolverClass:(NSString *)className selectorNoArg:(SEL)selector {
+    Class cls = NSClassFromString(className);
+    if (!cls || ![cls respondsToSelector:selector]) return nil;
+    NSString *(*fn)(id, SEL) = (NSString *(*)(id, SEL))objc_msgSend;
+    id out = fn(cls, selector);
+    return [out isKindOfClass:NSString.class] && [out length] ? out : nil;
+}
+
 + (NSString *)mappedNameForValue:(unsigned long long)value source:(NSString **)sourceOut {
     unsigned long long n = [self normalizedSpecifierValue:value];
     NSString *mapped = nil;
@@ -106,21 +120,22 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
     mapped = [self knownAnchorNameForValue:n];
     if (mapped.length) { if (sourceOut) *sourceOut = @"known-anchor"; return mapped; }
 
-    mapped = [SCIMobileConfigMapping resolvedNameForParamID:n];
-    if (mapped.length) { if (sourceOut) *sourceOut = [SCIMobileConfigMapping sourceForParamID:n] ?: @"id_name_mapping"; return mapped; }
+    mapped = [self callStringResolverClass:@"SCIMobileConfigMapping" selector:@selector(resolvedNameForParamID:) value:n];
+    if (mapped.length) { if (sourceOut) *sourceOut = @"id_name_mapping"; return mapped; }
 
-    mapped = [SCIMobileConfigMapping resolvedNameForParamID:value];
-    if (mapped.length) { if (sourceOut) *sourceOut = [SCIMobileConfigMapping sourceForParamID:value] ?: @"id_name_mapping-raw"; return mapped; }
+    if (value != n) {
+        mapped = [self callStringResolverClass:@"SCIMobileConfigMapping" selector:@selector(resolvedNameForParamID:) value:value];
+        if (mapped.length) { if (sourceOut) *sourceOut = @"id_name_mapping-raw"; return mapped; }
+    }
 
-    mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:n];
+    mapped = [self callStringResolverClass:@"SCIExpMobileConfigMapping" selector:@selector(resolvedNameForSpecifier:) value:n];
     if (mapped.length) { if (sourceOut) *sourceOut = @"SCIExpMobileConfigMapping"; return mapped; }
 
-    mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:value];
-    if (mapped.length) { if (sourceOut) *sourceOut = @"SCIExpMobileConfigMapping-raw"; return mapped; }
+    if (value != n) {
+        mapped = [self callStringResolverClass:@"SCIExpMobileConfigMapping" selector:@selector(resolvedNameForSpecifier:) value:value];
+        if (mapped.length) { if (sourceOut) *sourceOut = @"SCIExpMobileConfigMapping-raw"; return mapped; }
+    }
 
-    // DexKit 2.0: resolver-only path. This does not install hooks, does not patch C broker,
-    // and does not change startup timing. It only asks the Mach-O index for names that were
-    // recovered from real in-memory MobileConfig data tables.
     NSDictionary<NSNumber *, NSString *> *dexNames = [[SCIMachODexKitResolver sharedResolver] allKnownSpecifierNames];
     NSString *dexName = dexNames[@(n)];
     if (!dexName.length && value != n) dexName = dexNames[@(value)];
@@ -131,29 +146,6 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
         ![dexName hasPrefix:@"spec_0x"]) {
         if (sourceOut) *sourceOut = @"SCIMachODexKitResolver";
         return dexName;
-    }
-
-    for (SCIExpMCObservation *obs in [SCIExpFlags allMCObservations] ?: @[]) {
-        if ([self normalizedSpecifierValue:obs.paramID] != n) continue;
-        if (obs.resolvedName.length) { if (sourceOut) *sourceOut = obs.source.length ? obs.source : @"runtime-mc-observation"; return obs.resolvedName; }
-        if (obs.lastDefault.length) {
-            NSRange marker = [obs.lastDefault rangeOfString:@"name="];
-            if (marker.location != NSNotFound) {
-                NSString *tail = [obs.lastDefault substringFromIndex:marker.location + marker.length];
-                NSRange end = [tail rangeOfString:@" ·"];
-                NSString *candidate = end.location == NSNotFound ? tail : [tail substringToIndex:end.location];
-                if (candidate.length && ![candidate isEqualToString:@"(null)"]) { if (sourceOut) *sourceOut = @"runtime-mc-detail"; return candidate; }
-            }
-        }
-    }
-
-    for (SCIExpInternalUseObservation *obs in [SCIExpFlags allInternalUseObservations] ?: @[]) {
-        if ([self normalizedSpecifierValue:obs.specifier] != n) continue;
-        NSString *candidate = obs.specifierName;
-        if (candidate.length && ![candidate isEqualToString:@"unknown"] && ![candidate hasPrefix:@"unknown 0x"] && ![candidate hasPrefix:@"callsite "]) {
-            if (sourceOut) *sourceOut = @"runtime-internaluse";
-            return candidate;
-        }
     }
 
     if (sourceOut) *sourceOut = @"decoded-id";
@@ -177,7 +169,10 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
 
     NSString *manual = [self manualLabelForBrokerID:r.brokerID value:value];
     if (manual.length) {
-        r.title = manual; r.resolvedName = manual; r.source = @"manual"; r.resolved = YES;
+        r.title = manual;
+        r.resolvedName = manual;
+        r.source = @"manual";
+        r.resolved = YES;
         r.resolvedDetail = [NSString stringWithFormat:@"manual label · raw=0x%@ · normalized=0x%@", r.rawHex, r.normalizedHex];
         return r;
     }
@@ -185,7 +180,10 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
     NSDictionary *runtime = [self runtimeEntryForBrokerID:r.brokerID value:value];
     NSString *runtimeName = [runtime[@"name"] isKindOfClass:NSString.class] ? runtime[@"name"] : nil;
     if (runtimeName.length) {
-        r.title = runtimeName; r.resolvedName = runtimeName; r.source = [runtime[@"source"] isKindOfClass:NSString.class] ? runtime[@"source"] : @"runtime"; r.resolved = YES;
+        r.title = runtimeName;
+        r.resolvedName = runtimeName;
+        r.source = [runtime[@"source"] isKindOfClass:NSString.class] ? runtime[@"source"] : @"runtime";
+        r.resolved = YES;
         NSString *detail = [runtime[@"detail"] isKindOfClass:NSString.class] ? runtime[@"detail"] : nil;
         r.resolvedDetail = detail.length ? detail : [NSString stringWithFormat:@"runtime mapping · raw=0x%@ · normalized=0x%@", r.rawHex, r.normalizedHex];
         return r;
@@ -194,7 +192,10 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
     NSString *source = nil;
     NSString *mapped = [self mappedNameForValue:value source:&source];
     if (mapped.length) {
-        r.title = mapped; r.resolvedName = mapped; r.source = source.length ? source : @"mapping"; r.resolved = YES;
+        r.title = mapped;
+        r.resolvedName = mapped;
+        r.source = source.length ? source : @"mapping";
+        r.resolved = YES;
         r.resolvedDetail = [NSString stringWithFormat:@"%@ · raw=0x%@ · normalized=0x%@ · family=0x%@ · param=0x%@", r.source, r.rawHex, r.normalizedHex, r.familyHex, r.paramHex];
         return r;
     }
@@ -223,7 +224,9 @@ static NSString *const kSCIMCIDRuntimePrefix = @"sci_mc_id_runtime_name:";
 }
 
 + (NSString *)mappingStatusLine {
-    return [NSString stringWithFormat:@"Unified resolver · %@ · expMap=%@", [SCIMobileConfigMapping mappingStatusLine] ?: @"id_name_mapping unavailable", [SCIExpMobileConfigMapping mappingSourceDescription] ?: @"unknown"];
+    NSString *idMap = [self callStringResolverClass:@"SCIMobileConfigMapping" selectorNoArg:@selector(mappingStatusLine)] ?: @"id_name_mapping unavailable";
+    NSString *expMap = [self callStringResolverClass:@"SCIExpMobileConfigMapping" selectorNoArg:@selector(mappingSourceDescription)] ?: @"expMap unavailable";
+    return [NSString stringWithFormat:@"Unified resolver · %@ · %@", idMap, expMap];
 }
 
 @end
