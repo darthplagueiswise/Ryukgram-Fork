@@ -1,5 +1,6 @@
 #import "SCIMobileConfigBrokerRouter.h"
 #import "SCIMobileConfigBrokerStore.h"
+#import "SCIDexKitNameResolver.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
 #include "../../../modules/fishhook/fishhook.h"
@@ -23,10 +24,12 @@ static MCBRGeneric8Fn orig_msgc = NULL;
 static __thread int gMCBRReentryDepth = 0;
 static NSMutableDictionary<NSString *, NSString *> *gMCBRErrors;
 static NSMutableSet<NSString *> *gMCBRInstalled;
+static NSMutableSet<NSString *> *gMCBRResolverNoted;
 
 static void MCBREnsureState(void) {
     if (!gMCBRErrors) gMCBRErrors = [NSMutableDictionary dictionary];
     if (!gMCBRInstalled) gMCBRInstalled = [NSMutableSet set];
+    if (!gMCBRResolverNoted) gMCBRResolverNoted = [NSMutableSet set];
 }
 
 static NSString *MCBRBasename(const char *path) {
@@ -39,6 +42,10 @@ static NSString *MCBRFishhookName(NSString *symbol) {
     NSString *s = symbol ?: @"";
     while ([s hasPrefix:@"_"]) s = [s substringFromIndex:1];
     return s;
+}
+
+static NSString *MCBRHex64(uint64_t value) {
+    return [NSString stringWithFormat:@"%016llx", (unsigned long long)value];
 }
 
 static void *MCBRDlsymFlexible(NSString *symbol) {
@@ -84,6 +91,49 @@ static BOOL MCBRShouldProcess(SCIMobileConfigBrokerDescriptor *d) {
     return NO;
 }
 
+static void MCBRNoteResolver(SCIMobileConfigBrokerDescriptor *d,
+                             uint64_t keyValue,
+                             BOOL defaultValue,
+                             BOOL originalValue,
+                             BOOL finalValue,
+                             void *caller) {
+    if (!d.brokerID.length) return;
+
+    NSString *dedupeKey = [NSString stringWithFormat:@"%@:%@", d.brokerID ?: @"", MCBRHex64(keyValue)];
+    @synchronized([SCIMobileConfigBrokerRouter class]) {
+        MCBREnsureState();
+        if ([gMCBRResolverNoted containsObject:dedupeKey]) return;
+        if (gMCBRResolverNoted.count > 8192) return;
+        [gMCBRResolverNoted addObject:dedupeKey];
+    }
+
+    NSString *callerImage = @"";
+    NSString *callerSymbol = @"";
+    if (caller) {
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr(caller, &info) != 0) {
+            callerImage = MCBRBasename(info.dli_fname);
+            if (info.dli_sname) callerSymbol = [NSString stringWithUTF8String:info.dli_sname] ?: @"";
+        }
+    }
+
+    NSString *className = [NSString stringWithFormat:@"SCIMCBrokerRouter:%@", d.brokerID ?: @"?"];
+    NSString *selectorName = d.symbol.length ? d.symbol : (d.brokerID ?: @"?");
+    NSString *source = [NSString stringWithFormat:@"c-broker:%@", d.brokerID ?: @"?"];
+
+    [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:className
+                                                        selector:selectorName
+                                                       specifier:keyValue
+                                                    defaultValue:defaultValue
+                                                   originalValue:originalValue
+                                                      finalValue:finalValue
+                                                          source:source
+                                                     callerImage:callerImage
+                                                    callerSymbol:callerSymbol
+                                                   callerAddress:(uint64_t)(uintptr_t)caller];
+}
+
 static BOOL MCBRForcedOrOriginal(SCIMobileConfigBrokerDescriptor *d, uint64_t keyValue, BOOL original, BOOL *wasForced) {
     if (wasForced) *wasForced = NO;
     if (!d.brokerID.length) return original;
@@ -106,7 +156,8 @@ static BOOL MCBRHandleIG(NSString *brokerID,
                          MCBRIGBoolFn orig,
                          id ctx,
                          BOOL def,
-                         unsigned long long specifier) {
+                         unsigned long long specifier,
+                         void *caller) {
     SCIMobileConfigBrokerDescriptor *d = [SCIMobileConfigBrokerDescriptor descriptorForID:brokerID];
     if (!d || gMCBRReentryDepth > 0 || !MCBRShouldProcess(d)) {
         return orig ? orig(ctx, def, specifier) : def;
@@ -116,6 +167,7 @@ static BOOL MCBRHandleIG(NSString *brokerID,
     BOOL original = orig ? orig(ctx, def, specifier) : def;
     BOOL forced = NO;
     BOOL finalValue = MCBRForcedOrOriginal(d, (uint64_t)specifier, original, &forced);
+    MCBRNoteResolver(d, (uint64_t)specifier, def, original, finalValue, caller);
     gMCBRReentryDepth--;
     return finalValue;
 }
@@ -129,7 +181,8 @@ static uintptr_t MCBRHandleGeneric(NSString *brokerID,
                                    uintptr_t a4,
                                    uintptr_t a5,
                                    uintptr_t a6,
-                                   uintptr_t a7) {
+                                   uintptr_t a7,
+                                   void *caller) {
     SCIMobileConfigBrokerDescriptor *d = [SCIMobileConfigBrokerDescriptor descriptorForID:brokerID];
     if (!d || gMCBRReentryDepth > 0 || !MCBRShouldProcess(d)) {
         return orig ? orig(a0, a1, a2, a3, a4, a5, a6, a7) : 0;
@@ -146,44 +199,45 @@ static uintptr_t MCBRHandleGeneric(NSString *brokerID,
     BOOL original = raw ? YES : NO;
     BOOL forced = NO;
     BOOL finalValue = MCBRForcedOrOriginal(d, keyValue, original, &forced);
+    MCBRNoteResolver(d, keyValue, defaultValue, original, finalValue, caller);
     gMCBRReentryDepth--;
     return finalValue ? 1 : 0;
 }
 
 static BOOL hook_ig(id ctx, BOOL def, unsigned long long specifier) {
-    return MCBRHandleIG(@"ig", orig_ig, ctx, def, specifier);
+    return MCBRHandleIG(@"ig", orig_ig, ctx, def, specifier, __builtin_return_address(0));
 }
 
 static BOOL hook_igsl(id ctx, BOOL def, unsigned long long specifier) {
-    return MCBRHandleIG(@"igsl", orig_igsl, ctx, def, specifier);
+    return MCBRHandleIG(@"igsl", orig_igsl, ctx, def, specifier, __builtin_return_address(0));
 }
 
 static uintptr_t hook_eg(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"eg", orig_eg, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"eg", orig_eg, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_mci(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"mci", orig_mci, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"mci", orig_mci, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_egi(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"egi", orig_egi, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"egi", orig_egi, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_ega(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"ega", orig_ega, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"ega", orig_ega, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_mcic(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"mcic", orig_mcic, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"mcic", orig_mcic, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_mcie(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"mcie", orig_mcie, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"mcie", orig_mcie, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_meta(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"meta", orig_meta, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"meta", orig_meta, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_metanx(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"metanx", orig_metanx, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"metanx", orig_metanx, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 static uintptr_t hook_msgc(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    return MCBRHandleGeneric(@"msgc", orig_msgc, a0, a1, a2, a3, a4, a5, a6, a7);
+    return MCBRHandleGeneric(@"msgc", orig_msgc, a0, a1, a2, a3, a4, a5, a6, a7, __builtin_return_address(0));
 }
 
 static void *MCBRReplacementForBrokerID(NSString *brokerID) {
