@@ -21,6 +21,71 @@ static NSString *SCIDexKitAddressHex(uint64_t value) { return value ? [NSString 
 static NSString *SCIDexKitString(id value) { return [value isKindOfClass:NSString.class] ? (NSString *)value : @""; }
 static BOOL SCIDexKitBool(id value) { return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : NO; }
 
+static NSObject *SCIDexKitCacheLock(void) {
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ lock = [NSObject new]; });
+    return lock;
+}
+
+static NSMutableDictionary<NSString *, SCIDexKitResolvedName *> *SCIDexKitResolveCache(void) {
+    static NSMutableDictionary<NSString *, SCIDexKitResolvedName *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, id> *SCIDexKitRuntimeEntryCache(void) {
+    static NSMutableDictionary<NSString *, id> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, id> *SCIDexKitRuntimeNameCache(void) {
+    static NSMutableDictionary<NSString *, id> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, id> *SCIDexKitAliasCache(void) {
+    static NSMutableDictionary<NSString *, id> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, id> *SCIDexKitAliasSourceCache(void) {
+    static NSMutableDictionary<NSString *, id> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, NSString *> *SCIDexKitMappingCache(void) {
+    static NSMutableDictionary<NSString *, NSString *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableOrderedSet<NSString *> *SCIDexKitRuntimeIndexSet(void) {
+    static NSMutableOrderedSet<NSString *> *set = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSArray *stored = [[NSUserDefaults standardUserDefaults] arrayForKey:kSCIDexKitRuntimeIndexKey] ?: @[];
+        set = [NSMutableOrderedSet orderedSetWithArray:stored];
+    });
+    return set;
+}
+
+static void SCIDexKitInvalidateResolveCache(void) {
+    @synchronized (SCIDexKitCacheLock()) {
+        [SCIDexKitResolveCache() removeAllObjects];
+    }
+}
+
 static BOOL SCIDexKitParseHexString(NSString *string, uint64_t *outValue) {
     if (![string isKindOfClass:NSString.class] || string.length == 0) return NO;
     NSString *s = [string stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -34,8 +99,22 @@ static BOOL SCIDexKitParseHexString(NSString *string, uint64_t *outValue) {
 }
 
 static void SCIDexKitPostUpdate(BOOL runtime) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (runtime) [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverRuntimeFeedDidUpdateNotification object:nil];
+    static BOOL scheduled = NO;
+    static BOOL runtimePending = NO;
+    @synchronized (SCIDexKitCacheLock()) {
+        runtimePending = runtimePending || runtime;
+        if (scheduled) return;
+        scheduled = YES;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL shouldPostRuntime = NO;
+        @synchronized (SCIDexKitCacheLock()) {
+            shouldPostRuntime = runtimePending;
+            runtimePending = NO;
+            scheduled = NO;
+        }
+        if (shouldPostRuntime) [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverRuntimeFeedDidUpdateNotification object:nil];
         [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverDidUpdateNotification object:nil];
     });
 }
@@ -89,6 +168,12 @@ static NSString *SCIDexKitNameFromMappingObject(id candidate) {
 }
 
 static NSString *SCIResolveMappedNameForSingleValue(uint64_t value) {
+    NSString *cacheKey = SCIDexKitHex(value);
+    @synchronized (SCIDexKitCacheLock()) {
+        NSString *cached = SCIDexKitMappingCache()[cacheKey];
+        if (cached.length) return cached;
+    }
+
     NSArray<NSString *> *classNames = @[@"SCIMobileConfigMapping", @"SCIExpMobileConfigMapping"];
     NSArray<NSString *> *selectorNames = @[
         @"resolvedNameForParamID:",
@@ -112,7 +197,10 @@ static NSString *SCIResolveMappedNameForSingleValue(uint64_t value) {
             if (!imp) continue;
             id (*fn)(id, SEL, uint64_t) = (id (*)(id, SEL, uint64_t))imp;
             NSString *name = SCIDexKitNameFromMappingObject(fn(cls, sel, value));
-            if (name.length) return name;
+            if (name.length) {
+                @synchronized (SCIDexKitCacheLock()) { SCIDexKitMappingCache()[cacheKey] = name; }
+                return name;
+            }
         }
     }
     return nil;
@@ -135,9 +223,17 @@ static NSString *SCIResolveMappedNameForSpecifier(uint64_t value) {
 
 static NSDictionary *SCIDexKitRuntimeEntryForIdentity(NSString *identity) {
     if (!identity.length) return nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        id cached = SCIDexKitRuntimeEntryCache()[identity];
+        if (cached) return cached == (id)NSNull.null ? nil : cached;
+    }
     NSString *key = [kSCIDexKitRuntimeEntryPrefix stringByAppendingString:identity];
     id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
-    return [obj isKindOfClass:NSDictionary.class] ? (NSDictionary *)obj : nil;
+    NSDictionary *entry = [obj isKindOfClass:NSDictionary.class] ? (NSDictionary *)obj : nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        SCIDexKitRuntimeEntryCache()[identity] = entry ?: (id)NSNull.null;
+    }
+    return entry;
 }
 
 static NSDictionary *SCIDexKitRuntimeEntryForBrokerAndValue(NSString *brokerID, uint64_t value) {
@@ -150,16 +246,32 @@ static NSDictionary *SCIDexKitRuntimeEntryForBrokerAndValue(NSString *brokerID, 
 
 static NSString *SCIDexKitAliasForIdentity(NSString *identity) {
     if (!identity.length) return nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        id cached = SCIDexKitAliasCache()[identity];
+        if (cached) return cached == (id)NSNull.null ? nil : cached;
+    }
     NSString *key = [kSCIDexKitAliasRuntimePrefix stringByAppendingString:identity];
     id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
-    return [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
+    NSString *alias = [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        SCIDexKitAliasCache()[identity] = alias.length ? alias : (id)NSNull.null;
+    }
+    return alias.length ? alias : nil;
 }
 
 static NSString *SCIDexKitAliasSourceForIdentity(NSString *identity) {
     if (!identity.length) return nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        id cached = SCIDexKitAliasSourceCache()[identity];
+        if (cached) return cached == (id)NSNull.null ? nil : cached;
+    }
     NSString *key = [kSCIDexKitAliasSourceRuntimePrefix stringByAppendingString:identity];
     id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
-    return [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
+    NSString *source = [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
+    @synchronized (SCIDexKitCacheLock()) {
+        SCIDexKitAliasSourceCache()[identity] = source.length ? source : (id)NSNull.null;
+    }
+    return source.length ? source : nil;
 }
 
 static NSArray<NSNumber *> *SCIDexKitCandidateValuesForBrokerAndValue(NSString *brokerID, uint64_t value) {
@@ -216,6 +328,21 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
     if (![brokerID isKindOfClass:NSString.class]) return NO;
     if (!([brokerID hasPrefix:@"eg"] || [brokerID hasPrefix:@"meta"] || [brokerID hasPrefix:@"mci"] || [brokerID hasPrefix:@"msgc"])) return NO;
     return value >= 0x0000000100000000ULL && value <= 0x00000001ffffffffULL;
+}
+
+static NSDictionary *SCIDexKitMergedRuntimeEntry(NSDictionary *existing, NSDictionary *incoming) {
+    if (![existing isKindOfClass:NSDictionary.class] || existing.count == 0) return incoming;
+    NSMutableDictionary *merged = [existing mutableCopy];
+    for (NSString *key in @[@"rawHex", @"rawHexNoPrefix", @"normalizedHex", @"normalizedHexNoPrefix", @"className", @"selector", @"source", @"brokerID", @"defaultValue", @"originalValue", @"finalValue", @"runtimeObserved"]) {
+        id value = incoming[key];
+        if (value) merged[key] = value;
+    }
+    for (NSString *key in @[@"callerImage", @"callerSymbol", @"callerAddress"]) {
+        NSString *oldValue = SCIDexKitString(merged[key]);
+        NSString *newValue = SCIDexKitString(incoming[key]);
+        if (!oldValue.length && newValue.length) merged[key] = newValue;
+    }
+    return merged;
 }
 
 @implementation SCIDexKitResolvedName
@@ -297,10 +424,17 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
     if (name.length) [[NSUserDefaults standardUserDefaults] setObject:name forKey:key];
     else [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
     [[NSUserDefaults standardUserDefaults] synchronize];
+    SCIDexKitInvalidateResolveCache();
     SCIDexKitPostUpdate(NO);
 }
 
 + (SCIDexKitResolvedName *)resolveBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value {
+    NSString *cacheKey = [NSString stringWithFormat:@"%@|%@", brokerID ?: @"", SCIDexKitHex(value)];
+    @synchronized (SCIDexKitCacheLock()) {
+        SCIDexKitResolvedName *cached = SCIDexKitResolveCache()[cacheKey];
+        if (cached) return cached;
+    }
+
     uint64_t normalized = [self normalizedSpecifierValue:value];
     NSArray<NSNumber *> *candidateValues = SCIDexKitCandidateValuesForBrokerAndValue(brokerID, value);
     NSDictionary *runtimeForOriginal = SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, value);
@@ -314,6 +448,8 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
     res.pointerLike = SCIDexKitLooksLikeRuntimePointerToken(brokerID ?: @"", value);
     res.runtimeObserved = (runtimeForOriginal != nil);
 
+#define SCI_RETURN_RESOLVED() do { @synchronized (SCIDexKitCacheLock()) { SCIDexKitResolveCache()[cacheKey] = res; } return res; } while (0)
+
     for (NSNumber *n in candidateValues) {
         for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:n.unsignedLongLongValue]) {
             NSString *manual = [self manualNameForIdentity:identity];
@@ -325,7 +461,7 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
                 res.confidence = SCIDexKitNameConfidenceExact;
                 res.manual = YES;
                 res.runtimeObserved = res.runtimeObserved || (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, n.unsignedLongLongValue) != nil);
-                return res;
+                SCI_RETURN_RESOLVED();
             }
         }
     }
@@ -339,14 +475,24 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
             res.source = @"mapping";
             res.confidence = SCIDexKitNameConfidenceExact;
             res.runtimeObserved = res.runtimeObserved || (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, n.unsignedLongLongValue) != nil);
-            return res;
+            SCI_RETURN_RESOLVED();
         }
     }
 
     for (NSNumber *n in candidateValues) {
         for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:n.unsignedLongLongValue]) {
-            NSString *key = [kSCIDexKitNameRuntimePrefix stringByAppendingString:identity];
-            NSString *runtimeName = [[NSUserDefaults standardUserDefaults] stringForKey:key];
+            NSString *runtimeName = nil;
+            @synchronized (SCIDexKitCacheLock()) {
+                id cached = SCIDexKitRuntimeNameCache()[identity];
+                if (cached) runtimeName = cached == (id)NSNull.null ? nil : cached;
+            }
+            if (!runtimeName) {
+                NSString *key = [kSCIDexKitNameRuntimePrefix stringByAppendingString:identity];
+                runtimeName = [[NSUserDefaults standardUserDefaults] stringForKey:key];
+                @synchronized (SCIDexKitCacheLock()) {
+                    SCIDexKitRuntimeNameCache()[identity] = runtimeName.length ? runtimeName : (id)NSNull.null;
+                }
+            }
             if (runtimeName.length) {
                 res.title = runtimeName;
                 res.name = runtimeName;
@@ -354,7 +500,7 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
                 res.source = @"runtime-name";
                 res.confidence = SCIDexKitNameConfidenceHigh;
                 res.runtimeObserved = YES;
-                return res;
+                SCI_RETURN_RESOLVED();
             }
         }
     }
@@ -380,7 +526,7 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
         res.callerImage = SCIDexKitString(runtimeEntry[@"callerImage"]);
         res.callerSymbol = SCIDexKitString(runtimeEntry[@"callerSymbol"]);
         res.callerAddress = SCIDexKitString(runtimeEntry[@"callerAddress"]);
-        return res;
+        SCI_RETURN_RESOLVED();
     }
 
     NSString *aliasValue = @"";
@@ -402,7 +548,7 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
         res.source = @"alias";
         res.confidence = SCIDexKitNameConfidenceLow;
         res.runtimeObserved = YES;
-        return res;
+        SCI_RETURN_RESOLVED();
     }
 
     if (res.pointerLike) {
@@ -411,7 +557,7 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
         res.detail = @"EasyGating/MCI/META value looks like a runtime pointer/token, not a stable MobileConfig specifier. Use caller/callsite or a manual label after correlation.";
         res.source = @"runtime-token";
         res.confidence = SCIDexKitNameConfidenceNone;
-        return res;
+        SCI_RETURN_RESOLVED();
     }
 
     res.title = SCIDexKitHex(normalized);
@@ -419,7 +565,8 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
     res.detail = [NSString stringWithFormat:@"decoded family=0x%@ · param=0x%@ · tag=0x%@ · normalized=%@", res.family ?: @"", res.param ?: @"", res.tag ?: @"", res.normalizedKey ?: @""];
     res.source = @"decoded-id";
     res.confidence = SCIDexKitNameConfidenceNone;
-    return res;
+    SCI_RETURN_RESOLVED();
+#undef SCI_RETURN_RESOLVED
 }
 
 + (NSDictionary *)resolvedDictionaryForBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value {
@@ -461,13 +608,21 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
     NSString *brokerID = SCIDexKitInferBrokerID(safeClass);
     uint64_t normalized = [self normalizedSpecifierValue:specifier];
 
+    BOOL changed = NO;
     NSString *runtimeExactName = SCIDexKitFeatureLikeSelectorName(safeSelector);
     if (runtimeExactName.length) {
         for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:specifier]) {
             NSString *key = [kSCIDexKitNameRuntimePrefix stringByAppendingString:identity];
-            NSString *existing = [[NSUserDefaults standardUserDefaults] stringForKey:key];
+            NSString *existing = nil;
+            @synchronized (SCIDexKitCacheLock()) {
+                id cached = SCIDexKitRuntimeNameCache()[identity];
+                if (cached) existing = cached == (id)NSNull.null ? nil : cached;
+            }
+            if (!existing) existing = [[NSUserDefaults standardUserDefaults] stringForKey:key];
             if (![existing isEqualToString:runtimeExactName]) {
                 [[NSUserDefaults standardUserDefaults] setObject:runtimeExactName forKey:key];
+                @synchronized (SCIDexKitCacheLock()) { SCIDexKitRuntimeNameCache()[identity] = runtimeExactName; }
+                changed = YES;
             }
         }
     }
@@ -490,21 +645,35 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
         @"runtimeObserved": @YES
     };
 
-    BOOL changed = NO;
-    NSMutableOrderedSet<NSString *> *index = [NSMutableOrderedSet orderedSetWithArray:[[NSUserDefaults standardUserDefaults] arrayForKey:kSCIDexKitRuntimeIndexKey] ?: @[]];
-
+    BOOL indexChanged = NO;
     for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:specifier]) {
         NSString *key = [kSCIDexKitRuntimeEntryPrefix stringByAppendingString:identity];
-        NSDictionary *existing = [[NSUserDefaults standardUserDefaults] dictionaryForKey:key];
-        if (![existing isEqualToDictionary:entry]) {
-            [[NSUserDefaults standardUserDefaults] setObject:entry forKey:key];
+        NSDictionary *existing = SCIDexKitRuntimeEntryForIdentity(identity);
+        NSDictionary *merged = SCIDexKitMergedRuntimeEntry(existing, entry);
+        if (![existing isEqualToDictionary:merged]) {
+            [[NSUserDefaults standardUserDefaults] setObject:merged forKey:key];
+            @synchronized (SCIDexKitCacheLock()) { SCIDexKitRuntimeEntryCache()[identity] = merged; }
             changed = YES;
         }
-        [index addObject:identity];
+        @synchronized (SCIDexKitCacheLock()) {
+            if (![SCIDexKitRuntimeIndexSet() containsObject:identity]) {
+                [SCIDexKitRuntimeIndexSet() addObject:identity];
+                indexChanged = YES;
+            }
+        }
     }
 
-    [[NSUserDefaults standardUserDefaults] setObject:index.array forKey:kSCIDexKitRuntimeIndexKey];
-    if (changed) SCIDexKitPostUpdate(YES);
+    if (indexChanged) {
+        NSArray *indexArray = nil;
+        @synchronized (SCIDexKitCacheLock()) { indexArray = SCIDexKitRuntimeIndexSet().array; }
+        [[NSUserDefaults standardUserDefaults] setObject:indexArray forKey:kSCIDexKitRuntimeIndexKey];
+        changed = YES;
+    }
+
+    if (changed) {
+        SCIDexKitInvalidateResolveCache();
+        SCIDexKitPostUpdate(YES);
+    }
 }
 
 + (void)noteAliasFromSpecifier:(uint64_t)rawSpecifier
@@ -529,20 +698,25 @@ static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t v
         NSString *aliasKey = [kSCIDexKitAliasRuntimePrefix stringByAppendingString:identity];
         NSString *sourceKey = [kSCIDexKitAliasSourceRuntimePrefix stringByAppendingString:identity];
 
-        NSString *existing = [[NSUserDefaults standardUserDefaults] stringForKey:aliasKey];
+        NSString *existing = SCIDexKitAliasForIdentity(identity);
         if (![existing isEqualToString:aliasValue]) {
             [[NSUserDefaults standardUserDefaults] setObject:aliasValue forKey:aliasKey];
+            @synchronized (SCIDexKitCacheLock()) { SCIDexKitAliasCache()[identity] = aliasValue; }
             changed = YES;
         }
 
-        NSString *existingSource = [[NSUserDefaults standardUserDefaults] stringForKey:sourceKey];
+        NSString *existingSource = SCIDexKitAliasSourceForIdentity(identity);
         if (![existingSource isEqualToString:safeSource]) {
             [[NSUserDefaults standardUserDefaults] setObject:safeSource forKey:sourceKey];
+            @synchronized (SCIDexKitCacheLock()) { SCIDexKitAliasSourceCache()[identity] = safeSource; }
             changed = YES;
         }
     }
 
-    if (changed) SCIDexKitPostUpdate(YES);
+    if (changed) {
+        SCIDexKitInvalidateResolveCache();
+        SCIDexKitPostUpdate(YES);
+    }
 }
 
 @end
