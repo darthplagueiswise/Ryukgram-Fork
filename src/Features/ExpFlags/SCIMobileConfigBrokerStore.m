@@ -1,5 +1,6 @@
 #import "SCIMobileConfigBrokerStore.h"
 #import "SCIDexKitNameResolver.h"
+#import <dispatch/dispatch.h>
 
 NSString * const SCIMCBrokerStoreDidChangeNotification = @"SCIMCBrokerStoreDidChangeNotification";
 NSString * const SCIMCBrokerIndexKey = @"mcbr.idx";
@@ -15,10 +16,178 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
 
 static NSString *SCIMCBrokerString(id obj) { return [obj isKindOfClass:NSString.class] ? (NSString *)obj : @""; }
 static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(boolValue)] ? [obj boolValue] : NO; }
+static BOOL SCIMCBrokerObservedObjectIsPresent(id obj) { return obj && obj != (id)NSNull.null; }
+
+static NSObject *SCIMCBrokerCacheLock(void) {
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ lock = [NSObject new]; });
+    return lock;
+}
+
+static NSMutableDictionary<NSString *, NSDictionary *> *SCIMCBrokerResolvedCache(void) {
+    static NSMutableDictionary<NSString *, NSDictionary *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, NSNumber *> *SCIMCBrokerHitCache(void) {
+    static NSMutableDictionary<NSString *, NSNumber *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableDictionary<NSString *, NSNumber *> *SCIMCBrokerForcedHitCache(void) {
+    static NSMutableDictionary<NSString *, NSNumber *> *cache = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+static NSMutableSet<NSString *> *SCIMCBrokerDirtyHitKeys(void) {
+    static NSMutableSet<NSString *> *keys = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ keys = [NSMutableSet set]; });
+    return keys;
+}
+
+static NSDictionary *gSCIMCBrokerSnapshotCache = nil;
+
+static void SCIMCBrokerInvalidateCaches(void) {
+    @synchronized (SCIMCBrokerCacheLock()) {
+        [SCIMCBrokerResolvedCache() removeAllObjects];
+        gSCIMCBrokerSnapshotCache = nil;
+    }
+}
+
+static NSDictionary *SCIMCBrokerSnapshotCacheCopy(void) {
+    @synchronized (SCIMCBrokerCacheLock()) {
+        return gSCIMCBrokerSnapshotCache ? [gSCIMCBrokerSnapshotCache copy] : nil;
+    }
+}
+
+static void SCIMCBrokerSetSnapshotCache(NSDictionary *snapshot) {
+    @synchronized (SCIMCBrokerCacheLock()) {
+        gSCIMCBrokerSnapshotCache = snapshot ? [snapshot copy] : nil;
+    }
+}
+
+static void SCIMCBrokerPostStoreChange(NSDictionary *userInfo) {
+    static BOOL scheduled = NO;
+    static NSMutableDictionary *pending = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ pending = [NSMutableDictionary dictionary]; });
+
+    SCIMCBrokerInvalidateCaches();
+
+    @synchronized (SCIMCBrokerCacheLock()) {
+        if (userInfo.count) [pending addEntriesFromDictionary:userInfo];
+        if (scheduled) return;
+        scheduled = YES;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSDictionary *info = nil;
+        @synchronized (SCIMCBrokerCacheLock()) {
+            info = [pending copy];
+            [pending removeAllObjects];
+            scheduled = NO;
+        }
+        [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:info ?: @{}];
+    });
+}
+
+static NSNumber *SCIMCBrokerCachedCountForKey(NSMutableDictionary<NSString *, NSNumber *> *cache, NSString *defaultsKey) {
+    if (!defaultsKey.length) return @0;
+    @synchronized (SCIMCBrokerCacheLock()) {
+        NSNumber *cached = cache[defaultsKey];
+        if (cached) return cached;
+    }
+    NSNumber *loaded = @((NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:defaultsKey]);
+    @synchronized (SCIMCBrokerCacheLock()) { cache[defaultsKey] = loaded; }
+    return loaded;
+}
+
+static void SCIMCBrokerScheduleHitFlush(void) {
+    static BOOL scheduled = NO;
+    @synchronized (SCIMCBrokerCacheLock()) {
+        if (scheduled) return;
+        scheduled = YES;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *hits = nil;
+        NSDictionary *forcedHits = nil;
+        NSSet *dirty = nil;
+
+        @synchronized (SCIMCBrokerCacheLock()) {
+            hits = [SCIMCBrokerHitCache() copy];
+            forcedHits = [SCIMCBrokerForcedHitCache() copy];
+            dirty = [SCIMCBrokerDirtyHitKeys() copy];
+            [SCIMCBrokerDirtyHitKeys() removeAllObjects];
+            scheduled = NO;
+        }
+
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        for (NSString *key in dirty) {
+            NSNumber *value = hits[key] ?: forcedHits[key];
+            if (value) [ud setInteger:value.integerValue forKey:key];
+        }
+    });
+}
+
+static void SCIMCBrokerIncrementCachedCount(NSMutableDictionary<NSString *, NSNumber *> *cache, NSString *defaultsKey) {
+    if (!defaultsKey.length) return;
+    @synchronized (SCIMCBrokerCacheLock()) {
+        NSNumber *current = cache[defaultsKey];
+        if (!current) current = @((NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:defaultsKey]);
+        cache[defaultsKey] = @(current.unsignedIntegerValue + 1);
+        [SCIMCBrokerDirtyHitKeys() addObject:defaultsKey];
+    }
+    SCIMCBrokerScheduleHitFlush();
+}
+
+static void SCIMCBrokerEnsureResolverObserver(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+        [nc addObserverForName:SCIDexKitNameResolverDidUpdateNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+            SCIMCBrokerPostStoreChange(@{@"source": @"resolver"});
+        }];
+        [nc addObserverForName:SCIDexKitNameResolverRuntimeFeedDidUpdateNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+            SCIMCBrokerPostStoreChange(@{@"source": @"runtime-feed"});
+        }];
+    });
+}
+
+static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDictionary *b) {
+    BOOL ar = SCIMCBrokerBool(a[@"runtimeObserved"]);
+    BOOL br = SCIMCBrokerBool(b[@"runtimeObserved"]);
+    if (ar != br) return ar ? NSOrderedAscending : NSOrderedDescending;
+
+    BOOL aResolved = SCIMCBrokerBool(a[@"resolved"]);
+    BOOL bResolved = SCIMCBrokerBool(b[@"resolved"]);
+    if (aResolved != bResolved) return aResolved ? NSOrderedAscending : NSOrderedDescending;
+
+    BOOL aObserved = SCIMCBrokerObservedObjectIsPresent(a[@"observed"]);
+    BOOL bObserved = SCIMCBrokerObservedObjectIsPresent(b[@"observed"]);
+    if (aObserved != bObserved) return aObserved ? NSOrderedAscending : NSOrderedDescending;
+
+    NSString *at = SCIMCBrokerString(a[@"title"]);
+    NSString *bt = SCIMCBrokerString(b[@"title"]);
+    NSComparisonResult r = [at localizedCaseInsensitiveCompare:bt];
+    if (r != NSOrderedSame) return r;
+
+    return [SCIMCBrokerString(a[@"key"]) compare:SCIMCBrokerString(b[@"key"])] ;
+}
 
 @implementation SCIMobileConfigBrokerStore
 
 + (void)registerDefaultsAndMigrate {
+    SCIMCBrokerEnsureResolverObserver();
+
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     [ud registerDefaults:@{SCIMCBrokerIndexKey: @[], SCIMCBrokerObservedIndexKey: @[], SCIMCBrokerHookIndexKey: @[]}];
 
@@ -51,6 +220,7 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (void)addIndexedKey:(NSString *)item indexKey:(NSString *)indexKey {
     if (!item.length || !indexKey.length) return;
     NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:indexKey]];
+    if ([set containsObject:item]) return;
     [set addObject:item];
     [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:indexKey];
 }
@@ -58,6 +228,7 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (void)removeIndexedKey:(NSString *)item indexKey:(NSString *)indexKey {
     if (!item.length || !indexKey.length) return;
     NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:indexKey]];
+    if (![set containsObject:item]) return;
     [set removeObject:item];
     [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:indexKey];
 }
@@ -95,6 +266,10 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (void)setOverrideValue:(nullable NSNumber *)value forKey:(NSString *)key {
     if (!key.length) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    NSNumber *existing = [self overrideValueForKey:key];
+    if (value && existing && existing.boolValue == value.boolValue) return;
+    if (!value && !existing) return;
+
     if (value) {
         [ud setBool:value.boolValue forKey:key];
         [self addIndexedKey:key indexKey:SCIMCBrokerIndexKey];
@@ -102,7 +277,7 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
         [ud removeObjectForKey:key];
         [self removeIndexedKey:key indexKey:SCIMCBrokerIndexKey];
     }
-    [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"key": key}];
+    SCIMCBrokerPostStoreChange(@{@"key": key});
 }
 
 + (nullable NSNumber *)observedValueForOverrideKey:(NSString *)overrideKey {
@@ -115,8 +290,14 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (void)noteObservedValue:(BOOL)value forOverrideKey:(NSString *)overrideKey {
     NSString *key = [self observedKeyForOverrideKey:overrideKey];
     if (!key.length) return;
+
+    NSNumber *existing = [self observedValueForOverrideKey:overrideKey];
+    BOOL alreadyIndexed = [[self arrayForKey:SCIMCBrokerObservedIndexKey] containsObject:overrideKey];
+    if (existing && existing.boolValue == value && alreadyIndexed) return;
+
     [[NSUserDefaults standardUserDefaults] setBool:value forKey:key];
     [self addIndexedKey:overrideKey indexKey:SCIMCBrokerObservedIndexKey];
+    SCIMCBrokerPostStoreChange(@{@"key": overrideKey, @"observed": @(value)});
 }
 
 + (NSArray<NSString *> *)activeOverrideKeys {
@@ -137,11 +318,16 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (NSArray<NSString *> *)observedOverrideKeys {
     NSMutableOrderedSet<NSString *> *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:SCIMCBrokerObservedIndexKey]];
     NSDictionary *all = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
+    BOOL indexChanged = NO;
     for (NSString *key in all.allKeys) {
         if (![key hasPrefix:kMCBRObservedPrefix]) continue;
         NSString *overrideKey = [kMCBROverridePrefix stringByAppendingString:[key substringFromIndex:kMCBRObservedPrefix.length]];
-        [set addObject:overrideKey];
+        if (![set containsObject:overrideKey]) {
+            [set addObject:overrideKey];
+            indexChanged = YES;
+        }
     }
+    if (indexChanged) [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:SCIMCBrokerObservedIndexKey];
     return set.array;
 }
 
@@ -166,11 +352,14 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 
 + (void)setBrokerHookEnabled:(BOOL)enabled brokerID:(NSString *)brokerID {
     if (!brokerID.length) return;
+    BOOL old = [self isBrokerHookEnabledForID:brokerID];
+    if (old == enabled) return;
+
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     [ud setBool:enabled forKey:[self hookEnabledKeyForBrokerID:brokerID]];
     if (enabled) [self addIndexedKey:brokerID indexKey:SCIMCBrokerHookIndexKey];
     else [self removeIndexedKey:brokerID indexKey:SCIMCBrokerHookIndexKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"brokerID": brokerID}];
+    SCIMCBrokerPostStoreChange(@{@"brokerID": brokerID});
 }
 
 + (BOOL)hasAnyActiveOverridesOrHooks { return [self activeOverrideKeys].count > 0 || [self enabledHookBrokerIDs].count > 0; }
@@ -179,8 +368,13 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 + (void)noteLastError:(nullable NSString *)error brokerID:(NSString *)brokerID {
     if (!brokerID.length) return;
     NSString *key = [self lastErrorKeyForBrokerID:brokerID];
+    NSString *old = [[NSUserDefaults standardUserDefaults] stringForKey:key] ?: @"";
+    if ((error ?: @"").length && [old isEqualToString:error ?: @""]) return;
+    if (!(error ?: @"").length && !old.length) return;
+
     if (error.length) [[NSUserDefaults standardUserDefaults] setObject:error forKey:key];
     else [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
+    SCIMCBrokerPostStoreChange(@{@"brokerID": brokerID, @"error": error ?: @""});
 }
 + (nullable NSString *)lastErrorForBrokerID:(NSString *)brokerID {
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self lastErrorKeyForBrokerID:brokerID]];
@@ -189,17 +383,12 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 
 + (void)noteHitForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced {
     if (!brokerID.length) return;
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    NSString *hitKey = [self hitKeyForBrokerID:brokerID];
-    [ud setInteger:([ud integerForKey:hitKey] + 1) forKey:hitKey];
-    if (forced) {
-        NSString *fKey = [self forcedHitKeyForBrokerID:brokerID];
-        [ud setInteger:([ud integerForKey:fKey] + 1) forKey:fKey];
-    }
+    SCIMCBrokerIncrementCachedCount(SCIMCBrokerHitCache(), [self hitKeyForBrokerID:brokerID]);
+    if (forced) SCIMCBrokerIncrementCachedCount(SCIMCBrokerForcedHitCache(), [self forcedHitKeyForBrokerID:brokerID]);
     (void)value;
 }
-+ (NSUInteger)hitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self hitKeyForBrokerID:brokerID]]; }
-+ (NSUInteger)forcedHitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self forcedHitKeyForBrokerID:brokerID]]; }
++ (NSUInteger)hitCountForBrokerID:(NSString *)brokerID { return SCIMCBrokerCachedCountForKey(SCIMCBrokerHitCache(), [self hitKeyForBrokerID:brokerID]).unsignedIntegerValue; }
++ (NSUInteger)forcedHitCountForBrokerID:(NSString *)brokerID { return SCIMCBrokerCachedCountForKey(SCIMCBrokerForcedHitCache(), [self forcedHitKeyForBrokerID:brokerID]).unsignedIntegerValue; }
 
 + (SCIMCBrokerBoolState)effectiveStateForOverrideKey:(NSString *)overrideKey {
     NSNumber *forced = [self overrideValueForKey:overrideKey];
@@ -226,6 +415,14 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
 }
 
 + (NSDictionary *)resolvedMetadataForOverrideKey:(NSString *)overrideKey {
+    SCIMCBrokerEnsureResolverObserver();
+
+    if (!overrideKey.length) return @{};
+    @synchronized (SCIMCBrokerCacheLock()) {
+        NSDictionary *cached = SCIMCBrokerResolvedCache()[overrideKey];
+        if (cached) return cached;
+    }
+
     NSString *bid = nil;
     uint64_t value = 0;
     if (![self parseOverrideKey:overrideKey brokerID:&bid value:&value]) return @{};
@@ -274,10 +471,18 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
     out[@"callerAddress"] = callerAddress ?: @"";
     out[@"brokerID"] = bid ?: @"";
     out[@"identityCandidates"] = [SCIDexKitNameResolver identityCandidatesForBrokerID:bid value:value] ?: @[];
-    return out;
+
+    NSDictionary *immutable = [out copy];
+    @synchronized (SCIMCBrokerCacheLock()) { SCIMCBrokerResolvedCache()[overrideKey] = immutable; }
+    return immutable;
 }
 
 + (NSDictionary *)snapshotDictionary {
+    SCIMCBrokerEnsureResolverObserver();
+
+    NSDictionary *cached = SCIMCBrokerSnapshotCacheCopy();
+    if (cached) return cached;
+
     NSMutableDictionary *d = [NSMutableDictionary dictionary];
     for (SCIMobileConfigBrokerDescriptor *desc in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
         NSMutableArray *items = [NSMutableArray array];
@@ -291,6 +496,10 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
             item[@"observed"] = [self observedValueForOverrideKey:key] ?: [NSNull null];
             [items addObject:item];
         }
+        [items sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return SCIMCBrokerCompareMetadataItems(a, b);
+        }];
+
         d[desc.brokerID] = @{
             @"symbol": desc.symbol ?: @"",
             @"hookEnabled": @([self isBrokerHookEnabledForID:desc.brokerID]),
@@ -300,7 +509,10 @@ static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(b
             @"values": items
         };
     }
-    return d;
+
+    NSDictionary *snapshot = [d copy];
+    SCIMCBrokerSetSnapshotCache(snapshot);
+    return snapshot;
 }
 
 + (void)resetAllBrokerOverrides {
