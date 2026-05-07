@@ -29,7 +29,7 @@ static NSString * const kSCIDexKitAliasRuntimePrefix = @"dexkit.alias.runtime:";
         @"pointerLike": @(self.pointerLike),
         @"callerImage": self.callerImage ?: @"",
         @"callerSymbol": self.callerSymbol ?: @"",
-        @"callerAddress": [NSString stringWithFormat:@"0x%llx", self.callerAddress]
+        @"callerAddress": self.callerAddress ?: @""
     };
 }
 @end
