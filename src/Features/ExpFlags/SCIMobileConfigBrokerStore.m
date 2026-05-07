@@ -19,7 +19,6 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     [ud registerDefaults:@{SCIMCBrokerIndexKey: @[], SCIMCBrokerObservedIndexKey: @[], SCIMCBrokerHookIndexKey: @[]}];
 
-    // Conservative migration from the first long namespace and from early broker-wide mcbr:<id> values.
     NSDictionary *all = [ud dictionaryRepresentation];
     for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
         NSString *longKey = [NSString stringWithFormat:@"dexkit.cbroker:%@:%@", d.imageName, d.symbol];
@@ -42,38 +41,25 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
     return [obj isKindOfClass:NSArray.class] ? obj : @[];
 }
-
 + (void)addIndexedKey:(NSString *)item indexKey:(NSString *)indexKey {
     if (!item.length || !indexKey.length) return;
     NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:indexKey]];
     [set addObject:item];
     [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:indexKey];
 }
-
 + (void)removeIndexedKey:(NSString *)item indexKey:(NSString *)indexKey {
     if (!item.length || !indexKey.length) return;
     NSMutableOrderedSet *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:indexKey]];
     [set removeObject:item];
     [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:indexKey];
 }
-
-+ (NSString *)hexForValue:(uint64_t)value {
-    return [NSString stringWithFormat:@"%016llx", (unsigned long long)value];
-}
-
-+ (NSString *)overrideKeyForBroker:(SCIMobileConfigBrokerDescriptor *)broker value:(uint64_t)value {
-    return [self overrideKeyForBrokerID:broker.brokerID value:value];
-}
-
-+ (NSString *)overrideKeyForBrokerID:(NSString *)brokerID value:(uint64_t)value {
-    return [NSString stringWithFormat:@"%@%@:%@", kMCBROverridePrefix, brokerID ?: @"", [self hexForValue:value]];
-}
-
++ (NSString *)hexForValue:(uint64_t)value { return [NSString stringWithFormat:@"%016llx", (unsigned long long)value]; }
++ (NSString *)overrideKeyForBroker:(SCIMobileConfigBrokerDescriptor *)broker value:(uint64_t)value { return [self overrideKeyForBrokerID:broker.brokerID value:value]; }
++ (NSString *)overrideKeyForBrokerID:(NSString *)brokerID value:(uint64_t)value { return [NSString stringWithFormat:@"%@%@:%@", kMCBROverridePrefix, brokerID ?: @"", [self hexForValue:value]]; }
 + (NSString *)observedKeyForOverrideKey:(NSString *)overrideKey {
     if (![overrideKey hasPrefix:kMCBROverridePrefix]) return @"";
     return [kMCBRObservedPrefix stringByAppendingString:[overrideKey substringFromIndex:kMCBROverridePrefix.length]];
 }
-
 + (NSString *)hookEnabledKeyForBrokerID:(NSString *)brokerID { return [kMCBRHookPrefix stringByAppendingString:(brokerID ?: @"")]; }
 + (NSString *)lastErrorKeyForBrokerID:(NSString *)brokerID { return [kMCBRErrorPrefix stringByAppendingString:(brokerID ?: @"")]; }
 + (NSString *)hitKeyForBrokerID:(NSString *)brokerID { return [kMCBRHitPrefix stringByAppendingString:(brokerID ?: @"")]; }
@@ -99,34 +85,25 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
     return [v isKindOfClass:NSNumber.class] ? v : nil;
 }
-
 + (void)setOverrideValue:(nullable NSNumber *)value forKey:(NSString *)key {
     if (!key.length) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    if (value) {
-        [ud setBool:value.boolValue forKey:key];
-        [self addIndexedKey:key indexKey:SCIMCBrokerIndexKey];
-    } else {
-        [ud removeObjectForKey:key];
-        [self removeIndexedKey:key indexKey:SCIMCBrokerIndexKey];
-    }
+    if (value) { [ud setBool:value.boolValue forKey:key]; [self addIndexedKey:key indexKey:SCIMCBrokerIndexKey]; }
+    else { [ud removeObjectForKey:key]; [self removeIndexedKey:key indexKey:SCIMCBrokerIndexKey]; }
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"key": key}];
 }
-
 + (nullable NSNumber *)observedValueForOverrideKey:(NSString *)overrideKey {
     NSString *key = [self observedKeyForOverrideKey:overrideKey];
     if (!key.length) return nil;
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:key];
     return [v isKindOfClass:NSNumber.class] ? v : nil;
 }
-
 + (void)noteObservedValue:(BOOL)value forOverrideKey:(NSString *)overrideKey {
     NSString *key = [self observedKeyForOverrideKey:overrideKey];
     if (!key.length) return;
     [[NSUserDefaults standardUserDefaults] setBool:value forKey:key];
     [self addIndexedKey:overrideKey indexKey:SCIMCBrokerObservedIndexKey];
 }
-
 + (NSArray<NSString *> *)activeOverrideKeys {
     NSMutableArray<NSString *> *out = [NSMutableArray array];
     for (id obj in [self arrayForKey:SCIMCBrokerIndexKey]) {
@@ -135,14 +112,12 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     }
     return out;
 }
-
 + (NSArray<NSString *> *)activeOverrideKeysForBrokerID:(NSString *)brokerID {
     NSMutableArray<NSString *> *out = [NSMutableArray array];
     NSString *prefix = [NSString stringWithFormat:@"%@%@:", kMCBROverridePrefix, brokerID ?: @""];
     for (NSString *key in [self activeOverrideKeys]) if ([key hasPrefix:prefix]) [out addObject:key];
     return out;
 }
-
 + (NSArray<NSString *> *)observedOverrideKeys {
     NSMutableOrderedSet<NSString *> *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:SCIMCBrokerObservedIndexKey]];
     NSDictionary *all = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
@@ -153,7 +128,6 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     }
     return set.array;
 }
-
 + (NSArray<NSString *> *)observedOverrideKeysForBrokerID:(NSString *)brokerID {
     NSMutableOrderedSet<NSString *> *set = [NSMutableOrderedSet orderedSet];
     NSString *prefix = [NSString stringWithFormat:@"%@%@:", kMCBROverridePrefix, brokerID ?: @""];
@@ -161,18 +135,15 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     for (NSString *key in [self activeOverrideKeysForBrokerID:brokerID]) [set addObject:key];
     return set.array;
 }
-
 + (NSArray<NSString *> *)enabledHookBrokerIDs {
     NSMutableArray<NSString *> *out = [NSMutableArray array];
     for (id obj in [self arrayForKey:SCIMCBrokerHookIndexKey]) if ([obj isKindOfClass:NSString.class]) [out addObject:obj];
     return out;
 }
-
 + (BOOL)isBrokerHookEnabledForID:(NSString *)brokerID {
     if (!brokerID.length) return NO;
     return [[NSUserDefaults standardUserDefaults] boolForKey:[self hookEnabledKeyForBrokerID:brokerID]] || [[self enabledHookBrokerIDs] containsObject:brokerID];
 }
-
 + (void)setBrokerHookEnabled:(BOOL)enabled brokerID:(NSString *)brokerID {
     if (!brokerID.length) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
@@ -181,27 +152,18 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     else [self removeIndexedKey:brokerID indexKey:SCIMCBrokerHookIndexKey];
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIMCBrokerStoreDidChangeNotification object:nil userInfo:@{@"brokerID": brokerID}];
 }
-
-+ (BOOL)hasAnyActiveOverridesOrHooks {
-    return [self activeOverrideKeys].count > 0 || [self enabledHookBrokerIDs].count > 0;
-}
-
-+ (BOOL)shouldInstallBrokerID:(NSString *)brokerID {
-    return [self isBrokerHookEnabledForID:brokerID] || [self activeOverrideKeysForBrokerID:brokerID].count > 0;
-}
-
++ (BOOL)hasAnyActiveOverridesOrHooks { return [self activeOverrideKeys].count > 0 || [self enabledHookBrokerIDs].count > 0; }
++ (BOOL)shouldInstallBrokerID:(NSString *)brokerID { return [self isBrokerHookEnabledForID:brokerID] || [self activeOverrideKeysForBrokerID:brokerID].count > 0; }
 + (void)noteLastError:(nullable NSString *)error brokerID:(NSString *)brokerID {
     if (!brokerID.length) return;
     NSString *key = [self lastErrorKeyForBrokerID:brokerID];
     if (error.length) [[NSUserDefaults standardUserDefaults] setObject:error forKey:key];
     else [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
 }
-
 + (nullable NSString *)lastErrorForBrokerID:(NSString *)brokerID {
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:[self lastErrorKeyForBrokerID:brokerID]];
     return [v isKindOfClass:NSString.class] ? v : nil;
 }
-
 + (void)noteHitForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced {
     if (!brokerID.length) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
@@ -213,7 +175,6 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     }
     (void)value;
 }
-
 + (NSUInteger)hitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self hitKeyForBrokerID:brokerID]]; }
 + (NSUInteger)forcedHitCountForBrokerID:(NSString *)brokerID { return (NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:[self forcedHitKeyForBrokerID:brokerID]]; }
 
@@ -224,38 +185,36 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     if (observed) return observed.boolValue ? SCIMCBrokerBoolStateOn : SCIMCBrokerBoolStateOff;
     return SCIMCBrokerBoolStateSystem;
 }
-
 + (NSString *)stateLabelForOverrideKey:(NSString *)overrideKey {
     SCIMCBrokerBoolState s = [self effectiveStateForOverrideKey:overrideKey];
     if (s == SCIMCBrokerBoolStateOn) return @"ON";
     if (s == SCIMCBrokerBoolStateOff) return @"OFF";
     return @"Unknown";
 }
-
 + (NSString *)systemLabelForOverrideKey:(NSString *)overrideKey {
     NSNumber *observed = [self observedValueForOverrideKey:overrideKey];
     if (!observed) return @"Unknown";
     return observed.boolValue ? @"ON" : @"OFF";
 }
-
 + (NSString *)overrideLabelForOverrideKey:(NSString *)overrideKey {
     NSNumber *forced = [self overrideValueForKey:overrideKey];
     if (!forced) return @"System";
     return forced.boolValue ? @"Forced ON" : @"Forced OFF";
 }
 
-
 + (NSDictionary *)resolvedMetadataForOverrideKey:(NSString *)overrideKey {
     NSString *bid = nil;
     uint64_t value = 0;
     if (![self parseOverrideKey:overrideKey brokerID:&bid value:&value]) return @{};
-    SCIDexKitResolvedName *resolved = [SCIDexKitNameResolver resolveBrokerID:(bid ?: @"") value:value];
+
+    SCIDexKitResolvedName *resolved = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
     NSDictionary *base = [resolved dictionaryRepresentation] ?: @{};
+
     NSString *name = [base[@"name"] isKindOfClass:NSString.class] ? base[@"name"] : @"";
     NSString *title = [base[@"title"] isKindOfClass:NSString.class] ? base[@"title"] : @"";
     NSString *detail = [base[@"detail"] isKindOfClass:NSString.class] ? base[@"detail"] : @"";
     NSString *source = [base[@"source"] isKindOfClass:NSString.class] ? base[@"source"] : @"";
-    NSString *normalized = [base[@"normalizedKey"] isKindOfClass:NSString.class] ? base[@"normalizedKey"] : [self hexForValue:[SCIDexKitNameResolver normalizedSpecifierValue:value]];
+    NSString *normalized = [base[@"normalizedKey"] isKindOfClass:NSString.class] ? base[@"normalizedKey"] : [SCIDexKitNameResolver hexForValue:[SCIDexKitNameResolver normalizedSpecifierValue:value]];
     NSString *family = [base[@"family"] isKindOfClass:NSString.class] ? base[@"family"] : @"";
     NSString *param = [base[@"param"] isKindOfClass:NSString.class] ? base[@"param"] : @"";
     NSString *tag = [base[@"tag"] isKindOfClass:NSString.class] ? base[@"tag"] : @"";
@@ -263,16 +222,22 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     NSString *callerSymbol = [base[@"callerSymbol"] isKindOfClass:NSString.class] ? base[@"callerSymbol"] : @"";
     NSString *callerAddress = [base[@"callerAddress"] isKindOfClass:NSString.class] ? base[@"callerAddress"] : @"";
     BOOL runtimeObserved = [base[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [base[@"runtimeObserved"] boolValue] : NO;
-    BOOL resolvedExactish = name.length > 0 && ![source isEqualToString:@"decoded-id"] && ![source isEqualToString:@"runtime-token"];
+    BOOL exactName = name.length > 0 && [SCIDexKitNameResolver sourceRepresentsExactName:source];
+
+    if (!title.length) title = exactName ? name : [SCIDexKitNameResolver hexForValue:[SCIDexKitNameResolver normalizedSpecifierValue:value]];
+    if (!source.length) source = @"decoded-id";
 
     NSMutableDictionary *out = [NSMutableDictionary dictionaryWithDictionary:base];
-    out[@"resolvedName"] = name ?: @"";
-    out[@"title"] = title.length ? title : [NSString stringWithFormat:@"0x%@", [self hexForValue:value]];
+    out[@"name"] = name ?: @"";
+    out[@"resolvedName"] = exactName ? name : @"";
+    out[@"title"] = title ?: @"";
     out[@"resolvedDetail"] = detail ?: @"";
+    out[@"detail"] = detail ?: @"";
     out[@"source"] = source ?: @"";
     out[@"runtimeObserved"] = @(runtimeObserved);
-    out[@"resolved"] = @(resolvedExactish);
+    out[@"resolved"] = @(exactName);
     out[@"rawValue"] = [self hexForValue:value];
+    out[@"rawValuePrefixed"] = [SCIDexKitNameResolver hexForValue:value];
     out[@"normalizedValue"] = normalized ?: @"";
     out[@"family"] = family ?: @"";
     out[@"param"] = param ?: @"";
@@ -281,6 +246,7 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     out[@"callerSymbol"] = callerSymbol ?: @"";
     out[@"callerAddress"] = callerAddress ?: @"";
     out[@"brokerID"] = bid ?: @"";
+    out[@"identityCandidates"] = [SCIDexKitNameResolver identityCandidatesForBrokerID:bid value:value] ?: @[];
     return out;
 }
 
@@ -309,13 +275,9 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     }
     return d;
 }
-
-+ (void)resetAllBrokerOverrides {
-    for (NSString *key in [self activeOverrideKeys]) [self setOverrideValue:nil forKey:key];
-}
++ (void)resetAllBrokerOverrides { for (NSString *key in [self activeOverrideKeys]) [self setOverrideValue:nil forKey:key]; }
 
 #pragma mark - Compatibility broker-wide API
-
 + (NSString *)overrideKeyForBrokerID:(NSString *)brokerID { return [self overrideKeyForBrokerID:brokerID value:0]; }
 + (NSString *)observedKeyForBrokerID:(NSString *)brokerID { return [self observedKeyForOverrideKey:[self overrideKeyForBrokerID:brokerID value:0]]; }
 + (nullable NSNumber *)overrideValueForBrokerID:(NSString *)brokerID { return [self overrideValueForKey:[self overrideKeyForBrokerID:brokerID value:0]]; }
@@ -335,5 +297,4 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     return set.array;
 }
 + (void)noteHitForBrokerID:(NSString *)brokerID forced:(BOOL)forced { [self noteHitForBrokerID:brokerID value:0 forced:forced]; }
-
 @end
