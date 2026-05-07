@@ -21,6 +21,9 @@ static MCBRGeneric8Fn orig_meta = NULL;
 static MCBRGeneric8Fn orig_metanx = NULL;
 static MCBRGeneric8Fn orig_msgc = NULL;
 
+static NSString * const kMCBRRuntimeEntryPrefix = @"dexkit.runtime.entry:";
+static NSString * const kMCBRRuntimeIndexKey = @"dexkit.runtime.entry.idx";
+
 static __thread int gMCBRReentryDepth = 0;
 static NSMutableDictionary<NSString *, NSString *> *gMCBRErrors;
 static NSMutableSet<NSString *> *gMCBRInstalled;
@@ -46,6 +49,14 @@ static NSString *MCBRFishhookName(NSString *symbol) {
 
 static NSString *MCBRHex64(uint64_t value) {
     return [NSString stringWithFormat:@"%016llx", (unsigned long long)value];
+}
+
+static NSString *MCBRHex64Prefixed(uint64_t value) {
+    return [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
+}
+
+static NSString *MCBRAddressHex(uint64_t value) {
+    return value ? [NSString stringWithFormat:@"0x%llx", (unsigned long long)value] : @"";
 }
 
 static void *MCBRDlsymFlexible(NSString *symbol) {
@@ -91,6 +102,80 @@ static BOOL MCBRShouldProcess(SCIMobileConfigBrokerDescriptor *d) {
     return NO;
 }
 
+static NSDictionary *MCBRMergeRuntimeEntry(NSDictionary *existing, NSDictionary *incoming) {
+    if (![existing isKindOfClass:NSDictionary.class] || existing.count == 0) return incoming;
+    NSMutableDictionary *merged = [existing mutableCopy];
+    for (NSString *key in @[@"rawHex", @"rawHexNoPrefix", @"normalizedHex", @"normalizedHexNoPrefix", @"className", @"selector", @"source", @"brokerID", @"defaultValue", @"originalValue", @"finalValue", @"runtimeObserved"]) {
+        id value = incoming[key];
+        if (value) merged[key] = value;
+    }
+    for (NSString *key in @[@"callerImage", @"callerSymbol", @"callerAddress"]) {
+        NSString *oldValue = [merged[key] isKindOfClass:NSString.class] ? merged[key] : @"";
+        NSString *newValue = [incoming[key] isKindOfClass:NSString.class] ? incoming[key] : @"";
+        if (!oldValue.length && newValue.length) merged[key] = newValue;
+    }
+    return [merged copy];
+}
+
+static void MCBRStoreRuntimeEntry(SCIMobileConfigBrokerDescriptor *d,
+                                  uint64_t keyValue,
+                                  BOOL defaultValue,
+                                  BOOL originalValue,
+                                  BOOL finalValue,
+                                  NSString *className,
+                                  NSString *selectorName,
+                                  NSString *source,
+                                  NSString *callerImage,
+                                  NSString *callerSymbol,
+                                  uint64_t callerAddress) {
+    if (!d.brokerID.length) return;
+
+    uint64_t normalized = [SCIDexKitNameResolver normalizedSpecifierValue:keyValue];
+    NSDictionary *entry = @{
+        @"rawHex": MCBRHex64Prefixed(keyValue),
+        @"rawHexNoPrefix": MCBRHex64(keyValue),
+        @"normalizedHex": MCBRHex64Prefixed(normalized),
+        @"normalizedHexNoPrefix": MCBRHex64(normalized),
+        @"className": className ?: @"",
+        @"selector": selectorName ?: @"",
+        @"source": source ?: @"c-broker",
+        @"brokerID": d.brokerID ?: @"",
+        @"defaultValue": @(defaultValue),
+        @"originalValue": @(originalValue),
+        @"finalValue": @(finalValue),
+        @"callerImage": callerImage ?: @"",
+        @"callerSymbol": callerSymbol ?: @"",
+        @"callerAddress": MCBRAddressHex(callerAddress),
+        @"runtimeObserved": @YES
+    };
+
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    NSMutableOrderedSet<NSString *> *index = [NSMutableOrderedSet orderedSetWithArray:([ud arrayForKey:kMCBRRuntimeIndexKey] ?: @[])];
+    BOOL changed = NO;
+
+    for (NSString *identity in [SCIDexKitNameResolver identityCandidatesForBrokerID:d.brokerID value:keyValue]) {
+        NSString *key = [kMCBRRuntimeEntryPrefix stringByAppendingString:identity];
+        NSDictionary *existing = [ud dictionaryForKey:key];
+        NSDictionary *merged = MCBRMergeRuntimeEntry(existing, entry);
+        if (![existing isEqualToDictionary:merged]) {
+            [ud setObject:merged forKey:key];
+            changed = YES;
+        }
+        if (![index containsObject:identity]) {
+            [index addObject:identity];
+            changed = YES;
+        }
+    }
+
+    if (changed) {
+        [ud setObject:index.array forKey:kMCBRRuntimeIndexKey];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverRuntimeFeedDidUpdateNotification object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverDidUpdateNotification object:nil];
+        });
+    }
+}
+
 static void MCBRNoteResolver(SCIMobileConfigBrokerDescriptor *d,
                              uint64_t keyValue,
                              BOOL defaultValue,
@@ -121,6 +206,9 @@ static void MCBRNoteResolver(SCIMobileConfigBrokerDescriptor *d,
     NSString *className = [NSString stringWithFormat:@"SCIMCBrokerRouter:%@", d.brokerID ?: @"?"];
     NSString *selectorName = d.symbol.length ? d.symbol : (d.brokerID ?: @"?");
     NSString *source = [NSString stringWithFormat:@"c-broker:%@", d.brokerID ?: @"?"];
+    uint64_t callerAddress = (uint64_t)(uintptr_t)caller;
+
+    MCBRStoreRuntimeEntry(d, keyValue, defaultValue, originalValue, finalValue, className, selectorName, source, callerImage, callerSymbol, callerAddress);
 
     [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:className
                                                         selector:selectorName
@@ -131,7 +219,7 @@ static void MCBRNoteResolver(SCIMobileConfigBrokerDescriptor *d,
                                                           source:source
                                                      callerImage:callerImage
                                                     callerSymbol:callerSymbol
-                                                   callerAddress:(uint64_t)(uintptr_t)caller];
+                                                   callerAddress:callerAddress];
 }
 
 static BOOL MCBRForcedOrOriginal(SCIMobileConfigBrokerDescriptor *d, uint64_t keyValue, BOOL original, BOOL *wasForced) {
