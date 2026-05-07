@@ -328,6 +328,10 @@ static void SCIInstallAllObjCObserverHooks(void) {
     NSLog(@"[RyukGram][MCObjCObserver] installed explicit pass-through ObjC MobileConfig observer feeding SCIDexKitNameResolver");
 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 __attribute__((visibility("default"))) void SCIInstallFocusedObjCGetterObserver(void) {
     SCIInstallAllObjCObserverHooks();
 }
@@ -335,6 +339,10 @@ __attribute__((visibility("default"))) void SCIInstallFocusedObjCGetterObserver(
 __attribute__((visibility("default"))) void SCIInstallObjCMobileConfigGetterObserver(void) {
     SCIInstallAllObjCObserverHooks();
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 %ctor {
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
