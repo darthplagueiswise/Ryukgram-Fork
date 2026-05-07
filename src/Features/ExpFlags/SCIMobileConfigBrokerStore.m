@@ -13,6 +13,9 @@ static NSString * const kMCBRErrorPrefix = @"mcer:";
 static NSString * const kMCBRHitPrefix = @"mcbr.hit:";
 static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
 
+static NSString *SCIMCBrokerString(id obj) { return [obj isKindOfClass:NSString.class] ? (NSString *)obj : @""; }
+static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(boolValue)] ? [obj boolValue] : NO; }
+
 @implementation SCIMobileConfigBrokerStore
 
 + (void)registerDefaultsAndMigrate {
@@ -133,7 +136,24 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     NSString *prefix = [NSString stringWithFormat:@"%@%@:", kMCBROverridePrefix, brokerID ?: @""];
     for (NSString *key in [self observedOverrideKeys]) if ([key hasPrefix:prefix]) [set addObject:key];
     for (NSString *key in [self activeOverrideKeysForBrokerID:brokerID]) [set addObject:key];
-    return set.array;
+
+    NSArray<NSString *> *keys = set.array;
+    return [keys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSDictionary *ma = [self resolvedMetadataForOverrideKey:a];
+        NSDictionary *mb = [self resolvedMetadataForOverrideKey:b];
+        BOOL aRuntime = SCIMCBrokerBool(ma[@"runtimeObserved"]);
+        BOOL bRuntime = SCIMCBrokerBool(mb[@"runtimeObserved"]);
+        if (aRuntime != bRuntime) return aRuntime ? NSOrderedAscending : NSOrderedDescending;
+        BOOL aResolved = SCIMCBrokerBool(ma[@"resolved"]);
+        BOOL bResolved = SCIMCBrokerBool(mb[@"resolved"]);
+        if (aResolved != bResolved) return aResolved ? NSOrderedAscending : NSOrderedDescending;
+        BOOL aObserved = [self observedValueForOverrideKey:a] != nil;
+        BOOL bObserved = [self observedValueForOverrideKey:b] != nil;
+        if (aObserved != bObserved) return aObserved ? NSOrderedAscending : NSOrderedDescending;
+        NSString *ta = SCIMCBrokerString(ma[@"title"]);
+        NSString *tb = SCIMCBrokerString(mb[@"title"]);
+        return [ta compare:tb options:NSCaseInsensitiveSearch];
+    }];
 }
 + (NSArray<NSString *> *)enabledHookBrokerIDs {
     NSMutableArray<NSString *> *out = [NSMutableArray array];
@@ -210,21 +230,25 @@ static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
     SCIDexKitResolvedName *resolved = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
     NSDictionary *base = [resolved dictionaryRepresentation] ?: @{};
 
-    NSString *name = [base[@"name"] isKindOfClass:NSString.class] ? base[@"name"] : @"";
-    NSString *title = [base[@"title"] isKindOfClass:NSString.class] ? base[@"title"] : @"";
-    NSString *detail = [base[@"detail"] isKindOfClass:NSString.class] ? base[@"detail"] : @"";
-    NSString *source = [base[@"source"] isKindOfClass:NSString.class] ? base[@"source"] : @"";
-    NSString *normalized = [base[@"normalizedKey"] isKindOfClass:NSString.class] ? base[@"normalizedKey"] : [SCIDexKitNameResolver hexForValue:[SCIDexKitNameResolver normalizedSpecifierValue:value]];
-    NSString *family = [base[@"family"] isKindOfClass:NSString.class] ? base[@"family"] : @"";
-    NSString *param = [base[@"param"] isKindOfClass:NSString.class] ? base[@"param"] : @"";
-    NSString *tag = [base[@"tag"] isKindOfClass:NSString.class] ? base[@"tag"] : @"";
-    NSString *callerImage = [base[@"callerImage"] isKindOfClass:NSString.class] ? base[@"callerImage"] : @"";
-    NSString *callerSymbol = [base[@"callerSymbol"] isKindOfClass:NSString.class] ? base[@"callerSymbol"] : @"";
-    NSString *callerAddress = [base[@"callerAddress"] isKindOfClass:NSString.class] ? base[@"callerAddress"] : @"";
-    BOOL runtimeObserved = [base[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [base[@"runtimeObserved"] boolValue] : NO;
+    NSString *name = SCIMCBrokerString(base[@"name"]);
+    NSString *title = SCIMCBrokerString(base[@"title"]);
+    NSString *detail = SCIMCBrokerString(base[@"detail"]);
+    NSString *source = SCIMCBrokerString(base[@"source"]);
+    NSString *normalized = SCIMCBrokerString(base[@"normalizedKey"]);
+    NSString *family = SCIMCBrokerString(base[@"family"]);
+    NSString *param = SCIMCBrokerString(base[@"param"]);
+    NSString *tag = SCIMCBrokerString(base[@"tag"]);
+    NSString *callerImage = SCIMCBrokerString(base[@"callerImage"]);
+    NSString *callerSymbol = SCIMCBrokerString(base[@"callerSymbol"]);
+    NSString *callerAddress = SCIMCBrokerString(base[@"callerAddress"]);
+
+    NSNumber *observedValue = [self observedValueForOverrideKey:overrideKey];
+    BOOL runtimeObserved = SCIMCBrokerBool(base[@"runtimeObserved"]) || observedValue != nil || [SCIDexKitNameResolver sourceRepresentsRuntimeObservation:source];
     BOOL exactName = name.length > 0 && [SCIDexKitNameResolver sourceRepresentsExactName:source];
 
-    if (!title.length) title = exactName ? name : [SCIDexKitNameResolver hexForValue:[SCIDexKitNameResolver normalizedSpecifierValue:value]];
+    uint64_t normalizedValue = [SCIDexKitNameResolver normalizedSpecifierValue:value];
+    if (!normalized.length) normalized = [SCIDexKitNameResolver hexForValue:normalizedValue];
+    if (!title.length) title = exactName ? name : [SCIDexKitNameResolver hexForValue:normalizedValue];
     if (!source.length) source = @"decoded-id";
 
     NSMutableDictionary *out = [NSMutableDictionary dictionaryWithDictionary:base];
