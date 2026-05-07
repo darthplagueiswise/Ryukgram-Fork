@@ -2,6 +2,7 @@
 #import "../Features/ExpFlags/SCIMobileConfigBrokerDescriptor.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerStore.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerRouter.h"
+#import "../Features/ExpFlags/SCIDexKitNameResolver.h"
 
 @interface SCIMCBrokerCell : UITableViewCell
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -65,7 +66,15 @@
         [[UIBarButtonItem alloc] initWithTitle:@"Install" style:UIBarButtonItemStylePlain target:self action:@selector(installBroker)],
         [[UIBarButtonItem alloc] initWithTitle:@"Copy" style:UIBarButtonItemStylePlain target:self action:@selector(copySnapshot)]
     ];
+    
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadKeys) name:@"SCIDexKitNameResolverRuntimeFeedDidUpdateNotification" object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadKeys) name:@"SCIDexKitNameResolverDidUpdateNotification" object:nil];
+    
     [self reloadKeys];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 - (void)reloadKeys {
     self.keys = [SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:self.broker.brokerID];
@@ -122,6 +131,12 @@
     NSString *detail = [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @"";
     NSString *callerSymbol = [resolved[@"callerSymbol"] isKindOfClass:NSString.class] ? resolved[@"callerSymbol"] : @"";
     BOOL runtimeObserved = [resolved[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [resolved[@"runtimeObserved"] boolValue] : NO;
+    if (!title.length || [title hasPrefix:@"0x"]) {
+        SCIDexKitResolvedName *r = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
+        if (r.title.length && r.confidence >= SCIDexKitNameConfidenceMedium) {
+            title = r.title;
+        }
+    }
     if (!title.length) title = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
     cell.titleLabel.text = title;
     NSMutableArray<NSString *> *detailParts = [NSMutableArray array];

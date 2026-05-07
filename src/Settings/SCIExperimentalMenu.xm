@@ -2,6 +2,10 @@
 #import "SCIExpFlagsViewController.h"
 #import "SCIResolverReportViewController.h"
 #import "SCIDogfoodingMainLauncher.h"
+#import "SCIDexKitViewController.h"
+#import "SCIExperimentRuntimeBrowserViewController.h"
+#import "SCIMobileConfigBrokerViewController.h"
+#import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -225,6 +229,22 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Full resolver report. Read-only scan; no MC hook is installed from here."
                                                icon:[SCISymbol symbolWithName:@"magnifyingglass"]
                                      viewController:[[SCIResolverReportViewController alloc] initWithKind:SCIResolverReportKindFull title:@"Full Resolver Report"]],
+                [SCISetting navigationCellWithTitle:@"DexKit 2.0"
+                                           subtitle:@"DexKit-based MobileConfig name resolution and discovery."
+                                               icon:[SCISymbol symbolWithName:@"cpu"]
+                                     viewController:[SCIDexKitViewController new]],
+                [SCISetting navigationCellWithTitle:@"Runtime Browser"
+                                           subtitle:@"Browse and search MobileConfig flags at runtime."
+                                               icon:[SCISymbol symbolWithName:@"externaldrive.connected.to.line.below"]
+                                     viewController:[SCIExperimentRuntimeBrowserViewController new]],
+                [SCISetting navigationCellWithTitle:@"MC Broker v2"
+                                           subtitle:@"Centralized MobileConfig broker with name resolution."
+                                               icon:[SCISymbol symbolWithName:@"server.rack"]
+                                     viewController:[SCIMobileConfigBrokerViewController new]],
+                [SCISetting navigationCellWithTitle:@"Symbol Observer"
+                                           subtitle:@"Observe MobileConfig symbol access in real-time."
+                                               icon:[SCISymbol symbolWithName:@"eye"]
+                                     viewController:[SCIMobileConfigSymbolObserverViewController new]],
                 [SCISetting buttonCellWithTitle:@"Reset Developer Mode State"
                                        subtitle:@"Turns off identity aliases and all legacy MC hook toggles."
                                            icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]

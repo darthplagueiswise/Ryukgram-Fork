@@ -2,6 +2,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+extern NSString * const SCIDexKitNameResolverDidUpdateNotification;
+extern NSString * const SCIDexKitNameResolverRuntimeFeedDidUpdateNotification;
+
 typedef NS_ENUM(NSInteger, SCIDexKitNameConfidence) {
     SCIDexKitNameConfidenceNone = 0,
     SCIDexKitNameConfidenceLow = 1,

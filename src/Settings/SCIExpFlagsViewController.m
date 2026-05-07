@@ -6,6 +6,7 @@
 #import "../Utils.h"
 #import "SCIResolverScanner.h"
 #import "SCIResolverSpecifierEntry.h"
+#import "../Features/ExpFlags/SCIDexKitNameResolver.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -55,6 +56,9 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithTitle:@"Bulk" style:UIBarButtonItemStylePlain target:self action:@selector(presentBulkActions)];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"SCIDexKitNameResolverRuntimeFeedDidUpdateNotification" object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"SCIDexKitNameResolverDidUpdateNotification" object:nil];
 
     self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Internal (tap to override)", @"Overrides"]];
     self.seg.selectedSegmentIndex = SCIExpTabMeta;
@@ -130,6 +134,10 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self refresh]; }
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
 
 - (void)segChanged {
     self.tab = (SCIExpTab)self.seg.selectedSegmentIndex;
@@ -439,9 +447,16 @@ typedef NS_ENUM(NSInteger, SCIInternalUseCategory) {
         }
         case SCIExpTabMC: {
             SCIExpMCObservation *o = row;
-            cell.textLabel.text = [NSString stringWithFormat:@"%llu", o.paramID];
+            NSString *title = nil;
+            SCIDexKitResolvedName *r = [SCIDexKitNameResolver resolveBrokerID:nil value:o.paramID];
+            if (r.title.length && r.confidence >= SCIDexKitNameConfidenceMedium) {
+                title = r.title;
+            } else {
+                title = [NSString stringWithFormat:@"%llu", o.paramID];
+            }
+            cell.textLabel.text = title;
             cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · default=%@ · ×%lu", [self mcTypeName:o.type], o.lastDefault ?: @"?", (unsigned long)o.hitCount];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"ID: %llu · %@ · default=%@ · ×%lu", o.paramID, [self mcTypeName:o.type], o.lastDefault ?: @"?", (unsigned long)o.hitCount];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
         }
