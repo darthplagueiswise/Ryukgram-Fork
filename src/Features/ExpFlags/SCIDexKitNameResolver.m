@@ -19,6 +19,7 @@ static NSString *SCIDexKitHexNoPrefix(uint64_t value) { return [NSString stringW
 static NSString *SCIDexKitHex(uint64_t value) { return [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value]; }
 static NSString *SCIDexKitAddressHex(uint64_t value) { return value ? [NSString stringWithFormat:@"0x%llx", (unsigned long long)value] : @""; }
 static NSString *SCIDexKitString(id value) { return [value isKindOfClass:NSString.class] ? (NSString *)value : @""; }
+static BOOL SCIDexKitBool(id value) { return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : NO; }
 
 static BOOL SCIDexKitParseHexString(NSString *string, uint64_t *outValue) {
     if (![string isKindOfClass:NSString.class] || string.length == 0) return NO;
@@ -48,9 +49,10 @@ static void SCIDexKitAddUniqueValue(NSMutableArray<NSNumber *> *items, uint64_t 
 }
 
 static NSString *SCIDexKitInferBrokerID(NSString *className) {
+    if (![className isKindOfClass:NSString.class] || className.length == 0) return @"";
     if ([className containsString:@"Sessionless"]) return @"igsl";
-    if ([className hasPrefix:@"FBMobileConfig"]) return @"fb";
     if ([className hasPrefix:@"IGMobileConfig"]) return @"ig";
+    if ([className hasPrefix:@"FBMobileConfig"]) return @"fb";
     return @"";
 }
 
@@ -78,7 +80,7 @@ static NSString *SCIDexKitNameFromMappingObject(id candidate) {
     if ([candidate isKindOfClass:NSString.class] && [(NSString *)candidate length] > 0) return (NSString *)candidate;
     if ([candidate isKindOfClass:NSDictionary.class]) {
         NSDictionary *d = (NSDictionary *)candidate;
-        for (NSString *key in @[@"name", @"mobile_config_name", @"config_name", @"display_name", @"title", @"field_name", @"param_name", @"parameter_name"]) {
+        for (NSString *key in @[@"name", @"mobile_config_name", @"config_name", @"display_name", @"title", @"field_name", @"param_name", @"parameter_name", @"id_name"]) {
             id value = d[key];
             if ([value isKindOfClass:NSString.class] && [(NSString *)value length] > 0) return (NSString *)value;
         }
@@ -90,6 +92,7 @@ static NSString *SCIResolveMappedNameForSingleValue(uint64_t value) {
     NSArray<NSString *> *classNames = @[@"SCIMobileConfigMapping", @"SCIExpMobileConfigMapping"];
     NSArray<NSString *> *selectorNames = @[
         @"resolvedNameForParamID:",
+        @"resolvedNameForSpecifier:",
         @"nameForSpecifier:",
         @"nameForSpecifierValue:",
         @"mappedNameForSpecifier:",
@@ -152,18 +155,28 @@ static NSString *SCIDexKitAliasForIdentity(NSString *identity) {
     return [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
 }
 
+static NSString *SCIDexKitAliasSourceForIdentity(NSString *identity) {
+    if (!identity.length) return nil;
+    NSString *key = [kSCIDexKitAliasSourceRuntimePrefix stringByAppendingString:identity];
+    id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+    return [obj isKindOfClass:NSString.class] ? (NSString *)obj : nil;
+}
+
 static NSArray<NSNumber *> *SCIDexKitCandidateValuesForBrokerAndValue(NSString *brokerID, uint64_t value) {
     NSMutableArray<NSNumber *> *values = [NSMutableArray array];
     uint64_t normalized = [SCIDexKitNameResolver normalizedSpecifierValue:value];
     SCIDexKitAddUniqueValue(values, value);
     SCIDexKitAddUniqueValue(values, normalized);
 
-    for (NSString *identity in [SCIDexKitNameResolver identityCandidatesForBrokerID:brokerID value:value]) {
-        NSString *alias = SCIDexKitAliasForIdentity(identity);
-        uint64_t aliasValue = 0;
-        if (SCIDexKitParseHexString(alias, &aliasValue)) {
-            SCIDexKitAddUniqueValue(values, aliasValue);
-            SCIDexKitAddUniqueValue(values, [SCIDexKitNameResolver normalizedSpecifierValue:aliasValue]);
+    NSArray<NSNumber *> *seed = [values copy];
+    for (NSNumber *seedValue in seed) {
+        for (NSString *identity in [SCIDexKitNameResolver identityCandidatesForBrokerID:brokerID value:seedValue.unsignedLongLongValue]) {
+            NSString *alias = SCIDexKitAliasForIdentity(identity);
+            uint64_t aliasValue = 0;
+            if (SCIDexKitParseHexString(alias, &aliasValue)) {
+                SCIDexKitAddUniqueValue(values, aliasValue);
+                SCIDexKitAddUniqueValue(values, [SCIDexKitNameResolver normalizedSpecifierValue:aliasValue]);
+            }
         }
     }
     return values;
@@ -174,10 +187,10 @@ static NSString *SCIDexKitRuntimeTitleFromEntry(NSDictionary *entry, uint64_t no
     if (callerSymbol.length) return callerSymbol;
     NSString *className = SCIDexKitString(entry[@"className"]);
     NSString *selector = SCIDexKitString(entry[@"selector"]);
-    if (className.length || selector.length) return [NSString stringWithFormat:@"%@ %@", className ?: @"", selector ?: @""];
+    if (className.length || selector.length) return [NSString stringWithFormat:@"%@ %@", className.length ? className : @"?", selector.length ? selector : @"?"];
     NSString *callerImage = SCIDexKitString(entry[@"callerImage"]);
     NSString *callerAddress = SCIDexKitString(entry[@"callerAddress"]);
-    if (callerImage.length || callerAddress.length) return [NSString stringWithFormat:@"%@ %@", callerImage ?: @"", callerAddress ?: @""];
+    if (callerImage.length || callerAddress.length) return [NSString stringWithFormat:@"%@ %@", callerImage.length ? callerImage : @"?", callerAddress.length ? callerAddress : @"?"];
     return SCIDexKitHex(normalizedValue);
 }
 
@@ -197,6 +210,12 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
             def ? (def.boolValue ? @"YES" : @"NO") : @"?",
             orig ? (orig.boolValue ? @"YES" : @"NO") : @"?",
             fin ? (fin.boolValue ? @"YES" : @"NO") : @"?"];
+}
+
+static BOOL SCIDexKitLooksLikeRuntimePointerToken(NSString *brokerID, uint64_t value) {
+    if (![brokerID isKindOfClass:NSString.class]) return NO;
+    if (!([brokerID hasPrefix:@"eg"] || [brokerID hasPrefix:@"meta"] || [brokerID hasPrefix:@"mci"] || [brokerID hasPrefix:@"msgc"])) return NO;
+    return value >= 0x0000000100000000ULL && value <= 0x00000001ffffffffULL;
 }
 
 @implementation SCIDexKitResolvedName
@@ -260,6 +279,11 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
     return [source isEqualToString:@"manual"] || [source isEqualToString:@"mapping"] || [source isEqualToString:@"runtime-name"];
 }
 
++ (BOOL)sourceRepresentsRuntimeObservation:(NSString *)source {
+    if (![source isKindOfClass:NSString.class] || source.length == 0) return NO;
+    return [source isEqualToString:@"runtime-name"] || [source isEqualToString:@"runtime-callsite"] || [source isEqualToString:@"alias"];
+}
+
 + (nullable NSString *)manualNameForIdentity:(NSString *)identity {
     if (!identity.length) return nil;
     NSString *key = [kSCIDexKitNameManualPrefix stringByAppendingString:identity];
@@ -279,14 +303,16 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
 + (SCIDexKitResolvedName *)resolveBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value {
     uint64_t normalized = [self normalizedSpecifierValue:value];
     NSArray<NSNumber *> *candidateValues = SCIDexKitCandidateValuesForBrokerAndValue(brokerID, value);
+    NSDictionary *runtimeForOriginal = SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, value);
 
     SCIDexKitResolvedName *res = [[SCIDexKitResolvedName alloc] init];
     res.rawKey = SCIDexKitHex(value);
     res.normalizedKey = SCIDexKitHex(normalized);
-    res.family = [NSString stringWithFormat:@"0x%08llx", (unsigned long long)((normalized >> 32) & 0xffffffffULL)];
-    res.param = [NSString stringWithFormat:@"0x%08llx", (unsigned long long)(normalized & 0xffffffffULL)];
-    res.tag = [NSString stringWithFormat:@"0x%02llx", (unsigned long long)((value >> 56) & 0xffULL)];
-    res.pointerLike = (((value >> 56) & 0xffULL) != 0 && ((value >> 56) & 0xffULL) != 0x20);
+    res.family = [NSString stringWithFormat:@"%06llx", (unsigned long long)((normalized >> 32) & 0xffffffULL)];
+    res.param = [NSString stringWithFormat:@"%08llx", (unsigned long long)(normalized & 0xffffffffULL)];
+    res.tag = [NSString stringWithFormat:@"%02llx", (unsigned long long)((value >> 56) & 0xffULL)];
+    res.pointerLike = SCIDexKitLooksLikeRuntimePointerToken(brokerID ?: @"", value);
+    res.runtimeObserved = (runtimeForOriginal != nil);
 
     for (NSNumber *n in candidateValues) {
         for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:n.unsignedLongLongValue]) {
@@ -294,11 +320,11 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
             if (manual.length) {
                 res.title = manual;
                 res.name = manual;
-                res.detail = [NSString stringWithFormat:@"manual identity=%@", identity];
+                res.detail = [NSString stringWithFormat:@"manual identity=%@ · raw=%@ · normalized=%@", identity, res.rawKey, res.normalizedKey];
                 res.source = @"manual";
                 res.confidence = SCIDexKitNameConfidenceExact;
                 res.manual = YES;
-                res.runtimeObserved = (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, value) != nil);
+                res.runtimeObserved = res.runtimeObserved || (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, n.unsignedLongLongValue) != nil);
                 return res;
             }
         }
@@ -309,10 +335,10 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
         if (mapped.length) {
             res.title = mapped;
             res.name = mapped;
-            res.detail = [NSString stringWithFormat:@"mapping value=%@", SCIDexKitHex(n.unsignedLongLongValue)];
+            res.detail = [NSString stringWithFormat:@"mapping value=%@ · raw=%@ · normalized=%@", SCIDexKitHex(n.unsignedLongLongValue), res.rawKey, res.normalizedKey];
             res.source = @"mapping";
             res.confidence = SCIDexKitNameConfidenceExact;
-            res.runtimeObserved = (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, value) != nil);
+            res.runtimeObserved = res.runtimeObserved || (SCIDexKitRuntimeEntryForBrokerAndValue(brokerID, n.unsignedLongLongValue) != nil);
             return res;
         }
     }
@@ -324,7 +350,7 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
             if (runtimeName.length) {
                 res.title = runtimeName;
                 res.name = runtimeName;
-                res.detail = [NSString stringWithFormat:@"runtime-name identity=%@", identity];
+                res.detail = [NSString stringWithFormat:@"runtime-name identity=%@ · raw=%@ · normalized=%@", identity, res.rawKey, res.normalizedKey];
                 res.source = @"runtime-name";
                 res.confidence = SCIDexKitNameConfidenceHigh;
                 res.runtimeObserved = YES;
@@ -357,18 +383,41 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
         return res;
     }
 
-    BOOL hasAlias = NO;
+    NSString *aliasValue = @"";
+    NSString *aliasIdentity = @"";
+    NSString *aliasSource = @"";
     for (NSString *identity in [self identityCandidatesForBrokerID:brokerID value:value]) {
-        if (SCIDexKitAliasForIdentity(identity).length) {
-            hasAlias = YES;
+        aliasValue = SCIDexKitAliasForIdentity(identity) ?: @"";
+        if (aliasValue.length) {
+            aliasIdentity = identity;
+            aliasSource = SCIDexKitAliasSourceForIdentity(identity) ?: @"alias";
             break;
         }
     }
 
+    if (aliasValue.length) {
+        res.title = SCIDexKitHex(normalized);
+        res.name = @"";
+        res.detail = [NSString stringWithFormat:@"alias identity=%@ · translated=%@ · aliasSource=%@ · raw=%@ · normalized=%@ · family=0x%@ · param=0x%@ · tag=0x%@", aliasIdentity, aliasValue, aliasSource, res.rawKey, res.normalizedKey, res.family ?: @"", res.param ?: @"", res.tag ?: @""];
+        res.source = @"alias";
+        res.confidence = SCIDexKitNameConfidenceLow;
+        res.runtimeObserved = YES;
+        return res;
+    }
+
+    if (res.pointerLike) {
+        res.title = [NSString stringWithFormat:@"runtime gate token %@", SCIDexKitHex(value)];
+        res.name = @"";
+        res.detail = @"EasyGating/MCI/META value looks like a runtime pointer/token, not a stable MobileConfig specifier. Use caller/callsite or a manual label after correlation.";
+        res.source = @"runtime-token";
+        res.confidence = SCIDexKitNameConfidenceNone;
+        return res;
+    }
+
     res.title = SCIDexKitHex(normalized);
     res.name = @"";
-    res.detail = [NSString stringWithFormat:@"decoded family=%@ · param=%@ · tag=%@", res.family ?: @"", res.param ?: @"", res.tag ?: @""];
-    res.source = hasAlias ? @"alias" : @"decoded-id";
+    res.detail = [NSString stringWithFormat:@"decoded family=0x%@ · param=0x%@ · tag=0x%@ · normalized=%@", res.family ?: @"", res.param ?: @"", res.tag ?: @"", res.normalizedKey ?: @""];
+    res.source = @"decoded-id";
     res.confidence = SCIDexKitNameConfidenceNone;
     return res;
 }
@@ -425,7 +474,9 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
 
     NSDictionary *entry = @{
         @"rawHex": SCIDexKitHex(specifier),
+        @"rawHexNoPrefix": SCIDexKitHexNoPrefix(specifier),
         @"normalizedHex": SCIDexKitHex(normalized),
+        @"normalizedHexNoPrefix": SCIDexKitHexNoPrefix(normalized),
         @"className": safeClass,
         @"selector": safeSelector,
         @"source": safeSource,
@@ -467,10 +518,8 @@ static NSString *SCIDexKitRuntimeDetailFromEntry(NSDictionary *entry) {
     NSMutableDictionary<NSString *, NSString *> *pairs = [NSMutableDictionary dictionary];
     pairs[SCIDexKitHex(rawSpecifier)] = SCIDexKitHex(translatedSpecifier);
     pairs[SCIDexKitHexNoPrefix(rawSpecifier)] = SCIDexKitHex(translatedSpecifier);
-    if (rawNorm != rawSpecifier && rawNorm != translatedNorm) {
-        pairs[SCIDexKitHex(rawNorm)] = SCIDexKitHex(translatedNorm);
-        pairs[SCIDexKitHexNoPrefix(rawNorm)] = SCIDexKitHex(translatedNorm);
-    }
+    pairs[SCIDexKitHex(rawNorm)] = SCIDexKitHex(translatedNorm);
+    pairs[SCIDexKitHexNoPrefix(rawNorm)] = SCIDexKitHex(translatedNorm);
 
     BOOL changed = NO;
     NSString *safeSource = source.length ? source : @"alias";
