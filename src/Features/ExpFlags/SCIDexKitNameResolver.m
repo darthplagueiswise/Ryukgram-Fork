@@ -66,9 +66,9 @@ static NSString * const kSCIDexKitAliasRuntimePrefix = @"dexkit.alias.runtime:";
     });
 }
 
-+ (SCIDexKitResolvedName *)resolveBrokerID:(NSString *)brokerID value:(uint64_t)value {
++ (SCIDexKitResolvedName *)resolveBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value {
     SCIDexKitResolvedName *res = [[SCIDexKitResolvedName alloc] init];
-    res.rawKey = brokerID;
+    res.rawKey = brokerID ?: @"";
     res.normalizedKey = [self hexForValue:value];
     
     // 1. Manual
@@ -106,7 +106,7 @@ static NSString * const kSCIDexKitAliasRuntimePrefix = @"dexkit.alias.runtime:";
     return res;
 }
 
-+ (NSDictionary *)resolvedDictionaryForBrokerID:(NSString *)brokerID value:(uint64_t)value {
++ (NSDictionary *)resolvedDictionaryForBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value {
     return [[self resolveBrokerID:brokerID value:value] dictionaryRepresentation];
 }
 
