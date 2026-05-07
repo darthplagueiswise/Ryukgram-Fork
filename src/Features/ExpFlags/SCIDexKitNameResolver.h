@@ -38,8 +38,8 @@ typedef NS_ENUM(NSInteger, SCIDexKitNameConfidence) {
 + (NSString *)hexForValue:(uint64_t)value;
 + (nullable NSString *)manualNameForIdentity:(NSString *)identity;
 + (void)setManualName:(nullable NSString *)name forIdentity:(NSString *)identity;
-+ (SCIDexKitResolvedName *)resolveBrokerID:(nullable NSString *)brokerID value:(uint64_t)value;
-+ (NSDictionary *)resolvedDictionaryForBrokerID:(nullable NSString *)brokerID value:(uint64_t)value;
++ (SCIDexKitResolvedName *)resolveBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value;
++ (NSDictionary *)resolvedDictionaryForBrokerID:(NSString * _Nullable)brokerID value:(uint64_t)value;
 + (void)noteMobileConfigBoolReadWithClassName:(NSString *)className
                                      selector:(NSString *)selectorName
                                     specifier:(uint64_t)specifier
