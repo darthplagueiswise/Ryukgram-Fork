@@ -3,6 +3,7 @@
 #import "SCIExpMobileConfigMapping.h"
 #import "SCIExpFlags.h"
 #import <objc/message.h>
+#import <objc/runtime.h>
 
 NSString * const SCIDexKitNameResolverDidUpdateNotification = @"SCIDexKitNameResolverDidUpdateNotification";
 NSString * const SCIDexKitNameResolverRuntimeFeedDidUpdateNotification = @"SCIDexKitNameResolverRuntimeFeedDidUpdateNotification";
@@ -10,6 +11,62 @@ NSString * const SCIDexKitNameResolverRuntimeFeedDidUpdateNotification = @"SCIDe
 static NSString * const kSCIDexKitNameManualPrefix = @"dexkit.name.manual:";
 static NSString * const kSCIDexKitNameRuntimePrefix = @"dexkit.name.runtime:";
 static NSString * const kSCIDexKitAliasRuntimePrefix = @"dexkit.alias.runtime:";
+
+static BOOL SCIDexKitMappingMethodLooksLikeObjectForU64(Class cls, SEL sel) {
+    Method m = class_getClassMethod(cls, sel);
+    if (!m) return NO;
+    if (method_getNumberOfArguments(m) != 3) return NO; // self, _cmd, value
+
+    char ret[128] = {0};
+    char arg[128] = {0};
+    method_getReturnType(m, ret, sizeof(ret));
+    method_getArgumentType(m, 2, arg, sizeof(arg));
+
+    if (ret[0] != '@') return NO;
+
+    NSUInteger argSize = 0;
+    NSGetSizeAndAlignment(arg, &argSize, NULL);
+    return argSize == sizeof(uint64_t);
+}
+
+static NSString *SCIResolveMappedNameForSpecifier(uint64_t value) {
+    NSArray<NSString *> *classNames = @[
+        @"SCIMobileConfigMapping",
+        @"SCIExpMobileConfigMapping"
+    ];
+
+    NSArray<NSString *> *selectorNames = @[
+        @"nameForSpecifier:",
+        @"nameForSpecifierValue:",
+        @"mappedNameForSpecifier:",
+        @"nameForParamID:",
+        @"nameForID:"
+    ];
+
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        if (!cls) continue;
+
+        for (NSString *selectorName in selectorNames) {
+            SEL sel = NSSelectorFromString(selectorName);
+            if (![cls respondsToSelector:sel]) continue;
+            if (!SCIDexKitMappingMethodLooksLikeObjectForU64(cls, sel)) continue;
+
+            IMP imp = [cls methodForSelector:sel];
+            if (!imp) continue;
+
+            id (*fn)(id, SEL, uint64_t) = (id (*)(id, SEL, uint64_t))imp;
+            id candidate = fn(cls, sel, value);
+
+            if ([candidate isKindOfClass:[NSString class]] && [(NSString *)candidate length] > 0) {
+                return (NSString *)candidate;
+            }
+        }
+    }
+
+    return nil;
+}
+
 
 @implementation SCIDexKitResolvedName
 - (NSDictionary *)dictionaryRepresentation {
@@ -93,7 +150,7 @@ static NSString * const kSCIDexKitAliasRuntimePrefix = @"dexkit.alias.runtime:";
     }
     
     // 3. Mapping
-    NSString *mapped = [SCIMobileConfigMapping nameForSpecifier:value];
+    NSString *mapped = SCIResolveMappedNameForSpecifier(value);
     if (mapped) {
         res.title = mapped;
         res.source = @"mapping";
