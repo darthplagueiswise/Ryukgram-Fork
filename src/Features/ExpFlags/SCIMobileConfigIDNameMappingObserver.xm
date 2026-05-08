@@ -2,15 +2,34 @@
 #import "SCIDexKitNameResolver.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
+#import <memory>
 #import <string>
+#import <vector>
 
 extern "C" void MSHookFunction(void *symbol, void *replace, void **result);
 
+namespace mobileconfig { struct config_meta_t; }
+typedef std::shared_ptr<const std::vector<mobileconfig::config_meta_t>> SCIMCConfigMetaListPtr;
+
+static const char *kSCIMCIdNameGetFilePathSymbol = "__ZN12mobileconfig23FBMobileConfigIdNameMap19getIdToNameFilePathERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
+static const char *kSCIMCIdNameTryGetNamedParamsListSymbol = "__ZN12mobileconfig23FBMobileConfigIdNameMap21tryGetNamedParamsListERKNSt3__110shared_ptrIKNS1_6vectorINS_13config_meta_tENS1_9allocatorIS4_EEEEEERKNS1_12basic_stringIcNS1_11char_traitsIcEENS5_IcEEEE";
+static const char *kSCIMCStorageReadExtraDataSymbol = "__ZN12mobileconfig28FBMobileConfigStorageManager13readExtraDataERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
 static const char *kSCIMCStoragePersistExtraDataSymbol = "__ZN12mobileconfig28FBMobileConfigStorageManager16persistExtraDataERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEES9_";
 
+typedef std::string (*SCIMCIdNameGetFilePathFn)(const std::string &root);
+typedef SCIMCConfigMetaListPtr (*SCIMCIdNameTryGetNamedParamsListFn)(const SCIMCConfigMetaListPtr &params, const std::string &path);
+typedef std::string (*SCIMCStorageReadExtraDataFn)(void *self, const std::string &key);
 typedef void (*SCIMCStoragePersistExtraDataFn)(void *self, const std::string &key, const std::string &payload);
+
+static SCIMCIdNameGetFilePathFn orig_SCIMCIdNameGetFilePath = NULL;
+static SCIMCIdNameTryGetNamedParamsListFn orig_SCIMCIdNameTryGetNamedParamsList = NULL;
+static SCIMCStorageReadExtraDataFn orig_SCIMCStorageReadExtraData = NULL;
 static SCIMCStoragePersistExtraDataFn orig_SCIMCStoragePersistExtraData = NULL;
-static BOOL gSCIMCIDNameObserverInstalled = NO;
+
+static BOOL gSCIMCIdNameGetFilePathInstalled = NO;
+static BOOL gSCIMCIdNameTryGetNamedParamsListInstalled = NO;
+static BOOL gSCIMCStorageReadExtraDataInstalled = NO;
+static BOOL gSCIMCStoragePersistExtraDataInstalled = NO;
 
 static NSString *SCIStringFromStdString(const std::string &value) {
     if (value.empty()) return @"";
@@ -37,9 +56,13 @@ static BOOL SCIDataLooksLikeJSON(NSData *data) {
     return NO;
 }
 
-static BOOL SCILooksLikeIDNameMappingPayload(NSString *key, NSData *payload) {
+static BOOL SCIKeyLooksLikeIDNameMapping(NSString *key) {
     NSString *lowerKey = key.lowercaseString ?: @"";
-    if ([lowerKey containsString:@"id_name_mapping"]) return YES;
+    return [lowerKey containsString:@"id_name_mapping"] || [lowerKey containsString:@"id-name-mapping"] || [lowerKey containsString:@"idnamemapping"];
+}
+
+static BOOL SCILooksLikeIDNameMappingPayload(NSString *key, NSData *payload) {
+    if (SCIKeyLooksLikeIDNameMapping(key)) return YES;
     if (!payload.length || payload.length < 16) return NO;
     if (payload.length > (64 * 1024 * 1024)) return NO;
     if (!SCIDataLooksLikeJSON(payload)) return NO;
@@ -68,6 +91,7 @@ static void SCIRecordIDNameObserverStatus(NSString *source, NSString *key, NSStr
 }
 
 static void SCIExportIDNameMappingPayload(NSString *source, NSString *key, NSData *payload) {
+    if (!payload.length) return;
     if (!SCILooksLikeIDNameMappingPayload(key, payload)) return;
 
     NSError *jsonError = nil;
@@ -94,6 +118,108 @@ static void SCIExportIDNameMappingPayload(NSString *source, NSString *key, NSDat
     }
 }
 
+static void SCITryExportIDNameMappingFile(NSString *source, NSString *path) {
+    if (!SCIKeyLooksLikeIDNameMapping(path)) return;
+
+    BOOL isDir = NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path isDirectory:&isDir] || isDir) {
+        NSLog(@"[RyukGram][MCIDName] observed mapping path not readable yet source=%@ path=%@", source, path);
+        return;
+    }
+
+    NSData *payload = [NSData dataWithContentsOfFile:path];
+    if (!payload.length) {
+        NSLog(@"[RyukGram][MCIDName] observed mapping path empty source=%@ path=%@", source, path);
+        return;
+    }
+
+    SCIExportIDNameMappingPayload(source, path, payload);
+}
+
+static NSString *SCIInstalledSummary(void) {
+    return [NSString stringWithFormat:@"getPath=%@ tryNamed=%@ readExtra=%@ persistExtra=%@",
+            gSCIMCIdNameGetFilePathInstalled ? @"yes" : @"no",
+            gSCIMCIdNameTryGetNamedParamsListInstalled ? @"yes" : @"no",
+            gSCIMCStorageReadExtraDataInstalled ? @"yes" : @"no",
+            gSCIMCStoragePersistExtraDataInstalled ? @"yes" : @"no"];
+}
+
+static BOOL SCIAllIDNameObserversInstalled(void) {
+    return gSCIMCIdNameGetFilePathInstalled &&
+           gSCIMCIdNameTryGetNamedParamsListInstalled &&
+           gSCIMCStorageReadExtraDataInstalled &&
+           gSCIMCStoragePersistExtraDataInstalled;
+}
+
+static BOOL SCIInstallIDNameObserverSymbol(const char *symbol, void *replacement, void **original, BOOL *installed, NSString *label) {
+    if (*installed) return YES;
+
+    void *target = dlsym(RTLD_DEFAULT, symbol);
+    if (!target) return NO;
+
+    *installed = YES;
+    MSHookFunction(target, replacement, original);
+    NSLog(@"[RyukGram][MCIDName] %@ pass-through observer installed target=%p", label, target);
+    return YES;
+}
+
+static std::string hook_SCIMCIdNameGetFilePath(const std::string &root) {
+    std::string path;
+    if (orig_SCIMCIdNameGetFilePath) {
+        path = orig_SCIMCIdNameGetFilePath(root);
+    }
+
+    @autoreleasepool {
+        @try {
+            NSString *pathString = SCIStringFromStdString(path);
+            if (pathString.length) {
+                NSLog(@"[RyukGram][MCIDName] getIdToNameFilePath path=%@ root=%@", pathString, SCIStringFromStdString(root));
+                SCITryExportIDNameMappingFile(@"FBMobileConfigIdNameMap.getIdToNameFilePath", pathString);
+            }
+        } @catch (__unused NSException *exception) {
+        }
+    }
+
+    return path;
+}
+
+static SCIMCConfigMetaListPtr hook_SCIMCIdNameTryGetNamedParamsList(const SCIMCConfigMetaListPtr &params, const std::string &path) {
+    SCIMCConfigMetaListPtr result;
+    if (orig_SCIMCIdNameTryGetNamedParamsList) {
+        result = orig_SCIMCIdNameTryGetNamedParamsList(params, path);
+    }
+
+    @autoreleasepool {
+        @try {
+            NSString *pathString = SCIStringFromStdString(path);
+            if (pathString.length) {
+                NSLog(@"[RyukGram][MCIDName] tryGetNamedParamsList path=%@", pathString);
+                SCITryExportIDNameMappingFile(@"FBMobileConfigIdNameMap.tryGetNamedParamsList", pathString);
+            }
+        } @catch (__unused NSException *exception) {
+        }
+    }
+
+    return result;
+}
+
+static std::string hook_SCIMCStorageReadExtraData(void *self, const std::string &key) {
+    std::string payload;
+    if (orig_SCIMCStorageReadExtraData) {
+        payload = orig_SCIMCStorageReadExtraData(self, key);
+    }
+
+    @autoreleasepool {
+        @try {
+            SCIExportIDNameMappingPayload(@"FBMobileConfigStorageManager.readExtraData", SCIStringFromStdString(key), SCIDataFromStdString(payload));
+        } @catch (__unused NSException *exception) {
+        }
+    }
+
+    return payload;
+}
+
 static void hook_SCIMCStoragePersistExtraData(void *self, const std::string &key, const std::string &payload) {
     @autoreleasepool {
         @try {
@@ -108,23 +234,44 @@ static void hook_SCIMCStoragePersistExtraData(void *self, const std::string &key
 }
 
 static void SCIInstallIDNameMappingObserverAttempt(NSUInteger attempt) {
-    if (gSCIMCIDNameObserverInstalled) return;
+    if (SCIAllIDNameObserversInstalled()) return;
 
-    void *target = dlsym(RTLD_DEFAULT, kSCIMCStoragePersistExtraDataSymbol);
-    if (!target) {
+    SCIInstallIDNameObserverSymbol(kSCIMCIdNameGetFilePathSymbol,
+                                   (void *)&hook_SCIMCIdNameGetFilePath,
+                                   (void **)&orig_SCIMCIdNameGetFilePath,
+                                   &gSCIMCIdNameGetFilePathInstalled,
+                                   @"FBMobileConfigIdNameMap.getIdToNameFilePath");
+
+    SCIInstallIDNameObserverSymbol(kSCIMCIdNameTryGetNamedParamsListSymbol,
+                                   (void *)&hook_SCIMCIdNameTryGetNamedParamsList,
+                                   (void **)&orig_SCIMCIdNameTryGetNamedParamsList,
+                                   &gSCIMCIdNameTryGetNamedParamsListInstalled,
+                                   @"FBMobileConfigIdNameMap.tryGetNamedParamsList");
+
+    SCIInstallIDNameObserverSymbol(kSCIMCStorageReadExtraDataSymbol,
+                                   (void *)&hook_SCIMCStorageReadExtraData,
+                                   (void **)&orig_SCIMCStorageReadExtraData,
+                                   &gSCIMCStorageReadExtraDataInstalled,
+                                   @"FBMobileConfigStorageManager.readExtraData");
+
+    SCIInstallIDNameObserverSymbol(kSCIMCStoragePersistExtraDataSymbol,
+                                   (void *)&hook_SCIMCStoragePersistExtraData,
+                                   (void **)&orig_SCIMCStoragePersistExtraData,
+                                   &gSCIMCStoragePersistExtraDataInstalled,
+                                   @"FBMobileConfigStorageManager.persistExtraData");
+
+    if (!SCIAllIDNameObserversInstalled()) {
         if (attempt < 20) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 SCIInstallIDNameMappingObserverAttempt(attempt + 1);
             });
         } else {
-            NSLog(@"[RyukGram][MCIDName] persistExtraData symbol not loaded");
+            NSLog(@"[RyukGram][MCIDName] observer install incomplete: %@", SCIInstalledSummary());
         }
         return;
     }
 
-    gSCIMCIDNameObserverInstalled = YES;
-    MSHookFunction(target, (void *)&hook_SCIMCStoragePersistExtraData, (void **)&orig_SCIMCStoragePersistExtraData);
-    NSLog(@"[RyukGram][MCIDName] pass-through observer installed target=%p", target);
+    NSLog(@"[RyukGram][MCIDName] all pass-through observers installed: %@", SCIInstalledSummary());
 }
 
 %ctor {
