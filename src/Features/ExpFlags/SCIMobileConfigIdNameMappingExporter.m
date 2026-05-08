@@ -1,14 +1,10 @@
 #import "SCIMobileConfigIdNameMappingExporter.h"
 #import "SCIMobileConfigMapping.h"
 #import "SCIDexKitNameResolver.h"
-#import <dlfcn.h>
 
 NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotification = @"SCIMobileConfigIdNameMappingExporterDidUpdateNotification";
 
 static NSString * const kSCIIdMapExporterStatusKey = @"sci.mc.id_name_mapping_exporter.last_status";
-static const char *kSCIIGMobileConfigTryUpdateConfigsSymbol = "_IGMobileConfigTryUpdateConfigsWithCompletion";
-
-typedef void (*SCIIGMobileConfigTryUpdateConfigsFn)(id arg0, id arg1, id arg2, id completion);
 
 static NSString *SCIIdMapString(id value) {
     return [value isKindOfClass:NSString.class] ? (NSString *)value : @"";
@@ -121,56 +117,10 @@ static NSArray<NSString *> *SCIIdMapOutputPaths(void) {
     return paths.array;
 }
 
-static NSDictionary *SCIIdMapMergeNativeProbe(NSDictionary *result, NSDictionary *nativeProbe, NSString *statusOverride) {
-    NSMutableDictionary *merged = [[result isKindOfClass:NSDictionary.class] ? result : @{} mutableCopy];
-    if ([nativeProbe isKindOfClass:NSDictionary.class]) merged[@"nativeImport"] = nativeProbe;
-    if (statusOverride.length) merged[@"status"] = statusOverride;
-    return merged;
-}
-
 static void SCIIdMapSetStatus(NSString *status) {
     if (!status.length) return;
     [[NSUserDefaults standardUserDefaults] setObject:status forKey:kSCIIdMapExporterStatusKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
-}
-
-static NSDictionary *SCIIdMapRequestNativeMobileConfigImport(void) {
-    NSMutableDictionary *probe = [@{
-        @"ok": @NO,
-        @"mode": @"native-try-update",
-        @"symbol": @(kSCIIGMobileConfigTryUpdateConfigsSymbol),
-        @"requested": @NO,
-        @"callback": @NO,
-        @"reason": @"not-started"
-    } mutableCopy];
-
-    void *target = dlsym(RTLD_DEFAULT, kSCIIGMobileConfigTryUpdateConfigsSymbol);
-    if (!target) {
-        probe[@"reason"] = @"symbol-not-loaded";
-        return probe;
-    }
-
-    __block BOOL callbackSeen = NO;
-    void (^completion)(void) = [^{
-        callbackSeen = YES;
-        SCIIdMapSetStatus(@"native MobileConfig update callback received · rescanning id_name_mapping.json");
-        [[NSNotificationCenter defaultCenter] postNotificationName:SCIMobileConfigIdNameMappingExporterDidUpdateNotification object:nil];
-    } copy];
-
-    @try {
-        SCIIGMobileConfigTryUpdateConfigsFn fn = (SCIIGMobileConfigTryUpdateConfigsFn)target;
-        fn(nil, nil, nil, completion);
-        probe[@"ok"] = @YES;
-        probe[@"requested"] = @YES;
-        probe[@"reason"] = @"requested";
-        probe[@"target"] = [NSString stringWithFormat:@"%p", target];
-        probe[@"abi"] = @"arg0=nil,arg1=nil,arg2=nil,arg3=completion; wrapper sets force=0";
-        probe[@"callback"] = @(callbackSeen);
-    } @catch (NSException *exception) {
-        probe[@"reason"] = exception.reason ?: exception.name ?: @"objc-exception";
-    }
-
-    return probe;
 }
 
 @implementation SCIMobileConfigIdNameMappingExporter
@@ -199,12 +149,13 @@ static NSDictionary *SCIIdMapRequestNativeMobileConfigImport(void) {
 
 + (NSDictionary *)installNativePathObserver {
     NSString *primary = [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"";
-    NSString *status = [NSString stringWithFormat:@"id_name_mapping export path armed · primary=%@", primary];
+    NSString *status = [NSString stringWithFormat:@"id_name_mapping export path ready · primary=%@", primary];
     SCIIdMapSetStatus(status);
     return @{@"ok": @YES, @"mode": @"path-export", @"primaryPath": primary, @"status": status};
 }
 
-+ (NSDictionary *)exportIDNameMappingOnceWithProbe:(NSDictionary *)probe {
++ (NSDictionary *)exportIDNameMappingNow {
+    NSDictionary *probe = [self installNativePathObserver];
     NSArray<NSString *> *candidates = [self candidateIDNameMappingPaths];
     NSMutableArray<NSDictionary *> *candidateInfo = [NSMutableArray array];
     NSDictionary *best = nil;
@@ -225,9 +176,9 @@ static NSDictionary *SCIIdMapRequestNativeMobileConfigImport(void) {
     for (NSDictionary *info in candidateInfo) if ([info[@"exists"] boolValue] || visibleCandidates.count < 80) [visibleCandidates addObject:info];
 
     if (!best) {
-        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
+        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
         SCIIdMapSetStatus(status);
-        return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0};
+        return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0, @"nativeImport": @{@"ok": @NO, @"mode": @"observe-only", @"reason": @"no validated active native trigger in sideload-safe mode"}};
     }
 
     NSString *source = SCIIdMapString(best[@"path"]);
@@ -248,39 +199,6 @@ static NSDictionary *SCIIdMapRequestNativeMobileConfigImport(void) {
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIMobileConfigIdNameMappingExporterDidUpdateNotification object:nil];
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverDidUpdateNotification object:nil];
     return @{@"ok": @(outputs.count > 0), @"status": status, @"source": source ?: @"", @"outputs": outputs, @"errors": errors, @"count": @(count), @"bytes": best[@"bytes"] ?: @0, @"modified": best[@"modified"] ?: @"", @"probe": probe ?: @{}, @"checked": @(candidates.count), @"manifest": manifestPath ?: @"", @"candidates": visibleCandidates};
-}
-
-+ (NSDictionary *)exportIDNameMappingNow {
-    NSDictionary *probe = [self installNativePathObserver];
-    NSDictionary *initial = [self exportIDNameMappingOnceWithProbe:probe];
-    if ([initial[@"ok"] boolValue]) return initial;
-
-    NSDictionary *nativeProbe = SCIIdMapRequestNativeMobileConfigImport();
-    if (![nativeProbe[@"requested"] boolValue]) {
-        NSString *status = [NSString stringWithFormat:@"native MobileConfig import unavailable · %@ · %@", SCIIdMapString(nativeProbe[@"reason"]), SCIIdMapString(initial[@"status"])] ;
-        SCIIdMapSetStatus(status);
-        return SCIIdMapMergeNativeProbe(initial, nativeProbe, status);
-    }
-
-    NSArray<NSNumber *> *delays = [NSThread isMainThread] ? @[@0.0] : @[@1.0, @3.0, @8.0];
-    NSDictionary *last = initial;
-    for (NSNumber *delay in delays) {
-        NSTimeInterval seconds = delay.doubleValue;
-        if (seconds > 0.0) {
-            NSString *waiting = [NSString stringWithFormat:@"requested native MobileConfig import · rescanning id_name_mapping.json in %.0fs", seconds];
-            SCIIdMapSetStatus(waiting);
-            [NSThread sleepForTimeInterval:seconds];
-        }
-        last = [self exportIDNameMappingOnceWithProbe:probe];
-        if ([last[@"ok"] boolValue]) {
-            NSString *status = [NSString stringWithFormat:@"native MobileConfig import produced id_name_mapping · %@", SCIIdMapString(last[@"status"])] ;
-            return SCIIdMapMergeNativeProbe(last, nativeProbe, status);
-        }
-    }
-
-    NSString *status = [NSString stringWithFormat:@"native MobileConfig import requested, but id_name_mapping still not found · checked=%@ · primary=%@", last[@"checked"] ?: @0, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
-    SCIIdMapSetStatus(status);
-    return SCIIdMapMergeNativeProbe(last, nativeProbe, status);
 }
 
 + (nullable NSString *)lastStatusLine {
