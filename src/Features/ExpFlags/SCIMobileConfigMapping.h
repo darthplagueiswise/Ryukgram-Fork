@@ -14,6 +14,8 @@
 + (NSString *)activeIDNameMappingPath;
 
 + (NSDictionary<NSNumber *, NSDictionary *> *)idNameMapping;
++ (NSDictionary<NSNumber *, NSDictionary *> *)parseMappingObject:(id)obj
+                                                          source:(NSString *)source;
 + (NSDictionary *)mappingForParamID:(unsigned long long)paramID;
 + (NSString *)resolvedNameForParamID:(unsigned long long)paramID;
 + (NSString *)sourceForParamID:(unsigned long long)paramID;
