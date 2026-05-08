@@ -129,9 +129,20 @@ static void SCIDexKitAddUniqueValue(NSMutableArray<NSNumber *> *items, uint64_t 
 
 static NSString *SCIDexKitInferBrokerID(NSString *className) {
     if (![className isKindOfClass:NSString.class] || className.length == 0) return @"";
+    if ([className hasPrefix:@"IGMobileConfigSessionlessContextManager"]) return @"igsl";
+    if ([className hasPrefix:@"IGMobileConfigUserSessionContextManager"]) return @"igus";
+    if ([className hasPrefix:@"IGMobileConfigContextManager"]) return @"ig";
+    if ([className hasPrefix:@"FBMobileConfigSessionlessContextManager"]) return @"fbsl";
+    if ([className hasPrefix:@"FBMobileConfigUserSessionContextManager"]) return @"fbus";
+    if ([className hasPrefix:@"FBMobileConfigContextManager"]) return @"fb";
+    if ([className hasPrefix:@"FBMobileConfigAccessedParamsTracker"]) return @"fbapt";
+    if ([className hasPrefix:@"FBMobileConfigContextTracker"]) return @"fbctx";
+    if ([className hasPrefix:@"FBMobileConfigParameterDescription"]) return @"fbpd";
+    if ([className hasPrefix:@"METAMobileConfigUsageSerializer"]) return @"metaser";
+    if ([className hasPrefix:@"METAMobileConfigUsageTracker"]) return @"metaut";
     if ([className containsString:@"Sessionless"]) return @"igsl";
-    if ([className hasPrefix:@"IGMobileConfig"]) return @"ig";
     if ([className hasPrefix:@"FBMobileConfig"]) return @"fb";
+    if ([className hasPrefix:@"IGMobileConfig"]) return @"ig";
     return @"";
 }
 

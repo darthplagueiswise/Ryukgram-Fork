@@ -123,13 +123,19 @@ static void install(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     install(meta, @"groupName",     (IMP)new_groupName,     (IMP *)&orig_groupName);
     install(meta, @"peekGroupName", (IMP)new_peekGroupName, (IMP *)&orig_peekGroupName);
 
-    Class mc = NSClassFromString(@"IGMobileConfigContextManager");
-    install(mc, @"getBool:",               (IMP)new_mcBool,       (IMP *)&orig_mcBool);
-    install(mc, @"getBool:withDefault:",   (IMP)new_mcBool_def,   (IMP *)&orig_mcBool_def);
-    install(mc, @"getInt64:",              (IMP)new_mcInt,        (IMP *)&orig_mcInt);
-    install(mc, @"getInt64:withDefault:",  (IMP)new_mcInt_def,    (IMP *)&orig_mcInt_def);
-    install(mc, @"getDouble:",             (IMP)new_mcDouble,     (IMP *)&orig_mcDouble);
-    install(mc, @"getDouble:withDefault:", (IMP)new_mcDouble_def, (IMP *)&orig_mcDouble_def);
-    install(mc, @"getString:",             (IMP)new_mcString,     (IMP *)&orig_mcString);
-    install(mc, @"getString:withDefault:", (IMP)new_mcString_def, (IMP *)&orig_mcString_def);
+    // The unified ObjC observer owns MobileConfig getters now. Keep this legacy
+    // recorder disabled when the new observer is enabled to avoid duplicate chains.
+    BOOL unifiedObjCObserver = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_objc_getter_observer_enabled"] boolValue];
+    BOOL startupObjCObserver = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_objc_startup_hooks_enabled"] boolValue];
+    if (!unifiedObjCObserver || !startupObjCObserver) {
+        Class mc = NSClassFromString(@"IGMobileConfigContextManager");
+        install(mc, @"getBool:",               (IMP)new_mcBool,       (IMP *)&orig_mcBool);
+        install(mc, @"getBool:withDefault:",   (IMP)new_mcBool_def,   (IMP *)&orig_mcBool_def);
+        install(mc, @"getInt64:",              (IMP)new_mcInt,        (IMP *)&orig_mcInt);
+        install(mc, @"getInt64:withDefault:",  (IMP)new_mcInt_def,    (IMP *)&orig_mcInt_def);
+        install(mc, @"getDouble:",             (IMP)new_mcDouble,     (IMP *)&orig_mcDouble);
+        install(mc, @"getDouble:withDefault:", (IMP)new_mcDouble_def, (IMP *)&orig_mcDouble_def);
+        install(mc, @"getString:",             (IMP)new_mcString,     (IMP *)&orig_mcString);
+        install(mc, @"getString:withDefault:", (IMP)new_mcString_def, (IMP *)&orig_mcString_def);
+    }
 }

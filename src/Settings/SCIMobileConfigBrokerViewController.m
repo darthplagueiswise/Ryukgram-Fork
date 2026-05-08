@@ -1,8 +1,12 @@
 #import "SCIMobileConfigBrokerViewController.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerDescriptor.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerStore.h"
-#import "../Features/ExpFlags/SCIMobileConfigBrokerRouter.h"
 #import "../Features/ExpFlags/SCIDexKitNameResolver.h"
+
+extern void SCIInstallObjCMobileConfigGetterObserver(void);
+extern BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString *brokerID);
+extern NSUInteger SCIObjCMobileConfigObserverInstalledCount(void);
+extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 
 @interface SCIMCBrokerCell : UITableViewCell
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -82,8 +86,7 @@
 }
 - (void)installBroker {
     [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID];
-    NSError *err = nil;
-    [SCIMobileConfigBrokerRouter installBroker:self.broker error:&err];
+    SCIInstallObjCMobileConfigGetterObserver();
     [self reloadKeys];
 }
 - (void)copySnapshot {
@@ -94,9 +97,9 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 1 : self.keys.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Broker" : @"Observed specifiers / gates"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Install enables pass-through observation. Overrides are only per observed specifier/gate below.";
-    if (!self.keys.count) return @"No values observed yet. Tap Install, use the app path that reads this broker, then return here.";
-    return @"Switch writes mcbr:<id>:<hex>. Use System to remove override.";
+    if (section == 0) return @"Install enables ObjC pass-through observation. Overrides are only per observed specifier/gate below.";
+    if (!self.keys.count) return @"No values observed yet. Tap Install, use the app path that reads this target, then return here.";
+    return @"Switch reflects the observed system state until you change it. Changing it writes mcbr:<id>:<hex>; use System to remove the override.";
 }
 - (UITableViewCell *)basic:(NSString *)title detail:(NSString *)detail {
     UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
@@ -108,11 +111,11 @@
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) {
-        BOOL installed = [SCIMobileConfigBrokerRouter isInstalled:self.broker.brokerID];
-        NSString *detail = [NSString stringWithFormat:@"%@ · %@ · hook %@ · observed %lu · overrides %lu\n%@\nLast error: %@",
+        BOOL installed = SCIObjCMobileConfigObserverIsInstalledForBrokerID(self.broker.brokerID);
+        NSString *detail = [NSString stringWithFormat:@"%@ · %@ · observer %@ · observed %lu · overrides %lu\n%@\nLast status: %@",
                             self.broker.symbol,
                             self.broker.tierLabel,
-                            installed ? @"installed" : ([SCIMobileConfigBrokerStore isBrokerHookEnabledForID:self.broker.brokerID] ? @"pending" : @"off"),
+                            installed ? @"live" : ([SCIMobileConfigBrokerStore isBrokerHookEnabledForID:self.broker.brokerID] ? @"pending" : @"off"),
                             (unsigned long)[SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:self.broker.brokerID].count,
                             (unsigned long)[SCIMobileConfigBrokerStore activeOverrideKeysForBrokerID:self.broker.brokerID].count,
                             self.broker.details ?: @"",
@@ -148,9 +151,9 @@
     [cell.switchView setOn:(state == SCIMCBrokerBoolStateOn) animated:NO];
     __weak typeof(self) weakSelf = self;
     cell.switchChanged = ^(BOOL on) {
+        [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:weakSelf.broker.brokerID];
         [SCIMobileConfigBrokerStore setOverrideValue:@(on) forKey:key];
-        NSError *err = nil;
-        [SCIMobileConfigBrokerRouter installBroker:weakSelf.broker error:&err];
+        SCIInstallObjCMobileConfigGetterObserver();
         [weakSelf reloadKeys];
     };
     cell.accessoryType = forced ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
@@ -172,8 +175,8 @@
                          [resolved[@"callerAddress"] isKindOfClass:NSString.class] ? resolved[@"callerAddress"] : @"",
                          [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @""];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:@YES forKey:key]; [SCIMobileConfigBrokerRouter installBroker:self.broker error:nil]; [self reloadKeys]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:@NO forKey:key]; [SCIMobileConfigBrokerRouter installBroker:self.broker error:nil]; [self reloadKeys]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@YES forKey:key]; SCIInstallObjCMobileConfigGetterObserver(); [self reloadKeys]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@NO forKey:key]; SCIInstallObjCMobileConfigGetterObserver(); [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:nil forKey:key]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = key; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy resolved JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){
@@ -199,7 +202,7 @@
 @implementation SCIMobileConfigBrokerViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"MC Brokers";
+    self.title = @"MC ObjC Observers";
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     [SCIMobileConfigBrokerStore registerDefaultsAndMigrate];
     self.filter = [[UISegmentedControl alloc] initWithItems:@[@"Core", @"All", @"Observed", @"Forced", @"Live"]];
@@ -248,18 +251,18 @@
         if (f == 0 && d.kind != SCIMCBrokerKindPrimary && d.kind != SCIMCBrokerKindComplement) continue;
         if (f == 2 && [SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:d.brokerID].count == 0) continue;
         if (f == 3 && [SCIMobileConfigBrokerStore activeOverrideKeysForBrokerID:d.brokerID].count == 0) continue;
-        if (f == 4 && ![SCIMobileConfigBrokerRouter isInstalled:d.brokerID]) continue;
+        if (f == 4 && !SCIObjCMobileConfigObserverIsInstalledForBrokerID(d.brokerID)) continue;
         [items addObject:d];
     }
     self.rows = items;
-    self.footerLabel.text = [NSString stringWithFormat:@"Namespace: mcbr:<id>:<hex> / mcob:<id>:<hex> · installed=%lu · overrides=%lu · observed=%lu", (unsigned long)[SCIMobileConfigBrokerRouter installedCount], (unsigned long)[SCIMobileConfigBrokerStore activeOverrideKeys].count, (unsigned long)[SCIMobileConfigBrokerStore observedOverrideKeys].count];
+    self.footerLabel.text = [NSString stringWithFormat:@"Namespace: mcbr:<id>:<hex> / mcob:<id>:<hex> · ObjC hooks=%lu · overrides=%lu · observed=%lu", (unsigned long)SCIObjCMobileConfigObserverInstalledCount(), (unsigned long)[SCIMobileConfigBrokerStore activeOverrideKeys].count, (unsigned long)[SCIMobileConfigBrokerStore observedOverrideKeys].count];
     [self.tableView reloadData];
 }
-- (void)installEnabled { [SCIMobileConfigBrokerRouter installEnabledBrokers]; [self reloadRows]; }
+- (void)installEnabled { SCIObjCMobileConfigObserverInstallEnabled(); [self reloadRows]; }
 - (void)resetOverrides { [SCIMobileConfigBrokerStore resetAllBrokerOverrides]; [self reloadRows]; }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? self.rows.count : 1; }
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"FBSharedFramework C brokers" : @"Debug"; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"FBSharedFramework ObjC observer targets" : @"Debug"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return section == 0 ? @"Switch enables pass-through observation. Tap row to view observed specifiers/gates and force individual values." : nil; }
 - (UITableViewCell *)basicCell:(NSString *)title detail:(NSString *)detail {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
@@ -273,17 +276,17 @@
     if (indexPath.section == 1) return [self basicCell:@"Copy resolved snapshot" detail:@"Tap to copy current mcbr/mcob state as JSON enriched by SCIDexKitNameResolver: resolvedName, title, source, runtimeObserved, callerImage, callerSymbol and callerAddress."];
     SCIMCBrokerCell *cell = [tableView dequeueReusableCellWithIdentifier:@"broker" forIndexPath:indexPath];
     SCIMobileConfigBrokerDescriptor *d = self.rows[indexPath.row];
-    BOOL installed = [SCIMobileConfigBrokerRouter isInstalled:d.brokerID];
+    BOOL installed = SCIObjCMobileConfigObserverIsInstalledForBrokerID(d.brokerID);
     BOOL hookEnabled = [SCIMobileConfigBrokerStore isBrokerHookEnabledForID:d.brokerID];
     NSUInteger observed = [SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:d.brokerID].count;
     NSUInteger forced = [SCIMobileConfigBrokerStore activeOverrideKeysForBrokerID:d.brokerID].count;
     cell.titleLabel.text = [NSString stringWithFormat:@"%@  [%@]", d.displayName, d.brokerID];
-    cell.detailLabel2.text = [NSString stringWithFormat:@"%@ · %@ · hook %@ · observed %lu · forced %lu · hits %lu/%lu", d.tierLabel, d.kindLabel, installed ? @"live" : (hookEnabled ? @"pending" : @"off"), (unsigned long)observed, (unsigned long)forced, (unsigned long)[SCIMobileConfigBrokerStore hitCountForBrokerID:d.brokerID], (unsigned long)[SCIMobileConfigBrokerStore forcedHitCountForBrokerID:d.brokerID]];
+    cell.detailLabel2.text = [NSString stringWithFormat:@"%@ · %@ · observer %@ · observed %lu · forced %lu · hits %lu/%lu", d.tierLabel, d.kindLabel, installed ? @"live" : (hookEnabled ? @"pending" : @"off"), (unsigned long)observed, (unsigned long)forced, (unsigned long)[SCIMobileConfigBrokerStore hitCountForBrokerID:d.brokerID], (unsigned long)[SCIMobileConfigBrokerStore forcedHitCountForBrokerID:d.brokerID]];
     [cell.switchView setOn:hookEnabled animated:NO];
     __weak typeof(self) weakSelf = self;
     cell.switchChanged = ^(BOOL on) {
         [SCIMobileConfigBrokerStore setBrokerHookEnabled:on brokerID:d.brokerID];
-        if (on) [SCIMobileConfigBrokerRouter installBroker:d error:nil];
+        if (on) SCIInstallObjCMobileConfigGetterObserver();
         [weakSelf reloadRows];
     };
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;

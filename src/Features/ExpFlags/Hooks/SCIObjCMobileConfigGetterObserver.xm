@@ -5,6 +5,7 @@
 #import <dlfcn.h>
 #import "../SCIExpFlags.h"
 #import "../SCIDexKitNameResolver.h"
+#import "../SCIMobileConfigBrokerStore.h"
 
 static NSString *const kHooksKey = @"sci_exp_mc_objc_getter_observer_enabled";
 static NSString *const kStartupKey = @"sci_exp_mc_objc_startup_hooks_enabled";
@@ -15,7 +16,7 @@ static NSMutableDictionary<NSString *, NSValue *> *gOrig;
 static NSDictionary<NSString *, NSNumber *> *gOverrides;
 static NSMutableDictionary<NSString *, NSNumber *> *gHits;
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
-static BOOL gInstalled = NO;
+static BOOL gDefaultsObserverInstalled = NO;
 static __thread BOOL gInside = NO;
 
 static NSString *SCIKey(Class cls, SEL sel) {
@@ -27,11 +28,33 @@ static NSString *SCIClassName(id obj) {
     return cls ? NSStringFromClass(cls) : @"?";
 }
 
-static NSString *SCIBrokerIDForObject(id obj) {
-    NSString *cls = SCIClassName(obj);
+static NSString *SCIBrokerIDForClassName(NSString *cls) {
+    if (![cls isKindOfClass:NSString.class] || cls.length == 0) return @"";
+    if ([cls hasPrefix:@"IGMobileConfigSessionlessContextManager"]) return @"igsl";
+    if ([cls hasPrefix:@"IGMobileConfigUserSessionContextManager"]) return @"igus";
+    if ([cls hasPrefix:@"IGMobileConfigContextManager"]) return @"ig";
+    if ([cls hasPrefix:@"FBMobileConfigSessionlessContextManager"]) return @"fbsl";
+    if ([cls hasPrefix:@"FBMobileConfigUserSessionContextManager"]) return @"fbus";
+    if ([cls hasPrefix:@"FBMobileConfigContextManager"]) return @"fb";
+    if ([cls hasPrefix:@"FBMobileConfigAccessedParamsTracker"]) return @"fbapt";
+    if ([cls hasPrefix:@"FBMobileConfigContextTracker"]) return @"fbctx";
+    if ([cls hasPrefix:@"FBMobileConfigParameterDescription"]) return @"fbpd";
+    if ([cls hasPrefix:@"METAMobileConfigUsageSerializer"]) return @"metaser";
+    if ([cls hasPrefix:@"METAMobileConfigUsageTracker"]) return @"metaut";
     if ([cls containsString:@"Sessionless"]) return @"igsl";
     if ([cls hasPrefix:@"FBMobileConfig"]) return @"fb";
-    return @"ig";
+    if ([cls hasPrefix:@"IGMobileConfig"]) return @"ig";
+    return @"";
+}
+
+static NSString *SCIBrokerIDForObject(id obj) {
+    return SCIBrokerIDForClassName(SCIClassName(obj));
+}
+
+static BOOL SCIObserverShouldProcessBrokerID(NSString *brokerID) {
+    if (!brokerID.length) return NO;
+    return [SCIMobileConfigBrokerStore isBrokerHookEnabledForID:brokerID] ||
+           [SCIMobileConfigBrokerStore activeOverrideKeysForBrokerID:brokerID].count > 0;
 }
 
 static NSString *SCIHexOverrideKey(uint64_t value) {
@@ -63,10 +86,19 @@ static void SCIRefreshOverrides(void) {
 
 static SCIExpFlagOverride SCIOverrideForKey(NSString *key) {
     if (!key.length) return SCIExpFlagOverrideOff;
+
+    // Legacy/name based overrides use SCIExpFlagOverride enum values.
     pthread_mutex_lock(&gLock);
     NSNumber *value = gOverrides[key];
     pthread_mutex_unlock(&gLock);
-    return value ? (SCIExpFlagOverride)value.integerValue : SCIExpFlagOverrideOff;
+    if (value) return (SCIExpFlagOverride)value.integerValue;
+
+    // New per-observed-id toggles are normal NSUserDefaults booleans at mcbr:<id>:<hex>.
+    id direct = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+    if ([direct isKindOfClass:NSNumber.class]) {
+        return [direct boolValue] ? SCIExpFlagOverrideTrue : SCIExpFlagOverrideFalse;
+    }
+    return SCIExpFlagOverrideOff;
 }
 
 static BOOL SCIApplyOverridesEnabled(void) {
@@ -148,6 +180,14 @@ static void SCIRecordBoolRead(id obj, SEL sel, uint64_t specifier, BOOL defaultV
                                                     callerSymbol:callerSymbol
                                                    callerAddress:(uint64_t)(uintptr_t)caller];
 
+    if (brokerID.length) {
+        NSString *overrideKey = [SCIMobileConfigBrokerStore overrideKeyForBrokerID:brokerID value:specifier];
+        [SCIMobileConfigBrokerStore noteObservedValue:originalValue forOverrideKey:overrideKey];
+        [SCIMobileConfigBrokerStore noteHitForBrokerID:brokerID
+                                                 value:specifier
+                                                forced:(override != SCIExpFlagOverrideOff)];
+    }
+
     if (!SCIShouldRecord(specifier, sel)) return;
 
     SCIDexKitResolvedName *resolved = [SCIDexKitNameResolver resolveBrokerID:brokerID value:specifier];
@@ -180,10 +220,12 @@ static BOOL SCIHookGetBool(id obj, SEL sel, uint64_t specifier) {
     if (gInside) return orig ? orig(obj, sel, specifier) : NO;
     gInside = YES;
     BOOL original = orig ? orig(obj, sel, specifier) : NO;
-    BOOL apply = SCIApplyOverridesEnabled();
-    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, SCIBrokerIDForObject(obj)) : SCIExpFlagOverrideOff;
+    NSString *brokerID = SCIBrokerIDForObject(obj);
+    BOOL shouldProcess = SCIObserverShouldProcessBrokerID(brokerID);
+    BOOL apply = shouldProcess && SCIApplyOverridesEnabled();
+    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, brokerID) : SCIExpFlagOverrideOff;
     BOOL finalValue = apply ? SCIApplyOverrideValue(override, original) : original;
-    SCIRecordBoolRead(obj, sel, specifier, original, original, finalValue, override, @"objc-getBool", caller);
+    if (shouldProcess) SCIRecordBoolRead(obj, sel, specifier, original, original, finalValue, override, @"objc-getBool", caller);
     gInside = NO;
     return finalValue;
 }
@@ -194,10 +236,12 @@ static BOOL SCIHookGetBoolDefault(id obj, SEL sel, uint64_t specifier, BOOL defa
     if (gInside) return orig ? orig(obj, sel, specifier, defaultValue) : defaultValue;
     gInside = YES;
     BOOL original = orig ? orig(obj, sel, specifier, defaultValue) : defaultValue;
-    BOOL apply = SCIApplyOverridesEnabled();
-    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, SCIBrokerIDForObject(obj)) : SCIExpFlagOverrideOff;
+    NSString *brokerID = SCIBrokerIDForObject(obj);
+    BOOL shouldProcess = SCIObserverShouldProcessBrokerID(brokerID);
+    BOOL apply = shouldProcess && SCIApplyOverridesEnabled();
+    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, brokerID) : SCIExpFlagOverrideOff;
     BOOL finalValue = apply ? SCIApplyOverrideValue(override, original) : original;
-    SCIRecordBoolRead(obj, sel, specifier, defaultValue, original, finalValue, override, @"objc-getBool", caller);
+    if (shouldProcess) SCIRecordBoolRead(obj, sel, specifier, defaultValue, original, finalValue, override, @"objc-getBool", caller);
     gInside = NO;
     return finalValue;
 }
@@ -208,10 +252,12 @@ static BOOL SCIHookGetBoolOptions(id obj, SEL sel, uint64_t specifier, void *opt
     if (gInside) return orig ? orig(obj, sel, specifier, options) : NO;
     gInside = YES;
     BOOL original = orig ? orig(obj, sel, specifier, options) : NO;
-    BOOL apply = SCIApplyOverridesEnabled();
-    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, SCIBrokerIDForObject(obj)) : SCIExpFlagOverrideOff;
+    NSString *brokerID = SCIBrokerIDForObject(obj);
+    BOOL shouldProcess = SCIObserverShouldProcessBrokerID(brokerID);
+    BOOL apply = shouldProcess && SCIApplyOverridesEnabled();
+    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, brokerID) : SCIExpFlagOverrideOff;
     BOOL finalValue = apply ? SCIApplyOverrideValue(override, original) : original;
-    SCIRecordBoolRead(obj, sel, specifier, original, original, finalValue, override, @"objc-getBool", caller);
+    if (shouldProcess) SCIRecordBoolRead(obj, sel, specifier, original, original, finalValue, override, @"objc-getBool", caller);
     gInside = NO;
     return finalValue;
 }
@@ -222,10 +268,12 @@ static BOOL SCIHookGetBoolOptionsDefault(id obj, SEL sel, uint64_t specifier, vo
     if (gInside) return orig ? orig(obj, sel, specifier, options, defaultValue) : defaultValue;
     gInside = YES;
     BOOL original = orig ? orig(obj, sel, specifier, options, defaultValue) : defaultValue;
-    BOOL apply = SCIApplyOverridesEnabled();
-    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, SCIBrokerIDForObject(obj)) : SCIExpFlagOverrideOff;
+    NSString *brokerID = SCIBrokerIDForObject(obj);
+    BOOL shouldProcess = SCIObserverShouldProcessBrokerID(brokerID);
+    BOOL apply = shouldProcess && SCIApplyOverridesEnabled();
+    SCIExpFlagOverride override = apply ? SCIOverrideForSpecifier(specifier, brokerID) : SCIExpFlagOverrideOff;
     BOOL finalValue = apply ? SCIApplyOverrideValue(override, original) : original;
-    SCIRecordBoolRead(obj, sel, specifier, defaultValue, original, finalValue, override, @"objc-getBool", caller);
+    if (shouldProcess) SCIRecordBoolRead(obj, sel, specifier, defaultValue, original, finalValue, override, @"objc-getBool", caller);
     gInside = NO;
     return finalValue;
 }
@@ -266,27 +314,87 @@ static uint64_t SCIHookAlias(id obj, SEL sel, uint64_t raw) {
     return translated;
 }
 
-static void SCIInstallOne(Class cls, NSString *selectorName, IMP replacement) {
-    if (!cls || !selectorName.length || !replacement) return;
+static void SCIRecordAccessOnly(id obj, SEL sel, uint64_t specifier, NSString *source, void *caller) {
+    NSString *className = SCIClassName(obj);
+    NSString *brokerID = SCIBrokerIDForClassName(className);
+    if (!SCIObserverShouldProcessBrokerID(brokerID)) return;
+
+    NSString *callerImage = nil;
+    NSString *callerSymbol = nil;
+    SCIResolveCaller(caller, &callerImage, &callerSymbol);
+
+    [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:className
+                                                        selector:NSStringFromSelector(sel)
+                                                       specifier:specifier
+                                                    defaultValue:NO
+                                                   originalValue:NO
+                                                      finalValue:NO
+                                                          source:(source.length ? source : @"objc-access-only")
+                                                     callerImage:callerImage
+                                                    callerSymbol:callerSymbol
+                                                   callerAddress:(uint64_t)(uintptr_t)caller];
+
+    if (SCIShouldRecord(specifier, sel)) {
+        [SCIExpFlags recordMCParamID:specifier
+                                type:SCIExpMCTypeBool
+                        defaultValue:[NSString stringWithFormat:@"access-only · context=%@ · selector=%@ · broker=%@ · caller=%@/%@", className, NSStringFromSelector(sel), brokerID ?: @"", callerImage ?: @"", callerSymbol ?: @""]
+                       originalValue:@"access-only"
+                        contextClass:className
+                        selectorName:NSStringFromSelector(sel)];
+    }
+}
+
+static void SCIHookTrackParameterAccess(id obj, SEL sel, uint64_t specifier) {
+    void *caller = __builtin_return_address(0);
+    void (*orig)(id, SEL, uint64_t) = (void (*)(id, SEL, uint64_t))SCIOrigFor(obj, sel);
+    if (gInside) { if (orig) orig(obj, sel, specifier); return; }
+    gInside = YES;
+    if (orig) orig(obj, sel, specifier);
+    SCIRecordAccessOnly(obj, sel, specifier, @"objc-trackParameterAccess", caller);
+    gInside = NO;
+}
+
+static void SCIHookFirstTimeAccessForParameter(id obj, SEL sel, uint64_t specifier, id context, id completion) {
+    void *caller = __builtin_return_address(0);
+    void (*orig)(id, SEL, uint64_t, id, id) = (void (*)(id, SEL, uint64_t, id, id))SCIOrigFor(obj, sel);
+    if (gInside) { if (orig) orig(obj, sel, specifier, context, completion); return; }
+    gInside = YES;
+    if (orig) orig(obj, sel, specifier, context, completion);
+    SCIRecordAccessOnly(obj, sel, specifier, @"objc-firstTimeAccessForParameter", caller);
+    gInside = NO;
+}
+
+static BOOL SCIInstallOne(Class cls, NSString *selectorName, IMP replacement) {
+    if (!cls || !selectorName.length || !replacement) return NO;
     SEL sel = NSSelectorFromString(selectorName);
-    if (!class_getInstanceMethod(cls, sel)) return;
+    if (!class_getInstanceMethod(cls, sel)) return NO;
     NSString *key = SCIKey(cls, sel);
     pthread_mutex_lock(&gLock);
     BOOL alreadyInstalled = gOrig[key] != nil;
     pthread_mutex_unlock(&gLock);
-    if (alreadyInstalled) return;
+    if (alreadyInstalled) return YES;
     IMP old = NULL;
     MSHookMessageEx(cls, sel, replacement, &old);
-    if (!old) return;
+    if (!old) return NO;
     pthread_mutex_lock(&gLock);
     if (!gOrig) gOrig = [NSMutableDictionary dictionary];
     gOrig[key] = [NSValue valueWithPointer:(const void *)(uintptr_t)old];
     pthread_mutex_unlock(&gLock);
+    return YES;
 }
 
 static void SCIInstallBoolHook(Class cls, NSString *selectorName, NSUInteger argc, IMP replacement) {
     SEL sel = NSSelectorFromString(selectorName);
     if (SCIMethodLooksBoolU64(cls, sel, argc)) SCIInstallOne(cls, selectorName, replacement);
+}
+
+static BOOL SCIMethodLooksVoidU64(Class cls, SEL sel, NSUInteger argc) {
+    return SCIMethodSizeOK(cls, sel, argc, 0, sizeof(uint64_t));
+}
+
+static void SCIInstallVoidU64Hook(Class cls, NSString *selectorName, NSUInteger argc, IMP replacement) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (SCIMethodLooksVoidU64(cls, sel, argc)) SCIInstallOne(cls, selectorName, replacement);
 }
 
 static void SCIInstallAliasHook(Class cls, NSString *selectorName) {
@@ -296,7 +404,15 @@ static void SCIInstallAliasHook(Class cls, NSString *selectorName) {
 
 static void SCIInstallClassHooks(NSString *className) {
     Class cls = NSClassFromString(className);
-    if (!cls) return;
+    if (!cls) {
+        NSString *bid = SCIBrokerIDForClassName(className);
+        if (bid.length) [SCIMobileConfigBrokerStore noteLastError:[NSString stringWithFormat:@"ObjC class not loaded yet: %@", className ?: @""] brokerID:bid];
+        return;
+    }
+
+    NSString *bid = SCIBrokerIDForClassName(className);
+    if (bid.length) [SCIMobileConfigBrokerStore noteLastError:@"ObjC observer target validated" brokerID:bid];
+
     SCIInstallBoolHook(cls, @"getBool:", 3, (IMP)SCIHookGetBool);
     SCIInstallBoolHook(cls, @"getBool:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
     SCIInstallBoolHook(cls, @"getBool:withOptions:", 4, (IMP)SCIHookGetBoolOptions);
@@ -304,16 +420,32 @@ static void SCIInstallClassHooks(NSString *className) {
     SCIInstallBoolHook(cls, @"getBoolWithoutLogging:", 3, (IMP)SCIHookGetBool);
     SCIInstallBoolHook(cls, @"getBoolWithoutLogging:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
     SCIInstallAliasHook(cls, @"_getTranslatedSpecifier:");
+    SCIInstallAliasHook(cls, @"getTranslatedSpecifier:");
     SCIInstallAliasHook(cls, @"getStableIdFromParamSpecifier:");
+
+    SCIInstallVoidU64Hook(cls, @"trackParameterAccess:", 3, (IMP)SCIHookTrackParameterAccess);
+    SCIInstallVoidU64Hook(cls, @"firstTimeAccessForParameter:context:completion:", 5, (IMP)SCIHookFirstTimeAccessForParameter);
 }
 
-static void SCIInstallAllObjCObserverHooks(void) {
-    if (gInstalled) return;
-    gInstalled = YES;
-    SCIRefreshOverrides();
+static NSUInteger SCIInstalledHookCount(void) {
+    pthread_mutex_lock(&gLock);
+    NSUInteger count = gOrig.count;
+    pthread_mutex_unlock(&gLock);
+    return count;
+}
+
+static void SCIRegisterDefaultsObserverOnce(void) {
+    if (gDefaultsObserverInstalled) return;
+    gDefaultsObserverInstalled = YES;
     [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil usingBlock:^(__unused NSNotification *note) {
         SCIRefreshOverrides();
     }];
+}
+
+static void SCIInstallAllObjCObserverHooks(void) {
+    SCIRefreshOverrides();
+    SCIRegisterDefaultsObserverOnce();
+    NSUInteger before = SCIInstalledHookCount();
     for (NSString *className in @[
         @"IGMobileConfigContextManager",
         @"IGMobileConfigSessionlessContextManager",
@@ -321,11 +453,28 @@ static void SCIInstallAllObjCObserverHooks(void) {
         @"FBMobileConfigContextManager",
         @"FBMobileConfigSessionlessContextManager",
         @"FBMobileConfigUserSessionContextManager",
-        @"FBMobileConfigContextObjcImpl"
+        @"FBMobileConfigAccessedParamsTracker",
+        @"FBMobileConfigContextTracker",
+        @"FBMobileConfigParameterDescription",
+        @"METAMobileConfigUsageSerializer",
+        @"METAMobileConfigUsageTracker"
     ]) {
         SCIInstallClassHooks(className);
     }
-    NSLog(@"[RyukGram][MCObjCObserver] installed explicit pass-through ObjC MobileConfig observer feeding SCIDexKitNameResolver");
+    NSUInteger after = SCIInstalledHookCount();
+    NSLog(@"[RyukGram][MCObjCObserver] ObjC MobileConfig observer pass installed=%lu new=%lu",
+          (unsigned long)after, (unsigned long)(after >= before ? after - before : 0));
+}
+
+static BOOL SCIBoolDefault(NSString *key, BOOL fallback) {
+    id obj = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+    return obj ? [obj boolValue] : fallback;
+}
+
+static void SCIScheduleObjCObserverInstall(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        SCIInstallAllObjCObserverHooks();
+    });
 }
 
 #ifdef __cplusplus
@@ -340,19 +489,45 @@ __attribute__((visibility("default"))) void SCIInstallObjCMobileConfigGetterObse
     SCIInstallAllObjCObserverHooks();
 }
 
+__attribute__((visibility("default"))) BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString *brokerID) {
+    if (!brokerID.length) return NO;
+    pthread_mutex_lock(&gLock);
+    NSArray<NSString *> *keys = [gOrig.allKeys copy];
+    pthread_mutex_unlock(&gLock);
+    for (NSString *key in keys) {
+        NSString *className = [[key componentsSeparatedByString:@":"] firstObject] ?: @"";
+        if ([SCIBrokerIDForClassName(className) isEqualToString:brokerID]) return YES;
+    }
+    return NO;
+}
+
+__attribute__((visibility("default"))) NSUInteger SCIObjCMobileConfigObserverInstalledCount(void) {
+    return SCIInstalledHookCount();
+}
+
+__attribute__((visibility("default"))) void SCIObjCMobileConfigObserverInstallEnabled(void) {
+    SCIInstallAllObjCObserverHooks();
+}
+
 #ifdef __cplusplus
 }
 #endif
 
 %ctor {
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-        kHooksKey: @NO,
-        kStartupKey: @NO,
-        kApplyOverridesKey: @NO,
+        kHooksKey: @YES,
+        kStartupKey: @YES,
+        kApplyOverridesKey: @YES,
         @"sci_exp_mc_c_hooks_enabled": @NO,
-        @"sci_exp_mc_hooks_enabled": @NO
+        @"sci_exp_mc_hooks_enabled": @YES
     }];
-    // Launch-safe by design: no ObjC MobileConfig methods are hooked from %ctor.
-    // MC Broker / focused lab can opt in by calling SCIInstallObjCMobileConfigGetterObserver()
-    // or SCIInstallFocusedObjCGetterObserver().
+
+    BOOL master = SCIBoolDefault(@"sci_exp_flags_enabled", YES);
+    BOOL enabled = SCIBoolDefault(kHooksKey, YES) || SCIBoolDefault(@"sci_exp_mc_hooks_enabled", YES);
+    BOOL startup = SCIBoolDefault(kStartupKey, YES);
+    if (master && enabled && startup) {
+        SCIScheduleObjCObserverInstall(0.25);
+        SCIScheduleObjCObserverInstall(1.0);
+        SCIScheduleObjCObserverInstall(3.0);
+    }
 }

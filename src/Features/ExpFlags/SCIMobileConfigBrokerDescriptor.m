@@ -40,8 +40,8 @@
         items = @[
             [self d:@"ig"
              symbol:@"_IGMobileConfigBooleanValueForInternalUse"
-               name:@"IG InternalUse Bool"
-            details:@"Primary MobileConfig C bool broker. Owner FBSharedFramework(72), VM 0x308f64, xrefs include IGStashSetExperimentsValues. Override is per specifier, not global."
+               name:@"IG Context ObjC Bool"
+            details:@"ObjC pass-through observer target: IGMobileConfigContextManager getBool* / getBoolWithoutLogging*. C broker symbol is retained only as lab metadata; Dev Mode uses ObjC runtime hooks."
               orig8:0xd503201f10fdae23ULL
                  vm:0x00308f64
               xrefs:16
@@ -54,8 +54,8 @@
 
             [self d:@"igsl"
              symbol:@"_IGMobileConfigSessionlessBooleanValueForInternalUse"
-               name:@"IG Sessionless Bool"
-            details:@"Sessionless complement. Owner FBSharedFramework(72), VM 0x53b87c. Override is per specifier."
+               name:@"IG Sessionless ObjC Bool"
+            details:@"ObjC pass-through observer target: IGMobileConfigSessionlessContextManager getBool*. C broker symbol is retained only as lab metadata; Dev Mode uses ObjC runtime hooks."
               orig8:0x91129063b0ffee43ULL
                  vm:0x0053b87c
               xrefs:6
@@ -64,6 +64,132 @@
             keyKind:SCIMCBrokerKeyKindSpecifier
              keyArg:2
          defaultArg:1
+            exactIG:NO],
+
+            [self d:@"igus"
+             symbol:@"IGMobileConfigUserSessionContextManager"
+               name:@"IG UserSession ObjC Bool"
+            details:@"ObjC pass-through observer target: IGMobileConfigUserSessionContextManager getBool* / exposure readers. Override is per observed specifier."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindPrimary
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fb"
+             symbol:@"FBMobileConfigContextManager"
+               name:@"FB Context ObjC Bool"
+            details:@"ObjC pass-through observer target: FBMobileConfigContextManager getBool* / getBoolWithoutLogging*. Override is per observed specifier."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindPrimary
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fbsl"
+             symbol:@"FBMobileConfigSessionlessContextManager"
+               name:@"FB Sessionless ObjC Bool"
+            details:@"ObjC pass-through observer target: FBMobileConfigSessionlessContextManager getBool*. Override is per observed specifier."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindPrimary
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fbus"
+             symbol:@"FBMobileConfigUserSessionContextManager"
+               name:@"FB UserSession ObjC Bool"
+            details:@"ObjC pass-through observer target: FBMobileConfigUserSessionContextManager getBool*. Override is per observed specifier."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindPrimary
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fbapt"
+             symbol:@"FBMobileConfigAccessedParamsTracker"
+               name:@"FB AccessedParams Tracker"
+            details:@"ObjC access-only observer target: firstTimeAccessForParameter:context:completion:. Used to collect IDs/call-sites; bool state comes from getters."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindAdvanced
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fbctx"
+             symbol:@"FBMobileConfigContextTracker"
+               name:@"FB Context Tracker"
+            details:@"ObjC validated observer target. Context/session metadata only; no bool override is applied here."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindAdvanced
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"fbpd"
+             symbol:@"FBMobileConfigParameterDescription"
+               name:@"FB Parameter Description"
+            details:@"ObjC validated observer target for parameter value/source metadata. No bool override is applied directly here."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindAdvanced
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"metaser"
+             symbol:@"METAMobileConfigUsageSerializer"
+               name:@"META Usage Serializer"
+            details:@"ObjC validated observer target. Serializer has C++ shared_ptr class methods; kept validation-only for safety."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindAdvanced
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
+            exactIG:NO],
+
+            [self d:@"metaut"
+             symbol:@"METAMobileConfigUsageTracker"
+               name:@"META Usage Tracker"
+            details:@"ObjC access-only observer target: trackParameterAccess:. Used to collect IDs/call-sites; bool state comes from getters."
+              orig8:0
+                 vm:0
+              xrefs:0
+               kind:SCIMCBrokerKindAdvanced
+                abi:SCIMCBrokerABIGeneric8Bool
+            keyKind:SCIMCBrokerKeyKindSpecifier
+             keyArg:2
+         defaultArg:0
             exactIG:NO],
 
             [self d:@"eg"
