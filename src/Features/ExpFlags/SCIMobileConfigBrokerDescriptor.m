@@ -50,7 +50,7 @@
             keyKind:SCIMCBrokerKeyKindSpecifier
              keyArg:2
          defaultArg:1
-            exactIG:YES],
+            exactIG:NO],
 
             [self d:@"igsl"
              symbol:@"_IGMobileConfigSessionlessBooleanValueForInternalUse"
@@ -64,7 +64,7 @@
             keyKind:SCIMCBrokerKeyKindSpecifier
              keyArg:2
          defaultArg:1
-            exactIG:YES],
+            exactIG:NO],
 
             [self d:@"eg"
              symbol:@"_EasyGatingPlatformGetBoolean"
