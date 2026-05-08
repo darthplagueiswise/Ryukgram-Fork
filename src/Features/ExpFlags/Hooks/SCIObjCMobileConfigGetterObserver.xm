@@ -388,8 +388,36 @@ static void SCIInstallBoolHook(Class cls, NSString *selectorName, NSUInteger arg
     if (SCIMethodLooksBoolU64(cls, sel, argc)) SCIInstallOne(cls, selectorName, replacement);
 }
 
+static BOOL SCITypeIsObjectLike(const char *type) {
+    return type && (type[0] == '@' || type[0] == '#');
+}
+
+static BOOL SCIMethodArgSizeOK(Class cls, SEL sel, NSUInteger index, NSUInteger wanted) {
+    Method method = class_getInstanceMethod(cls, sel);
+    if (!method || method_getNumberOfArguments(method) <= index) return NO;
+    char arg[128] = {0};
+    method_getArgumentType(method, index, arg, sizeof(arg));
+    NSUInteger argSize = 0;
+    NSGetSizeAndAlignment(arg, &argSize, NULL);
+    return argSize == wanted;
+}
+
+static BOOL SCIMethodArgObjectLike(Class cls, SEL sel, NSUInteger index) {
+    Method method = class_getInstanceMethod(cls, sel);
+    if (!method || method_getNumberOfArguments(method) <= index) return NO;
+    char arg[128] = {0};
+    method_getArgumentType(method, index, arg, sizeof(arg));
+    return SCITypeIsObjectLike(arg);
+}
+
 static BOOL SCIMethodLooksVoidU64(Class cls, SEL sel, NSUInteger argc) {
     return SCIMethodSizeOK(cls, sel, argc, 0, sizeof(uint64_t));
+}
+
+static BOOL SCIMethodLooksFirstTimeAccess(Class cls, SEL sel) {
+    return SCIMethodLooksVoidU64(cls, sel, 5) &&
+           SCIMethodArgObjectLike(cls, sel, 3) &&
+           SCIMethodArgObjectLike(cls, sel, 4);
 }
 
 static void SCIInstallVoidU64Hook(Class cls, NSString *selectorName, NSUInteger argc, IMP replacement) {
@@ -397,34 +425,65 @@ static void SCIInstallVoidU64Hook(Class cls, NSString *selectorName, NSUInteger 
     if (SCIMethodLooksVoidU64(cls, sel, argc)) SCIInstallOne(cls, selectorName, replacement);
 }
 
+static void SCIInstallFirstTimeAccessHook(Class cls, NSString *selectorName, IMP replacement) {
+    SEL sel = NSSelectorFromString(selectorName);
+    if (SCIMethodLooksFirstTimeAccess(cls, sel)) SCIInstallOne(cls, selectorName, replacement);
+}
+
 static void SCIInstallAliasHook(Class cls, NSString *selectorName) {
     SEL sel = NSSelectorFromString(selectorName);
     if (SCIMethodLooksU64ToU64(cls, sel)) SCIInstallOne(cls, selectorName, (IMP)SCIHookAlias);
 }
 
+static BOOL SCIClassIsBoolManagerTarget(NSString *className) {
+    return [className isEqualToString:@"IGMobileConfigContextManager"] ||
+           [className isEqualToString:@"IGMobileConfigSessionlessContextManager"] ||
+           [className isEqualToString:@"IGMobileConfigUserSessionContextManager"] ||
+           [className isEqualToString:@"FBMobileConfigContextManager"] ||
+           [className isEqualToString:@"FBMobileConfigSessionlessContextManager"] ||
+           [className isEqualToString:@"FBMobileConfigUserSessionContextManager"];
+}
+
+static BOOL SCIClassIsAccessOnlyTrackerTarget(NSString *className) {
+    return [className isEqualToString:@"FBMobileConfigAccessedParamsTracker"] ||
+           [className isEqualToString:@"METAMobileConfigUsageTracker"];
+}
+
 static void SCIInstallClassHooks(NSString *className) {
+    NSString *bid = SCIBrokerIDForClassName(className);
+    if (bid.length && !SCIObserverShouldProcessBrokerID(bid)) return;
+
     Class cls = NSClassFromString(className);
     if (!cls) {
-        NSString *bid = SCIBrokerIDForClassName(className);
         if (bid.length) [SCIMobileConfigBrokerStore noteLastError:[NSString stringWithFormat:@"ObjC class not loaded yet: %@", className ?: @""] brokerID:bid];
         return;
     }
 
-    NSString *bid = SCIBrokerIDForClassName(className);
     if (bid.length) [SCIMobileConfigBrokerStore noteLastError:@"ObjC observer target validated" brokerID:bid];
 
-    SCIInstallBoolHook(cls, @"getBool:", 3, (IMP)SCIHookGetBool);
-    SCIInstallBoolHook(cls, @"getBool:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
-    SCIInstallBoolHook(cls, @"getBool:withOptions:", 4, (IMP)SCIHookGetBoolOptions);
-    SCIInstallBoolHook(cls, @"getBool:withOptions:withDefault:", 5, (IMP)SCIHookGetBoolOptionsDefault);
-    SCIInstallBoolHook(cls, @"getBoolWithoutLogging:", 3, (IMP)SCIHookGetBool);
-    SCIInstallBoolHook(cls, @"getBoolWithoutLogging:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
-    SCIInstallAliasHook(cls, @"_getTranslatedSpecifier:");
-    SCIInstallAliasHook(cls, @"getTranslatedSpecifier:");
-    SCIInstallAliasHook(cls, @"getStableIdFromParamSpecifier:");
+    if (SCIClassIsBoolManagerTarget(className)) {
+        SCIInstallBoolHook(cls, @"getBool:", 3, (IMP)SCIHookGetBool);
+        SCIInstallBoolHook(cls, @"getBool:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
+        SCIInstallBoolHook(cls, @"getBool:withOptions:", 4, (IMP)SCIHookGetBoolOptions);
+        SCIInstallBoolHook(cls, @"getBool:withOptions:withDefault:", 5, (IMP)SCIHookGetBoolOptionsDefault);
+        SCIInstallBoolHook(cls, @"getBoolWithoutLogging:", 3, (IMP)SCIHookGetBool);
+        SCIInstallBoolHook(cls, @"getBoolWithoutLogging:withDefault:", 4, (IMP)SCIHookGetBoolDefault);
+        SCIInstallAliasHook(cls, @"_getTranslatedSpecifier:");
+        SCIInstallAliasHook(cls, @"getTranslatedSpecifier:");
+        SCIInstallAliasHook(cls, @"getStableIdFromParamSpecifier:");
+        return;
+    }
 
-    SCIInstallVoidU64Hook(cls, @"trackParameterAccess:", 3, (IMP)SCIHookTrackParameterAccess);
-    SCIInstallVoidU64Hook(cls, @"firstTimeAccessForParameter:context:completion:", 5, (IMP)SCIHookFirstTimeAccessForParameter);
+    if (SCIClassIsAccessOnlyTrackerTarget(className)) {
+        SCIInstallVoidU64Hook(cls, @"trackParameterAccess:", 3, (IMP)SCIHookTrackParameterAccess);
+        SCIInstallFirstTimeAccessHook(cls, @"firstTimeAccessForParameter:context:completion:", (IMP)SCIHookFirstTimeAccessForParameter);
+        return;
+    }
+
+    // Validation-only targets for now. These classes are useful metadata sources,
+    // but their hot paths include context/serializer/C++-backed methods. Do not
+    // hook them in a sideload build until a concrete selector ABI is proven safe.
+    if (bid.length) [SCIMobileConfigBrokerStore noteLastError:@"ObjC observer target validated; no hook installed in crash-safe mode" brokerID:bid];
 }
 
 static NSUInteger SCIInstalledHookCount(void) {
@@ -471,12 +530,6 @@ static BOOL SCIBoolDefault(NSString *key, BOOL fallback) {
     return obj ? [obj boolValue] : fallback;
 }
 
-static void SCIScheduleObjCObserverInstall(NSTimeInterval delay) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        SCIInstallAllObjCObserverHooks();
-    });
-}
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -514,20 +567,37 @@ __attribute__((visibility("default"))) void SCIObjCMobileConfigObserverInstallEn
 #endif
 
 %ctor {
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-        kHooksKey: @YES,
-        kStartupKey: @YES,
-        kApplyOverridesKey: @YES,
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    [ud registerDefaults:@{
+        kHooksKey: @NO,
+        kStartupKey: @NO,
+        kApplyOverridesKey: @NO,
         @"sci_exp_mc_c_hooks_enabled": @NO,
-        @"sci_exp_mc_hooks_enabled": @YES
+        @"sci_exp_mc_hooks_enabled": @NO,
+        @"sci_exp_mc_legacy_getter_hooks_enabled": @NO
     }];
 
-    BOOL master = SCIBoolDefault(@"sci_exp_flags_enabled", YES);
-    BOOL enabled = SCIBoolDefault(kHooksKey, YES) || SCIBoolDefault(@"sci_exp_mc_hooks_enabled", YES);
-    BOOL startup = SCIBoolDefault(kStartupKey, YES);
-    if (master && enabled && startup) {
-        SCIScheduleObjCObserverInstall(0.25);
-        SCIScheduleObjCObserverInstall(1.0);
-        SCIScheduleObjCObserverInstall(3.0);
+    // Crash-safe migration from the previous v7 build: never auto-install
+    // MobileConfig hooks at process startup. Installation is manual from Dev Mode.
+    if (![ud boolForKey:@"sci_exp_default_observers_v8_crashsafe_done"]) {
+        for (NSString *key in @[kHooksKey,
+                               kStartupKey,
+                               kApplyOverridesKey,
+                               @"sci_exp_mc_hooks_enabled",
+                               @"sci_exp_mc_c_hooks_enabled",
+                               @"sci_exp_mc_c_broker_body_hooks_enabled",
+                               @"sci_exp_mc_legacy_getter_hooks_enabled"]) {
+            [ud setBool:NO forKey:key];
+        }
+        for (NSString *brokerID in @[@"ig", @"igsl", @"igus", @"fb", @"fbsl", @"fbus", @"fbapt", @"fbctx", @"fbpd", @"metaser", @"metaut", @"eg", @"mci", @"egi", @"ega", @"mcic", @"mcie", @"meta", @"metanx", @"msgc"]) {
+            [ud setBool:NO forKey:[@"mcbr.hook:" stringByAppendingString:brokerID]];
+        }
+        [ud setObject:@[] forKey:@"mcbr.hooks"];
+        [ud setBool:YES forKey:@"sci_exp_default_observers_v8_crashsafe_done"];
+        [ud synchronize];
     }
+
+    // Do not schedule hooks from %ctor. Dev Mode/MC ObjC Observers calls
+    // SCIInstallObjCMobileConfigGetterObserver() explicitly after the user opts in.
+    (void)SCIBoolDefault;
 }

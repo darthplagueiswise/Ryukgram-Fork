@@ -123,11 +123,11 @@ static void install(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     install(meta, @"groupName",     (IMP)new_groupName,     (IMP *)&orig_groupName);
     install(meta, @"peekGroupName", (IMP)new_peekGroupName, (IMP *)&orig_peekGroupName);
 
-    // The unified ObjC observer owns MobileConfig getters now. Keep this legacy
-    // recorder disabled when the new observer is enabled to avoid duplicate chains.
-    BOOL unifiedObjCObserver = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_objc_getter_observer_enabled"] boolValue];
-    BOOL startupObjCObserver = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_objc_startup_hooks_enabled"] boolValue];
-    if (!unifiedObjCObserver || !startupObjCObserver) {
+    // Crash-safe alpha3: the old IGMobileConfig getter recorder is no longer
+    // installed automatically. It can still be enabled explicitly for lab use,
+    // but Dev Mode observation should use MC ObjC Observers instead.
+    BOOL legacyMCGetterHooks = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_legacy_getter_hooks_enabled"] boolValue];
+    if (legacyMCGetterHooks) {
         Class mc = NSClassFromString(@"IGMobileConfigContextManager");
         install(mc, @"getBool:",               (IMP)new_mcBool,       (IMP *)&orig_mcBool);
         install(mc, @"getBool:withDefault:",   (IMP)new_mcBool_def,   (IMP *)&orig_mcBool_def);
