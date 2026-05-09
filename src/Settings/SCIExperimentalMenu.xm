@@ -3,10 +3,14 @@
 #import "SCIResolverReportViewController.h"
 #import "SCIDogfoodingMainLauncher.h"
 #import "SCIDexKitViewController.h"
+#import "SCIEnabledExperimentTogglesViewController.h"
 #import "SCIExperimentRuntimeBrowserViewController.h"
+#import "SCIExpPersistedQueryViewController.h"
 #import "SCIMobileConfigBrokerViewController.h"
 #import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
+#import "../Features/ExpFlags/SCIAutofillInternalDevMode.h"
+#import "../Features/ExpFlags/SCIPersistedQueryCatalog.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
@@ -131,6 +135,19 @@ static void RYDevShowAlert(NSString *title, NSString *message) {
     [top presentViewController:alert animated:YES completion:nil];
 }
 
+static void RYDevShowAlertWithCopy(NSString *title, NSString *message) {
+    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
+    if (!top) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title ?: @"RyukGram"
+                                                                   message:message ?: @""
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+        UIPasteboard.generalPasteboard.string = message ?: @"";
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [top presentViewController:alert animated:YES completion:nil];
+}
+
 static void RYDevOpenMainDogfood(void) {
     UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
     if (!top) { RYDevShowAlert(@"Dogfood unavailable", @"No active presenter was found."); return; }
@@ -245,6 +262,30 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Observe MobileConfig symbol access in real-time."
                                                icon:[SCISymbol symbolWithName:@"eye"]
                                      viewController:[SCIMobileConfigSymbolObserverViewController new]],
+                [SCISetting navigationCellWithTitle:@"Persisted GraphQL Mapping"
+                                           subtitle:@"QuickSnap/Instants, Dogfood, Homecoming and client_doc_id operation catalog from schema JSON."
+                                               icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
+                                     viewController:[SCIExpPersistedQueryViewController new]],
+                [SCISetting buttonCellWithTitle:@"Persisted GraphQL Diagnostic"
+                                       subtitle:@"Shows loaded schema source plus priority QuickSnap and Dogfood operation matches."
+                                           icon:[SCISymbol symbolWithName:@"list.bullet.clipboard"]
+                                         action:^{
+                                             [[SCIPersistedQueryCatalog sharedCatalog] reload];
+                                             RYDevShowAlertWithCopy(@"Persisted GraphQL", [[SCIPersistedQueryCatalog sharedCatalog] diagnosticReport]);
+                                         }],
+                [SCISetting buttonCellWithTitle:@"Apply Autofill Defaults"
+                                       subtitle:@"Writes Autofill backing defaults for internal dev mode."
+                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
+                                         action:^{
+                                             [SCIAutofillInternalDevMode applyEnabledToggles];
+                                             RYDevShowAlertWithCopy(@"Autofill", [SCIAutofillInternalDevMode statusText]);
+                                         }],
+                [SCISetting buttonCellWithTitle:@"Autofill Status"
+                                       subtitle:@"Backing defaults + selector availability."
+                                           icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
+                                         action:^{
+                                             RYDevShowAlertWithCopy(@"Autofill", [SCIAutofillInternalDevMode statusText]);
+                                         }],
                 [SCISetting buttonCellWithTitle:@"Reset Developer Mode State"
                                        subtitle:@"Turns off identity aliases and all legacy MC hook toggles."
                                            icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
@@ -420,6 +461,8 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
 }
 
 %ctor {
+    [SCIAutofillInternalDevMode registerDefaults];
+    [SCIPersistedQueryCatalog prewarmInBackground];
     Class cls = NSClassFromString(@"SCITweakSettings");
     if (!cls) return;
     Class meta = object_getClass(cls);

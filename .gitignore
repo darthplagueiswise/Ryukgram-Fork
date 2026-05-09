@@ -45,6 +45,12 @@ wrapper/
 scripts/*.py
 scripts/__pycache__/
 
+# Build logs and artifacts
+*.log
+build_*/
+build_errors_only.log
+build_full.log
+
 # FFmpegKit frameworks
 modules/ffmpegkit/
 
