@@ -5,6 +5,7 @@
 #import <dlfcn.h>
 #import "../SCIDexKitNameResolver.h"
 #import "../SCIMobileConfigBrokerStore.h"
+#import "../SCIMobileConfigBrokerRouter.h"
 
 static NSString *const kStartupKey=@"sci_exp_mc_objc_startup_hooks_enabled";
 static NSString *const kApplyKey=@"sci_exp_mc_objc_apply_overrides_enabled";
@@ -34,12 +35,13 @@ static void Rec(id o,SEL s,uint64_t p,BOOL orig,BOOL fin,void*c){NSString*b=BID(
 static BOOL HBoolOpt(id o,SEL s,uint64_t p,void*opt){void*c=__builtin_return_address(0);BOOL(*orig)(id,SEL,uint64_t,void*)=(BOOL(*)(id,SEL,uint64_t,void*))Orig(o,s);if(gInside)return orig?orig(o,s,p,opt):NO;gInside=YES;BOOL ov=orig?orig(o,s,p,opt):NO;BOOL fv=FinalFor(p,BID(o),ov);Rec(o,s,p,ov,fv,c);gInside=NO;return fv;}
 static uint64_t HAlias(id o,SEL s,uint64_t raw){uint64_t(*orig)(id,SEL,uint64_t)=(uint64_t(*)(id,SEL,uint64_t))Orig(o,s);if(gInside)return orig?orig(o,s,raw):raw;gInside=YES;uint64_t t=orig?orig(o,s,raw):raw;gInside=NO;if(raw&&t&&raw!=t)[SCIDexKitNameResolver noteAliasFromSpecifier:raw toSpecifier:t source:[NSString stringWithFormat:@"%@ %@",CN(o),NSStringFromSelector(s)]];return t;}
 static BOOL One(Class c,NSString*n,IMP r){SEL s=NSSelectorFromString(n);if(!class_getInstanceMethod(c,s))return NO;NSString*k=K(c,s);pthread_mutex_lock(&gLock);BOOL a=gOrig[k]!=nil;pthread_mutex_unlock(&gLock);if(a)return YES;IMP old=NULL;MSHookMessageEx(c,s,r,&old);if(!old)return NO;pthread_mutex_lock(&gLock);if(!gOrig)gOrig=[NSMutableDictionary dictionary];gOrig[k]=[NSValue valueWithPointer:(const void*)(uintptr_t)old];pthread_mutex_unlock(&gLock);return YES;}
-static BOOL InstallB(NSString*b){NSString*cn=ClassForBID(b);if(!cn.length){[SCIMobileConfigBrokerStore noteLastError:@"canary unsupported broker" brokerID:b];return NO;}Class c=NSClassFromString(cn);if(!c){[SCIMobileConfigBrokerStore noteLastError:[NSString stringWithFormat:@"class not loaded: %@",cn] brokerID:b];return NO;}SEL s=NSSelectorFromString(@"getBool:withOptions:");if(!LooksBoolU64Opt(c,s)){[SCIMobileConfigBrokerStore noteLastError:@"getBool:withOptions: ABI mismatch" brokerID:b];return NO;}BOOL ok=One(c,@"getBool:withOptions:",(IMP)HBoolOpt);[SCIMobileConfigBrokerStore noteLastError:(ok?@"canary live: getBool:withOptions: only; alias off":@"canary install failed") brokerID:b];return ok;}
+static void InstallCBroker(NSString*b){if(!b.length)return;SCIMobileConfigBrokerDescriptor*d=[SCIMobileConfigBrokerDescriptor descriptorForID:b];if(d){NSError*err=nil;[SCIMobileConfigBrokerRouter installBroker:d error:&err];}}
+static BOOL InstallB(NSString*b){NSString*cn=ClassForBID(b);if(!cn.length){return NO;}Class c=NSClassFromString(cn);if(!c){[SCIMobileConfigBrokerStore noteLastError:[NSString stringWithFormat:@"ObjC canary class not loaded: %@",cn] brokerID:b];return NO;}SEL s=NSSelectorFromString(@"getBool:withOptions:");if(!LooksBoolU64Opt(c,s)){[SCIMobileConfigBrokerStore noteLastError:@"ObjC canary getBool:withOptions: ABI mismatch" brokerID:b];return NO;}BOOL ok=One(c,@"getBool:withOptions:",(IMP)HBoolOpt);[SCIMobileConfigBrokerStore noteLastError:(ok?@"ObjC canary live: getBool:withOptions: only; C broker import observer restored":@"ObjC canary install failed") brokerID:b];return ok;}
 static BOOL InstallAliasB(NSString*b){if(!On(kAliasKey))return NO;NSString*cn=ClassForBID(b);Class c=cn.length?NSClassFromString(cn):Nil;if(!c)return NO;BOOL any=NO;for(NSString*n in @[@"_getTranslatedSpecifier:",@"getTranslatedSpecifier:",@"getStableIdFromParamSpecifier:"]){SEL s=NSSelectorFromString(n);if(LooksU64U64(c,s))any=One(c,n,(IMP)HAlias)||any;}return any;}
 static NSUInteger Count(void){pthread_mutex_lock(&gLock);NSUInteger c=gOrig.count;pthread_mutex_unlock(&gLock);return c;}
-static void InstallBroker(NSString*b){InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
-static void InstallEnabled(void){for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
-static void InstallPersistedIfNeeded(void){if(!Should(@"ig")&&!Should(@"igsl"))return;InstallEnabled();dispatch_async(dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});}
+static void InstallBroker(NSString*b){InstallCBroker(b);InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
+static void InstallEnabled(void){[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
+static void InstallPersistedIfNeeded(void){InstallEnabled();dispatch_async(dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});}
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,8 +50,8 @@ __attribute__((visibility("default"))) void SCIInstallObjCMobileConfigGetterObse
 __attribute__((visibility("default"))) void SCIInstallObjCMobileConfigAliasResolverObserverForBrokerID(NSString*b){[[NSUserDefaults standardUserDefaults] setBool:YES forKey:kAliasKey];InstallAliasB(b);} 
 __attribute__((visibility("default"))) void SCIInstallFocusedObjCGetterObserver(void){InstallEnabled();}
 __attribute__((visibility("default"))) void SCIInstallObjCMobileConfigGetterObserver(void){InstallEnabled();}
-__attribute__((visibility("default"))) BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString*b){if(!b.length)return NO;pthread_mutex_lock(&gLock);NSArray*ks=[gOrig.allKeys copy];pthread_mutex_unlock(&gLock);for(NSString*k in ks){NSString*cn=[[k componentsSeparatedByString:@":"] firstObject]?:@"";if([BIDForCN(cn) isEqualToString:b])return YES;}return NO;}
-__attribute__((visibility("default"))) NSUInteger SCIObjCMobileConfigObserverInstalledCount(void){return Count();}
+__attribute__((visibility("default"))) BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString*b){if(!b.length)return [SCIMobileConfigBrokerRouter installedCount]>0;pthread_mutex_lock(&gLock);NSArray*ks=[gOrig.allKeys copy];pthread_mutex_unlock(&gLock);for(NSString*k in ks){NSString*cn=[[k componentsSeparatedByString:@":"] firstObject]?:@"";if([BIDForCN(cn) isEqualToString:b])return YES;}return [SCIMobileConfigBrokerRouter isInstalled:b];}
+__attribute__((visibility("default"))) NSUInteger SCIObjCMobileConfigObserverInstalledCount(void){return Count()+[SCIMobileConfigBrokerRouter installedCount];}
 __attribute__((visibility("default"))) void SCIObjCMobileConfigObserverInstallEnabled(void){InstallEnabled();}
 #ifdef __cplusplus
 }
