@@ -38,7 +38,8 @@ static BOOL InstallB(NSString*b){NSString*cn=ClassForBID(b);if(!cn.length){[SCIM
 static BOOL InstallAliasB(NSString*b){if(!On(kAliasKey))return NO;NSString*cn=ClassForBID(b);Class c=cn.length?NSClassFromString(cn):Nil;if(!c)return NO;BOOL any=NO;for(NSString*n in @[@"_getTranslatedSpecifier:",@"getTranslatedSpecifier:",@"getStableIdFromParamSpecifier:"]){SEL s=NSSelectorFromString(n);if(LooksU64U64(c,s))any=One(c,n,(IMP)HAlias)||any;}return any;}
 static NSUInteger Count(void){pthread_mutex_lock(&gLock);NSUInteger c=gOrig.count;pthread_mutex_unlock(&gLock);return c;}
 static void InstallBroker(NSString*b){InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
-static void InstallEnabled(void){for(NSString*b in [SCIMobileConfigBrokerStore enabledHookBrokerIDs])InstallBroker(b);} 
+static void InstallEnabled(void){for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
+static void InstallPersistedIfNeeded(void){if(!Should(@"ig")&&!Should(@"igsl"))return;InstallEnabled();dispatch_async(dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});}
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,4 +55,4 @@ __attribute__((visibility("default"))) void SCIObjCMobileConfigObserverInstallEn
 }
 #endif
 
-%ctor{NSUserDefaults*ud=[NSUserDefaults standardUserDefaults];[ud registerDefaults:@{kStartupKey:@NO,kApplyKey:@NO,kAliasKey:@NO,@"sci_exp_mc_c_hooks_enabled":@NO,@"sci_exp_mc_hooks_enabled":@NO,@"sci_exp_mc_legacy_getter_hooks_enabled":@NO}];if(![ud boolForKey:@"sci_exp_default_observers_v9_canary_done"]){for(NSString*k in @[kStartupKey,kApplyKey,kAliasKey,@"sci_exp_mc_hooks_enabled",@"sci_exp_mc_c_hooks_enabled",@"sci_exp_mc_c_broker_body_hooks_enabled",@"sci_exp_mc_legacy_getter_hooks_enabled"])[ud setBool:NO forKey:k];for(NSString*b in @[@"ig",@"igsl",@"igus",@"fb",@"fbsl",@"fbus",@"fbapt",@"fbctx",@"fbpd",@"metaser",@"metaut",@"eg",@"mci",@"egi",@"ega",@"mcic",@"mcie",@"meta",@"metanx",@"msgc"])[ud setBool:NO forKey:[@"mcbr.hook:" stringByAppendingString:b]];[ud setObject:@[] forKey:@"mcbr.hooks"];[ud setBool:YES forKey:@"sci_exp_default_observers_v9_canary_done"];[ud synchronize];}}
+%ctor{NSUserDefaults*ud=[NSUserDefaults standardUserDefaults];[ud registerDefaults:@{kStartupKey:@NO,kApplyKey:@NO,kAliasKey:@NO,@"sci_exp_mc_c_hooks_enabled":@NO,@"sci_exp_mc_hooks_enabled":@NO,@"sci_exp_mc_legacy_getter_hooks_enabled":@NO}];if(![ud boolForKey:@"sci_exp_default_observers_v10_preserve_persistence_done"]){for(NSString*k in @[@"sci_exp_mc_hooks_enabled",@"sci_exp_mc_c_hooks_enabled",@"sci_exp_mc_c_broker_body_hooks_enabled",@"sci_exp_mc_legacy_getter_hooks_enabled"])[ud setBool:NO forKey:k];[ud setBool:YES forKey:@"sci_exp_default_observers_v10_preserve_persistence_done"];[ud synchronize];}InstallPersistedIfNeeded();}
