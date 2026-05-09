@@ -14,8 +14,10 @@ static const char *kSCIMCStoragePersistExtraDataSymbol = "__ZN12mobileconfig28FB
 // Public export wrapper in FBSharedFramework starts as:
 //   mov w4, #0
 //   b   worker
-// The import observer therefore treats x0-x3 as raw/pass-through arguments and
-// preserves x0 as a raw uintptr_t return. It does not call the export directly.
+// Keep this as an import-only observer. It must never install automatically at
+// process start in sideload builds: a bad import rebind or signature mismatch in
+// this hot update path can crash Instagram during cold launch. Install it only
+// from an explicit debug action after the UI/app has stabilized.
 typedef uintptr_t (*SCIIGTryUpdateImportFn)(void *arg0, void *arg1, void *arg2, void *arg3);
 static SCIIGTryUpdateImportFn orig_SCIIGTryUpdateImport = NULL;
 static BOOL gSCITryUpdateImportInstalled = NO;
@@ -27,7 +29,6 @@ static void SCISetObserverStatus(NSString *status, NSDictionary<NSString *, id> 
     [ud setObject:extra ?: @{} forKey:@"sci.mc.id_name_observer.extra"];
     [ud setObject:[SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"" forKey:@"sci.mc.id_name_observer.path"];
     [ud setObject:[NSDate date] forKey:@"sci.mc.id_name_observer.date"];
-    [ud synchronize];
 }
 
 static NSDictionary<NSString *, id> *SCIProbeIDNameMappingSymbols(void) {
@@ -118,10 +119,26 @@ static void SCIInstallTryUpdateImportObserver(void) {
     NSLog(@"[RyukGram][MCIDName] %@", status);
 }
 
+__attribute__((visibility("default")))
+void SCIInstallMobileConfigIDNameMappingObserver(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SCIInstallTryUpdateImportObserver();
+    });
+}
+
+__attribute__((visibility("default")))
+void SCIInstallMobileConfigIDNameMappingObserverIfNeeded(void) {
+    SCIInstallMobileConfigIDNameMappingObserver();
+}
+
+__attribute__((visibility("default")))
+BOOL SCIIsMobileConfigIDNameMappingObserverInstalled(void) {
+    return gSCITryUpdateImportInstalled;
+}
+
 %ctor {
-    @autoreleasepool {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            SCIInstallTryUpdateImportObserver();
-        });
-    }
+    // Deliberately no automatic install here. The run #46 version installed a
+    // TryUpdate fishhook from %ctor; in sideload this is too early and too risky
+    // for a hot MobileConfig update path. Keep startup inert; expose the installer
+    // for a future explicit debug/UI action only.
 }
