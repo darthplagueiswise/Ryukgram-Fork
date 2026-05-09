@@ -66,19 +66,34 @@
 + (NSString *)familyKeyForClassName:(NSString *)className selector:(NSString *)selector {
     NSString *ls = selector.lowercaseString ?: @"";
     NSString *family = @"misc";
-    if ([ls containsString:@"firstswipepreview"]) family = @"first-swipe-preview";
-    else if ([ls containsString:@"preview"]) family = @"preview";
-    else if ([ls containsString:@"bottomsheet"]) family = @"bottomsheet";
-    else if ([ls containsString:@"globalsound"] || [ls containsString:@"sound"]) family = @"sound";
-    else if ([ls containsString:@"caption"]) family = @"caption";
-    else if ([ls containsString:@"scrubber"]) family = @"scrubber";
-    else if ([ls containsString:@"spinner"]) family = @"spinner";
-    else if ([ls containsString:@"homecoming"]) family = @"homecoming";
-    else if ([ls containsString:@"quicksnap"]) family = @"quicksnap";
-    else if ([ls containsString:@"friendmap"]) family = @"friendmap";
-    else if ([ls containsString:@"liquidglass"]) family = @"liquidglass";
-    else if ([ls containsString:@"prism"]) family = @"prism";
+    if ([ls containsString:@"firstswipepreview"] || ([ls containsString:@"firstswipe"] && [ls containsString:@"preview"])) family = @"FirstSwipePreview";
+    else if ([ls containsString:@"defaultsound"] || ([ls containsString:@"default"] && [ls containsString:@"sound"])) family = @"DefaultSound";
+    else if ([ls containsString:@"globalsound"] || ([ls containsString:@"global"] && [ls containsString:@"sound"])) family = @"GlobalSound";
+    else if ([ls containsString:@"bottomsheet"]) family = @"Bottomsheet";
+    else if ([ls containsString:@"preview"]) family = @"Preview";
+    else if ([ls containsString:@"sound"]) family = @"Sound";
+    else if ([ls containsString:@"caption"]) family = @"Caption";
+    else if ([ls containsString:@"scrubber"]) family = @"Scrubber";
+    else if ([ls containsString:@"spinner"]) family = @"Spinner";
+    else if ([ls containsString:@"homecoming"]) family = @"Homecoming";
+    else if ([ls containsString:@"quicksnap"]) family = @"QuickSnap";
+    else if ([ls containsString:@"friendmap"]) family = @"FriendMap";
+    else if ([ls containsString:@"liquidglass"]) family = @"LiquidGlass";
+    else if ([ls containsString:@"prism"]) family = @"Prism";
     return [NSString stringWithFormat:@"%@|%@", className ?: @"?", family];
+}
+
++ (NSString *)conflictFamilyLabelForFamilyKey:(NSString *)familyKey {
+    if (![familyKey isKindOfClass:NSString.class] || !familyKey.length) return @"";
+    NSString *suffix = [[familyKey componentsSeparatedByString:@"|"] lastObject] ?: @"";
+    NSSet *conflicts = [NSSet setWithArray:@[@"FirstSwipePreview", @"DefaultSound", @"Preview", @"Bottomsheet", @"GlobalSound"]];
+    return [conflicts containsObject:suffix] ? suffix : @"";
+}
++ (BOOL)isConflictFamilyKey:(NSString *)familyKey {
+    return [self conflictFamilyLabelForFamilyKey:familyKey].length > 0;
+}
++ (NSString *)conflictFamilyLabelForClassName:(NSString *)className selector:(NSString *)selector {
+    return [self conflictFamilyLabelForFamilyKey:[self familyKeyForClassName:className selector:selector]];
 }
 
 + (BOOL)isHiddenNoiseClassification:(NSDictionary<NSString *, id> *)classification {
@@ -117,6 +132,9 @@
     BOOL config = [self containsAny:selector tokens:[self configOptionTokens]] || [lc containsString:@"configuration"] || [lc containsString:@"config"];
     BOOL variant = [self containsAny:selector tokens:[self variantTokens]];
     BOOL debugInternal = [lc containsString:@"debug"] || [lc containsString:@"dogfood"] || [lc containsString:@"internal"] || [ls containsString:@"debug"] || [ls containsString:@"internal"];
+    NSString *familyKey = [self familyKeyForClassName:className selector:selector];
+    NSString *conflictFamily = [self conflictFamilyLabelForFamilyKey:familyKey];
+    BOOL conflict = conflictFamily.length > 0;
 
     if (uiState || [self isExcludedClassName:className selector:selector]) {
         category = @"ui-state";
@@ -176,6 +194,12 @@
         [reasons addObject:@"generic BOOL; discovery only"];
     }
 
+    if (conflict) {
+        batch = NO;
+        if (risk < 3 && !rootGate) risk = 3;
+        [reasons addObject:[NSString stringWithFormat:@"conflict family %@: batch force blocked; use Discovery -> Observation -> explicit per-row Override", conflictFamily]];
+    }
+
     if ([imageBasename isEqualToString:@"FBSharedFramework"]) [reasons addObject:@"FBSharedFramework"];
     [reasons addObject:[NSString stringWithFormat:@"score=%ld", (long)score]];
 
@@ -186,7 +210,8 @@
         @"observeRecommended": @(observe),
         @"forceRecommended": @(force),
         @"classificationReason": [reasons componentsJoinedByString:@" · "],
-        @"familyKey": [self familyKeyForClassName:className selector:selector]
+        @"familyKey": familyKey,
+        @"conflictFamily": conflictFamily
     };
 }
 
