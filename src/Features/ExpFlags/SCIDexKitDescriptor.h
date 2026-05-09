@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <stdint.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -25,6 +26,21 @@ typedef NS_ENUM(NSInteger, SCIDexKitKnownBoolState) {
 @property (nonatomic, assign) BOOL unavailable;
 @property (nonatomic, copy, nullable) NSString *unavailableReason;
 @property (nonatomic, assign) NSInteger curatedScore;
+
+// Commit 1 classifier metadata. These fields do not change existing override
+// behavior yet; they let the UI/routing layer distinguish feature gates from
+// noisy UI state/default/variant methods in the next commits.
+@property (nonatomic, copy) NSString *semanticCategory;
+@property (nonatomic, assign) NSInteger riskLevel;
+@property (nonatomic, assign) BOOL batchForceAllowed;
+@property (nonatomic, assign) BOOL observeRecommended;
+@property (nonatomic, assign) BOOL forceRecommended;
+@property (nonatomic, copy) NSString *classificationReason;
+@property (nonatomic, copy) NSString *familyKey;
+@property (nonatomic, assign) uint64_t impAddress;
+@property (nonatomic, copy) NSString *impSymbol;
+@property (nonatomic, copy) NSString *implementationKey;
+
 - (NSString *)ownerDisplayName;
 - (NSString *)ownerGroupKey;
 @end
