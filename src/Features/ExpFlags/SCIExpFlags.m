@@ -1,5 +1,7 @@
 #import "SCIExpFlags.h"
 #import "SCIExpMobileConfigMapping.h"
+#import "SCIMobileConfigIDResolver.h"
+#import "SCIExpCallsiteResolver.h"
 #import <sys/mman.h>
 #import <sys/stat.h>
 #import <fcntl.h>
@@ -203,24 +205,46 @@ static NSString *SCICallerDescription(void *callerAddress) {
     return [NSString stringWithFormat:@"%@+0x%lx", image, (unsigned long)imageOffset];
 }
 
+static BOOL SCIResolvedNameLooksUsable(NSString *name) {
+    if (!name.length) return NO;
+    NSString *lower = name.lowercaseString ?: @"";
+    if ([lower isEqualToString:@"unknown"]) return NO;
+    if ([lower hasPrefix:@"unknown 0x"]) return NO;
+    if ([lower hasPrefix:@"spec_0x"]) return NO;
+    if ([lower hasPrefix:@"callsite "]) return NO;
+    return YES;
+}
+
 static NSString *SCIResolvedSpecifierName(NSString *specifierName,
                                           unsigned long long specifier,
                                           NSString *functionName,
                                           void *callerAddress) {
-    if (specifierName.length && ![specifierName isEqualToString:@"unknown"] && ![specifierName hasPrefix:@"spec_0x"]) {
+    if (SCIResolvedNameLooksUsable(specifierName)) {
         return specifierName;
     }
 
+    // Single resolver pipeline: manual/runtime cache -> anchors -> id_name_mapping ->
+    // SCIExpMobileConfigMapping -> Mach-O fallback -> decoded-id. This replaces the
+    // previous constructor-time bridge that swizzled SCIExpFlags just to enrich names.
+    SCIMobileConfigIDResolution *unified = [SCIMobileConfigIDResolver resolutionForBrokerID:@"ig" value:specifier];
+    if (SCIResolvedNameLooksUsable(unified.resolvedName)) {
+        return unified.resolvedName;
+    }
+
     NSString *mapped = [SCIExpMobileConfigMapping resolvedNameForSpecifier:specifier];
-    if (mapped.length) {
+    if (SCIResolvedNameLooksUsable(mapped)) {
         return mapped;
     }
 
-    NSString *caller = SCICallerDescription(callerAddress);
-    if (caller.length) {
+    NSString *caller = SCIExpDescribeCallsite(callerAddress);
+    if (!caller.length || [caller isEqualToString:@"unknown"]) {
+        caller = SCICallerDescription(callerAddress);
+    }
+    if (caller.length && ![caller isEqualToString:@"unknown"]) {
         return [NSString stringWithFormat:@"callsite %@ · 0x%016llx", caller, specifier];
     }
 
+    (void)functionName;
     return [NSString stringWithFormat:@"unknown 0x%016llx", specifier];
 }
 

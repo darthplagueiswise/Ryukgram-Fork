@@ -1,6 +1,7 @@
 #import "SCIResolverScanner.h"
 #import "SCIResolverSpecifierEntry.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
+#import "../Features/ExpFlags/SCIMachODexKitResolver.h"
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -492,6 +493,65 @@ static void SCIAddSpecifierSymbol(NSMutableDictionary<NSNumber *, SCIResolverSpe
     }
 }
 
+static BOOL SCIResolverNameLooksWeak(NSString *name) {
+    if (!name.length) return YES;
+    NSString *lower = name.lowercaseString ?: @"";
+    return [lower containsString:@"unknown"] ||
+           [lower hasPrefix:@"callsite "] ||
+           [lower hasPrefix:@"spec_0x"];
+}
+
+static NSString *SCIMachoDexReportBlock(void) {
+    SCIMachODexKitResolver *resolver = [SCIMachODexKitResolver sharedResolver];
+    NSArray<NSString *> *lines = [resolver reportLines];
+    NSDictionary<NSNumber *, NSString *> *names = [resolver allKnownSpecifierNames];
+
+    NSMutableString *out = [NSMutableString stringWithString:
+        @"Mach-O DexKit fallback resolver\n"
+         "mode = observe-only runtime Mach-O string/data correlation; no C body hook; no __TEXT writes\n\n"];
+
+    [out appendFormat:@"knownSpecifierNames=%lu reportLines=%lu\n\n",
+     (unsigned long)names.count,
+     (unsigned long)lines.count];
+
+    if (names.count) {
+        [out appendString:@"Known MobileConfig specifiers from Mach-O fallback\n\n"];
+
+        NSArray<NSNumber *> *keys = [[names allKeys] sortedArrayUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
+            unsigned long long av = a.unsignedLongLongValue;
+            unsigned long long bv = b.unsignedLongLongValue;
+            if (av < bv) return NSOrderedAscending;
+            if (av > bv) return NSOrderedDescending;
+            return NSOrderedSame;
+        }];
+
+        for (NSNumber *key in keys) {
+            NSString *name = names[key];
+            if (SCIResolverNameLooksWeak(name)) continue;
+            [out appendFormat:@"0x%016llx · %@\n", key.unsignedLongLongValue, name];
+        }
+
+        [out appendString:@"\n"];
+    }
+
+    if (lines.count) {
+        [out appendString:@"Resolver log\n\n"];
+        for (NSString *line in lines) {
+            [out appendFormat:@"%@\n", line];
+        }
+    }
+
+    return out;
+}
+
+static void SCIAddMachoDexEntries(NSMutableDictionary<NSNumber *, SCIResolverSpecifierEntry *> *map) {
+    NSDictionary<NSNumber *, NSString *> *names = [[SCIMachODexKitResolver sharedResolver] allKnownSpecifierNames];
+    [names enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, NSString *name, BOOL *stop) {
+        if (!key || SCIResolverNameLooksWeak(name)) return;
+        SCIAddEntry(map, key.unsignedLongLongValue, name, @"Mach-O fallback", YES);
+    }];
+}
+
 @implementation SCIResolverScanner
 
 + (NSArray<SCIResolverSpecifierEntry *> *)allKnownSpecifierEntries {
@@ -556,6 +616,10 @@ static void SCIAddSpecifierSymbol(NSMutableDictionary<NSNumber *, SCIResolverSpe
         NSString *source = [NSString stringWithFormat:@"runtime %@ ×%lu", o.functionName ?: @"Gate", (unsigned long)o.hitCount];
         SCIAddEntry(map, o.specifier, name, source, o.resultValue);
     }
+
+    // Merge observe-only Mach-O fallback names after runtime observations. Known runtime
+    // names stay authoritative; weak runtime/callsite names can be upgraded.
+    SCIAddMachoDexEntries(map);
 
     // Preserve manual overrides even if the gate has not appeared in runtime observations yet.
     for (NSNumber *n in [SCIExpFlags allOverriddenInternalUseSpecifiers]) {
@@ -668,6 +732,8 @@ static void SCIAddSpecifierSymbol(NSMutableDictionary<NSNumber *, SCIResolverSpe
         [out appendString:SCISymbolAvailabilityReport()];
         [out appendString:@"\n==============================\n\n"];
         [out appendString:SCIRuntimeObservationReport()];
+        [out appendString:@"\n==============================\n\n"];
+        [out appendString:SCIMachoDexReportBlock()];
         [out appendString:@"\n==============================\n\n"];
         [out appendString:SCIFormatCandidates(@"MobileConfig/EasyGating runtime-visible class candidates", SCIRankedCandidates(SCIMCKeys(), 260))];
         return out;

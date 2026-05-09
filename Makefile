@@ -20,11 +20,14 @@ before-all::
 
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 RYUKGRAM_SRC_FILES := $(filter-out $(GENERATED_SCHEMA_SRC),$(RYUKGRAM_SRC_FILES))
-# alpha3: SCIMachODexKitResolverLite.m is a fallback shim that defines the same
-# ObjC classes as SCIMachODexKitResolver.m. Keep the real DexKit resolver active
-# and exclude the lite shim from the auto-discovered source list to avoid duplicate
-# symbols at link time.
+# alpha3: keep the real Mach-O DexKit resolver active as a direct fallback in
+# SCIMobileConfigIDResolver / SCIExpFlags / SCIResolverScanner. Exclude the old
+# bridge shims so we do not swizzle our own class methods at constructor time or
+# duplicate scanner output.
 RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIMachODexKitResolverLite.m,$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIMachODexKitResolverBridge.m,$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out src/Features/ExpFlags/SCIExpCallsiteResolverBridge.m,$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out src/Settings/SCIMachODexKitResolverScannerBridge.m,$(RYUKGRAM_SRC_FILES))
 
 $(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation UniformTypeIdentifiers CoreLocation MapKit
