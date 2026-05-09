@@ -19,6 +19,16 @@
     d.unavailable = self.unavailable;
     d.unavailableReason = self.unavailableReason;
     d.curatedScore = self.curatedScore;
+    d.semanticCategory = self.semanticCategory;
+    d.riskLevel = self.riskLevel;
+    d.batchForceAllowed = self.batchForceAllowed;
+    d.observeRecommended = self.observeRecommended;
+    d.forceRecommended = self.forceRecommended;
+    d.classificationReason = self.classificationReason;
+    d.familyKey = self.familyKey;
+    d.impAddress = self.impAddress;
+    d.impSymbol = self.impSymbol;
+    d.implementationKey = self.implementationKey;
     return d;
 }
 
