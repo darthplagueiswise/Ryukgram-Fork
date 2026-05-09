@@ -32,7 +32,26 @@
     d.hookInstalled = SCIDexKitIsHookInstalled(d.overrideKey);
 }
 
-+ (SCIDexKitDescriptor *)descriptorForImage:(SCIDexKitImageInfo *)image className:(NSString *)className selectorName:(NSString *)selectorName classMethod:(BOOL)classMethod method:(Method)m score:(NSInteger)score {
++ (void)fillClassificationForDescriptor:(SCIDexKitDescriptor *)d method:(Method)m dlInfo:(Dl_info *)info {
+    NSDictionary<NSString *, id> *classification = [SCIDexKitSelectorRules classificationForClassName:d.className
+                                                                                             selector:d.selectorName
+                                                                                        imageBasename:d.imageBasename
+                                                                                         typeEncoding:d.typeEncoding];
+    d.semanticCategory = classification[@"semanticCategory"] ?: @"unknown-bool";
+    d.riskLevel = [classification[@"riskLevel"] integerValue];
+    d.batchForceAllowed = [classification[@"batchForceAllowed"] boolValue];
+    d.observeRecommended = [classification[@"observeRecommended"] boolValue];
+    d.forceRecommended = [classification[@"forceRecommended"] boolValue];
+    d.classificationReason = classification[@"classificationReason"] ?: @"";
+    d.familyKey = classification[@"familyKey"] ?: [SCIDexKitSelectorRules familyKeyForClassName:d.className selector:d.selectorName];
+
+    IMP imp = m ? method_getImplementation(m) : NULL;
+    d.impAddress = (uint64_t)(uintptr_t)imp;
+    d.impSymbol = (info && info->dli_sname) ? @(info->dli_sname) : @"";
+    d.implementationKey = [NSString stringWithFormat:@"%@|0x%llx|%@", d.imageBasename ?: @"?", (unsigned long long)d.impAddress, d.impSymbol ?: @""];
+}
+
++ (SCIDexKitDescriptor *)descriptorForImage:(SCIDexKitImageInfo *)image className:(NSString *)className selectorName:(NSString *)selectorName classMethod:(BOOL)classMethod method:(Method)m score:(NSInteger)score dlInfo:(Dl_info *)info {
     NSString *sign = classMethod ? @"+" : @"-";
     SCIDexKitDescriptor *d = [SCIDexKitDescriptor new];
     d.imageBasename = image.basename ?: @"";
@@ -44,6 +63,7 @@
     d.overrideKey = [SCIDexKitStore overrideKeyForImage:d.imageBasename sign:sign className:d.className selector:d.selectorName];
     d.observedKey = [SCIDexKitStore observedKeyForImage:d.imageBasename sign:sign className:d.className selector:d.selectorName];
     d.curatedScore = score;
+    [self fillClassificationForDescriptor:d method:m dlInfo:info];
     [self fillStateForDescriptor:d];
     return d;
 }
@@ -64,6 +84,21 @@
         d.observedKey = [SCIDexKitStore observedKeyForOverrideKey:key];
         d.unavailable = YES;
         d.unavailableReason = @"Unavailable in this build or image not loaded";
+        d.curatedScore = 0;
+        NSDictionary<NSString *, id> *classification = [SCIDexKitSelectorRules classificationForClassName:d.className
+                                                                                                 selector:d.selectorName
+                                                                                            imageBasename:d.imageBasename
+                                                                                             typeEncoding:d.typeEncoding];
+        d.semanticCategory = classification[@"semanticCategory"] ?: @"unknown-bool";
+        d.riskLevel = [classification[@"riskLevel"] integerValue];
+        d.batchForceAllowed = NO;
+        d.observeRecommended = NO;
+        d.forceRecommended = NO;
+        d.classificationReason = [NSString stringWithFormat:@"legacy override only · %@", classification[@"classificationReason"] ?: @""];
+        d.familyKey = classification[@"familyKey"] ?: [SCIDexKitSelectorRules familyKeyForClassName:d.className selector:d.selectorName];
+        d.impAddress = 0;
+        d.impSymbol = @"";
+        d.implementationKey = @"";
         [self fillStateForDescriptor:d];
         map[key] = d;
     }
@@ -101,11 +136,14 @@
 
                     NSInteger score = [SCIDexKitSelectorRules curatedScoreForClassName:className selector:selName];
                     if (mode == SCIDexKitScannerModeCurated && score < 10) continue;
-                    if (lowerQuery.length) {
-                        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@", image.basename, className, selName, [self typeEncodingForMethod:m]].lowercaseString;
-                        if (![hay containsString:lowerQuery]) continue;
-                    }
-                    SCIDexKitDescriptor *d = [self descriptorForImage:image className:className selectorName:selName classMethod:classMethod method:m score:score];
+                    NSString *typeEncoding = [self typeEncodingForMethod:m];
+                    NSDictionary<NSString *, id> *classification = [SCIDexKitSelectorRules classificationForClassName:className selector:selName imageBasename:image.basename typeEncoding:typeEncoding];
+                    NSString *semantic = classification[@"semanticCategory"] ?: @"";
+                    NSString *reason = classification[@"classificationReason"] ?: @"";
+                    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@ %@", image.basename, className, selName, typeEncoding, semantic, reason, classification[@"familyKey"] ?: @""].lowercaseString;
+                    if (lowerQuery.length && ![hay containsString:lowerQuery]) continue;
+
+                    SCIDexKitDescriptor *d = [self descriptorForImage:image className:className selectorName:selName classMethod:classMethod method:m score:score dlInfo:&info];
                     if (d.overrideKey.length) byKey[d.overrideKey] = d;
                 }
                 if (methods) free(methods);
