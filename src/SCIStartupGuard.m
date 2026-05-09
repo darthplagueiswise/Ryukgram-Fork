@@ -1,6 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
-#import "SCIMobileConfigBrokerStore.h"
+#import "Features/ExpFlags/SCIMobileConfigBrokerStore.h"
 
 static NSString * const kSGPending = @"sci.startupguard.pending";
 static NSString * const kSGSignature = @"sci.startupguard.signature";
