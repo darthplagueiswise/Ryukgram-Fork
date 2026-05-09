@@ -321,8 +321,61 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 }
 
 - (void)exportIDNameMapping {
-    UIAlertController *wait=[UIAlertController alertControllerWithTitle:@"ID Map" message:@"Procurando e exportando id_name_mapping.json..." preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:wait animated:YES completion:^{ dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{ NSDictionary *r=[SCIMobileConfigIdNameMappingExporter exportIDNameMappingNow]; NSString *msg=SCIIdMapUIResultMessage(r); dispatch_async(dispatch_get_main_queue(),^{ [wait dismissViewControllerAnimated:YES completion:^{ UIAlertController *a=[UIAlertController alertControllerWithTitle:([r[@"ok"] boolValue]?@"ID Map exportado":@"ID Map não encontrado") message:msg preferredStyle:UIAlertControllerStyleActionSheet]; [a addAction:[UIAlertAction actionWithTitle:@"Copiar relatório" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string=msg; }]]; NSString *source=SCIIdMapUIString(r[@"source"]); if(source.length)[a addAction:[UIAlertAction actionWithTitle:@"Copiar source path" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string=source; }]]; NSArray *outputs=[r[@"outputs"] isKindOfClass:NSArray.class]?r[@"outputs"]:@[]; NSString *out=SCIIdMapUIJoin(outputs,99); if(out.length)[a addAction:[UIAlertAction actionWithTitle:@"Copiar output paths" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string=out; }]]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]]; if(a.popoverPresentationController){a.popoverPresentationController.barButtonItem:self.navigationItem.rightBarButtonItems.firstObject;} [self presentViewController:a animated:YES completion:nil]; [self reload]; }]; }); }); }];
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"ID Map"
+                                                                  message:@"Procurando e exportando id_name_mapping.json..."
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+
+    [self presentViewController:wait animated:YES completion:^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSDictionary *result = [SCIMobileConfigIdNameMappingExporter exportIDNameMappingNow];
+            NSString *message = SCIIdMapUIResultMessage(result);
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [wait dismissViewControllerAnimated:YES completion:^{
+                    BOOL ok = [result[@"ok"] boolValue];
+                    UIAlertController *alert = [UIAlertController alertControllerWithTitle:(ok ? @"ID Map exportado" : @"ID Map não encontrado")
+                                                                                   message:message
+                                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+
+                    [alert addAction:[UIAlertAction actionWithTitle:@"Copiar relatório"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(__unused UIAlertAction *action) {
+                        UIPasteboard.generalPasteboard.string = message;
+                    }]];
+
+                    NSString *source = SCIIdMapUIString(result[@"source"]);
+                    if (source.length) {
+                        [alert addAction:[UIAlertAction actionWithTitle:@"Copiar source path"
+                                                                  style:UIAlertActionStyleDefault
+                                                                handler:^(__unused UIAlertAction *action) {
+                            UIPasteboard.generalPasteboard.string = source;
+                        }]];
+                    }
+
+                    NSArray *outputs = [result[@"outputs"] isKindOfClass:NSArray.class] ? result[@"outputs"] : @[];
+                    NSString *outputText = SCIIdMapUIJoin(outputs, 99);
+                    if (outputText.length) {
+                        [alert addAction:[UIAlertAction actionWithTitle:@"Copiar output paths"
+                                                                  style:UIAlertActionStyleDefault
+                                                                handler:^(__unused UIAlertAction *action) {
+                            UIPasteboard.generalPasteboard.string = outputText;
+                        }]];
+                    }
+
+                    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:nil]];
+
+                    if (alert.popoverPresentationController) {
+                        alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject;
+                    }
+
+                    [self presentViewController:alert animated:YES completion:nil];
+                    [self reload];
+                }];
+            });
+        });
+    }];
 }
 - (void)observeVisible { [self observeRows:self.rows ?: @[]]; }
 - (SCIDexKitKnownBoolState)effective:(SCIDexKitDescriptor *)d { return [SCIDexKitStore effectiveStateForOverrideKey:d.overrideKey observedKey:d.observedKey]; }
