@@ -81,6 +81,25 @@
     return [NSString stringWithFormat:@"%@|%@", className ?: @"?", family];
 }
 
++ (BOOL)isHiddenNoiseClassification:(NSDictionary<NSString *, id> *)classification {
+    if (![classification isKindOfClass:NSDictionary.class]) return NO;
+    NSString *category = [classification[@"semanticCategory"] isKindOfClass:NSString.class] ? [classification[@"semanticCategory"] lowercaseString] : @"";
+    NSInteger risk = [classification[@"riskLevel"] respondsToSelector:@selector(integerValue)] ? [classification[@"riskLevel"] integerValue] : 0;
+    BOOL observe = [classification[@"observeRecommended"] respondsToSelector:@selector(boolValue)] ? [classification[@"observeRecommended"] boolValue] : YES;
+    if (risk >= 4) return YES;
+    if (!observe) return YES;
+    if ([category isEqualToString:@"ui-state"] ||
+        [category isEqualToString:@"lifecycle-state"] ||
+        [category isEqualToString:@"loading-state"] ||
+        [category isEqualToString:@"selection-state"]) return YES;
+    return NO;
+}
+
++ (BOOL)shouldHideNoisyClassName:(NSString *)className selector:(NSString *)selector imageBasename:(NSString *)imageBasename typeEncoding:(NSString *)typeEncoding {
+    NSDictionary *c = [self classificationForClassName:className selector:selector imageBasename:imageBasename typeEncoding:typeEncoding];
+    return [self isHiddenNoiseClassification:c];
+}
+
 + (NSDictionary<NSString *, id> *)classificationForClassName:(NSString *)className selector:(NSString *)selector imageBasename:(NSString *)imageBasename typeEncoding:(NSString *)typeEncoding {
     NSString *lc = className.lowercaseString ?: @"";
     NSString *ls = selector.lowercaseString ?: @"";

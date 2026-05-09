@@ -17,6 +17,15 @@ NS_ASSUME_NONNULL_BEGIN
                                                imageBasename:(NSString *)imageBasename
                                                 typeEncoding:(NSString *)typeEncoding;
 + (NSString *)familyKeyForClassName:(NSString *)className selector:(NSString *)selector;
+
+// Hidden-noise helpers used by the UI filters. Hidden means the BOOL is likely
+// transient UI/lifecycle/selection/loading state and should not be shown in the
+// default Recommended/All discovery views.
++ (BOOL)isHiddenNoiseClassification:(NSDictionary<NSString *, id> *)classification;
++ (BOOL)shouldHideNoisyClassName:(NSString *)className
+                        selector:(NSString *)selector
+                   imageBasename:(NSString *)imageBasename
+                    typeEncoding:(NSString *)typeEncoding;
 @end
 
 NS_ASSUME_NONNULL_END
