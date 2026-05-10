@@ -55,12 +55,13 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 @interface SCIMCBrokerValueViewController : UITableViewController
 @property (nonatomic, strong) SCIMobileConfigBrokerDescriptor *broker;
 @property (nonatomic, strong) NSArray<NSString *> *keys;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *resolvedCache;
 @end
 
 @implementation SCIMCBrokerValueViewController
 - (instancetype)initWithBroker:(SCIMobileConfigBrokerDescriptor *)broker {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (self) { _broker = broker; self.title = broker.brokerID; }
+    if (self) { _broker = broker; self.title = broker.brokerID; _resolvedCache = [NSMutableDictionary dictionary]; }
     return self;
 }
 - (void)viewDidLoad {
@@ -82,6 +83,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 }
 - (void)reloadKeys {
     self.keys = [SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:self.broker.brokerID];
+    [self.resolvedCache removeAllObjects];
     [self.tableView reloadData];
 }
 - (void)installBroker {
@@ -90,9 +92,35 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     [self reloadKeys];
 }
 - (void)copySnapshot {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:[SCIMobileConfigBrokerStore snapshotDictionary] options:NSJSONWritingPrettyPrinted error:nil];
-    UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *snapshot = [SCIMobileConfigBrokerStore snapshotDictionary];
+        NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil];
+        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIPasteboard.generalPasteboard.string = json;
+        });
+    });
 }
+- (void)applyResolvedMetadata:(NSDictionary *)resolved toCell:(SCIMCBrokerCell *)cell key:(NSString *)key value:(uint64_t)value brokerID:(NSString *)bid {
+    NSString *title = [resolved[@"title"] isKindOfClass:NSString.class] ? resolved[@"title"] : @"";
+    NSString *source = [resolved[@"source"] isKindOfClass:NSString.class] ? resolved[@"source"] : @"";
+    NSString *detail = [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @"";
+    NSString *callerSymbol = [resolved[@"callerSymbol"] isKindOfClass:NSString.class] ? resolved[@"callerSymbol"] : @"";
+    BOOL runtimeObserved = [resolved[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [resolved[@"runtimeObserved"] boolValue] : NO;
+    if (!title.length || [title hasPrefix:@"0x"]) {
+        SCIDexKitResolvedName *r = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
+        if (r.title.length && r.confidence >= SCIDexKitNameConfidenceMedium) title = r.title;
+    }
+    if (!title.length) title = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
+    NSMutableArray<NSString *> *detailParts = [NSMutableArray array];
+    [detailParts addObject:[NSString stringWithFormat:@"%@ · system %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key]]];
+    if (source.length) [detailParts addObject:[NSString stringWithFormat:@"source %@%@", source, runtimeObserved ? @" · runtimeObserved" : @""]];
+    if (callerSymbol.length) [detailParts addObject:[NSString stringWithFormat:@"caller %@", callerSymbol]];
+    if (detail.length) [detailParts addObject:detail];
+    cell.titleLabel.text = title;
+    cell.detailLabel2.text = [detailParts componentsJoinedByString:@"\n"];
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 1 : self.keys.count; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Broker" : @"Observed specifiers / gates"; }
@@ -128,26 +156,13 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
     NSNumber *forced = [SCIMobileConfigBrokerStore overrideValueForKey:key];
     SCIMCBrokerBoolState state = [SCIMobileConfigBrokerStore effectiveStateForOverrideKey:key];
-    NSDictionary *resolved = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key];
-    NSString *title = [resolved[@"title"] isKindOfClass:NSString.class] ? resolved[@"title"] : @"";
-    NSString *source = [resolved[@"source"] isKindOfClass:NSString.class] ? resolved[@"source"] : @"";
-    NSString *detail = [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @"";
-    NSString *callerSymbol = [resolved[@"callerSymbol"] isKindOfClass:NSString.class] ? resolved[@"callerSymbol"] : @"";
-    BOOL runtimeObserved = [resolved[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [resolved[@"runtimeObserved"] boolValue] : NO;
-    if (!title.length || [title hasPrefix:@"0x"]) {
-        SCIDexKitResolvedName *r = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
-        if (r.title.length && r.confidence >= SCIDexKitNameConfidenceMedium) {
-            title = r.title;
-        }
+    NSDictionary *resolved = self.resolvedCache[key];
+    if (resolved) {
+        [self applyResolvedMetadata:resolved toCell:cell key:key value:value brokerID:bid];
+    } else {
+        cell.titleLabel.text = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
+        cell.detailLabel2.text = [NSString stringWithFormat:@"%@ · system %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key]];
     }
-    if (!title.length) title = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
-    cell.titleLabel.text = title;
-    NSMutableArray<NSString *> *detailParts = [NSMutableArray array];
-    [detailParts addObject:[NSString stringWithFormat:@"%@ · system %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key]]];
-    if (source.length) [detailParts addObject:[NSString stringWithFormat:@"source %@%@", source, runtimeObserved ? @" · runtimeObserved" : @""]];
-    if (callerSymbol.length) [detailParts addObject:[NSString stringWithFormat:@"caller %@", callerSymbol]];
-    if (detail.length) [detailParts addObject:detail];
-    cell.detailLabel2.text = [detailParts componentsJoinedByString:@"\n"];
     [cell.switchView setOn:(state == SCIMCBrokerBoolStateOn) animated:NO];
     __weak typeof(self) weakSelf = self;
     cell.switchChanged = ^(BOOL on) {
@@ -159,6 +174,24 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     cell.accessoryType = forced ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)tableViewCell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section != 1) return;
+    NSString *key = self.keys[indexPath.row];
+    if (self.resolvedCache[key]) return;
+    NSString *bid = nil; uint64_t value = 0;
+    [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *resolved = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key] ?: @{};
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!resolved || self.resolvedCache[key]) return;
+            self.resolvedCache[key] = resolved;
+            SCIMCBrokerCell *cell = (SCIMCBrokerCell *)[tableView cellForRowAtIndexPath:indexPath];
+            if (![cell isKindOfClass:SCIMCBrokerCell.class]) return;
+            [self applyResolvedMetadata:resolved toCell:cell key:key value:value brokerID:bid];
+        });
+    });
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section != 1) return;
@@ -260,6 +293,26 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 }
 - (void)installEnabled { SCIObjCMobileConfigObserverInstallEnabled(); [self reloadRows]; }
 - (void)resetOverrides { [SCIMobileConfigBrokerStore resetAllBrokerOverrides]; [self reloadRows]; }
+- (void)applyResolvedMetadata:(NSDictionary *)resolved toCell:(SCIMCBrokerCell *)cell key:(NSString *)key value:(uint64_t)value brokerID:(NSString *)bid {
+    NSString *title = [resolved[@"title"] isKindOfClass:NSString.class] ? resolved[@"title"] : @"";
+    NSString *source = [resolved[@"source"] isKindOfClass:NSString.class] ? resolved[@"source"] : @"";
+    NSString *detail = [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @"";
+    NSString *callerSymbol = [resolved[@"callerSymbol"] isKindOfClass:NSString.class] ? resolved[@"callerSymbol"] : @"";
+    BOOL runtimeObserved = [resolved[@"runtimeObserved"] respondsToSelector:@selector(boolValue)] ? [resolved[@"runtimeObserved"] boolValue] : NO;
+    if (!title.length || [title hasPrefix:@"0x"]) {
+        SCIDexKitResolvedName *r = [SCIDexKitNameResolver resolveBrokerID:bid value:value];
+        if (r.title.length && r.confidence >= SCIDexKitNameConfidenceMedium) title = r.title;
+    }
+    if (!title.length) title = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
+    NSMutableArray<NSString *> *detailParts = [NSMutableArray array];
+    [detailParts addObject:[NSString stringWithFormat:@"%@ · system %@ · %@", self.broker.kindLabel, [SCIMobileConfigBrokerStore systemLabelForOverrideKey:key], [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:key]]];
+    if (source.length) [detailParts addObject:[NSString stringWithFormat:@"source %@%@", source, runtimeObserved ? @" · runtimeObserved" : @""]];
+    if (callerSymbol.length) [detailParts addObject:[NSString stringWithFormat:@"caller %@", callerSymbol]];
+    if (detail.length) [detailParts addObject:detail];
+    cell.titleLabel.text = title;
+    cell.detailLabel2.text = [detailParts componentsJoinedByString:@"\n"];
+}
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? self.rows.count : 1; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"FBSharedFramework ObjC observer targets" : @"Debug"; }
