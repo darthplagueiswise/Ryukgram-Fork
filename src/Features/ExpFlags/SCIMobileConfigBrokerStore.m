@@ -316,19 +316,13 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
 }
 
 + (NSArray<NSString *> *)observedOverrideKeys {
-    NSMutableOrderedSet<NSString *> *set = [NSMutableOrderedSet orderedSetWithArray:[self arrayForKey:SCIMCBrokerObservedIndexKey]];
-    NSDictionary *all = [[NSUserDefaults standardUserDefaults] dictionaryRepresentation];
-    BOOL indexChanged = NO;
-    for (NSString *key in all.allKeys) {
-        if (![key hasPrefix:kMCBRObservedPrefix]) continue;
-        NSString *overrideKey = [kMCBROverridePrefix stringByAppendingString:[key substringFromIndex:kMCBRObservedPrefix.length]];
-        if (![set containsObject:overrideKey]) {
-            [set addObject:overrideKey];
-            indexChanged = YES;
-        }
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    for (id obj in [self arrayForKey:SCIMCBrokerObservedIndexKey]) {
+        if (![obj isKindOfClass:NSString.class]) continue;
+        NSString *key = (NSString *)obj;
+        if ([key hasPrefix:kMCBROverridePrefix]) [out addObject:key];
     }
-    if (indexChanged) [[NSUserDefaults standardUserDefaults] setObject:set.array forKey:SCIMCBrokerObservedIndexKey];
-    return set.array;
+    return out;
 }
 
 + (NSArray<NSString *> *)observedOverrideKeysForBrokerID:(NSString *)brokerID {
