@@ -24,6 +24,12 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Normalize script permissions
+        run: |
+          chmod +x ./scripts/setup-ffmpegkit.sh || true
+          chmod +x ./build.sh || true
+          find ./scripts -type f -name '*.sh' -exec chmod +x {} \; || true
+
       - name: Install Dependencies
         run: brew install ldid dpkg make
 
@@ -86,12 +92,15 @@ jobs:
           grep '^Version:' control
 
       - name: Setup FFmpegKit
-        run: ./scripts/setup-ffmpegkit.sh
+        run: |
+          chmod +x ./scripts/setup-ffmpegkit.sh || true
+          bash ./scripts/setup-ffmpegkit.sh
 
       - name: Build package
         run: |
           export THEOS="${{ github.workspace }}/theos"
-          ./build.sh rootless
+          chmod +x ./build.sh || true
+          bash ./build.sh rootless
           cd packages
           DEB="$(ls -t *.deb | head -n1)"
           [ -n "$DEB" ] && mv "$DEB" "$PACKAGE_NAME"
