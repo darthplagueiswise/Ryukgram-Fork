@@ -35,13 +35,6 @@ static NSInteger const kSCIDexKitSchemaVersion = 2;
 + (void)invalidateObservedCacheIfBuildChanged {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     NSString *current = [self currentAppBuildToken];
-    NSString *old = [ud stringForKey:kSCIDexKitObservedBuildKey];
-    if (old.length && ![old isEqualToString:current]) {
-        NSDictionary *dict = [ud dictionaryRepresentation];
-        for (NSString *key in dict.allKeys) {
-            if ([key hasPrefix:@"dexkit.observed.bool:"]) [ud removeObjectForKey:key];
-        }
-    }
     [ud setObject:current forKey:kSCIDexKitObservedBuildKey];
 }
 

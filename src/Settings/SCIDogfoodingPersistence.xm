@@ -288,22 +288,32 @@ static void SCIInstallIDNameMappingObserverAttempt(NSUInteger attempt) {
     NSLog(@"[RyukGram][MCIDName] pass-through observer installed target=%p", target);
 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+__attribute__((visibility("default"))) void SCIInstallDogfoodingPersistenceHooks(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SCIDogInstallPersistenceHooks();
+    });
+}
+
+__attribute__((visibility("default"))) void SCIInstallPassiveIDNameMappingPersistObserver(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SCIInstallIDNameMappingObserverAttempt(0);
+    });
+}
+
+__attribute__((visibility("default"))) BOOL SCIIsPassiveIDNameMappingPersistObserverInstalled(void) {
+    return gSCIMCIDNameObserverInstalled;
+}
+#ifdef __cplusplus
+}
+#endif
+
 __attribute__((constructor))
 static void SCIDogfoodingPersistenceInit(void) {
     @autoreleasepool {
         SCIDogCrashGuardBootstrap();
-        SCIDogInstallPersistenceHooks();
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            SCIDogInstallPersistenceHooks();
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            SCIDogInstallPersistenceHooks();
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            SCIDogInstallPersistenceHooks();
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            SCIInstallIDNameMappingObserverAttempt(0);
-        });
+        NSLog(@"[RyukGram][DogfoodPersist] startup inert; hooks and id_name observer are manual/debug only");
     }
 }

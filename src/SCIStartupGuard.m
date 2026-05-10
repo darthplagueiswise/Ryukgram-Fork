@@ -62,7 +62,6 @@ static NSString *SGNow(void) {
 static NSArray<NSString *> *SGActiveItems(void) {
     NSMutableSet<NSString *> *set = [NSMutableSet set];
     @try {
-        [SCIMobileConfigBrokerStore registerDefaultsAndMigrate];
         for (NSString *k in [SCIMobileConfigBrokerStore activeOverrideKeys]) if (k.length) [set addObject:k];
         for (NSString *bid in [SCIMobileConfigBrokerStore enabledHookBrokerIDs]) if (bid.length) [set addObject:[@"hook:" stringByAppendingString:bid]];
     } @catch (id e) { NSLog(@"[RyukGram][StartupGuard] broker scan exception: %@", e); }
@@ -77,17 +76,9 @@ static NSString *SGSignature(NSArray<NSString *> *items) { return items.count ? 
 
 static NSString *SGLabel(NSString *item) {
     if ([item hasPrefix:@"mcbr:"]) {
-        NSDictionary *m = nil;
-        @try { m = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:item]; } @catch (__unused id e) {}
-        NSString *name = @"";
-        for (NSString *k in @[@"resolvedName", @"name", @"title", @"label", @"stableID", @"alias"]) {
-            id v = m[k];
-            if ([v isKindOfClass:NSString.class] && [v length]) { name = v; break; }
-        }
         NSString *state = @"";
         @try { state = [SCIMobileConfigBrokerStore overrideLabelForOverrideKey:item] ?: @""; } @catch (__unused id e) {}
         NSMutableString *label = [NSMutableString stringWithString:item ?: @"?"];
-        if (name.length) [label appendFormat:@" · %@", name];
         if (state.length) [label appendFormat:@" · %@", state];
         return label;
     }

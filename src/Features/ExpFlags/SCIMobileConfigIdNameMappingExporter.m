@@ -9,6 +9,8 @@ static NSString * const kSCIIdMapExporterStatusKey = @"sci.mc.id_name_mapping_ex
 
 extern void SCIInstallMobileConfigIDNameMappingObserver(void);
 extern BOOL SCIIsMobileConfigIDNameMappingObserverInstalled(void);
+extern void SCIInstallPassiveIDNameMappingPersistObserver(void);
+extern BOOL SCIIsPassiveIDNameMappingPersistObserverInstalled(void);
 
 static const char *kSCIIdMapSymbolTryGetNamedParamsList = "__ZN12mobileconfig23FBMobileConfigIdNameMap21tryGetNamedParamsListERKNSt3__110shared_ptrIKNS1_6vectorINS_13config_meta_tENS1_9allocatorIS4_EEEEEERKNS1_12basic_stringIcNS1_11char_traitsIcEENS5_IcEEEE";
 static const char *kSCIIdMapSymbolGetFilePath = "__ZN12mobileconfig23FBMobileConfigIdNameMap19getIdToNameFilePathERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
@@ -181,15 +183,18 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
 
 + (NSDictionary *)installNativePathObserver {
     SCIInstallMobileConfigIDNameMappingObserver();
+    SCIInstallPassiveIDNameMappingPersistObserver();
     NSDictionary *symbolProbe = SCIIdMapNativeSymbolProbe();
     BOOL observerInstalled = SCIIsMobileConfigIDNameMappingObserverInstalled();
+    BOOL passivePersistObserverInstalled = SCIIsPassiveIDNameMappingPersistObserverInstalled();
     NSString *primary = [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"";
-    NSString *status = [NSString stringWithFormat:@"id_name_mapping observer requested · installed=%@ · primary=%@", observerInstalled ? @"YES" : @"pending", primary];
+    NSString *status = [NSString stringWithFormat:@"id_name_mapping observer requested · update=%@ · persist=%@ · primary=%@", observerInstalled ? @"YES" : @"pending", passivePersistObserverInstalled ? @"YES" : @"pending", primary];
     SCIIdMapSetStatus(status);
     return @{@"ok": @YES,
              @"mode": @"manual-trigger-passive-capture",
              @"primaryPath": primary,
              @"observerInstalled": @(observerInstalled),
+             @"passivePersistObserverInstalled": @(passivePersistObserverInstalled),
              @"symbolProbe": symbolProbe ?: @{},
              @"status": status};
 }
@@ -224,6 +229,7 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
                  @"probe": probe ?: @{},
                  @"symbolProbe": probe[@"symbolProbe"] ?: @{},
                  @"observerInstalled": probe[@"observerInstalled"] ?: @NO,
+                 @"passivePersistObserverInstalled": probe[@"passivePersistObserverInstalled"] ?: @NO,
                  @"checked": @(candidates.count),
                  @"checkedPaths": @(candidates.count),
                  @"candidates": visibleCandidates,
@@ -243,7 +249,7 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
     for (NSString *output in SCIIdMapOutputPaths()) SCIIdMapWriteData(data, output, outputs, errors);
 
     NSString *manifestPath = [[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/RyukGram"] stringByAppendingPathComponent:@"id_name_mapping_export_manifest.json"];
-    NSDictionary *manifest = @{@"ok": @(outputs.count > 0), @"mode": @"path-copy", @"source": source ?: @"", @"outputs": outputs, @"errors": errors, @"count": @(count), @"bytes": best[@"bytes"] ?: @0, @"modified": best[@"modified"] ?: @"", @"probe": probe ?: @{}, @"symbolProbe": probe[@"symbolProbe"] ?: @{}, @"observerInstalled": probe[@"observerInstalled"] ?: @NO, @"bundleVersion": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"", @"bundleBuild": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"", @"exportedAt": SCIIdMapISODate([NSDate date])};
+    NSDictionary *manifest = @{@"ok": @(outputs.count > 0), @"mode": @"path-copy", @"source": source ?: @"", @"outputs": outputs, @"errors": errors, @"count": @(count), @"bytes": best[@"bytes"] ?: @0, @"modified": best[@"modified"] ?: @"", @"probe": probe ?: @{}, @"symbolProbe": probe[@"symbolProbe"] ?: @{}, @"observerInstalled": probe[@"observerInstalled"] ?: @NO, @"passivePersistObserverInstalled": probe[@"passivePersistObserverInstalled"] ?: @NO, @"bundleVersion": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"", @"bundleBuild": [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"", @"exportedAt": SCIIdMapISODate([NSDate date])};
     NSData *manifestData = [NSJSONSerialization dataWithJSONObject:manifest options:NSJSONWritingPrettyPrinted error:nil];
     if (manifestData.length) SCIIdMapWriteData(manifestData, manifestPath, outputs, errors);
 
@@ -263,6 +269,7 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
              @"probe": probe ?: @{},
              @"symbolProbe": probe[@"symbolProbe"] ?: @{},
              @"observerInstalled": probe[@"observerInstalled"] ?: @NO,
+             @"passivePersistObserverInstalled": probe[@"passivePersistObserverInstalled"] ?: @NO,
              @"checked": @(candidates.count),
              @"checkedPaths": @(candidates.count),
              @"manifest": manifestPath ?: @"",

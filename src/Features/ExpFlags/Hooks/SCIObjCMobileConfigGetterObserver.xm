@@ -73,7 +73,6 @@ static BOOL InstallAliasB(NSString*b){if(!On(kAliasKey))return NO;NSString*cn=Cl
 static NSUInteger Count(void){pthread_mutex_lock(&gLock);NSUInteger c=gOrig.count;pthread_mutex_unlock(&gLock);return c;}
 static void InstallBroker(NSString*b){ConfigureBufferConsumer();InstallCBroker(b);InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
 static void InstallEnabled(void){ConfigureBufferConsumer();[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
-static void InstallPersistedIfNeeded(void){ConfigureBufferConsumer();InstallEnabled();dispatch_async(dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});}
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,4 +88,4 @@ __attribute__((visibility("default"))) void SCIObjCMobileConfigObserverInstallEn
 }
 #endif
 
-%ctor{NSUserDefaults*ud=[NSUserDefaults standardUserDefaults];[ud registerDefaults:@{kStartupKey:@NO,kApplyKey:@NO,kAliasKey:@NO,@"sci_exp_mc_c_hooks_enabled":@NO,@"sci_exp_mc_hooks_enabled":@NO,@"sci_exp_mc_legacy_getter_hooks_enabled":@NO}];if(![ud boolForKey:@"sci_exp_default_observers_v10_preserve_persistence_done"]){for(NSString*k in @[@"sci_exp_mc_hooks_enabled",@"sci_exp_mc_c_hooks_enabled",@"sci_exp_mc_c_broker_body_hooks_enabled",@"sci_exp_mc_legacy_getter_hooks_enabled"])[ud setBool:NO forKey:k];[ud setBool:YES forKey:@"sci_exp_default_observers_v10_preserve_persistence_done"];[ud synchronize];}InstallPersistedIfNeeded();}
+%ctor{NSUserDefaults*ud=[NSUserDefaults standardUserDefaults];[ud registerDefaults:@{kStartupKey:@NO,kApplyKey:@NO,kAliasKey:@NO,@"sci_exp_mc_c_hooks_enabled":@NO,@"sci_exp_mc_hooks_enabled":@NO,@"sci_exp_mc_legacy_getter_hooks_enabled":@NO}];if(![ud boolForKey:@"sci_exp_default_observers_v10_preserve_persistence_done"]){for(NSString*k in @[@"sci_exp_mc_hooks_enabled",@"sci_exp_mc_c_hooks_enabled",@"sci_exp_mc_c_broker_body_hooks_enabled",@"sci_exp_mc_legacy_getter_hooks_enabled"])[ud setBool:NO forKey:k];[ud setBool:YES forKey:@"sci_exp_default_observers_v10_preserve_persistence_done"];[ud synchronize];}NSLog(@"[RyukGram][MCObjC] startup observer inert; install is manual/debug only");}

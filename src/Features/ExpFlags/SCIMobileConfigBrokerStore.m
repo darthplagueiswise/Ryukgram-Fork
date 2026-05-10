@@ -13,6 +13,7 @@ static NSString * const kMCBRHookPrefix = @"mcbr.hook:";
 static NSString * const kMCBRErrorPrefix = @"mcer:";
 static NSString * const kMCBRHitPrefix = @"mcbr.hit:";
 static NSString * const kMCBRForcedHitPrefix = @"mcbr.fhit:";
+static NSString * const kMCBRMigrationDoneKey = @"mcbr.migration.v2.done";
 
 static NSString *SCIMCBrokerString(id obj) { return [obj isKindOfClass:NSString.class] ? (NSString *)obj : @""; }
 static BOOL SCIMCBrokerBool(id obj) { return [obj respondsToSelector:@selector(boolValue)] ? [obj boolValue] : NO; }
@@ -195,6 +196,8 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     [ud registerDefaults:@{SCIMCBrokerIndexKey: @[], SCIMCBrokerObservedIndexKey: @[], SCIMCBrokerHookIndexKey: @[]}];
 
+    if ([ud boolForKey:kMCBRMigrationDoneKey]) return;
+
     NSDictionary *all = [ud dictionaryRepresentation];
     for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
         NSString *longKey = [NSString stringWithFormat:@"dexkit.cbroker:%@:%@", d.imageName, d.symbol];
@@ -214,6 +217,7 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
             [ud removeObjectForKey:oldBrokerWide];
         }
     }
+    [ud setBool:YES forKey:kMCBRMigrationDoneKey];
 }
 
 + (NSArray *)arrayForKey:(NSString *)key {
