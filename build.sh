@@ -299,7 +299,7 @@ then
     echo -e '\033[1m\033[32mBuilding RyukGram tweak for rootless\033[0m'
 
     export THEOS_PACKAGE_SCHEME=rootless
-    make package
+    make package FINALPACKAGE=1
 
     echo -e '\033[1m\033[32mInjecting RyukGram.bundle (localization + FFmpegKit) into deb\033[0m'
     cd packages
@@ -324,7 +324,7 @@ then
     echo -e '\033[1m\033[32mBuilding RyukGram tweak for rootful\033[0m'
 
     unset THEOS_PACKAGE_SCHEME
-    make package
+    make package FINALPACKAGE=1
 
     echo -e '\033[1m\033[32mInjecting RyukGram.bundle (localization + FFmpegKit) into deb\033[0m'
     cd packages
