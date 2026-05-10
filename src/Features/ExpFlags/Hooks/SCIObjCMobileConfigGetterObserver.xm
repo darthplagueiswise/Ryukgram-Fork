@@ -41,15 +41,19 @@ static void ConfigureBufferConsumer(void){static dispatch_once_t once;dispatch_o
         if(!b.length||!p)continue;
         BOOL orig=[e[@"lastOriginalValue"] boolValue];
         BOOL fin=[e[@"lastFinalValue"] boolValue];
+        NSUInteger hits=[e[@"hitCount"] respondsToSelector:@selector(unsignedIntegerValue)]?[e[@"hitCount"] unsignedIntegerValue]:1;
+        BOOL runtimeContextEligible=[e[@"runtimeContextEligible"] respondsToSelector:@selector(boolValue)]?[e[@"runtimeContextEligible"] boolValue]:YES;
         void *ca=(void *)(uintptr_t)[e[@"callerAddress"] unsignedLongLongValue];
-        NSString *ci=nil,*cs=nil;Caller(ca,&ci,&cs);
-        NSString *cls=ClassForBID(b);if(!cls.length)cls=[NSString stringWithFormat:@"SCIMCBrokerRouter:%@",b];
-        NSString *sel=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"getBool:withOptions:":[NSString stringWithFormat:@"c-broker:%@",b];
-        NSString *src=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"objc-buffer:getBool:withOptions":@"c-broker-buffer";
-        [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:cls selector:sel specifier:p defaultValue:orig originalValue:orig finalValue:fin source:src callerImage:ci callerSymbol:cs callerAddress:(uint64_t)(uintptr_t)ca];
+        if(runtimeContextEligible){
+            NSString *ci=nil,*cs=nil;Caller(ca,&ci,&cs);
+            NSString *cls=ClassForBID(b);if(!cls.length)cls=[NSString stringWithFormat:@"SCIMCBrokerRouter:%@",b];
+            NSString *sel=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"getBool:withOptions:":[NSString stringWithFormat:@"c-broker:%@",b];
+            NSString *src=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"objc-buffer:getBool:withOptions":@"c-broker-buffer";
+            [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:cls selector:sel specifier:p defaultValue:orig originalValue:orig finalValue:fin source:src callerImage:ci callerSymbol:cs callerAddress:(uint64_t)(uintptr_t)ca];
+        }
         NSString *k=[SCIMobileConfigBrokerStore overrideKeyForBrokerID:b value:p];
         [SCIMobileConfigBrokerStore noteObservedValue:orig forOverrideKey:k];
-        [SCIMobileConfigBrokerStore noteHitForBrokerID:b value:p forced:(orig!=fin)];
+        [SCIMobileConfigBrokerStore noteHitCountForBrokerID:b value:p forced:(orig!=fin) count:hits];
     }
     for(NSDictionary *a in aliasEvents){
         uint64_t raw=[a[@"rawSpecifier"] respondsToSelector:@selector(unsignedLongLongValue)]?[a[@"rawSpecifier"] unsignedLongLongValue]:0;

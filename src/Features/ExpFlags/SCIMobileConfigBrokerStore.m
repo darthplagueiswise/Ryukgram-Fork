@@ -138,15 +138,19 @@ static void SCIMCBrokerScheduleHitFlush(void) {
     });
 }
 
-static void SCIMCBrokerIncrementCachedCount(NSMutableDictionary<NSString *, NSNumber *> *cache, NSString *defaultsKey) {
-    if (!defaultsKey.length) return;
+static void SCIMCBrokerIncrementCachedCountBy(NSMutableDictionary<NSString *, NSNumber *> *cache, NSString *defaultsKey, NSUInteger delta) {
+    if (!defaultsKey.length || delta == 0) return;
     @synchronized (SCIMCBrokerCacheLock()) {
         NSNumber *current = cache[defaultsKey];
         if (!current) current = @((NSUInteger)[[NSUserDefaults standardUserDefaults] integerForKey:defaultsKey]);
-        cache[defaultsKey] = @(current.unsignedIntegerValue + 1);
+        cache[defaultsKey] = @(current.unsignedIntegerValue + delta);
         [SCIMCBrokerDirtyHitKeys() addObject:defaultsKey];
     }
     SCIMCBrokerScheduleHitFlush();
+}
+
+static void SCIMCBrokerIncrementCachedCount(NSMutableDictionary<NSString *, NSNumber *> *cache, NSString *defaultsKey) {
+    SCIMCBrokerIncrementCachedCountBy(cache, defaultsKey, 1);
 }
 
 static void SCIMCBrokerEnsureResolverObserver(void) {
@@ -376,9 +380,13 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
 }
 
 + (void)noteHitForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced {
+    [self noteHitCountForBrokerID:brokerID value:value forced:forced count:1];
+}
++ (void)noteHitCountForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced count:(NSUInteger)count {
     if (!brokerID.length) return;
-    SCIMCBrokerIncrementCachedCount(SCIMCBrokerHitCache(), [self hitKeyForBrokerID:brokerID]);
-    if (forced) SCIMCBrokerIncrementCachedCount(SCIMCBrokerForcedHitCache(), [self forcedHitKeyForBrokerID:brokerID]);
+    if (count == 0) return;
+    SCIMCBrokerIncrementCachedCountBy(SCIMCBrokerHitCache(), [self hitKeyForBrokerID:brokerID], count);
+    if (forced) SCIMCBrokerIncrementCachedCountBy(SCIMCBrokerForcedHitCache(), [self forcedHitKeyForBrokerID:brokerID], count);
     (void)value;
 }
 + (NSUInteger)hitCountForBrokerID:(NSString *)brokerID { return SCIMCBrokerCachedCountForKey(SCIMCBrokerHitCache(), [self hitKeyForBrokerID:brokerID]).unsignedIntegerValue; }

@@ -8,8 +8,10 @@
 
 static const char *kSCIMCIdNameGetFilePathSymbol = "__ZN12mobileconfig23FBMobileConfigIdNameMap19getIdToNameFilePathERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
 static const char *kSCIMCIdNameTryGetNamedParamsListSymbol = "__ZN12mobileconfig23FBMobileConfigIdNameMap21tryGetNamedParamsListERKNSt3__110shared_ptrIKNS1_6vectorINS_13config_meta_tENS1_9allocatorIS4_EEEEEERKNS1_12basic_stringIcNS1_11char_traitsIcEENS5_IcEEEE";
+static const char *kSCIMCMakeConfigMetaListSymbol = "__ZN12mobileconfig25FBMobileConfigSchemaUtils18makeConfigMetaListEPKNS_15c_config_meta_tEi";
 static const char *kSCIMCStorageReadExtraDataSymbol = "__ZN12mobileconfig28FBMobileConfigStorageManager13readExtraDataERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
 static const char *kSCIMCStoragePersistExtraDataSymbol = "__ZN12mobileconfig28FBMobileConfigStorageManager16persistExtraDataERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEES9_";
+static const char *kSCIMCTryUpdateSymbol = "IGMobileConfigTryUpdateConfigsWithCompletion";
 
 // Public export wrapper in FBSharedFramework starts as:
 //   mov w4, #0
@@ -36,8 +38,10 @@ static NSDictionary<NSString *, id> *SCIProbeIDNameMappingSymbols(void) {
     struct Entry { const char *label; const char *symbol; } entries[] = {
         {"FBMobileConfigIdNameMap.getIdToNameFilePath", kSCIMCIdNameGetFilePathSymbol},
         {"FBMobileConfigIdNameMap.tryGetNamedParamsList", kSCIMCIdNameTryGetNamedParamsListSymbol},
+        {"FBMobileConfigSchemaUtils.makeConfigMetaList", kSCIMCMakeConfigMetaListSymbol},
         {"FBMobileConfigStorageManager.readExtraData", kSCIMCStorageReadExtraDataSymbol},
         {"FBMobileConfigStorageManager.persistExtraData", kSCIMCStoragePersistExtraDataSymbol},
+        {"IGMobileConfigTryUpdateConfigsWithCompletion", kSCIMCTryUpdateSymbol},
     };
 
     for (NSUInteger i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
@@ -119,22 +123,25 @@ static void SCIInstallTryUpdateImportObserver(void) {
     NSLog(@"[RyukGram][MCIDName] %@", status);
 }
 
-__attribute__((visibility("default")))
-void SCIInstallMobileConfigIDNameMappingObserver(void) {
+#ifdef __cplusplus
+extern "C" {
+#endif
+__attribute__((visibility("default"))) void SCIInstallMobileConfigIDNameMappingObserver(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         SCIInstallTryUpdateImportObserver();
     });
 }
 
-__attribute__((visibility("default")))
-void SCIInstallMobileConfigIDNameMappingObserverIfNeeded(void) {
+__attribute__((visibility("default"))) void SCIInstallMobileConfigIDNameMappingObserverIfNeeded(void) {
     SCIInstallMobileConfigIDNameMappingObserver();
 }
 
-__attribute__((visibility("default")))
-BOOL SCIIsMobileConfigIDNameMappingObserverInstalled(void) {
+__attribute__((visibility("default"))) BOOL SCIIsMobileConfigIDNameMappingObserverInstalled(void) {
     return gSCITryUpdateImportInstalled;
 }
+#ifdef __cplusplus
+}
+#endif
 
 %ctor {
     // Deliberately no automatic install here. The run #46 version installed a

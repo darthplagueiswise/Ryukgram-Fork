@@ -7,6 +7,7 @@ NSString * const SCIMCRuntimeObservationBufferAliasEventsKey = @"aliasEvents";
 static dispatch_queue_t gSCIMCBufferQueue;
 static NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *gSCIMCBoolEvents;
 static NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *gSCIMCAliasEvents;
+static NSMutableSet<NSString *> *gSCIMCBoolLaunchSeen;
 static BOOL gSCIMCFlushScheduled;
 static SCIMCRuntimeObservationFlushHandler gSCIMCFlushHandler;
 
@@ -26,6 +27,11 @@ static NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *S
 static NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *SCIMCAliasEvents(void) {
     if (!gSCIMCAliasEvents) gSCIMCAliasEvents = [NSMutableDictionary dictionary];
     return gSCIMCAliasEvents;
+}
+
+static NSMutableSet<NSString *> *SCIMCBoolLaunchSeen(void) {
+    if (!gSCIMCBoolLaunchSeen) gSCIMCBoolLaunchSeen = [NSMutableSet set];
+    return gSCIMCBoolLaunchSeen;
 }
 
 static NSString *SCIMCHex64(uint64_t value) {
@@ -58,6 +64,8 @@ void SCIMCRuntimeObservationBufferNoteBoolRead(NSString *brokerID,
         NSString *key = [NSString stringWithFormat:@"%@:%@", bid, hex];
         NSMutableDictionary<NSString *, id> *event = SCIMCBoolEvents()[key];
         if (!event) {
+            BOOL runtimeContextEligible = ![SCIMCBoolLaunchSeen() containsObject:key];
+            if (runtimeContextEligible) [SCIMCBoolLaunchSeen() addObject:key];
             event = [@{
                 @"brokerID": bid,
                 @"specifier": @(value),
@@ -68,6 +76,7 @@ void SCIMCRuntimeObservationBufferNoteBoolRead(NSString *brokerID,
                 @"lastFinalValue": @(final),
                 @"callerAddress": @((unsigned long long)caller),
                 @"hitCount": @1,
+                @"runtimeContextEligible": @(runtimeContextEligible),
                 @"firstTimestamp": @([[NSDate date] timeIntervalSince1970]),
                 @"lastTimestamp": @([[NSDate date] timeIntervalSince1970])
             } mutableCopy];

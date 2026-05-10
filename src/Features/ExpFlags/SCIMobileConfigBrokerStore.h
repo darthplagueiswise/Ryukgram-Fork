@@ -44,6 +44,7 @@ typedef NS_ENUM(NSInteger, SCIMCBrokerBoolState) {
 + (void)noteLastError:(nullable NSString *)error brokerID:(NSString *)brokerID;
 + (nullable NSString *)lastErrorForBrokerID:(NSString *)brokerID;
 + (void)noteHitForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced;
++ (void)noteHitCountForBrokerID:(NSString *)brokerID value:(uint64_t)value forced:(BOOL)forced count:(NSUInteger)count;
 + (NSUInteger)hitCountForBrokerID:(NSString *)brokerID;
 + (NSUInteger)forcedHitCountForBrokerID:(NSString *)brokerID;
 

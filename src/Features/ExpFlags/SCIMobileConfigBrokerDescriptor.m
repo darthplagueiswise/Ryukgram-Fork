@@ -252,8 +252,8 @@
              symbol:@"_MCIExperimentCacheGetMobileConfigBoolean"
                name:@"MCI ExperimentCache Bool"
             details:@"Advanced/lab MCI experiment cache bool reader. Per specifier."
-              orig8:0
-                 vm:0
+              orig8:0xa90157f6d10103ffULL
+                 vm:0x006a4998
               xrefs:1
                kind:SCIMCBrokerKindAdvanced
                 abi:SCIMCBrokerABIGeneric8Bool
@@ -266,8 +266,8 @@
              symbol:@"_MCIExtensionExperimentCacheGetMobileConfigBoolean"
                name:@"MCI ExtensionCache Bool"
             details:@"Advanced/lab MCI extension experiment bool reader. Per specifier."
-              orig8:0
-                 vm:0
+              orig8:0xa90557f6d10203ffULL
+                 vm:0x00697ad8
               xrefs:4
                kind:SCIMCBrokerKindAdvanced
                 abi:SCIMCBrokerABIGeneric8Bool
@@ -280,8 +280,8 @@
              symbol:@"_METAExtensionsExperimentGetBoolean"
                name:@"META Extensions Bool"
             details:@"Advanced/lab METAExtensions bool reader. Per gate, heuristic x1."
-              orig8:0
-                 vm:0
+              orig8:0x1404b45252800024ULL
+                 vm:0x00bbf154
               xrefs:3
                kind:SCIMCBrokerKindAdvanced
                 abi:SCIMCBrokerABIGeneric8Bool
@@ -294,8 +294,8 @@
              symbol:@"_METAExtensionsExperimentGetBooleanWithoutExposure"
                name:@"META Extensions Bool NoExposure"
             details:@"Advanced/lab METAExtensions bool reader without exposure. Per gate, heuristic x1."
-              orig8:0
-                 vm:0
+              orig8:0x1404d33e52800004ULL
+                 vm:0x00bb75a4
               xrefs:0
                kind:SCIMCBrokerKindAdvanced
                 abi:SCIMCBrokerABIGeneric8Bool
@@ -308,8 +308,8 @@
              symbol:@"_MSGCSessionedMobileConfigGetBoolean"
                name:@"MSGC Sessioned Bool"
             details:@"Advanced/lab MSGC sessioned MobileConfig bool reader. Per specifier, heuristic x2."
-              orig8:0
-                 vm:0
+              orig8:0x97a81efba9bf7bfdULL
+                 vm:0x0160a398
               xrefs:0
                kind:SCIMCBrokerKindAdvanced
                 abi:SCIMCBrokerABIGeneric8Bool
