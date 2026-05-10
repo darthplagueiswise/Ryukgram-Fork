@@ -299,7 +299,7 @@ __attribute__((visibility("default"))) void SCIInstallDogfoodingPersistenceHooks
 
 __attribute__((visibility("default"))) void SCIInstallPassiveIDNameMappingPersistObserver(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        SCIInstallIDNameMappingObserverAttempt(0);
+        SCIRecordIDNameObserverStatus(@"disabled", @"", @"", 0, @"persistExtraData hook disabled; scan paths only");
     });
 }
 

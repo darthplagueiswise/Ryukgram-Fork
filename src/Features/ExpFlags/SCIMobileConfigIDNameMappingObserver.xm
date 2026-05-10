@@ -128,7 +128,8 @@ extern "C" {
 #endif
 __attribute__((visibility("default"))) void SCIInstallMobileConfigIDNameMappingObserver(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        SCIInstallTryUpdateImportObserver();
+        NSDictionary *symbols = SCIProbeIDNameMappingSymbols();
+        SCISetObserverStatus(@"id_name_mapping native observer disabled; scan paths only", symbols ?: @{});
     });
 }
 

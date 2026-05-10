@@ -19,7 +19,7 @@ before-all::
 	fi
 
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
-RYUKGRAM_SRC_FILES := $(filter-out $(GENERATED_SCHEMA_SRC),$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out src/Generated/%,$(RYUKGRAM_SRC_FILES))
 
 $(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation UniformTypeIdentifiers CoreLocation MapKit

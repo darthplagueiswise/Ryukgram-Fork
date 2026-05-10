@@ -7,11 +7,6 @@ NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotification = @"S
 
 static NSString * const kSCIIdMapExporterStatusKey = @"sci.mc.id_name_mapping_exporter.last_status";
 
-extern void SCIInstallMobileConfigIDNameMappingObserver(void);
-extern BOOL SCIIsMobileConfigIDNameMappingObserverInstalled(void);
-extern void SCIInstallPassiveIDNameMappingPersistObserver(void);
-extern BOOL SCIIsPassiveIDNameMappingPersistObserverInstalled(void);
-
 static const char *kSCIIdMapSymbolTryGetNamedParamsList = "__ZN12mobileconfig23FBMobileConfigIdNameMap21tryGetNamedParamsListERKNSt3__110shared_ptrIKNS1_6vectorINS_13config_meta_tENS1_9allocatorIS4_EEEEEERKNS1_12basic_stringIcNS1_11char_traitsIcEENS5_IcEEEE";
 static const char *kSCIIdMapSymbolGetFilePath = "__ZN12mobileconfig23FBMobileConfigIdNameMap19getIdToNameFilePathERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE";
 static const char *kSCIIdMapSymbolMakeConfigMetaList = "__ZN12mobileconfig25FBMobileConfigSchemaUtils18makeConfigMetaListEPKNS_15c_config_meta_tEi";
@@ -182,19 +177,15 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
 }
 
 + (NSDictionary *)installNativePathObserver {
-    SCIInstallMobileConfigIDNameMappingObserver();
-    SCIInstallPassiveIDNameMappingPersistObserver();
     NSDictionary *symbolProbe = SCIIdMapNativeSymbolProbe();
-    BOOL observerInstalled = SCIIsMobileConfigIDNameMappingObserverInstalled();
-    BOOL passivePersistObserverInstalled = SCIIsPassiveIDNameMappingPersistObserverInstalled();
     NSString *primary = [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"";
-    NSString *status = [NSString stringWithFormat:@"id_name_mapping observer requested · update=%@ · persist=%@ · primary=%@", observerInstalled ? @"YES" : @"pending", passivePersistObserverInstalled ? @"YES" : @"pending", primary];
+    NSString *status = [NSString stringWithFormat:@"id_name_mapping scan only · native hooks disabled · primary=%@", primary];
     SCIIdMapSetStatus(status);
     return @{@"ok": @YES,
-             @"mode": @"manual-trigger-passive-capture",
+             @"mode": @"path-scan-only",
              @"primaryPath": primary,
-             @"observerInstalled": @(observerInstalled),
-             @"passivePersistObserverInstalled": @(passivePersistObserverInstalled),
+             @"observerInstalled": @NO,
+             @"passivePersistObserverInstalled": @NO,
              @"symbolProbe": symbolProbe ?: @{},
              @"status": status};
 }
@@ -221,10 +212,10 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
     for (NSDictionary *info in candidateInfo) if ([info[@"exists"] boolValue] || visibleCandidates.count < 80) [visibleCandidates addObject:info];
 
     if (!best) {
-        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
+        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native hooks disabled", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
         SCIIdMapSetStatus(status);
         return @{@"ok": @NO,
-                 @"mode": @"manual-trigger-passive-capture",
+                 @"mode": @"path-scan-only",
                  @"status": status,
                  @"probe": probe ?: @{},
                  @"symbolProbe": probe[@"symbolProbe"] ?: @{},
@@ -237,7 +228,7 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
                  @"source": @"",
                  @"outputs": @[],
                  @"errors": @[],
-                 @"nativeImport": @{@"ok": @NO, @"mode": @"probe-only", @"reason": @"direct tryGetNamedParamsList call intentionally disabled"}};
+                 @"nativeImport": @{@"ok": @NO, @"mode": @"probe-only", @"reason": @"native hooks disabled; matching InstaFEL path-copy model"}};
     }
 
     NSString *source = SCIIdMapString(best[@"path"]);
