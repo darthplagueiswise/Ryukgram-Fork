@@ -3,7 +3,7 @@
 #import "../Features/ExpFlags/SCIMobileConfigBrokerStore.h"
 #import "../Features/ExpFlags/SCIDexKitNameResolver.h"
 
-extern void SCIInstallObjCMobileConfigGetterObserver(void);
+extern void SCIInstallObjCMobileConfigGetterObserverForBrokerID(NSString *brokerID);
 extern BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString *brokerID);
 extern NSUInteger SCIObjCMobileConfigObserverInstalledCount(void);
 extern void SCIObjCMobileConfigObserverInstallEnabled(void);
@@ -88,7 +88,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 }
 - (void)installBroker {
     [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID];
-    SCIInstallObjCMobileConfigGetterObserver();
+    SCIInstallObjCMobileConfigGetterObserverForBrokerID(self.broker.brokerID);
     [self reloadKeys];
 }
 - (void)copySnapshot {
@@ -168,7 +168,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     cell.switchChanged = ^(BOOL on) {
         [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:weakSelf.broker.brokerID];
         [SCIMobileConfigBrokerStore setOverrideValue:@(on) forKey:key];
-        SCIInstallObjCMobileConfigGetterObserver();
+        SCIInstallObjCMobileConfigGetterObserverForBrokerID(weakSelf.broker.brokerID);
         [weakSelf reloadKeys];
     };
     cell.accessoryType = forced ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
@@ -208,8 +208,8 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
                          [resolved[@"callerAddress"] isKindOfClass:NSString.class] ? resolved[@"callerAddress"] : @"",
                          [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @""];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@YES forKey:key]; SCIInstallObjCMobileConfigGetterObserver(); [self reloadKeys]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@NO forKey:key]; SCIInstallObjCMobileConfigGetterObserver(); [self reloadKeys]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@YES forKey:key]; SCIInstallObjCMobileConfigGetterObserverForBrokerID(self.broker.brokerID); [self reloadKeys]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setBrokerHookEnabled:YES brokerID:self.broker.brokerID]; [SCIMobileConfigBrokerStore setOverrideValue:@NO forKey:key]; SCIInstallObjCMobileConfigGetterObserverForBrokerID(self.broker.brokerID); [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:nil forKey:key]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = key; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy resolved JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){
@@ -320,7 +320,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     __weak typeof(self) weakSelf = self;
     cell.switchChanged = ^(BOOL on) {
         [SCIMobileConfigBrokerStore setBrokerHookEnabled:on brokerID:d.brokerID];
-        if (on) SCIInstallObjCMobileConfigGetterObserver();
+        if (on) SCIInstallObjCMobileConfigGetterObserverForBrokerID(d.brokerID);
         [weakSelf reloadRows];
     };
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;

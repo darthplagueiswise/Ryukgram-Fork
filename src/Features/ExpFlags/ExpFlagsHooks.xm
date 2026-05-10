@@ -128,14 +128,6 @@ static void install(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     // but Dev Mode observation should use MC ObjC Observers instead.
     BOOL legacyMCGetterHooks = [[[NSUserDefaults standardUserDefaults] objectForKey:@"sci_exp_mc_legacy_getter_hooks_enabled"] boolValue];
     if (legacyMCGetterHooks) {
-        Class mc = NSClassFromString(@"IGMobileConfigContextManager");
-        install(mc, @"getBool:",               (IMP)new_mcBool,       (IMP *)&orig_mcBool);
-        install(mc, @"getBool:withDefault:",   (IMP)new_mcBool_def,   (IMP *)&orig_mcBool_def);
-        install(mc, @"getInt64:",              (IMP)new_mcInt,        (IMP *)&orig_mcInt);
-        install(mc, @"getInt64:withDefault:",  (IMP)new_mcInt_def,    (IMP *)&orig_mcInt_def);
-        install(mc, @"getDouble:",             (IMP)new_mcDouble,     (IMP *)&orig_mcDouble);
-        install(mc, @"getDouble:withDefault:", (IMP)new_mcDouble_def, (IMP *)&orig_mcDouble_def);
-        install(mc, @"getString:",             (IMP)new_mcString,     (IMP *)&orig_mcString);
-        install(mc, @"getString:withDefault:", (IMP)new_mcString_def, (IMP *)&orig_mcString_def);
+        NSLog(@"[RyukGram][ExpFlags] legacy MobileConfig getter hooks blocked during launch");
     }
 }

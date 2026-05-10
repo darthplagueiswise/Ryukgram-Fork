@@ -143,6 +143,11 @@ static SCIDexKitDescriptor *DescriptorFromOverrideKey(NSString *key) {
 }
 
 void SCIDexKitReapplySavedOverrides(void) {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"sci_dexkit_allow_startup_reapply"]) {
+        NSLog(@"[RyukGram][DexKitRouter] startup reapply blocked");
+        return;
+    }
+
     NSUInteger attempted = 0, installed = 0, pending = 0;
     for (NSString *key in [SCIDexKitStore activeOverrideKeys]) {
         if ([SCIDexKitStore isOverrideQuarantined:key]) continue;
@@ -156,6 +161,8 @@ void SCIDexKitReapplySavedOverrides(void) {
 }
 
 void SCIDexKitRetryPendingOverridesForImage(NSString *imageBasename) {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"sci_dexkit_allow_startup_reapply"]) return;
+
     NSArray *keys = [SCIDexKitImagePolicy drainPendingOverrideKeysForImage:imageBasename];
     for (NSString *key in keys) {
         SCIDexKitDescriptor *d = DescriptorFromOverrideKey(key);

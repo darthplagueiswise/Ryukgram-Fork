@@ -128,7 +128,10 @@ static BOOL RGPatchOneSymbol(const RGMC_PatchSpec *spec, BOOL relaxed) {
     return ok;
 }
 
-%ctor {
+#ifdef __cplusplus
+extern "C" {
+#endif
+__attribute__((visibility("default"))) void SCIRunMobileConfigRuntimePatcherManual(void) {
     if (!RGMCEnabled()) return;
     if ([SCIMobileConfigBrokerStore hasAnyActiveOverridesOrHooks]) {
         NSLog(@"[RyukGram][RGMC] skipped runtime true patcher because SCIMobileConfigBrokerRouter has active overrides/hooks");
@@ -140,7 +143,7 @@ static BOOL RGPatchOneSymbol(const RGMC_PatchSpec *spec, BOOL relaxed) {
     NSUInteger selected = 0;
     NSUInteger total = sizeof(kRGMCPatches) / sizeof(kRGMCPatches[0]);
 
-    NSLog(@"[RyukGram][RGMC] runtime MobileConfig true patcher master enabled; relaxed=%d total=%lu", relaxed, (unsigned long)total);
+    NSLog(@"[RyukGram][RGMC] manual MobileConfig true patcher enabled; relaxed=%d total=%lu", relaxed, (unsigned long)total);
     for (NSUInteger i = 0; i < total; i++) {
         const RGMC_PatchSpec *spec = &kRGMCPatches[i];
         if (!RGMCSpecEnabled(spec)) {
@@ -150,5 +153,14 @@ static BOOL RGPatchOneSymbol(const RGMC_PatchSpec *spec, BOOL relaxed) {
         selected++;
         if (RGPatchOneSymbol(spec, relaxed)) okCount++;
     }
-    NSLog(@"[RyukGram][RGMC] runtime patcher finished selected=%lu ok=%lu/%lu", (unsigned long)selected, (unsigned long)okCount, (unsigned long)total);
+    NSLog(@"[RyukGram][RGMC] manual runtime patcher finished selected=%lu ok=%lu/%lu", (unsigned long)selected, (unsigned long)okCount, (unsigned long)total);
+}
+#ifdef __cplusplus
+}
+#endif
+
+%ctor {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"igt_runtime_mc_true_patcher"]) {
+        NSLog(@"[RyukGram][RGMC] startup runtime patcher blocked; native MobileConfig patching must not run during launch");
+    }
 }

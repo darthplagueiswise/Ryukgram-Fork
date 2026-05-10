@@ -229,8 +229,7 @@ static void **MCBROriginalSlotForBrokerID(NSString *brokerID) {
 
 + (void)bootstrap {
     [SCIMobileConfigBrokerStore registerDefaultsAndMigrate];
-    [self installEnabledBrokers];
-    NSLog(@"[RyukGram][MCBR] import-only broker observer ready; full C body patch remains offline-only for sideload");
+    NSLog(@"[RyukGram][MCBR] bootstrap inert; broker install is manual/debug only");
 }
 
 + (BOOL)installBroker:(SCIMobileConfigBrokerDescriptor *)descriptor error:(NSError * _Nullable * _Nullable)error {
@@ -294,6 +293,11 @@ static void **MCBROriginalSlotForBrokerID(NSString *brokerID) {
 }
 
 + (void)installEnabledBrokers {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:@"sci_exp_mc_allow_install_enabled_brokers"]) {
+        NSLog(@"[RyukGram][MCBR] installEnabledBrokers blocked; use explicit manual broker install");
+        return;
+    }
+
     for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
         if (![SCIMobileConfigBrokerStore shouldInstallBrokerID:d.brokerID]) continue;
         NSError *err = nil;

@@ -198,10 +198,9 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
 
     if ([ud boolForKey:kMCBRMigrationDoneKey]) return;
 
-    NSDictionary *all = [ud dictionaryRepresentation];
     for (SCIMobileConfigBrokerDescriptor *d in [SCIMobileConfigBrokerDescriptor allDescriptors]) {
         NSString *longKey = [NSString stringWithFormat:@"dexkit.cbroker:%@:%@", d.imageName, d.symbol];
-        id longValue = all[longKey];
+        id longValue = [ud objectForKey:longKey];
         if ([longValue isKindOfClass:NSNumber.class]) {
             NSString *key = [self overrideKeyForBrokerID:d.brokerID value:0];
             [ud setBool:[longValue boolValue] forKey:key];
@@ -209,7 +208,7 @@ static NSComparisonResult SCIMCBrokerCompareMetadataItems(NSDictionary *a, NSDic
         }
 
         NSString *oldBrokerWide = [kMCBROverridePrefix stringByAppendingString:(d.brokerID ?: @"")];
-        id oldValue = all[oldBrokerWide];
+        id oldValue = [ud objectForKey:oldBrokerWide];
         if ([oldValue isKindOfClass:NSNumber.class]) {
             NSString *key = [self overrideKeyForBrokerID:d.brokerID value:0];
             [ud setBool:[oldValue boolValue] forKey:key];

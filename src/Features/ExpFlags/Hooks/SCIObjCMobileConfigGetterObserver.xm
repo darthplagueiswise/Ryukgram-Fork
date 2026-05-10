@@ -72,7 +72,7 @@ static BOOL InstallB(NSString*b){NSString*cn=ClassForBID(b);if(!cn.length){retur
 static BOOL InstallAliasB(NSString*b){if(!On(kAliasKey))return NO;NSString*cn=ClassForBID(b);Class c=cn.length?NSClassFromString(cn):Nil;if(!c)return NO;BOOL any=NO;for(NSString*n in @[@"_getTranslatedSpecifier:",@"getTranslatedSpecifier:",@"getStableIdFromParamSpecifier:"]){SEL s=NSSelectorFromString(n);if(LooksU64U64(c,s))any=One(c,n,(IMP)HAlias)||any;}return any;}
 static NSUInteger Count(void){pthread_mutex_lock(&gLock);NSUInteger c=gOrig.count;pthread_mutex_unlock(&gLock);return c;}
 static void InstallBroker(NSString*b){ConfigureBufferConsumer();InstallCBroker(b);InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
-static void InstallEnabled(void){ConfigureBufferConsumer();[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
+static void InstallEnabled(void){ConfigureBufferConsumer();if(![[NSUserDefaults standardUserDefaults] boolForKey:@"sci_exp_mc_allow_install_enabled_brokers"]){NSLog(@"[RyukGram][MCObjC] installEnabled blocked; install a broker explicitly from debug UI");return;}[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
 
 #ifdef __cplusplus
 extern "C" {
