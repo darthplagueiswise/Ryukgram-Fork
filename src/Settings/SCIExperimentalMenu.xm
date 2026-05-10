@@ -1,5 +1,6 @@
 #import "TweakSettings.h"
 #import "SCIExpFlagsViewController.h"
+#import "SCIMobileConfigBrokerViewController.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -63,7 +64,11 @@ static NSArray *expNavSections(void) {
                 [SCISetting navigationCellWithTitle:@"Experimental flags browser"
                                            subtitle:@"Open MetaLocalExperiment / IGMobileConfig browser"
                                                icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
-                                     viewController:[SCIExpFlagsViewController new]]
+                                     viewController:[SCIExpFlagsViewController new]],
+                [SCISetting navigationCellWithTitle:@"MC Broker"
+                                           subtitle:@"MobileConfig param browser with lazy name resolution"
+                                               icon:[SCISymbol symbolWithName:@"cpu"]
+                                     viewController:[SCIMobileConfigBrokerViewController new]]
             ]
         }
     ];
