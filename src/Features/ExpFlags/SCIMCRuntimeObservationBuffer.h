@@ -2,6 +2,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 FOUNDATION_EXPORT NSString * const SCIMCRuntimeObservationBufferDidFlushNotification;
 FOUNDATION_EXPORT NSString * const SCIMCRuntimeObservationBufferBoolEventsKey;
 FOUNDATION_EXPORT NSString * const SCIMCRuntimeObservationBufferAliasEventsKey;
@@ -34,5 +38,9 @@ NSUInteger SCIMCRuntimeObservationBufferPendingBoolCount(void);
 
 /// Returns the number of currently buffered unique alias events.
 NSUInteger SCIMCRuntimeObservationBufferPendingAliasCount(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 NS_ASSUME_NONNULL_END
