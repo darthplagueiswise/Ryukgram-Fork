@@ -55,9 +55,29 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 @interface SCIMCBrokerValueViewController : UITableViewController
 @property (nonatomic, strong) SCIMobileConfigBrokerDescriptor *broker;
 @property (nonatomic, strong) NSArray<NSString *> *keys;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *resolvedCache;
 @end
 
 @implementation SCIMCBrokerValueViewController
+
+- (NSDictionary *)resolvedMetadataForKey:(NSString *)key preloadOnly:(BOOL)preloadOnly {
+    NSDictionary *cached = self.resolvedCache[key];
+    if (cached) return cached;
+    if (preloadOnly) return nil;
+    NSDictionary *resolved = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key] ?: @{};
+    self.resolvedCache[key] = resolved;
+    return resolved;
+}
+
+- (void)preloadVisibleResolvedMetadata {
+    NSArray<NSIndexPath *> *visibleRows = [self.tableView indexPathsForVisibleRows];
+    if (!visibleRows.count) return;
+    for (NSIndexPath *indexPath in visibleRows) {
+        if (indexPath.section != 1 || indexPath.row >= self.keys.count) continue;
+        NSString *key = self.keys[indexPath.row];
+        [self resolvedMetadataForKey:key preloadOnly:NO];
+    }
+}
 - (instancetype)initWithBroker:(SCIMobileConfigBrokerDescriptor *)broker {
     self = [super initWithStyle:UITableViewStyleInsetGrouped];
     if (self) { _broker = broker; self.title = broker.brokerID; }
@@ -66,6 +86,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 - (void)viewDidLoad {
     [super viewDidLoad];
     [self.tableView registerClass:SCIMCBrokerCell.class forCellReuseIdentifier:@"value"];
+    self.resolvedCache = [NSMutableDictionary dictionary];
     self.navigationItem.rightBarButtonItems = @[
         [[UIBarButtonItem alloc] initWithTitle:@"Install" style:UIBarButtonItemStylePlain target:self action:@selector(installBroker)],
         [[UIBarButtonItem alloc] initWithTitle:@"Copy" style:UIBarButtonItemStylePlain target:self action:@selector(copySnapshot)]
@@ -82,6 +103,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 }
 - (void)reloadKeys {
     self.keys = [SCIMobileConfigBrokerStore observedOverrideKeysForBrokerID:self.broker.brokerID];
+    [self.resolvedCache removeAllObjects];
     [self.tableView reloadData];
 }
 - (void)installBroker {
@@ -90,8 +112,17 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     [self reloadKeys];
 }
 - (void)copySnapshot {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:[SCIMobileConfigBrokerStore snapshotDictionary] options:NSJSONWritingPrettyPrinted error:nil];
-    UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    UIBarButtonItem *copyButton = self.navigationItem.rightBarButtonItems.lastObject;
+    copyButton.enabled = NO;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary *snapshot = [SCIMobileConfigBrokerStore snapshotDictionary];
+        NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil];
+        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIPasteboard.generalPasteboard.string = json;
+            copyButton.enabled = YES;
+        });
+    });
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? 1 : self.keys.count; }
@@ -128,7 +159,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
     NSNumber *forced = [SCIMobileConfigBrokerStore overrideValueForKey:key];
     SCIMCBrokerBoolState state = [SCIMobileConfigBrokerStore effectiveStateForOverrideKey:key];
-    NSDictionary *resolved = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key];
+    NSDictionary *resolved = [self resolvedMetadataForKey:key preloadOnly:NO] ?: @{};
     NSString *title = [resolved[@"title"] isKindOfClass:NSString.class] ? resolved[@"title"] : @"";
     NSString *source = [resolved[@"source"] isKindOfClass:NSString.class] ? resolved[@"source"] : @"";
     NSString *detail = [resolved[@"resolvedDetail"] isKindOfClass:NSString.class] ? resolved[@"resolvedDetail"] : @"";
@@ -159,13 +190,21 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     cell.accessoryType = forced ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
+- (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView {
+    [self preloadVisibleResolvedMetadata];
+}
+
+- (void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate {
+    if (!decelerate) [self preloadVisibleResolvedMetadata];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section != 1) return;
     NSString *key = self.keys[indexPath.row];
     NSString *bid = nil; uint64_t value = 0;
     [SCIMobileConfigBrokerStore parseOverrideKey:key brokerID:&bid value:&value];
-    NSDictionary *resolved = [SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key];
+    NSDictionary *resolved = [self resolvedMetadataForKey:key preloadOnly:NO] ?: @{};
     NSString *title = [resolved[@"title"] isKindOfClass:NSString.class] && [resolved[@"title"] length] ? resolved[@"title"] : [NSString stringWithFormat:@"0x%016llx", (unsigned long long)value];
     NSString *message = [NSString stringWithFormat:@"%@\nsource=%@\nruntimeObserved=%@\ncaller=%@ %@\n%@",
                          key,
@@ -180,7 +219,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
     [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [SCIMobileConfigBrokerStore setOverrideValue:nil forKey:key]; [self reloadKeys]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = key; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Copy resolved JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){
-        NSMutableDictionary *copy = [[SCIMobileConfigBrokerStore resolvedMetadataForOverrideKey:key] mutableCopy];
+        NSMutableDictionary *copy = [[self resolvedMetadataForKey:key preloadOnly:NO] mutableCopy];
         copy[@"key"] = key ?: @"";
         NSData *data = [NSJSONSerialization dataWithJSONObject:copy options:NSJSONWritingPrettyPrinted error:nil];
         UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -295,8 +334,14 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 1) {
-        NSData *data = [NSJSONSerialization dataWithJSONObject:[SCIMobileConfigBrokerStore snapshotDictionary] options:NSJSONWritingPrettyPrinted error:nil];
-        UIPasteboard.generalPasteboard.string = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            NSDictionary *snapshot = [SCIMobileConfigBrokerStore snapshotDictionary];
+            NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil];
+            NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIPasteboard.generalPasteboard.string = json;
+            });
+        });
         return;
     }
     SCIMobileConfigBrokerDescriptor *d = self.rows[indexPath.row];
