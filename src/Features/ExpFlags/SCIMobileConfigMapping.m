@@ -3,6 +3,7 @@
 static NSString *const kDir = @"mobileconfig";
 static NSString *const kMap = @"id_name_mapping.json";
 static NSString *const kOvr = @"mc_overrides.json";
+static NSString *const kAndroidDexCandidateMap = @"id_name_mapping.android_dex_candidates.json";
 
 @implementation SCIMobileConfigMapping
 
@@ -119,9 +120,36 @@ static NSString *const kOvr = @"mc_overrides.json";
     return paths.array;
 }
 
++ (NSArray<NSString *> *)androidDexCandidateMappingPaths {
+    NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
+    NSString *h = NSHomeDirectory();
+    if (h.length) {
+        [paths addObject:[[h stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig_res"] stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+        [paths addObject:[[h stringByAppendingPathComponent:@"mobileconfig"] stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+    }
+    [paths addObject:[@"/var/jb/Library/Application Support/RyukGram/mobileconfig_res" stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+    [paths addObject:[@"/Library/Application Support/RyukGram/mobileconfig_res" stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+
+    NSString *bundle = [NSBundle mainBundle].bundlePath;
+    if (bundle.length) {
+        [paths addObject:[[bundle stringByAppendingPathComponent:@"mobileconfig_res"] stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+        [paths addObject:[[bundle stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework/mobileconfig_res"] stringByAppendingPathComponent:kAndroidDexCandidateMap]];
+    }
+    return paths.array;
+}
+
 + (NSString *)activeIDNameMappingPath {
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *p in [self mappingPaths]) {
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:p isDirectory:&isDir] && !isDir) return p;
+    }
+    return nil;
+}
+
++ (NSString *)activeAndroidDexCandidateMappingPath {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *p in [self androidDexCandidateMappingPaths]) {
         BOOL isDir = NO;
         if ([fm fileExistsAtPath:p isDirectory:&isDir] && !isDir) return p;
     }
@@ -176,15 +204,35 @@ static NSString *const kOvr = @"mc_overrides.json";
 + (NSDictionary<NSNumber *, NSDictionary *> *)idNameMapping {
     static NSDictionary *cache;
     static NSString *loadedPath;
+    static NSString *loadedCandidatePath;
     static NSDate *loadedDate;
+    static NSDate *loadedCandidateDate;
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *path = [self activeIDNameMappingPath];
+    NSString *candidatePath = [self activeAndroidDexCandidateMappingPath];
     NSDate *date = nil;
+    NSDate *candidateDate = nil;
     if (path.length) date = [fm attributesOfItemAtPath:path error:nil][NSFileModificationDate];
-    if (cache && ((path == loadedPath) || [path isEqualToString:loadedPath]) && ((date == loadedDate) || [date isEqualToDate:loadedDate])) return cache;
-    cache = [[self parseMappingObject:[self jsonAtPath:path] source:path ?: kMap] copy] ?: @{};
+    if (candidatePath.length) candidateDate = [fm attributesOfItemAtPath:candidatePath error:nil][NSFileModificationDate];
+    BOOL samePath = ((path == loadedPath) || [path isEqualToString:loadedPath]);
+    BOOL sameDate = ((date == loadedDate) || [date isEqualToDate:loadedDate]);
+    BOOL sameCandidatePath = ((candidatePath == loadedCandidatePath) || [candidatePath isEqualToString:loadedCandidatePath]);
+    BOOL sameCandidateDate = ((candidateDate == loadedCandidateDate) || [candidateDate isEqualToDate:loadedCandidateDate]);
+    if (cache && samePath && sameDate && sameCandidatePath && sameCandidateDate) return cache;
+
+    NSMutableDictionary *merged = [NSMutableDictionary dictionary];
+    if (candidatePath.length) {
+        NSDictionary *candidate = [self parseMappingObject:[self jsonAtPath:candidatePath]
+                                                    source:[NSString stringWithFormat:@"android-dex-candidate:%@", candidatePath]] ?: @{};
+        [merged addEntriesFromDictionary:candidate];
+    }
+    NSDictionary *primary = [self parseMappingObject:[self jsonAtPath:path] source:path ?: kMap] ?: @{};
+    [merged addEntriesFromDictionary:primary];
+    cache = [merged copy] ?: @{};
     loadedPath = [path copy];
+    loadedCandidatePath = [candidatePath copy];
     loadedDate = date;
+    loadedCandidateDate = candidateDate;
     return cache;
 }
 
@@ -210,7 +258,8 @@ static NSString *const kOvr = @"mc_overrides.json";
 
 + (NSString *)mappingStatusLine {
     NSString *active = [self activeIDNameMappingPath];
-    return [NSString stringWithFormat:@"id_name_mapping=%lu · active=%@ · primary=%@ · dataCandidates=%lu · bundleCandidates=%lu", (unsigned long)[self idNameMapping].count, active ?: @"none", [self primaryIDNameMappingPath], (unsigned long)[self dataContainerMappingPaths].count, (unsigned long)[self bundleMappingPaths].count];
+    NSString *androidCandidate = [self activeAndroidDexCandidateMappingPath];
+    return [NSString stringWithFormat:@"id_name_mapping=%lu · active=%@ · androidDexCandidate=%@ · primary=%@ · dataCandidates=%lu · bundleCandidates=%lu", (unsigned long)[self idNameMapping].count, active ?: @"none", androidCandidate ?: @"none", [self primaryIDNameMappingPath], (unsigned long)[self dataContainerMappingPaths].count, (unsigned long)[self bundleMappingPaths].count];
 }
 
 + (NSDictionary *)allOverrides {

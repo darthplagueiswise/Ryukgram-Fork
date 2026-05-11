@@ -12,6 +12,8 @@
 + (NSArray<NSString *> *)bundleMappingPaths;
 + (NSArray<NSString *> *)mappingPaths;
 + (NSString *)activeIDNameMappingPath;
++ (NSArray<NSString *> *)androidDexCandidateMappingPaths;
++ (NSString *)activeAndroidDexCandidateMappingPath;
 
 + (NSDictionary<NSNumber *, NSDictionary *> *)idNameMapping;
 + (NSDictionary<NSNumber *, NSDictionary *> *)parseMappingObject:(id)obj
