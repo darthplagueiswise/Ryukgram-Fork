@@ -50,20 +50,25 @@ static NSArray<NSString *> *sciPrefKeysForFGSel(NSString *sel) {
         return @[@"igt_mutual_interest"];
     if ([l containsString:@"stickercard"])
         return @[@"igt_icebreaker", @"igt_mutual_interest"];
+    if ([l containsString:@"tapprefetch"] || [l containsString:@"tap_prefetch"])
+        return @[@"igt_stories_tray_tap_prefetch"];
+    if ([l containsString:@"traytitle"] || [l containsString:@"tray_title"])
+        return @[@"igt_stories_tray_title_interaction"];
     if ([l containsString:@"storiestray"] || [l containsString:@"stories_tray"])
         return @[@"igt_stories_tray_decoupling"];
     if ([l containsString:@"feeddecoupl"] || [l containsString:@"feed_decoupl"])
-        return @[@"igt_stories_tray_decoupling"];
+        return @[@"igt_stories_feed_decoupling"];
     if ([l containsString:@"inlinelike"] || [l containsString:@"inline_like"])
         return @[@"igt_dm_inline_like"];
     if ([l containsString:@"friendlanefeed"] || [l containsString:@"friendlane"])
         return @[@"igt_friends_feed"];
     if ([l containsString:@"storiesfetchhandled"] || [l containsString:@"storiesindependent"])
-        return @[@"igt_stories_tray_decoupling"];
-    if ([l containsString:@"multiplenotes"] || [l containsString:@"multiple_notes"])
-        return @[@"igt_multiple_notes"];
-    if ([l containsString:@"firstnotebadge"])
-        return @[@"igt_dn_first_badge"];
+        return @[@"igt_stories_independent_fetch"];
+
+    // Direct Notes-specific feature methods such as multipleNotesEnabled: and
+    // firstNoteBadgeEnabled are intentionally not routed here anymore. They
+    // are controlled by the native Direct Notes Dogfooding settings flow so the
+    // menu does not expose duplicate RyukGram switches that fight native state.
     return nil;
 }
 
@@ -121,7 +126,9 @@ static void sciHookFGClass(Class cls) {
 %ctor {
     NSArray<NSString *> *featureKeys = @[
         @"igt_mutual_interest", @"igt_icebreaker", @"igt_friends_feed",
-        @"igt_stories_tray_decoupling", @"igt_dm_inline_like", @"igt_multiple_notes",
+        @"igt_stories_tray_decoupling", @"igt_stories_tray_tap_prefetch",
+        @"igt_stories_tray_title_interaction", @"igt_stories_feed_decoupling",
+        @"igt_stories_independent_fetch", @"igt_dm_inline_like",
         @"igt_feed_dedup", @"igt_reels_first", @"igt_feed_culling",
         @"igt_pull_to_carrera", @"igt_audio_ramping", @"igt_tab_swiping",
         @"igt_quicksnap", @"igt_prism", @"igt_homecoming", @"igt_story_grid"
@@ -133,18 +140,18 @@ static void sciHookFGClass(Class cls) {
     if (!any) return;
 
     gFGOriginals = [NSMutableDictionary dictionary];
-    // CONFIRMED class names from Instagram + FBSharedFramework binary analysis
     NSArray<NSString *> *fgClassNames = @[
-        // Mutual Interest + Icebreaker (DM thread cards)
+        // Confirmed in the main Instagram executable.
         @"_TtC32IGDirectMutualInterestIcebreaker42IGDirectMutualInterestFeatureGatingService",
-        // Stories Tray decoupling + tap prefetch (Ads prefetch manager)
         @"_TtC23IGStoryAdsPrefetchSwift27IGStoriesAdsPrefetchManager",
-        // Homecoming Nav Configuration (story grid, friend lane, feed culling etc.)
+        @"IGDirectMessageMenuStaticEligibilityContext",
+
+        // Confirmed in FBSharedFramework / runtime for nav configuration.
+        @"_TtC18IGNavConfiguration25IGHomecomingConfiguration",
         @"_TtC18IGNavConfiguration28IGHomecomingNavConfiguration",
         @"_TtC18IGNavConfiguration18IGNavConfiguration",
-        // DM message menu inline like
-        @"IGDirectMessageMenuStaticEligibilityContext",
-        // Legacy / fallback names (originally wrong, kept for safety)
+
+        // Legacy / fallback names.
         @"FeatureGatingService",
         @"FeatureGate",
     ];
