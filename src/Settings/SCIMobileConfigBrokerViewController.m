@@ -2,7 +2,6 @@
 #import "../Features/ExpFlags/SCIMobileConfigBrokerDescriptor.h"
 #import "../Features/ExpFlags/SCIMobileConfigBrokerStore.h"
 #import "../Features/ExpFlags/SCIDexKitNameResolver.h"
-#import "../Features/ExpFlags/SCIMobileConfigIdNameMappingExporter.h"
 
 extern void SCIInstallObjCMobileConfigGetterObserverForBrokerID(NSString *brokerID);
 extern BOOL SCIObjCMobileConfigObserverIsInstalledForBrokerID(NSString *brokerID);
@@ -296,7 +295,7 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 - (void)resetOverrides { [SCIMobileConfigBrokerStore resetAllBrokerOverrides]; [self reloadRows]; }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? self.rows.count : 3; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return section == 0 ? self.rows.count : 1; }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"FBSharedFramework ObjC observer targets" : @"Debug"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return section == 0 ? @"Switch enables pass-through observation. Tap row to view observed specifiers/gates and force individual values." : nil; }
 - (UITableViewCell *)basicCell:(NSString *)title detail:(NSString *)detail {
@@ -310,8 +309,6 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 1) {
         if (indexPath.row == 0) return [self basicCell:@"Copy resolved snapshot" detail:@"Tap to copy current mcbr/mcob state as JSON enriched by SCIDexKitNameResolver: resolvedName, title, source, runtimeObserved, callerImage, callerSymbol and callerAddress."];
-        if (indexPath.row == 1) return [self basicCell:@"Copy MobileConfig asset report" detail:@"Reports packaged Android params_map/params_names experiment files, candidate iOS paths, file sizes, SHA-256 hashes, native symbol probe, and id_name_mapping candidates. No hooks are installed."];
-        return [self basicCell:@"Copy assets to runtime paths" detail:@"Manual experiment: copies packaged params_map/params_names files into container/app candidate mobileconfig_res paths, then copies the full JSON report. Does not call C++ or TryUpdate."];
     }
     SCIMCBrokerCell *cell = [tableView dequeueReusableCellWithIdentifier:@"broker" forIndexPath:indexPath];
     SCIMobileConfigBrokerDescriptor *d = self.rows[indexPath.row];
@@ -334,18 +331,6 @@ extern void SCIObjCMobileConfigObserverInstallEnabled(void);
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (indexPath.section == 1) {
-        if (indexPath.row == 1 || indexPath.row == 2) {
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                NSDictionary *result = (indexPath.row == 2) ? [SCIMobileConfigIdNameMappingExporter copyMobileConfigAssetExperimentFiles] : [SCIMobileConfigIdNameMappingExporter mobileConfigAssetExperimentReport];
-                NSData *data = [NSJSONSerialization dataWithJSONObject:result ?: @{} options:NSJSONWritingPrettyPrinted error:nil];
-                NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    UIPasteboard.generalPasteboard.string = json;
-                    [self reloadRows];
-                });
-            });
-            return;
-        }
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             NSDictionary *snapshot = [SCIMobileConfigBrokerStore snapshotDictionary];
             NSData *data = [NSJSONSerialization dataWithJSONObject:snapshot options:NSJSONWritingPrettyPrinted error:nil];

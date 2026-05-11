@@ -9,8 +9,6 @@ extern NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotificatio
 + (NSDictionary *)exportIDNameMappingNow;
 + (NSDictionary *)installNativePathObserver;
 + (NSArray<NSString *> *)candidateIDNameMappingPaths;
-+ (NSDictionary *)mobileConfigAssetExperimentReport;
-+ (NSDictionary *)copyMobileConfigAssetExperimentFiles;
 + (nullable NSString *)lastStatusLine;
 
 @end

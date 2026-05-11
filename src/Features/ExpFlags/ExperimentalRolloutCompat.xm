@@ -141,6 +141,41 @@ static BOOL sciPullToCarreraRollout(NSString *name) {
     ]);
 }
 
+static BOOL sciMutualInterestRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_mutual_interest"]) return NO;
+    return sciContainsAny(name, @[
+        @"mutual_interest",
+        @"mutualinterest",
+        @"mutual_follow",
+        @"mutual_followed",
+        @"mutually_liked",
+        @"mutuallyliked",
+        @"direct_mutual_interest"
+    ]);
+}
+
+static BOOL sciIcebreakerRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_icebreaker"]) return NO;
+    return sciContainsAny(name, @[
+        @"icebreaker",
+        @"ice_breaker",
+        @"quick_reply_icebreaker",
+        @"mutual_icebreaker",
+        @"xma_spark_icebreaker"
+    ]);
+}
+
+static BOOL sciStoryGridRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_story_grid"]) return NO;
+    return sciContainsAny(name, @[
+        @"story_grid",
+        @"stories_grid",
+        @"storygrid",
+        @"stories_tray_grid",
+        @"dynamic_tab_story_grid"
+    ]);
+}
+
 static BOOL sciShouldForceOff(NSString *name) {
     return sciQuickSnapDisableRollout(name);
 }
@@ -154,7 +189,10 @@ static BOOL sciShouldForceOn(NSString *name) {
            sciFriendsFeedRollout(name) ||
            sciFeedDedupRollout(name) ||
            sciFeedCullingRollout(name) ||
-           sciPullToCarreraRollout(name);
+           sciPullToCarreraRollout(name) ||
+           sciMutualInterestRollout(name) ||
+           sciIcebreakerRollout(name) ||
+           sciStoryGridRollout(name);
 }
 
 static BOOL (*orig_meta_isInExperiment)(id, SEL) = NULL;
@@ -211,7 +249,10 @@ static void sciHookInst(Class cls, NSString *selName, IMP newImp, IMP *orig) {
           [SCIUtils getBoolPref:@"igt_friends_feed"] ||
           [SCIUtils getBoolPref:@"igt_feed_culling"] ||
           [SCIUtils getBoolPref:@"igt_feed_dedup"] ||
-          [SCIUtils getBoolPref:@"igt_pull_to_carrera"])) return;
+          [SCIUtils getBoolPref:@"igt_pull_to_carrera"] ||
+          [SCIUtils getBoolPref:@"igt_mutual_interest"] ||
+          [SCIUtils getBoolPref:@"igt_icebreaker"] ||
+          [SCIUtils getBoolPref:@"igt_story_grid"])) return;
 
     sciHookInst(NSClassFromString(@"MetaLocalExperiment"), @"isInExperiment", (IMP)new_meta_isInExperiment, (IMP *)&orig_meta_isInExperiment);
     sciHookInst(NSClassFromString(@"MetaLocalExperiment"), @"groupName", (IMP)new_groupName, (IMP *)&orig_groupName);

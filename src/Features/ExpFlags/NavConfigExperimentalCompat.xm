@@ -26,7 +26,7 @@ static void hookNavBool(NSString *selName, IMP repl) {
 
 static void hookHomecomingBool(NSString *selName, IMP repl) {
     NSArray<NSString *> *classes = @[
-        @"_TtC18IGNavConfiguration012IGHomecomingB0C",
+        @"_TtC18IGNavConfiguration25IGHomecomingConfiguration",
         @"IGNavConfiguration.IGHomecomingConfiguration",
         @"IGHomecomingConfiguration"
     ];
@@ -41,6 +41,7 @@ static void hookHomecomingBool(NSString *selName, IMP repl) {
                pref(@"igt_pull_to_carrera") ||
                pref(@"igt_tab_swiping") ||
                pref(@"igt_audio_ramping") ||
+               pref(@"igt_story_grid") ||
                pref(@"igt_homecoming");
     if (!any) return;
 
@@ -70,8 +71,11 @@ static void hookHomecomingBool(NSString *selName, IMP repl) {
         hookHomecomingBool(@"isRemovalOfFriendsFeedEnabled", (IMP)ret_false);
     }
 
-    if (pref(@"igt_homecoming")) {
+    if (pref(@"igt_story_grid") || pref(@"igt_homecoming")) {
         hookHomecomingBool(@"isDynamicTabStoryGridEnabled", (IMP)ret_true);
+    }
+
+    if (pref(@"igt_homecoming")) {
         hookHomecomingBool(@"isStoriesTrayOnAllTabsEnabled", (IMP)ret_true);
         hookHomecomingBool(@"isStoriesFetchHandledIndependently", (IMP)ret_true);
         hookHomecomingBool(@"isStoriesVPVNavChainFixEnabled", (IMP)ret_true);

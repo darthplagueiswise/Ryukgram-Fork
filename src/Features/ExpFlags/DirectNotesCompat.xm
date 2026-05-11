@@ -66,6 +66,12 @@ static BOOL new_isInExperiment(id self, SEL _cmd, id arg1) {
 }
 
 %ctor {
+    if (!(sciFriendMapEnabled() ||
+          sciAudioReplyEnabled() ||
+          sciAvatarReplyEnabled() ||
+          sciGifsReplyEnabled() ||
+          sciPhotoReplyEnabled())) return;
+
     struct rebinding notesBinds[] = {
         {"IGDirectNotesFriendMapEnabled", (void *)hook_IGDirectNotesFriendMapEnabled, (void **)&orig_IGDirectNotesFriendMapEnabled},
         {"IGDirectNotesEnableAudioNoteReplyType", (void *)hook_IGDirectNotesEnableAudioNoteReplyType, (void **)&orig_IGDirectNotesEnableAudioNoteReplyType},

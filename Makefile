@@ -31,13 +31,6 @@ CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-after-stage::
-	@mkdir -p "$(THEOS_STAGING_DIR)/Library/Application Support/RyukGram/mobileconfig_res"
-	@if [ -d resources/mobileconfig_res ]; then \
-		cp -R resources/mobileconfig_res/* "$(THEOS_STAGING_DIR)/Library/Application Support/RyukGram/mobileconfig_res/"; \
-		echo "[RyukGram][MCMapping] staged Android MobileConfig asset experiment resources"; \
-	fi
-
 # Build FLEXing for sideloading (not building in dev-mode)
 ifdef SIDELOAD
 	$(TWEAK_NAME)_SUBPROJECTS += modules/flexing

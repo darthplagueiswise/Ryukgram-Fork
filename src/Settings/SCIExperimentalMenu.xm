@@ -177,14 +177,10 @@ static NSArray *experimentalNavSections(void) {
         },
         @{
             @"header": @"Direct Notes & Inbox",
-            @"footer": @"QuickSnap and Direct Notes related experiments.",
+            @"footer": @"QuickSnap and FriendMap gates. Direct Notes reply types are controlled by the native Direct Notes Dogfooding menu.",
             @"rows": @[
                 ExpSwitch(@"QuickSnap / Instants", @"Enables QuickSnap helper and related MobileConfig groups.", @"igt_quicksnap", YES),
-                ExpSwitch(@"Direct Notes: FriendMap", @"Enables FriendMap / location notes gates.", @"igt_directnotes_friendmap", YES),
-                ExpSwitch(@"Direct Notes: Audio Reply", @"Enables Direct Notes audio reply experiments.", @"igt_directnotes_audio_reply", NO),
-                ExpSwitch(@"Direct Notes: Avatar Reply", @"Enables Direct Notes avatar reply experiments.", @"igt_directnotes_avatar_reply", NO),
-                ExpSwitch(@"Direct Notes: GIFs/Stickers", @"Enables Direct Notes GIF and sticker reply experiments.", @"igt_directnotes_gifs_reply", NO),
-                ExpSwitch(@"Direct Notes: Photo Reply", @"Enables Direct Notes photo reply experiments.", @"igt_directnotes_photo_reply", NO)
+                ExpSwitch(@"FriendMap / Maps", @"Enables FriendMap / location notes gates.", @"igt_directnotes_friendmap", YES)
             ]
         },
         @{
@@ -197,7 +193,10 @@ static NSArray *experimentalNavSections(void) {
                 ExpSwitch(@"Audio Ramping", @"Dedicated toggle for audio ramping on swipe.", @"igt_audio_ramping", NO),
                 ExpSwitch(@"Feed Culling", @"Dedicated toggle for feed culling experiments.", @"igt_feed_culling", NO),
                 ExpSwitch(@"Feed Dedup", @"Dedicated toggle for feed deduplication.", @"igt_feed_dedup", NO),
-                ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to Carrera experiment.", @"igt_pull_to_carrera", NO)
+                ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to Carrera experiment.", @"igt_pull_to_carrera", NO),
+                ExpSwitch(@"Mutual Interest", @"Mutual Interest feature in Direct Messages.", @"igt_mutual_interest", YES),
+                ExpSwitch(@"Icebreaker", @"Icebreaker feature for mutually liked reels.", @"igt_icebreaker", YES),
+                ExpSwitch(@"Story Grid", @"Story grid and related tray gates.", @"igt_story_grid", YES)
             ]
         }
     ];
@@ -255,10 +254,6 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Browse and search MobileConfig flags at runtime."
                                                icon:[SCISymbol symbolWithName:@"externaldrive.connected.to.line.below"]
                                      viewController:[SCIExperimentRuntimeBrowserViewController new]],
-                [SCISetting navigationCellWithTitle:@"MC Broker v2"
-                                           subtitle:@"Centralized MobileConfig broker with name resolution."
-                                               icon:[SCISymbol symbolWithName:@"server.rack"]
-                                     viewController:[SCIMobileConfigBrokerViewController new]],
                 [SCISetting navigationCellWithTitle:@"Symbol Observer"
                                            subtitle:@"Observe MobileConfig symbol access in real-time."
                                                icon:[SCISymbol symbolWithName:@"eye"]
@@ -330,7 +325,11 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
         @"igt_internaluse_observer",
         @"igt_runtime_mc_true_patcher",
         @"igt_runtime_mc_true_patcher_relaxed",
-        @"igt_runtime_mc_symbol_observer_verbose"
+        @"igt_runtime_mc_symbol_observer_verbose",
+        @"igt_directnotes_audio_reply",
+        @"igt_directnotes_avatar_reply",
+        @"igt_directnotes_gifs_reply",
+        @"igt_directnotes_photo_reply"
     ];
     if ([hiddenKeys containsObject:key]) return YES;
 
@@ -340,6 +339,7 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
            [joined containsString:@"flags browser"] ||
            [joined containsString:@"mobileconfig browser"] ||
            [joined containsString:@"mobileconfig observer"] ||
+           [joined containsString:@"mc broker"] ||
            [joined containsString:@"mc override lab"] ||
            [joined containsString:@"mc observer"] ||
            [joined containsString:@"objc getter"] ||
