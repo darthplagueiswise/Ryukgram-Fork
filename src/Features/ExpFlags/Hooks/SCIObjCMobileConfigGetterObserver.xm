@@ -32,7 +32,7 @@ static BOOL LooksU64U64(Class c,SEL s){Method m=class_getInstanceMethod(c,s);if(
 static void Caller(void*a,NSString**img,NSString**sym){if(img)*img=nil;if(sym)*sym=nil;if(!a)return;Dl_info i={0};if(!dladdr(a,&i))return;if(img&&i.dli_fname)*img=[@(i.dli_fname) lastPathComponent];if(sym&&i.dli_sname)*sym=@(i.dli_sname);} 
 static BOOL Direct(NSString*k,BOOL*out){id o=[[NSUserDefaults standardUserDefaults] objectForKey:k];if([o isKindOfClass:NSNumber.class]){if(out)*out=[o boolValue];return YES;}return NO;}
 static uint64_t LocalNorm(uint64_t p){return p&0x00FFFFFFFFFFFFFFULL;}
-static BOOL FinalFor(uint64_t p,NSString*b,BOOL orig){if(!On(kApplyKey)||!b.length)return orig;uint64_t n=LocalNorm(p);BOOL v=orig;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)p],&v))return v;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)n],&v))return v;return orig;}
+static BOOL FinalFor(uint64_t p,NSString*b,BOOL orig){if(!b.length)return orig;uint64_t n=LocalNorm(p);BOOL v=orig;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)p],&v))return v;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)n],&v))return v;return orig;}
 
 static void ConfigureBufferConsumer(void){static dispatch_once_t once;dispatch_once(&once,^{SCIMCRuntimeObservationBufferSetFlushHandler(^(NSArray<NSDictionary<NSString*,id>*>*boolEvents,NSArray<NSDictionary<NSString*,id>*>*aliasEvents){
     for(NSDictionary *e in boolEvents){
@@ -59,7 +59,7 @@ static void ConfigureBufferConsumer(void){static dispatch_once_t once;dispatch_o
     }
 });});}
 
-static void Rec(id o,SEL s,uint64_t p,BOOL orig,BOOL fin,void*c){NSString*b=BID(o);if(!Should(b))return;SCIMCRuntimeObservationBufferNoteBoolRead(b,p,orig,fin,(uintptr_t)c);}
+static void Rec(id o,SEL s,uint64_t p,BOOL orig,BOOL fin,void*c){NSString*b=BID(o);if(!b.length)return;SCIMCRuntimeObservationBufferNoteBoolRead(b,p,orig,fin,(uintptr_t)c);}
 static BOOL HBoolOpt(id o,SEL s,uint64_t p,void*opt){void*c=__builtin_return_address(0);BOOL(*orig)(id,SEL,uint64_t,void*)=(BOOL(*)(id,SEL,uint64_t,void*))Orig(o,s);if(gInside)return orig?orig(o,s,p,opt):NO;gInside=YES;BOOL ov=orig?orig(o,s,p,opt):NO;BOOL fv=FinalFor(p,BID(o),ov);Rec(o,s,p,ov,fv,c);gInside=NO;return fv;}
 static uint64_t HAlias(id o,SEL s,uint64_t raw){uint64_t(*orig)(id,SEL,uint64_t)=(uint64_t(*)(id,SEL,uint64_t))Orig(o,s);if(gInside)return orig?orig(o,s,raw):raw;gInside=YES;uint64_t t=orig?orig(o,s,raw):raw;gInside=NO;if(raw&&t&&raw!=t)SCIMCRuntimeObservationBufferNoteAlias(raw,t,[NSString stringWithFormat:@"%@ %@",CN(o),NSStringFromSelector(s)]);return t;}
 static BOOL One(Class c,NSString*n,IMP r){SEL s=NSSelectorFromString(n);if(!class_getInstanceMethod(c,s))return NO;NSString*k=K(c,s);pthread_mutex_lock(&gLock);BOOL a=gOrig[k]!=nil;pthread_mutex_unlock(&gLock);if(a)return YES;IMP old=NULL;MSHookMessageEx(c,s,r,&old);if(!old)return NO;pthread_mutex_lock(&gLock);if(!gOrig)gOrig=[NSMutableDictionary dictionary];gOrig[k]=[NSValue valueWithPointer:(const void*)(uintptr_t)old];pthread_mutex_unlock(&gLock);return YES;}
@@ -68,7 +68,7 @@ static BOOL InstallB(NSString*b){NSString*cn=ClassForBID(b);if(!cn.length){retur
 static BOOL InstallAliasB(NSString*b){if(!On(kAliasKey))return NO;NSString*cn=ClassForBID(b);Class c=cn.length?NSClassFromString(cn):Nil;if(!c)return NO;BOOL any=NO;for(NSString*n in @[@"_getTranslatedSpecifier:",@"getTranslatedSpecifier:",@"getStableIdFromParamSpecifier:"]){SEL s=NSSelectorFromString(n);if(LooksU64U64(c,s))any=One(c,n,(IMP)HAlias)||any;}return any;}
 static NSUInteger Count(void){pthread_mutex_lock(&gLock);NSUInteger c=gOrig.count;pthread_mutex_unlock(&gLock);return c;}
 static void InstallBroker(NSString*b){ConfigureBufferConsumer();InstallCBroker(b);InstallB(b);if(On(kAliasKey))InstallAliasB(b);} 
-static void InstallEnabled(void){ConfigureBufferConsumer();[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){if(Should(b))InstallBroker(b);}}
+static void InstallEnabled(void){ConfigureBufferConsumer();[SCIMobileConfigBrokerRouter installEnabledBrokers];for(NSString*b in @[@"ig",@"igsl"]){InstallBroker(b);}}
 static void InstallPersistedIfNeeded(void){ConfigureBufferConsumer();InstallEnabled();dispatch_async(dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3.0*NSEC_PER_SEC)),dispatch_get_main_queue(),^{InstallEnabled();});}
 
 #ifdef __cplusplus

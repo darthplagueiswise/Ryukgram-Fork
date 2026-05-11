@@ -309,15 +309,5 @@ static void **MCBROriginalSlotForBrokerID(NSString *brokerID) {
 @end
 
 %ctor {
-    [[NSUserDefaults standardUserDefaults] registerDefaults:@{
-        @"sci_exp_mc_c_hooks_enabled": @NO,
-        @"sci_exp_mc_c_broker_body_hooks_enabled": @NO
-    }];
-    BOOL cHooks = [[NSUserDefaults standardUserDefaults] boolForKey:@"sci_exp_mc_c_hooks_enabled"];
-    BOOL bodyHooks = [[NSUserDefaults standardUserDefaults] boolForKey:@"sci_exp_mc_c_broker_body_hooks_enabled"];
-    if (cHooks && bodyHooks) {
-        [SCIMobileConfigBrokerRouter bootstrap];
-    } else {
-        NSLog(@"[RyukGram][MCBR] C broker router disabled; ObjC pass-through observer owns Dev Mode observation");
-    }
+    [SCIMobileConfigBrokerRouter bootstrap];
 }
