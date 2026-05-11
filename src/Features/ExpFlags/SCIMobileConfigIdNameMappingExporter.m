@@ -1,6 +1,7 @@
 #import "SCIMobileConfigIdNameMappingExporter.h"
 #import "SCIMobileConfigMapping.h"
 #import "SCIDexKitNameResolver.h"
+#import <CommonCrypto/CommonDigest.h>
 #import <dlfcn.h>
 
 NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotification = @"SCIMobileConfigIdNameMappingExporterDidUpdateNotification";
@@ -12,6 +13,18 @@ static const char *kSCIIdMapSymbolGetFilePath = "__ZN12mobileconfig23FBMobileCon
 static const char *kSCIIdMapSymbolMakeConfigMetaList = "__ZN12mobileconfig25FBMobileConfigSchemaUtils18makeConfigMetaListEPKNS_15c_config_meta_tEi";
 static const char *kSCIIdMapSymbolPersistExtraData = "__ZN12mobileconfig28FBMobileConfigStorageManager16persistExtraDataERKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEES9_";
 static const char *kSCIIdMapSymbolTryUpdate = "IGMobileConfigTryUpdateConfigsWithCompletion";
+static const char *kSCIIdMapSymbolParamsMapLazyLoaderGet = "__ZNK12mobileconfig33FBMobileConfigParamsMapLazyLoader3getENS_23FBMobileConfigParamsMap8LoadTypeE";
+
+static NSArray<NSString *> *SCIRequiredMobileConfigAssetNames(void) {
+    return @[
+        @"params_map.txt",
+        @"params_map_v4_u0.txt",
+        @"params_map_v4_u4.txt",
+        @"params_map_kMobileConfigAdminId.txt",
+        @"params_names_v4_u0.txt",
+        @"params_names_v4_u4.txt",
+    ];
+}
 
 static NSString *SCIIdMapString(id value) {
     return [value isKindOfClass:NSString.class] ? (NSString *)value : @"";
@@ -53,6 +66,94 @@ static NSUInteger SCIIdMapObjectCount(id object) {
     if ([array isKindOfClass:NSArray.class]) return [(NSArray *)array count];
     if ([array isKindOfClass:NSDictionary.class]) return [(NSDictionary *)array count];
     return dict.count;
+}
+
+static NSString *SCIHexForData(NSData *data) {
+    if (!data.length) return @"";
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    NSMutableString *out = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (NSUInteger i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [out appendFormat:@"%02x", digest[i]];
+    return out;
+}
+
+static NSDictionary *SCIMCAssetFileInfo(NSString *path) {
+    if (![path isKindOfClass:NSString.class] || !path.length) return @{};
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDir = NO;
+    BOOL exists = [fm fileExistsAtPath:path isDirectory:&isDir] && !isDir;
+    NSMutableDictionary *info = [@{@"path": path, @"exists": @(exists), @"bytes": @0, @"sha256": @"", @"modified": @""} mutableCopy];
+    if (!exists) return info;
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil] ?: @{};
+    NSNumber *size = [attrs[NSFileSize] respondsToSelector:@selector(unsignedLongLongValue)] ? attrs[NSFileSize] : @0;
+    NSDate *modified = [attrs[NSFileModificationDate] isKindOfClass:NSDate.class] ? attrs[NSFileModificationDate] : nil;
+    NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:nil];
+    info[@"bytes"] = size;
+    info[@"sha256"] = SCIHexForData(data);
+    info[@"modified"] = SCIIdMapISODate(modified);
+    return info;
+}
+
+static NSString *SCIMCFrameworkPath(void) {
+    NSString *fw = [[NSBundle mainBundle].privateFrameworksPath stringByAppendingPathComponent:@"FBSharedFramework.framework"];
+    return fw.length ? fw : @"";
+}
+
+static NSArray<NSString *> *SCIMCAssetExperimentDirectories(void) {
+    NSString *home = NSHomeDirectory() ?: @"";
+    NSString *appBundle = [NSBundle mainBundle].bundlePath ?: @"";
+    NSString *framework = SCIMCFrameworkPath();
+    NSMutableOrderedSet<NSString *> *dirs = [NSMutableOrderedSet orderedSet];
+    if (appBundle.length) [dirs addObject:[appBundle stringByAppendingPathComponent:@"mobileconfig_res"]];
+    if (framework.length) [dirs addObject:[framework stringByAppendingPathComponent:@"mobileconfig_res"]];
+    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support/mobileconfig_res"]];
+    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig_res"]];
+    [dirs addObject:[home stringByAppendingPathComponent:@"mobileconfig_res"]];
+    [dirs addObject:@"/var/jb/Library/Application Support/RyukGram.bundle/mobileconfig_res"];
+    [dirs addObject:@"/Library/Application Support/RyukGram.bundle/mobileconfig_res"];
+    [dirs addObject:@"/var/jb/Library/Application Support/RyukGram/mobileconfig_res"];
+    [dirs addObject:@"/Library/Application Support/RyukGram/mobileconfig_res"];
+    return dirs.array;
+}
+
+static NSArray<NSString *> *SCIMCAssetCopyTargetDirectories(void) {
+    NSString *home = NSHomeDirectory() ?: @"";
+    NSString *appBundle = [NSBundle mainBundle].bundlePath ?: @"";
+    NSString *framework = SCIMCFrameworkPath();
+    NSMutableOrderedSet<NSString *> *dirs = [NSMutableOrderedSet orderedSet];
+    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support/mobileconfig_res"]];
+    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support/RyukGram/mobileconfig_res"]];
+    [dirs addObject:[home stringByAppendingPathComponent:@"mobileconfig_res"]];
+    if (appBundle.length) [dirs addObject:[appBundle stringByAppendingPathComponent:@"mobileconfig_res"]];
+    if (framework.length) [dirs addObject:[framework stringByAppendingPathComponent:@"mobileconfig_res"]];
+    return dirs.array;
+}
+
+static NSDictionary *SCIMCAssetDirectoryInfo(NSString *dir) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDir = NO;
+    BOOL exists = [fm fileExistsAtPath:dir isDirectory:&isDir] && isDir;
+    NSMutableDictionary *files = [NSMutableDictionary dictionary];
+    NSUInteger present = 0;
+    for (NSString *name in SCIRequiredMobileConfigAssetNames()) {
+        NSDictionary *info = SCIMCAssetFileInfo([dir stringByAppendingPathComponent:name]);
+        if ([info[@"exists"] boolValue]) present++;
+        files[name] = info;
+    }
+    return @{@"path": dir ?: @"",
+             @"exists": @(exists),
+             @"complete": @(present == SCIRequiredMobileConfigAssetNames().count),
+             @"present": @(present),
+             @"required": @(SCIRequiredMobileConfigAssetNames().count),
+             @"files": files};
+}
+
+static NSString *SCIMCFirstCompleteAssetDirectory(void) {
+    for (NSString *dir in SCIMCAssetExperimentDirectories()) {
+        NSDictionary *info = SCIMCAssetDirectoryInfo(dir);
+        if ([info[@"complete"] boolValue]) return dir;
+    }
+    return nil;
 }
 
 static BOOL SCIIdMapLooksUsable(id object) {
@@ -137,6 +238,7 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
         {@"FBMobileConfigIdNameMap.getIdToNameFilePath", kSCIIdMapSymbolGetFilePath, @"0x2a47e4"},
         {@"FBMobileConfigSchemaUtils.makeConfigMetaList", kSCIIdMapSymbolMakeConfigMetaList, @"0x28aefc"},
         {@"FBMobileConfigStorageManager.persistExtraData", kSCIIdMapSymbolPersistExtraData, @"0x15c33dc"},
+        {@"FBMobileConfigParamsMapLazyLoader.get", kSCIIdMapSymbolParamsMapLazyLoaderGet, @"0x13a1bf8"},
         {@"IGMobileConfigTryUpdateConfigsWithCompletion", kSCIIdMapSymbolTryUpdate, @"0x702aa8"},
     };
 
@@ -265,6 +367,81 @@ static NSDictionary *SCIIdMapNativeSymbolProbe(void) {
              @"checkedPaths": @(candidates.count),
              @"manifest": manifestPath ?: @"",
              @"candidates": visibleCandidates};
+}
+
++ (NSDictionary *)mobileConfigAssetExperimentReport {
+    NSMutableArray<NSDictionary *> *dirs = [NSMutableArray array];
+    for (NSString *dir in SCIMCAssetExperimentDirectories()) [dirs addObject:SCIMCAssetDirectoryInfo(dir)];
+    NSArray<NSString *> *idCandidates = [self candidateIDNameMappingPaths];
+    NSMutableArray<NSDictionary *> *idInfos = [NSMutableArray array];
+    for (NSString *path in (NSArray *)idCandidates) [idInfos addObject:SCIIdMapCandidateInfo(path)];
+    NSDictionary *symbols = SCIIdMapNativeSymbolProbe();
+    NSDictionary *loader = @{
+        @"symbolPresent": [symbols[@"FBMobileConfigParamsMapLazyLoader.get"][@"loaded"] respondsToSelector:@selector(boolValue)] ? symbols[@"FBMobileConfigParamsMapLazyLoader.get"][@"loaded"] : @NO,
+        @"observerInstalled": @NO,
+        @"called": @NO,
+        @"returnObserved": @NO,
+        @"reason": @"not hooked: C++ shared_ptr return ABI is unsafe without an assembly shim; this experiment first validates asset paths"
+    };
+    NSString *source = SCIMCFirstCompleteAssetDirectory() ?: @"";
+    NSString *status = source.length ? [NSString stringWithFormat:@"MobileConfig assets present · source=%@", source] : @"MobileConfig assets absent · copy experiment files first";
+    SCIIdMapSetStatus(status);
+    return @{@"ok": @(source.length > 0),
+             @"mode": @"mobileconfig-assets-diagnostic",
+             @"status": status,
+             @"source": source,
+             @"requiredFiles": SCIRequiredMobileConfigAssetNames(),
+             @"directories": dirs,
+             @"idNameMappingCandidates": idInfos,
+             @"symbolProbe": symbols ?: @{},
+             @"paramsMapLazyLoader": loader,
+             @"note": @"u4 validates format only; u0 names remain absent when params_names_v4_u0.txt is []"};
+}
+
++ (NSDictionary *)copyMobileConfigAssetExperimentFiles {
+    NSString *source = SCIMCFirstCompleteAssetDirectory();
+    NSMutableArray<NSDictionary *> *outputs = [NSMutableArray array];
+    NSMutableArray<NSString *> *errors = [NSMutableArray array];
+    if (!source.length) {
+        NSString *status = @"MobileConfig asset copy failed · no complete packaged source";
+        SCIIdMapSetStatus(status);
+        return @{@"ok": @NO, @"mode": @"mobileconfig-assets-copy", @"status": status, @"outputs": outputs, @"errors": errors, @"report": [self mobileConfigAssetExperimentReport]};
+    }
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *targetDir in SCIMCAssetCopyTargetDirectories()) {
+        NSError *dirError = nil;
+        BOOL made = [fm createDirectoryAtPath:targetDir withIntermediateDirectories:YES attributes:nil error:&dirError];
+        if (!made) {
+            [errors addObject:[NSString stringWithFormat:@"mkdir failed %@: %@", targetDir, dirError.localizedDescription ?: @"unknown"]];
+            continue;
+        }
+        NSMutableArray<NSDictionary *> *copied = [NSMutableArray array];
+        for (NSString *name in SCIRequiredMobileConfigAssetNames()) {
+            NSString *src = [source stringByAppendingPathComponent:name];
+            NSString *dst = [targetDir stringByAppendingPathComponent:name];
+            [fm removeItemAtPath:dst error:nil];
+            NSError *copyError = nil;
+            if (![fm copyItemAtPath:src toPath:dst error:&copyError]) {
+                [errors addObject:[NSString stringWithFormat:@"copy failed %@ -> %@: %@", src, dst, copyError.localizedDescription ?: @"unknown"]];
+                continue;
+            }
+            [copied addObject:SCIMCAssetFileInfo(dst)];
+        }
+        [outputs addObject:@{@"target": targetDir, @"copied": copied, @"complete": @(copied.count == SCIRequiredMobileConfigAssetNames().count)}];
+    }
+
+    NSDictionary *report = [self mobileConfigAssetExperimentReport];
+    NSString *status = [NSString stringWithFormat:@"MobileConfig asset copy finished · source=%@ · targets=%lu · errors=%lu", source, (unsigned long)outputs.count, (unsigned long)errors.count];
+    SCIIdMapSetStatus(status);
+    [[NSNotificationCenter defaultCenter] postNotificationName:SCIMobileConfigIdNameMappingExporterDidUpdateNotification object:nil];
+    return @{@"ok": @(outputs.count > 0 && errors.count == 0),
+             @"mode": @"mobileconfig-assets-copy",
+             @"status": status,
+             @"source": source,
+             @"outputs": outputs,
+             @"errors": errors,
+             @"report": report ?: @{}};
 }
 
 + (nullable NSString *)lastStatusLine {
