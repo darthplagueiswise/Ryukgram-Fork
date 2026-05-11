@@ -193,8 +193,6 @@ static void hookRYDNSelectionUpdatedOptions(id self, SEL _cmd, id vc, id options
     RYDNApplyPersistFromMany(@"dogfoodingSettingsSelectionViewController:updatedOptions:", self, vc, options);
 }
 
-static void (*origRYDNNoArgBoolSetter)(id self, SEL _cmd, BOOL v) = NULL;
-
 static void RYDNHookSelectorIfPresent(Class cls, SEL sel, IMP replacement, IMP *orig) {
     if (!cls || !sel || !replacement || !orig) return;
     Method m = class_getInstanceMethod(cls, sel);
