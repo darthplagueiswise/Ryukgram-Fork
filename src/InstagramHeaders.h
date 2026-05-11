@@ -701,3 +701,31 @@ typedef FLEXAlertAction * _Nonnull (^FLEXAlertActionHandler)(void(^handler)(NSAr
 - (void)setIsHidden:(BOOL)hidden;
 - (void)setDisabled:(BOOL)disabled;
 @end
+
+// FeatureGating — discovered via runtime method dump (isMutuallyLikedReelsIcebreakerEnabled et al).
+@interface FeatureGatingService : NSObject
+- (BOOL)isMutuallyLikedReelsIcebreakerEnabled;
+- (BOOL)isMutualInterestEnabled;
+- (BOOL)isIcebreakerEnabled;
+- (BOOL)isMutualInterestIcebreakerEnabled;
+- (BOOL)isFriendsFeedEnabled;
+- (BOOL)isFriendsOnlyFeedEnabled;
+- (BOOL)isFeedDedupEnabled;
+- (BOOL)isReelsFirstEnabled;
+- (BOOL)isFeedCullingEnabled;
+- (BOOL)isPullToCarreraEnabled;
+- (BOOL)isAudioRampingEnabled;
+- (BOOL)isTabSwipingEnabled;
+- (BOOL)isQuicksnapEnabled;
+- (BOOL)isInstantsEnabled;
+- (BOOL)isPrismEnabled;
+- (BOOL)isHomecomingEnabled;
+- (BOOL)isStoryGridEnabled;
+- (BOOL)isStoryTrayGridEnabled;
+@end
+
+@interface FeatureGate : NSObject
+@end
+
+@interface IGDirectMutualInterestIcebreaker : NSObject
+@end

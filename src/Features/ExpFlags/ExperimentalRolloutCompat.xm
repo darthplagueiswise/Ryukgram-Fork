@@ -74,13 +74,77 @@ static BOOL sciPrismRollout(NSString *name) {
     ]);
 }
 
+static BOOL sciFriendsFeedRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_friends_feed"]) return NO;
+    return sciContainsAny(name, @[@"friends_feed", @"ig_ios_friends_feed", @"friends_only_feed",
+                                  @"ig_friends_feed", @"friendsfeed", @"ig_ios_friendsfeed"]);
+}
+
+static BOOL sciFeedDedupRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_feed_dedup"]) return NO;
+    return sciContainsAny(name, @[@"feed_dedup", @"feed_deduplication", @"ig_ios_feed_dedup",
+                                  @"ig_feed_dedup", @"feeddedup", @"feed_deduplicate"]);
+}
+
+static BOOL sciReelsFirstRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_reels_first"]) return NO;
+    return sciContainsAny(name, @[@"reels_first", @"ig_reels_first", @"ig_ios_reels_first",
+                                  @"reels_first_experience", @"reelsfirst", @"ig_ios_reelsfirst"]);
+}
+
+static BOOL sciFeedCullingRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_feed_culling"]) return NO;
+    return sciContainsAny(name, @[@"feed_culling", @"ig_feed_culling", @"ig_ios_feed_cull",
+                                  @"feedculling", @"ig_ios_feedculling"]);
+}
+
+static BOOL sciPullToCarreraRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_pull_to_carrera"]) return NO;
+    return sciContainsAny(name, @[@"carrera", @"pull_to_carrera", @"ig_ios_carrera",
+                                  @"ig_carrera", @"pulltocarrera"]);
+}
+
+static BOOL sciAudioRampingRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_audio_ramping"]) return NO;
+    return sciContainsAny(name, @[@"audio_ramp", @"audio_ramping", @"ig_ios_audio_ramp",
+                                  @"ig_audio_ramp", @"audioramp", @"audio_ramp_swipe"]);
+}
+
+static BOOL sciTabSwipingRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_tab_swiping"]) return NO;
+    return sciContainsAny(name, @[@"tab_swip", @"tab_swiping", @"ig_ios_tab_swipe",
+                                  @"ig_tab_swipe", @"tabswipe", @"tabswiping"]);
+}
+
+static BOOL sciMutualInterestRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_mutual_interest"]) return NO;
+    return sciContainsAny(name, @[@"mutual_interest", @"mutualinterest", @"mutual_liked",
+                                  @"mutually_liked", @"ig_mutual", @"ig_ios_mutual"]);
+}
+
+static BOOL sciIcebreakerRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_icebreaker"]) return NO;
+    return sciContainsAny(name, @[@"icebreaker", @"ice_breaker", @"ig_icebreaker",
+                                  @"mutual_icebreaker", @"ig_ios_icebreaker"]);
+}
+
+static BOOL sciStoryGridRollout(NSString *name) {
+    if (![SCIUtils getBoolPref:@"igt_story_grid"]) return NO;
+    return sciContainsAny(name, @[@"story_grid", @"stories_grid", @"ig_story_grid",
+                                  @"ig_ios_story_grid", @"storygrid", @"story_tray_grid"]);
+}
+
 static BOOL sciShouldForceOff(NSString *name) {
     return sciQuickSnapDisableRollout(name);
 }
 
 static BOOL sciShouldForceOn(NSString *name) {
     if (sciShouldForceOff(name)) return NO;
-    return sciQuickSnapRollout(name) || sciFriendMapRollout(name) || sciPrismRollout(name);
+    return sciQuickSnapRollout(name) || sciFriendMapRollout(name) || sciPrismRollout(name) ||
+           sciFriendsFeedRollout(name) || sciFeedDedupRollout(name) || sciReelsFirstRollout(name) ||
+           sciFeedCullingRollout(name) || sciPullToCarreraRollout(name) || sciAudioRampingRollout(name) ||
+           sciTabSwipingRollout(name) || sciMutualInterestRollout(name) || sciIcebreakerRollout(name) ||
+           sciStoryGridRollout(name);
 }
 
 static BOOL (*orig_meta_isInExperiment)(id, SEL) = NULL;
@@ -132,7 +196,17 @@ static void sciHookInst(Class cls, NSString *selName, IMP newImp, IMP *orig) {
 %ctor {
     if (!([SCIUtils getBoolPref:@"igt_quicksnap"] ||
           [SCIUtils getBoolPref:@"igt_directnotes_friendmap"] ||
-          [SCIUtils getBoolPref:@"igt_prism"])) return;
+          [SCIUtils getBoolPref:@"igt_prism"] ||
+          [SCIUtils getBoolPref:@"igt_friends_feed"] ||
+          [SCIUtils getBoolPref:@"igt_feed_dedup"] ||
+          [SCIUtils getBoolPref:@"igt_reels_first"] ||
+          [SCIUtils getBoolPref:@"igt_feed_culling"] ||
+          [SCIUtils getBoolPref:@"igt_pull_to_carrera"] ||
+          [SCIUtils getBoolPref:@"igt_audio_ramping"] ||
+          [SCIUtils getBoolPref:@"igt_tab_swiping"] ||
+          [SCIUtils getBoolPref:@"igt_mutual_interest"] ||
+          [SCIUtils getBoolPref:@"igt_icebreaker"] ||
+          [SCIUtils getBoolPref:@"igt_story_grid"])) return;
 
     sciHookInst(NSClassFromString(@"MetaLocalExperiment"), @"isInExperiment", (IMP)new_meta_isInExperiment, (IMP *)&orig_meta_isInExperiment);
     sciHookInst(NSClassFromString(@"MetaLocalExperiment"), @"groupName", (IMP)new_groupName, (IMP *)&orig_groupName);

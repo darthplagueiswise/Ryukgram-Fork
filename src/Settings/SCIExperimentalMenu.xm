@@ -196,7 +196,10 @@ static NSArray *experimentalNavSections(void) {
                 ExpSwitch(@"Audio Ramping", @"Dedicated toggle for audio ramping on swipe.", @"igt_audio_ramping", NO),
                 ExpSwitch(@"Feed Culling", @"Dedicated toggle for feed culling experiments.", @"igt_feed_culling", NO),
                 ExpSwitch(@"Feed Dedup", @"Dedicated toggle for feed deduplication.", @"igt_feed_dedup", NO),
-                ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to Carrera experiment.", @"igt_pull_to_carrera", NO)
+                ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to Carrera experiment.", @"igt_pull_to_carrera", NO),
+                ExpSwitch(@"Mutual Interest", @"Mutual Interest feature in Direct Messages.", @"igt_mutual_interest", YES),
+                ExpSwitch(@"Icebreaker", @"Icebreaker feature for mutually liked reels.", @"igt_icebreaker", YES),
+                ExpSwitch(@"Story Grid", @"Story grid view in profile and tray.", @"igt_story_grid", YES)
             ]
         }
     ];
