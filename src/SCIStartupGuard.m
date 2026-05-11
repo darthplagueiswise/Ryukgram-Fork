@@ -13,8 +13,12 @@
 // 1. register/migrate the MobileConfig broker store;
 // 2. erase stale StartupGuard bookkeeping keys so old crash-loop state cannot
 //    affect new builds;
-// 3. optionally install previously enabled broker observers, but only after the
-//    app is active and a non-login root UI has had time to settle.
+// 3. expose a manual helper for delayed observer installation when a debug UI
+//    explicitly asks for it.
+//
+// Important: this file must not run from a constructor. The tweak is loaded
+// before Instagram's login/root UI is stable, and even "cheap" notification
+// observers/timers here have caused slow launch and startup crashes on beta1.
 
 static NSString * const kSCIStartupObserverDidRunKey = @"sci.startupobserver.did_run_once";
 static NSString * const kSCIStartupObserverLastRunKey = @"sci.startupobserver.last_run";
@@ -172,8 +176,7 @@ static void SCIScheduleSafeObserverChecks(void) {
     });
 }
 
-__attribute__((constructor))
-static void SCIStartupObserverInit(void) {
+__attribute__((visibility("default"))) void SCIStartupObserverInstallEnabledBrokersWhenSafe(void) {
     @autoreleasepool {
         NSUserDefaults *ud = SCIStartupDefaults();
         [ud registerDefaults:@{
@@ -187,6 +190,6 @@ static void SCIStartupObserverInit(void) {
         [SCIMobileConfigBrokerStore registerDefaultsAndMigrate];
         SCIScheduleSafeObserverChecks();
 
-        NSLog(@"[RyukGram][StartupObserver] loaded inert; no safeguard, no auto-disable, delayed observer only");
+        NSLog(@"[RyukGram][StartupObserver] manual delayed observer checks scheduled");
     }
 }
