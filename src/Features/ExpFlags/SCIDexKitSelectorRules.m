@@ -3,13 +3,13 @@
 @implementation SCIDexKitSelectorRules
 
 + (NSArray<NSString *> *)ownerTokens {
-    return @[@"experiment", @"feature", @"featuregate", @"featuregating", @"config", @"configuration", @"provider", @"providing", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"tabbar", @"navigation", @"feed", @"story", @"stories", @"storytray", @"storiestray", @"traytitle", @"friendmap", @"notes", @"multiplenotes", @"solicitation", @"icebreaker", @"mutualinterest", @"identityswitcher", @"cta"];
+    return @[@"experiment", @"feature", @"featuregate", @"featuregating", @"config", @"configuration", @"provider", @"providing", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"tabbar", @"navigation", @"feed", @"story", @"stories", @"storie", @"storytray", @"storiestray", @"tray", @"traytitle", @"grid", @"reels", @"friendmap", @"notes", @"multiplenotes", @"solicitation", @"icebreaker", @"mutual", @"mutualinterest", @"carrera", @"dedup", @"dedupe", @"culling", @"friending", @"friendly", @"identityswitcher", @"cta"];
 }
 + (NSArray<NSString *> *)strongOwnerTokens {
-    return @[@"experiment", @"experimentation", @"featuregate", @"featuregating", @"gating", @"gate", @"config", @"configuration", @"provider", @"providing", @"mobileconfig", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"dogfood", @"storytray", @"storiestray", @"icebreaker"];
+    return @[@"experiment", @"experimentation", @"featuregate", @"featuregating", @"gating", @"gate", @"config", @"configuration", @"provider", @"providing", @"mobileconfig", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"dogfood", @"story", @"stories", @"storytray", @"storiestray", @"feed", @"reels", @"carrera", @"icebreaker"];
 }
 + (NSArray<NSString *> *)selectorTokens {
-    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"instants", @"friendmap", @"dogfood", @"decoupling", @"tapprefetch", @"traytitle", @"storytray", @"storiestray", @"multiplenotes", @"icebreaker", @"mutualinterest"];
+    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"instants", @"friendmap", @"dogfood", @"decoupling", @"tapprefetch", @"traytitle", @"story", @"stories", @"storytray", @"storiestray", @"feed", @"reels", @"carrera", @"dedup", @"dedupe", @"culling", @"multiplenotes", @"icebreaker", @"mutual", @"mutualinterest"];
 }
 + (NSArray<NSString *> *)rootGateTokens {
     return @[@"enabled", @"isenabled", @"shouldenable", @"shouldshow", @"eligible", @"iseligible", @"available", @"isavailable", @"supported", @"issupported", @"allowed", @"isallowed"];
@@ -89,6 +89,15 @@
     else if ([ls containsString:@"friendmap"]) family = @"FriendMap";
     else if ([ls containsString:@"liquidglass"]) family = @"LiquidGlass";
     else if ([ls containsString:@"prism"]) family = @"Prism";
+    else if ([ls containsString:@"carrera"]) family = @"Carrera";
+    else if ([ls containsString:@"dedup"] || [ls containsString:@"dedupe"]) family = @"Dedup";
+    else if ([ls containsString:@"culling"]) family = @"FeedCulling";
+    else if ([ls containsString:@"story"] || [ls containsString:@"stories"]) family = @"Stories";
+    else if ([ls containsString:@"tray"]) family = @"Tray";
+    else if ([ls containsString:@"grid"]) family = @"Grid";
+    else if ([ls containsString:@"reels"]) family = @"Reels";
+    else if ([ls containsString:@"feed"]) family = @"Feed";
+    else if ([ls containsString:@"icebreaker"] || [ls containsString:@"mutual"]) family = @"IcebreakerMutual";
     return [NSString stringWithFormat:@"%@|%@", className ?: @"?", family];
 }
 

@@ -566,7 +566,7 @@ static void SCIAddMachoDexEntries(NSMutableDictionary<NSNumber *, SCIResolverSpe
 
     // QuickSnap / Instants data specifier groups.
     SCIAddSpecifierSymbol(map, "ig_instants_hide", @"ig_instants_hide", 1, NO);
-    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap", @"ig_ios_quick_snap", 34, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap", @"ig_ios_quick_snap", 17, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_nux_v2", @"ig_ios_quick_snap_nux_v2", 7, YES);
     SCIAddSpecifierSymbol(map, "ig_quick_snap_show_peek_in_view_did_appear", @"ig_quick_snap_show_peek_in_view_did_appear", 1, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_app_joiner_number", @"ig_ios_quick_snap_app_joiner_number", 1, YES);
@@ -583,7 +583,7 @@ static void SCIAddMachoDexEntries(NSMutableDictionary<NSNumber *, SCIResolverSpe
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_audience_picker", @"ig_ios_quicksnap_audience_picker", 3, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_cache_instants", @"ig_ios_quicksnap_cache_instants", 1, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_button", @"ig_ios_quicksnap_consumption_button", 1, YES);
-    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 19, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_stack_improvements", @"ig_ios_quicksnap_consumption_stack_improvements", 12, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_consumption_v2", @"ig_ios_quicksnap_consumption_v2", 9, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_craft_improvements", @"ig_ios_quicksnap_craft_improvements", 2, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_creation_preview", @"ig_ios_quicksnap_creation_preview", 2, YES);
@@ -602,6 +602,66 @@ static void SCIAddMachoDexEntries(NSMutableDictionary<NSNumber *, SCIResolverSpe
     SCIAddSpecifierSymbol(map, "ig_ios_instants_to_stories_recap", @"ig_ios_instants_to_stories_recap", 4, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_instants_upleveling_reactions", @"ig_ios_instants_upleveling_reactions", 3, YES);
     SCIAddSpecifierSymbol(map, "ig_ios_instants_widget", @"ig_ios_instants_widget", 2, YES);
+
+    // FBSharedFramework ee19067d: requested QuickSnap / Direct Notes / Icebreaker additions.
+    SCIAddSpecifierSymbol(map, "ig_instants_empty_state_v3", @"ig_instants_empty_state_v3", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quick_snap_archive", @"ig_ios_quick_snap_archive", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_camera_orientation", @"ig_ios_quicksnap_camera_orientation", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_context_menu_mitigations", @"ig_ios_quicksnap_context_menu_mitigations", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_fix_foreground", @"ig_ios_quicksnap_fix_foreground", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_handle_fetch_on_background", @"ig_ios_quicksnap_handle_fetch_on_background", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_quicksnap_impression_logging", @"ig_ios_quicksnap_impression_logging", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_notes_public_comments", @"ig_ios_notes_public_comments", 7, YES);
+    SCIAddSpecifierSymbol(map, "ig_notes_self_sheet_redesign", @"ig_notes_self_sheet_redesign", 1, YES);
+    SCIAddSpecifierSymbol(map, "biig_icebreaker_completeness_upsell_mc", @"biig_icebreaker_completeness_upsell_mc", 2, YES);
+    SCIAddSpecifierSymbol(map, "ctd_in_thread_icebreakers_ios_mc", @"ctd_in_thread_icebreakers_ios_mc", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_default_icebreaker_appointment", @"ig_default_icebreaker_appointment", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_profile_mutual_context_fallback", @"ig_ios_profile_mutual_context_fallback", 3, YES);
+    SCIAddSpecifierSymbol(map, "ios_igd_ice_breakers", @"ios_igd_ice_breakers", 8, YES);
+
+    // FBSharedFramework ee19067d: requested feed, friends, dedup, Carrera and refresh groups.
+    SCIAddSpecifierSymbol(map, "ig_ad_validate_dedup_using_surface_states", @"ig_ad_validate_dedup_using_surface_states", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_client_comment_dedup", @"ig_client_comment_dedup", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_feed_eager_refresh", @"ig_feed_eager_refresh", 42, YES);
+    SCIAddSpecifierSymbol(map, "ig_h1_26_friending_in_reels_first_world", @"ig_h1_26_friending_in_reels_first_world", 24, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_client_dedupe", @"ig_ios_client_dedupe", 11, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_feed_ptr_new_year_animation", @"ig_ios_feed_ptr_new_year_animation", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_feed_refresh", @"ig_ios_feed_refresh", 8, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_feed_to_reels_experience_merge", @"ig_ios_feed_to_reels_experience_merge", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_friendly_feed_fbidv2_v2", @"ig_ios_friendly_feed_fbidv2_v2", 11, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_launcher_mainfeed_request_add_auto_refresh_to_pull_to_refresh", @"ig_ios_launcher_mainfeed_request_add_auto_refresh_to_pull_to_refresh", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_p13n_dedup", @"ig_ios_reels_p13n_dedup", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_viewer_pull_to_refresh", @"ig_ios_reels_viewer_pull_to_refresh", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_reels_eager_refresh", @"ig_reels_eager_refresh", 33, YES);
+    SCIAddSpecifierSymbol(map, "igios_homecoming_carrera", @"igios_homecoming_carrera", 1, YES);
+    SCIAddSpecifierSymbol(map, "igios_search_ta_deduping", @"igios_search_ta_deduping", 1, YES);
+    SCIAddSpecifierSymbol(map, "p92_ios_main_feed_explicit_dedup", @"p92_ios_main_feed_explicit_dedup", 5, YES);
+
+    // FBSharedFramework ee19067d: requested story/tray/grid/reels navigation groups.
+    SCIAddSpecifierSymbol(map, "ig_empty_story_tray_su_redesign", @"ig_empty_story_tray_su_redesign", 15, YES);
+    SCIAddSpecifierSymbol(map, "ig_explore_tall_grid", @"ig_explore_tall_grid", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_explore_tall_grid_h2_2025", @"ig_explore_tall_grid_h2_2025", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_mid_feed_tray", @"ig_ios_mid_feed_tray", 15, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_parsing_broadcasts_in_tray_response", @"ig_ios_parsing_broadcasts_in_tray_response", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_profile_grid_reorder", @"ig_ios_profile_grid_reorder", 7, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_camera_thumbnail_tray", @"ig_ios_reels_camera_thumbnail_tray", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_eager_pagination", @"ig_ios_reels_eager_pagination", 5, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_flexible_grid", @"ig_ios_reels_flexible_grid", 3, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_ptr", @"ig_ios_reels_ptr", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_repository_migration_verifications", @"ig_ios_reels_repository_migration_verifications", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_unconnected_stories", @"ig_ios_reels_unconnected_stories", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_send_fetched_reels_states_in_tray_fetch_universe", @"ig_ios_send_fetched_reels_states_in_tray_fetch_universe", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_auto_advance", @"ig_ios_stories_auto_advance", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_fast_forward", @"ig_ios_stories_fast_forward", 24, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_freshness", @"ig_ios_stories_freshness", 25, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_immersive_viewer", @"ig_ios_stories_immersive_viewer", 2, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_in_view_nav_tray", @"ig_ios_stories_in_view_nav_tray", 1, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_stories_in_viewer_resort", @"ig_ios_stories_in_viewer_resort", 5, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_tab_bar_touchdown", @"ig_ios_tab_bar_touchdown", 14, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_appstart_cold_start_open_to_reels_tab_test", @"ig_ios_appstart_cold_start_open_to_reels_tab_test", 16, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_26_reels_fixes", @"ig_ios_26_reels_fixes", 4, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_clips_friendly_viewer_launch", @"ig_ios_clips_friendly_viewer_launch", 13, YES);
+    SCIAddSpecifierSymbol(map, "ig_ios_reels_ads_friendly_viewer", @"ig_ios_reels_ads_friendly_viewer", 8, YES);
 
     // Stable fallbacks for current FBSharedFramework builds.
     SCIAddEntry(map, 0x0081030f00000a95ULL, @"ig_is_employee[0]", @"hardcoded fallback", YES);

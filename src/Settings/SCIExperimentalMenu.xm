@@ -69,6 +69,7 @@ static void RYResetDeveloperModeState(void) {
         @"igt_employee",
         @"igt_employee_mc",
         @"igt_employee_or_test_user_mc",
+        @"igt_employee_test_user",
         @"igt_employee_devoptions_gate",
         @"igt_internal",
         @"igt_internal_apps_spoof",

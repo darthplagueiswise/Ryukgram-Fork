@@ -19,11 +19,27 @@ static BOOL sciPhotoReplyEnabled(void) {
     return [SCIUtils getBoolPref:@"igt_directnotes_photo_reply"];
 }
 
-static BOOL hook_IGDirectNotesFriendMapEnabled(void) { return sciFriendMapEnabled(); }
-static BOOL hook_IGDirectNotesEnableAudioNoteReplyType(void) { return sciAudioReplyEnabled(); }
-static BOOL hook_IGDirectNotesEnableAvatarReplyTypes(void) { return sciAvatarReplyEnabled(); }
-static BOOL hook_IGDirectNotesEnableGifsStickersReplyTypes(void) { return sciGifsReplyEnabled(); }
-static BOOL hook_IGDirectNotesEnablePhotoNoteReplyType(void) { return sciPhotoReplyEnabled(); }
+static BOOL (*orig_IGDirectNotesFriendMapEnabled)(void) = NULL;
+static BOOL (*orig_IGDirectNotesEnableAudioNoteReplyType)(void) = NULL;
+static BOOL (*orig_IGDirectNotesEnableAvatarReplyTypes)(void) = NULL;
+static BOOL (*orig_IGDirectNotesEnableGifsStickersReplyTypes)(void) = NULL;
+static BOOL (*orig_IGDirectNotesEnablePhotoNoteReplyType)(void) = NULL;
+
+static BOOL hook_IGDirectNotesFriendMapEnabled(void) {
+    return sciFriendMapEnabled() ? YES : (orig_IGDirectNotesFriendMapEnabled ? orig_IGDirectNotesFriendMapEnabled() : NO);
+}
+static BOOL hook_IGDirectNotesEnableAudioNoteReplyType(void) {
+    return sciAudioReplyEnabled() ? YES : (orig_IGDirectNotesEnableAudioNoteReplyType ? orig_IGDirectNotesEnableAudioNoteReplyType() : NO);
+}
+static BOOL hook_IGDirectNotesEnableAvatarReplyTypes(void) {
+    return sciAvatarReplyEnabled() ? YES : (orig_IGDirectNotesEnableAvatarReplyTypes ? orig_IGDirectNotesEnableAvatarReplyTypes() : NO);
+}
+static BOOL hook_IGDirectNotesEnableGifsStickersReplyTypes(void) {
+    return sciGifsReplyEnabled() ? YES : (orig_IGDirectNotesEnableGifsStickersReplyTypes ? orig_IGDirectNotesEnableGifsStickersReplyTypes() : NO);
+}
+static BOOL hook_IGDirectNotesEnablePhotoNoteReplyType(void) {
+    return sciPhotoReplyEnabled() ? YES : (orig_IGDirectNotesEnablePhotoNoteReplyType ? orig_IGDirectNotesEnablePhotoNoteReplyType() : NO);
+}
 
 static BOOL sciContainsAny(NSString *value, NSArray<NSString *> *needles) {
     if (![value isKindOfClass:[NSString class]] || value.length == 0) return NO;
@@ -35,11 +51,11 @@ static BOOL sciContainsAny(NSString *value, NSArray<NSString *> *needles) {
 }
 
 static BOOL sciDirectNotesExperimentMatch(NSString *name) {
-    if (sciFriendMapEnabled() && sciContainsAny(name, @[@"friendmap", @"friends_map", @"ig_ios_friendmap_", @"friendmapenabled"])) return YES;
-    if (sciAudioReplyEnabled() && sciContainsAny(name, @[@"audio"])) return YES;
-    if (sciAvatarReplyEnabled() && sciContainsAny(name, @[@"avatar"])) return YES;
-    if (sciGifsReplyEnabled() && sciContainsAny(name, @[@"gifs", @"sticker"])) return YES;
-    if (sciPhotoReplyEnabled() && sciContainsAny(name, @[@"photo"])) return YES;
+    if (sciFriendMapEnabled() && sciContainsAny(name, @[@"friendmap", @"friend_map", @"friends_map", @"location", @"ig_ios_friendmap_", @"friendmapenabled"])) return YES;
+    if (sciAudioReplyEnabled() && sciContainsAny(name, @[@"audio", @"original_audio", @"music"])) return YES;
+    if (sciAvatarReplyEnabled() && sciContainsAny(name, @[@"avatar", @"emoji"])) return YES;
+    if (sciGifsReplyEnabled() && sciContainsAny(name, @[@"gif", @"gifs", @"sticker", @"quickreplies"])) return YES;
+    if (sciPhotoReplyEnabled() && sciContainsAny(name, @[@"photo", @"camera", @"image"])) return YES;
     return NO;
 }
 
@@ -51,15 +67,17 @@ static BOOL new_isInExperiment(id self, SEL _cmd, id arg1) {
 
 %ctor {
     struct rebinding notesBinds[] = {
-        {"IGDirectNotesFriendMapEnabled", (void *)hook_IGDirectNotesFriendMapEnabled, NULL},
-        {"IGDirectNotesEnableAudioNoteReplyType", (void *)hook_IGDirectNotesEnableAudioNoteReplyType, NULL},
-        {"IGDirectNotesEnableAvatarReplyTypes", (void *)hook_IGDirectNotesEnableAvatarReplyTypes, NULL},
-        {"IGDirectNotesEnableGifsStickersReplyTypes", (void *)hook_IGDirectNotesEnableGifsStickersReplyTypes, NULL},
-        {"IGDirectNotesEnablePhotoNoteReplyType", (void *)hook_IGDirectNotesEnablePhotoNoteReplyType, NULL},
+        {"IGDirectNotesFriendMapEnabled", (void *)hook_IGDirectNotesFriendMapEnabled, (void **)&orig_IGDirectNotesFriendMapEnabled},
+        {"IGDirectNotesEnableAudioNoteReplyType", (void *)hook_IGDirectNotesEnableAudioNoteReplyType, (void **)&orig_IGDirectNotesEnableAudioNoteReplyType},
+        {"IGDirectNotesEnableAvatarReplyTypes", (void *)hook_IGDirectNotesEnableAvatarReplyTypes, (void **)&orig_IGDirectNotesEnableAvatarReplyTypes},
+        {"IGDirectNotesEnableGifsStickersReplyTypes", (void *)hook_IGDirectNotesEnableGifsStickersReplyTypes, (void **)&orig_IGDirectNotesEnableGifsStickersReplyTypes},
+        {"IGDirectNotesEnablePhotoNoteReplyType", (void *)hook_IGDirectNotesEnablePhotoNoteReplyType, (void **)&orig_IGDirectNotesEnablePhotoNoteReplyType},
     };
     rebind_symbols(notesBinds, sizeof(notesBinds) / sizeof(notesBinds[0]));
 
-    Class helper = NSClassFromString(@"IGDirectNotesExperimentHelper");
+    Class helper = NSClassFromString(@"_TtC34IGDirectNotesExperimentHelperSwift29IGDirectNotesExperimentHelper");
+    if (!helper) helper = NSClassFromString(@"IGDirectNotesExperimentHelperSwift.IGDirectNotesExperimentHelper");
+    if (!helper) helper = NSClassFromString(@"IGDirectNotesExperimentHelper");
     SEL sel = NSSelectorFromString(@"isInExperiment:");
     if (helper && class_getInstanceMethod(helper, sel)) {
         MSHookMessageEx(helper, sel, (IMP)new_isInExperiment, (IMP *)&orig_isInExperiment);

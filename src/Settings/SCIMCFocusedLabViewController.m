@@ -136,7 +136,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
     [t addObject:@{@"title": @"Update / refresh / override paths", @"subtitle": @"Observe-only; não são bool gates", @"key": @"category|update_refresh_override_paths"}];
 
-    NSArray<NSString *> *categories = @[@"c_bool_brokers", @"objc_mobileconfig_getters_contexts", @"objc_mapped_mobileconfig_class", @"startupconfigs_boot_getters", @"update_refresh_override_paths", @"direct_notes", @"direct_msys_e2ee", @"dogfood_internal_employee", @"quicksnap_instants", @"prism_ui", @"tabbar_navigation_homecoming", @"eligibility_monetization", @"feature_family", @"other_candidates", @"other"];
+    NSArray<NSString *> *categories = @[@"c_bool_brokers", @"objc_mobileconfig_getters_contexts", @"objc_mapped_mobileconfig_class", @"startupconfigs_boot_getters", @"update_refresh_override_paths", @"direct_notes", @"direct_msys_e2ee", @"dogfood_internal_employee", @"quicksnap_instants", @"prism_ui", @"tabbar_navigation_homecoming", @"feed_refresh_dedup_carrera", @"reels_first_second", @"stories_tray_grid", @"icebreaker_mutual", @"eligibility_monetization", @"feature_family", @"other_candidates", @"other"];
 
     for (NSString *cat in categories) {
 
@@ -291,6 +291,19 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
         NSString *cat = [target substringFromIndex:9].lowercaseString;
 
+        if ([cat isEqualToString:@"feed_refresh_dedup_carrera"]) {
+            return [self string:hay containsAny:@[@"feed", @"dedup", @"dedupe", @"culling", @"carrera", @"eager_refresh", @"pull_to_refresh", @"ptr", @"refresh"]];
+        }
+        if ([cat isEqualToString:@"reels_first_second"]) {
+            return [self string:hay containsAny:@[@"reels", @"first_world", @"second_screen", @"open_to_reels", @"reels_first", @"reels_second"]];
+        }
+        if ([cat isEqualToString:@"stories_tray_grid"]) {
+            return [self string:hay containsAny:@[@"story", @"stories", @"storie", @"tray", @"grid", @"ctray", @"explore_grid"]];
+        }
+        if ([cat isEqualToString:@"icebreaker_mutual"]) {
+            return [self string:hay containsAny:@[@"icebreaker", @"mutual"]];
+        }
+
         return [[self categoryForText:hay].lowercaseString isEqualToString:cat] || [hay containsString:cat];
 
     }
@@ -403,11 +416,13 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
 - (NSString *)categoryForText:(NSString *)hay {
     if ([self string:hay containsAny:@[@"employee", @"dogfood", @"dogfooding", @"internal", @"test_user", @"devoptions"]]) return @"Dogfood";
-    if ([self string:hay containsAny:@[@"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notestray"]]) return @"Direct";
+    if ([self string:hay containsAny:@[@"icebreaker", @"mutual", @"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notestray"]]) return @"Direct";
     if ([self string:hay containsAny:@[@"quicksnap", @"quick_snap", @"instants", @"instant", @"mshquicksnap"]]) return @"QuickSnap";
     if ([self string:hay containsAny:@[@"prism", @"igdsprism", @"prismmenu"]]) return @"Prism";
     if ([self string:hay containsAny:@[@"tabbar", @"homecoming", @"launcher", @"navigation", @"sundial"]]) return @"TabBar";
-    if ([self string:hay containsAny:@[@"feed", @"reels", @"story", @"stories", @"explore"]]) return @"Feed";
+    if ([self string:hay containsAny:@[@"dedup", @"dedupe", @"culling", @"carrera", @"eager_refresh", @"pull_to_refresh", @"ptr"]]) return @"Feed/Dedup";
+    if ([self string:hay containsAny:@[@"story", @"stories", @"storie", @"tray", @"grid", @"explore"]]) return @"Stories/Grid";
+    if ([self string:hay containsAny:@[@"feed", @"reels", @"first_world", @"open_to_reels", @"friendly_feed", @"friending"]]) return @"Feed";
     return @"Infra";
 }
 

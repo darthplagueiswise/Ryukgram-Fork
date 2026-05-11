@@ -93,7 +93,10 @@ static BOOL SCIStringLooksLikeNameCandidate(NSString *s) {
         @"quick_snap", @"instants", @"notes", @"direct", @"friend_map", @"friendmap",
         @"prism", @"homecoming", @"launcher", @"enabled", @"eligib", @"gate",
         @"creator", @"creation", @"instamadillo", @"liquid", @"liquidglass", @"liquid_glass",
-        @"igds", @"teen", @"avocado", @"camera", @"reels", @"feed", @"stories"
+        @"igds", @"teen", @"avocado", @"camera", @"reels", @"feed", @"stories",
+        @"story", @"storie", @"tray", @"grid", @"dedup", @"dedupe", @"culling",
+        @"carrera", @"eager", @"refresh", @"pull_to_refresh", @"ptr", @"icebreaker",
+        @"mutual", @"friendly", @"friending", @"first_world", @"open_to_reels"
     ];
     for (NSString *t in tokens) if ([l containsString:t]) return YES;
     if ([s containsString:@"_"] && ![s containsString:@" "] && ![s containsString:@"."] && s.length >= 6) return YES;
@@ -117,8 +120,15 @@ static NSInteger SCIStringScore(NSString *s) {
     if ([l containsString:@"creator"] || [l containsString:@"creation"]) score += 30;
     if ([l containsString:@"notes"]) score += 30;
     if ([l containsString:@"friend_map"] || [l containsString:@"friendmap"]) score += 30;
+    if ([l containsString:@"icebreaker"] || [l containsString:@"mutual"]) score += 30;
+    if ([l containsString:@"dedup"] || [l containsString:@"dedupe"]) score += 30;
+    if ([l containsString:@"eager_refresh"] || [l containsString:@"pull_to_refresh"] || [l containsString:@"_ptr"]) score += 25;
     if ([l containsString:@"instants"]) score += 25;
     if ([l containsString:@"homecoming"]) score += 25;
+    if ([l containsString:@"story"] || [l containsString:@"stories"] || [l containsString:@"tray"] || [l containsString:@"grid"]) score += 25;
+    if ([l containsString:@"reels"] || [l containsString:@"first_world"] || [l containsString:@"open_to_reels"]) score += 25;
+    if ([l containsString:@"feed"] || [l containsString:@"friendly"] || [l containsString:@"friending"]) score += 20;
+    if ([l containsString:@"carrera"] || [l containsString:@"culling"]) score += 20;
     if ([l containsString:@"enabled"]) score += 20;
     if ([l containsString:@"eligib"]) score += 20;
     if ([l containsString:@"/"]) score -= 15;

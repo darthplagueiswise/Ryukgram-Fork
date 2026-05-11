@@ -21,6 +21,7 @@
         @"igt_employee": @(NO),
         @"igt_employee_mc": @(NO),
         @"igt_employee_or_test_user_mc": @(NO),
+        @"igt_employee_test_user": @(NO),
         @"igt_internal": @(NO),
         @"igt_internal_apps_gate": @(NO),
         @"igt_internaluse_observer": @(NO),

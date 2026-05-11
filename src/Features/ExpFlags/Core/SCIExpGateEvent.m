@@ -37,10 +37,12 @@ NSString *SCIExpGateCategoryForName(NSString *name, NSString *gateSymbol, NSStri
     NSString *hay = [@[name ?: @"", gateSymbol ?: @"", callerDescription ?: @""] componentsJoinedByString:@" "];
     if (SCIContainsAny(hay, @[@"employee", @"dogfood", @"dogfooding", @"internal", @"test_user", @"devoptions", @"xav_switcher"])) return @"Dogfood/Internal";
     if (SCIContainsAny(hay, @[@"quicksnap", @"quick_snap", @"instant", @"instants", @"mshquicksnap", @"notestray"])) return @"QuickSnap/Instants";
-    if (SCIContainsAny(hay, @[@"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notes_tray"])) return @"Direct/Notes";
+    if (SCIContainsAny(hay, @[@"icebreaker", @"mutual", @"directnotes", @"direct_notes", @"friendmap", @"locationnotes", @"notes_tray"])) return @"Direct/Notes";
     if (SCIContainsAny(hay, @[@"prism", @"igdsprism", @"prismmenu"])) return @"Prism/UI";
     if (SCIContainsAny(hay, @[@"tabbar", @"homecoming", @"launcher", @"sundial", @"navigation"])) return @"TabBar/Homecoming";
-    if (SCIContainsAny(hay, @[@"feed", @"reels", @"stories", @"storytray", @"explore"])) return @"Feed/Reels/Stories";
+    if (SCIContainsAny(hay, @[@"dedup", @"dedupe", @"culling", @"carrera", @"eager_refresh", @"pull_to_refresh", @"ptr"])) return @"Feed/Refresh/Dedup";
+    if (SCIContainsAny(hay, @[@"story", @"stories", @"storie", @"storytray", @"tray", @"grid", @"explore"])) return @"Stories/Tray/Grid";
+    if (SCIContainsAny(hay, @[@"feed", @"reels", @"first_world", @"open_to_reels", @"friendly_feed", @"friending"])) return @"Feed/Reels/Stories";
     if (SCIContainsAny(hay, @[@"mobileconfig", @"startupconfigs", @"easygating", @"override", @"refresh", @"updateconfigs"])) return @"MobileConfig Infra";
     return @"Unknown";
 }

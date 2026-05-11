@@ -12,8 +12,12 @@ static const unsigned long long kIGIsEmployeeB = 0x0081030f00010a96ULL;
 static const unsigned long long kIGIsEmployeeOrTestUser = 0x008100b200000161ULL;
 
 static BOOL RGEmployeeMCEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee"]; }
-static BOOL RGEmployeeOrTestUserMCEnabled(void) { return [SCIUtils getBoolPref:@"igt_employee_test_user"]; }
-static BOOL RGInternalAppsGateEnabled(void) { return [SCIUtils getBoolPref:@"igt_internal"]; }
+static BOOL RGEmployeeOrTestUserMCEnabled(void) {
+    return [SCIUtils getBoolPref:@"igt_employee_or_test_user_mc"] || [SCIUtils getBoolPref:@"igt_employee_test_user"];
+}
+static BOOL RGInternalAppsGateEnabled(void) {
+    return [SCIUtils getBoolPref:@"igt_internal_apps_gate"] || [SCIUtils getBoolPref:@"igt_internal"];
+}
 static BOOL RGObserveInternalUseEnabled(void) { return [SCIUtils getBoolPref:@"igt_internaluse_observer"]; }
 
 static NSString *RGNameForKnownSpecifier(unsigned long long spec) {
