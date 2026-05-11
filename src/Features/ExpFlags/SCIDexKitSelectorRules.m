@@ -3,31 +3,32 @@
 @implementation SCIDexKitSelectorRules
 
 + (NSArray<NSString *> *)ownerTokens {
-    return @[@"experiment", @"feature", @"config", @"configuration", @"provider", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"homecoming", @"liquidglass", @"tabbar", @"friendmap", @"notes", @"identityswitcher", @"cta"];
+    return @[@"experiment", @"feature", @"featuregate", @"featuregating", @"config", @"configuration", @"provider", @"providing", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"tabbar", @"navigation", @"feed", @"story", @"stories", @"storytray", @"storiestray", @"traytitle", @"friendmap", @"notes", @"multiplenotes", @"solicitation", @"icebreaker", @"mutualinterest", @"identityswitcher", @"cta"];
 }
 + (NSArray<NSString *> *)strongOwnerTokens {
-    return @[@"experiment", @"experimentation", @"gating", @"gate", @"config", @"configuration", @"provider", @"mobileconfig", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"homecoming", @"liquidglass", @"dogfood"];
+    return @[@"experiment", @"experimentation", @"featuregate", @"featuregating", @"gating", @"gate", @"config", @"configuration", @"provider", @"providing", @"mobileconfig", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"instants", @"homecoming", @"liquidglass", @"dogfood", @"storytray", @"storiestray", @"icebreaker"];
 }
 + (NSArray<NSString *> *)selectorTokens {
-    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"friendmap", @"dogfood"];
+    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"instants", @"friendmap", @"dogfood", @"decoupling", @"tapprefetch", @"traytitle", @"storytray", @"storiestray", @"multiplenotes", @"icebreaker", @"mutualinterest"];
 }
 + (NSArray<NSString *> *)rootGateTokens {
     return @[@"enabled", @"isenabled", @"shouldenable", @"shouldshow", @"eligible", @"iseligible", @"available", @"isavailable", @"supported", @"issupported", @"allowed", @"isallowed"];
 }
 + (NSArray<NSString *> *)configOptionTokens {
-    return @[@"enable", @"disable", @"default", @"defaulton", @"defaultoff", @"toggle", @"sound", @"caption", @"scrubber", @"ufi", @"preview", @"spinner", @"positioning", @"bottomsheet", @"global", @"sticky"];
+    return @[@"enable", @"disable", @"default", @"defaulton", @"defaultoff", @"toggle", @"sound", @"caption", @"scrubber", @"ufi", @"preview", @"spinner", @"positioning", @"bottomsheet", @"global", @"sticky", @"prefetch", @"decoupling", @"tray", @"traytitle", @"navbar", @"solicitation", @"multiplenotes", @"multiple"];
 }
 + (NSArray<NSString *> *)variantTokens {
     return @[@"variant", @"treatment", @"bucket", @"firstswipe", @"preview", @"defaulton", @"defaultoff", @"recap", @"up leveling", @"upleveling"];
 }
 + (NSArray<NSString *> *)uiStateTokens {
-    return @[@"selected", @"highlighted", @"visible", @"hidden", @"loading", @"refreshing", @"animating", @"presented", @"dismissed", @"dragging", @"scrolling", @"decelerating", @"tracking", @"editing", @"focused", @"expanded", @"collapsed", @"mounted", @"appearing", @"disappearing", @"window", @"superview", @"layout", @"firstresponder", @"accessibility", @"playing"];
+    return @[@"selected", @"highlighted", @"visible", @"hidden", @"loading", @"loaded", @"fetching", @"refreshing", @"animating", @"presented", @"dismissed", @"dragging", @"scrolling", @"decelerating", @"tracking", @"editing", @"focused", @"expanded", @"collapsed", @"mounted", @"appearing", @"disappearing", @"window", @"superview", @"layout", @"firstresponder", @"accessibility", @"playing"];
 }
 + (NSSet<NSString *> *)excludedSelectors {
-    return [NSSet setWithArray:@[@"isEmpty", @"empty", @"isVisible", @"visible", @"isHidden", @"hidden", @"isSelected", @"selected", @"isHighlighted", @"highlighted", @"isLoading", @"loading", @"isRefreshing", @"refreshing", @"isAnimating", @"animating", @"isAccessibilityElement", @"supportsSecureCoding", @"prefersNavigationBarHidden", @"prefersStatusBarHidden", @"becomeFirstResponder", @"resignFirstResponder", @"scrollEnabled", @"isScrollEnabled", @"userInteractionEnabled", @"isUserInteractionEnabled", @"requiresPageWorld", @"isPlaying", @"playing"]];
+    return [NSSet setWithArray:@[@"isEmpty", @"empty", @"isVisible", @"visible", @"isHidden", @"hidden", @"isEnabled", @"enabled", @"isSelected", @"selected", @"isHighlighted", @"highlighted", @"isLoading", @"loading", @"isFetching", @"fetching", @"hasLoaded", @"loaded", @"isRefreshing", @"refreshing", @"isAnimating", @"animating", @"isAccessibilityElement", @"supportsSecureCoding", @"prefersNavigationBarHidden", @"prefersStatusBarHidden", @"becomeFirstResponder", @"resignFirstResponder", @"scrollEnabled", @"isScrollEnabled", @"userInteractionEnabled", @"isUserInteractionEnabled", @"requiresPageWorld", @"isPlaying", @"playing"]];
 }
 + (NSArray<NSString *> *)excludedClassPrefixes { return @[@"UI", @"NS", @"WK", @"AV", @"CA", @"NSURL", @"SwiftUI"]; }
-+ (NSArray<NSString *> *)visualOwnerTokens { return @[@"view", @"cell", @"button", @"label", @"imageview", @"scroll", @"collection", @"table", @"gesture", @"layer", @"spinner", @"hud", @"controller"]; }
++ (NSArray<NSString *> *)visualOwnerTokens { return @[@"view", @"cell", @"button", @"label", @"imageview", @"scroll", @"collection", @"table", @"gesture", @"layer", @"spinner", @"hud", @"controller", @"overlay", @"tray", @"navbar", @"header", @"footer"];
+}
 
 + (BOOL)containsAny:(NSString *)s tokens:(NSArray<NSString *> *)tokens {
     NSString *l = s.lowercaseString ?: @"";
@@ -54,7 +55,7 @@
     if ([ls hasPrefix:@"should"] || [ls hasPrefix:@"is"] || [ls hasPrefix:@"has"] || [ls hasPrefix:@"can"]) score += 2;
     if ([self containsAny:selector tokens:[self uiStateTokens]]) score -= 35;
     if ([self containsAny:className tokens:[self visualOwnerTokens]] && [self containsAny:selector tokens:[self uiStateTokens]]) score -= 35;
-    if ([ls isEqualToString:@"isenabled"] || [ls isEqualToString:@"enabled"]) score -= 15;
+    if ([ls isEqualToString:@"isenabled"] || [ls isEqualToString:@"enabled"]) score -= 35;
     if ([self containsAny:selector tokens:[self configOptionTokens]]) score += 4;
     if ([self containsAny:selector tokens:[self variantTokens]]) score -= 6;
     return score;
@@ -71,12 +72,20 @@
     else if ([ls containsString:@"globalsound"] || ([ls containsString:@"global"] && [ls containsString:@"sound"])) family = @"GlobalSound";
     else if ([ls containsString:@"bottomsheet"]) family = @"Bottomsheet";
     else if ([ls containsString:@"preview"]) family = @"Preview";
+    else if ([ls containsString:@"tapprefetch"] || ([ls containsString:@"tap"] && [ls containsString:@"prefetch"])) family = @"TapPrefetch";
+    else if ([ls containsString:@"decoupling"]) family = @"Decoupling";
+    else if ([ls containsString:@"traytitle"]) family = @"TrayTitle";
+    else if ([ls containsString:@"storiestray"] || [ls containsString:@"storytray"]) family = @"StoryTray";
+    else if ([ls containsString:@"multiplenotes"]) family = @"MultipleNotes";
+    else if ([ls containsString:@"solicitation"]) family = @"Solicitation";
+    else if ([ls containsString:@"icebreaker"]) family = @"Icebreaker";
+    else if ([ls containsString:@"mutualinterest"]) family = @"MutualInterest";
     else if ([ls containsString:@"sound"]) family = @"Sound";
     else if ([ls containsString:@"caption"]) family = @"Caption";
     else if ([ls containsString:@"scrubber"]) family = @"Scrubber";
     else if ([ls containsString:@"spinner"]) family = @"Spinner";
     else if ([ls containsString:@"homecoming"]) family = @"Homecoming";
-    else if ([ls containsString:@"quicksnap"]) family = @"QuickSnap";
+    else if ([ls containsString:@"quicksnap"] || [ls containsString:@"instants"]) family = @"QuickSnap";
     else if ([ls containsString:@"friendmap"]) family = @"FriendMap";
     else if ([ls containsString:@"liquidglass"]) family = @"LiquidGlass";
     else if ([ls containsString:@"prism"]) family = @"Prism";
@@ -128,7 +137,8 @@
 
     BOOL strongOwner = [self containsAny:className tokens:[self strongOwnerTokens]];
     BOOL rootGate = [self containsAny:selector tokens:[self rootGateTokens]];
-    BOOL uiState = [self containsAny:selector tokens:[self uiStateTokens]] || ([self containsAny:className tokens:[self visualOwnerTokens]] && [self containsAny:selector tokens:[self uiStateTokens]]);
+    BOOL exactGenericEnabled = [ls isEqualToString:@"isenabled"] || [ls isEqualToString:@"enabled"];
+    BOOL uiState = [self containsAny:selector tokens:[self uiStateTokens]] || exactGenericEnabled || ([self containsAny:className tokens:[self visualOwnerTokens]] && [self containsAny:selector tokens:[self uiStateTokens]]);
     BOOL config = [self containsAny:selector tokens:[self configOptionTokens]] || [lc containsString:@"configuration"] || [lc containsString:@"config"];
     BOOL variant = [self containsAny:selector tokens:[self variantTokens]];
     BOOL debugInternal = [lc containsString:@"debug"] || [lc containsString:@"dogfood"] || [lc containsString:@"internal"] || [ls containsString:@"debug"] || [ls containsString:@"internal"];
@@ -137,12 +147,12 @@
     BOOL conflict = conflictFamily.length > 0;
 
     if (uiState || [self isExcludedClassName:className selector:selector]) {
-        category = @"ui-state";
+        category = exactGenericEnabled ? @"ui-state" : @"ui-state";
         risk = 4;
         observe = NO;
         force = NO;
         batch = NO;
-        [reasons addObject:@"selector/class looks like transient UI or lifecycle state"];
+        [reasons addObject:exactGenericEnabled ? @"generic isEnabled/enabled is usually local visual state; observe through a real owner-specific gate instead" : @"selector/class looks like transient UI or lifecycle state"];
     } else if (debugInternal) {
         category = @"debug-internal";
         risk = 2;
@@ -156,7 +166,7 @@
         observe = YES;
         force = YES;
         batch = YES;
-        [reasons addObject:@"strong feature/config owner with root gate selector"];
+        [reasons addObject:@"strong feature/config/provider owner with root gate selector"];
     } else if (rootGate && strongOwner) {
         category = @"experiment-gate";
         risk = 1;
