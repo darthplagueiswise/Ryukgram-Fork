@@ -605,6 +605,17 @@
 @property (readonly, nonatomic) IGCreationActionBarButton *button;
 @end
 
+@interface IGStatButton : UIView {
+	UILabel *_countLabel;
+}
+@end
+
+@interface _TtC23IGProfileHeaderIdentity38IGProfileHeaderStatButtonContainerView : UIView {
+	IGStatButton *$__lazy_storage_$_followersButton;
+	IGStatButton *postCountButton;
+}
+@end
+
 // Call buttons in DM thread header. Coordinator owns _audioCallButton / _videoCallButton
 // (both IGDirectCallButton) and forwards taps to _didTapAudioButton: / _didTapVideoButton:.
 // Discovered by dumping the thread VC view hierarchy for IGDirectCallButton.
