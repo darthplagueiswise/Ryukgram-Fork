@@ -46,6 +46,24 @@ static NSArray<NSString *> *sciPrefKeysForFGSel(NSString *sel) {
     if ([l containsString:@"storygrid"] || [l containsString:@"story_grid"] ||
         ([l containsString:@"story"] && [l containsString:@"grid"]))
         return @[@"igt_story_grid"];
+    if ([l containsString:@"mutualfollow"])
+        return @[@"igt_mutual_interest"];
+    if ([l containsString:@"stickercard"])
+        return @[@"igt_icebreaker", @"igt_mutual_interest"];
+    if ([l containsString:@"storiestray"] || [l containsString:@"stories_tray"])
+        return @[@"igt_stories_tray_decoupling"];
+    if ([l containsString:@"feeddecoupl"] || [l containsString:@"feed_decoupl"])
+        return @[@"igt_stories_tray_decoupling"];
+    if ([l containsString:@"inlinelike"] || [l containsString:@"inline_like"])
+        return @[@"igt_dm_inline_like"];
+    if ([l containsString:@"friendlanefeed"] || [l containsString:@"friendlane"])
+        return @[@"igt_friends_feed"];
+    if ([l containsString:@"storiesfetchhandled"] || [l containsString:@"storiesindependent"])
+        return @[@"igt_stories_tray_decoupling"];
+    if ([l containsString:@"multiplenotes"] || [l containsString:@"multiple_notes"])
+        return @[@"igt_multiple_notes"];
+    if ([l containsString:@"firstnotebadge"])
+        return @[@"igt_dn_first_badge"];
     return nil;
 }
 
@@ -103,6 +121,7 @@ static void sciHookFGClass(Class cls) {
 %ctor {
     NSArray<NSString *> *featureKeys = @[
         @"igt_mutual_interest", @"igt_icebreaker", @"igt_friends_feed",
+        @"igt_stories_tray_decoupling", @"igt_dm_inline_like", @"igt_multiple_notes",
         @"igt_feed_dedup", @"igt_reels_first", @"igt_feed_culling",
         @"igt_pull_to_carrera", @"igt_audio_ramping", @"igt_tab_swiping",
         @"igt_quicksnap", @"igt_prism", @"igt_homecoming", @"igt_story_grid"
@@ -114,7 +133,22 @@ static void sciHookFGClass(Class cls) {
     if (!any) return;
 
     gFGOriginals = [NSMutableDictionary dictionary];
-    for (NSString *className in @[@"FeatureGatingService", @"FeatureGate"]) {
+    // CONFIRMED class names from Instagram + FBSharedFramework binary analysis
+    NSArray<NSString *> *fgClassNames = @[
+        // Mutual Interest + Icebreaker (DM thread cards)
+        @"_TtC32IGDirectMutualInterestIcebreaker42IGDirectMutualInterestFeatureGatingService",
+        // Stories Tray decoupling + tap prefetch (Ads prefetch manager)
+        @"_TtC23IGStoryAdsPrefetchSwift27IGStoriesAdsPrefetchManager",
+        // Homecoming Nav Configuration (story grid, friend lane, feed culling etc.)
+        @"_TtC18IGNavConfiguration28IGHomecomingNavConfiguration",
+        @"_TtC18IGNavConfiguration18IGNavConfiguration",
+        // DM message menu inline like
+        @"IGDirectMessageMenuStaticEligibilityContext",
+        // Legacy / fallback names (originally wrong, kept for safety)
+        @"FeatureGatingService",
+        @"FeatureGate",
+    ];
+    for (NSString *className in fgClassNames) {
         sciHookFGClass(NSClassFromString(className));
     }
 }
