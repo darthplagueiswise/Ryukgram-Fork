@@ -30,6 +30,12 @@
         @"igt_mutual_interest": @(NO),
         @"igt_icebreaker": @(NO),
         @"igt_story_grid": @(NO),
+        @"igt_stories_tray_decoupling": @(NO),
+        @"igt_stories_tray_tap_prefetch": @(NO),
+        @"igt_stories_tray_title_interaction": @(NO),
+        @"igt_stories_feed_decoupling": @(NO),
+        @"igt_stories_independent_fetch": @(NO),
+        @"igt_dm_inline_like": @(NO),
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
 }
