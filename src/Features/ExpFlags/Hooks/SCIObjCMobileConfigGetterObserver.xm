@@ -29,7 +29,7 @@ static BOOL I64(const char*t){return t&&(t[0]=='Q'||t[0]=='q'||t[0]=='L'||t[0]==
 static BOOL SCITypeIsPointerLike(const char*t){return t&&(t[0]=='@'||t[0]=='#'||t[0]=='^'||t[0]==':'||t[0]=='*');}
 static BOOL LooksBoolU64Opt(Class c,SEL s){Method m=class_getInstanceMethod(c,s);if(!m||method_getNumberOfArguments(m)!=4)return NO;char r[64]={0},a2[64]={0},a3[64]={0};method_getReturnType(m,r,sizeof(r));method_getArgumentType(m,2,a2,sizeof(a2));method_getArgumentType(m,3,a3,sizeof(a3));NSUInteger z2=0,z3=0;return BoolRet(r)&&TSize(a2,&z2)&&TSize(a3,&z3)&&I64(a2)&&z2==8&&SCITypeIsPointerLike(a3)&&z3==sizeof(void*);}
 static BOOL LooksU64U64(Class c,SEL s){Method m=class_getInstanceMethod(c,s);if(!m||method_getNumberOfArguments(m)!=3)return NO;char r[64]={0},a2[64]={0};method_getReturnType(m,r,sizeof(r));method_getArgumentType(m,2,a2,sizeof(a2));NSUInteger zr=0,z2=0;return TSize(r,&zr)&&TSize(a2,&z2)&&I64(r)&&I64(a2)&&zr==8&&z2==8;}
-static void Caller(void*a,NSString**img,NSString**sym){if(img)*img=nil;if(sym)*sym=nil;if(!a)return;Dl_info i={0};if(!dladdr(a,&i))return;if(img&&i.dli_fname)*img=[@(i.dli_fname) lastPathComponent];if(sym&&i.dli_sname)*sym=@(i.dli_sname);} 
+static uint64_t Caller(void*a,NSString**img,NSString**sym){if(img)*img=nil;if(sym)*sym=nil;if(!a)return 0;Dl_info i={0};if(!dladdr(a,&i))return (uint64_t)(uintptr_t)a;NSString*base=i.dli_fname?[@(i.dli_fname) lastPathComponent]:@"";if(img&&base.length)*img=base;if(sym&&i.dli_sname)*sym=@(i.dli_sname);uintptr_t ret=(uintptr_t)a;uintptr_t call=ret>=4?ret-4:ret;if([base isEqualToString:@"Instagram"]&&i.dli_fbase){return (uint64_t)(call-(uintptr_t)i.dli_fbase+0x100000000ULL);}return (uint64_t)call;}
 static BOOL Direct(NSString*k,BOOL*out){id o=[[NSUserDefaults standardUserDefaults] objectForKey:k];if([o isKindOfClass:NSNumber.class]){if(out)*out=[o boolValue];return YES;}return NO;}
 static uint64_t LocalNorm(uint64_t p){return p&0x00FFFFFFFFFFFFFFULL;}
 static BOOL FinalFor(uint64_t p,NSString*b,BOOL orig){if(!On(kApplyKey)||!b.length)return orig;uint64_t n=LocalNorm(p);BOOL v=orig;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)p],&v))return v;if(Direct([NSString stringWithFormat:@"mcbr:%@:%016llx",b,(unsigned long long)n],&v))return v;return orig;}
@@ -45,11 +45,11 @@ static void ConfigureBufferConsumer(void){static dispatch_once_t once;dispatch_o
         BOOL runtimeContextEligible=[e[@"runtimeContextEligible"] respondsToSelector:@selector(boolValue)]?[e[@"runtimeContextEligible"] boolValue]:YES;
         void *ca=(void *)(uintptr_t)[e[@"callerAddress"] unsignedLongLongValue];
         if(runtimeContextEligible){
-            NSString *ci=nil,*cs=nil;Caller(ca,&ci,&cs);
+            NSString *ci=nil,*cs=nil;uint64_t callsite=Caller(ca,&ci,&cs);
             NSString *cls=ClassForBID(b);if(!cls.length)cls=[NSString stringWithFormat:@"SCIMCBrokerRouter:%@",b];
             NSString *sel=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"getBool:withOptions:":[NSString stringWithFormat:@"c-broker:%@",b];
             NSString *src=([b isEqualToString:@"ig"]||[b isEqualToString:@"igsl"])?@"objc-buffer:getBool:withOptions":@"c-broker-buffer";
-            [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:cls selector:sel specifier:p defaultValue:orig originalValue:orig finalValue:fin source:src callerImage:ci callerSymbol:cs callerAddress:(uint64_t)(uintptr_t)ca];
+            [SCIDexKitNameResolver noteMobileConfigBoolReadWithClassName:cls selector:sel specifier:p defaultValue:orig originalValue:orig finalValue:fin source:src callerImage:ci callerSymbol:cs callerAddress:callsite];
         }
         NSString *k=[SCIMobileConfigBrokerStore overrideKeyForBrokerID:b value:p];
         [SCIMobileConfigBrokerStore noteObservedValue:orig forOverrideKey:k];
