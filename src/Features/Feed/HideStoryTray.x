@@ -2,6 +2,6 @@
 #import "../../InstagramHeaders.h"
 
 // Disable Story Tray Section
-%hook IGStoryTraySectionController
-+ (id)alloc {if ([SCIUtils getBoolPref:@"hide_stories_tray"]) {return nil;}return %orig;}
+%hook IGMainStoryTrayDataSource
+- (BOOL)isEmpty {if ([SCIUtils getBoolPref:@"hide_stories_tray"]) return YES;return %orig;}
 %end
