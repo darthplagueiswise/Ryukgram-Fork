@@ -460,9 +460,16 @@
 //                IGSundialClearMode.IGSundialClearedOverlayView
 // Hooked via %hook with mangled names — see EnhancedPlayback.xm
 
+@interface IGUFIButton : NSObject
+@property (nonatomic, setter=setEDR:) BOOL edr;
+@property (retain, nonatomic) UIColor *overrideTintColor;
+@end
+
 @interface IGSundialViewerVerticalUFI : UIView
 - (void)_didTapLikeButton:(id)arg1;
 - (void)_didTapRepostButton:(id)arg1;
+@property (readonly, nonatomic) IGUFIButton *ufiLikeButton;
+
 @end
 
 @interface IGMainAppSurfaceIntent : NSObject

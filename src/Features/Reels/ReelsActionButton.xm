@@ -10,11 +10,12 @@
 
 static const NSInteger kReelActionBtnTag = 1337;
 static const NSInteger kReelActionHitTag = 1338;
+static const NSInteger kReelEDROffTag = 13380;
+static const NSInteger kReelEDROnTag = 13381;
 
 static char kReelActionDefaultKey;
 static char kReelContextInteractionKey;
 static char kReelVisibleButtonKey;
-static char kSCIIGUFIButtonEDRKey;
 
 @interface SCIReelHitButton : UIButton
 @end
@@ -58,38 +59,34 @@ static UIColor *sciReelIconColor(BOOL edr) {
 	static UIColor *color;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceExtendedSRGB);
-		CGFloat c[] = { 2.0, 2.0, 2.0, 1.0 };
-		CGColorRef cg = CGColorCreate(cs, c);
-		color = [UIColor colorWithCGColor:cg];
-		CGColorRelease(cg);
-		CGColorSpaceRelease(cs);
+		CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedSRGB);
+		CGFloat components[] = { 2.0, 2.0, 2.0, 1.0 };
+		CGColorRef cgColor = CGColorCreate(colorSpace, components);
+		color = [UIColor colorWithCGColor:cgColor];
+		CGColorRelease(cgColor);
+		CGColorSpaceRelease(colorSpace);
 	});
 
 	return color;
 }
 
-static BOOL sciNativeReelEDR(id ufi) {
-	id button = [ufi respondsToSelector:@selector(ufiLikeButton)]
-		? ((id (*)(id, SEL))objc_msgSend)(ufi, @selector(ufiLikeButton))
-		: nil;
-
-	NSNumber *value = objc_getAssociatedObject(button, &kSCIIGUFIButtonEDRKey);
-	if (value) return value.boolValue;
-
-	return [button respondsToSelector:@selector(edr)]
-		? ((BOOL (*)(id, SEL))objc_msgSend)(button, @selector(edr))
-		: NO;
+static BOOL sciNativeReelEDR(IGSundialViewerVerticalUFI *ufi) {
+	return ufi.ufiLikeButton.edr;
 }
 
 static void sciApplyReelIconBrightness(SCIChromeButton *button, BOOL edr) {
 	if (!button) return;
 
-	UIColor *color = sciReelIconColor(edr);
-
 	button.hidden = NO;
 	button.alpha = 1.0;
 	button.userInteractionEnabled = NO;
+
+	NSInteger stateTag = edr ? kReelEDROnTag : kReelEDROffTag;
+	if (button.iconView.tag == stateTag) return;
+
+	button.iconView.tag = stateTag;
+
+	UIColor *color = sciReelIconColor(edr);
 	button.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
 	button.iconTint = color;
 	button.bubbleColor = UIColor.clearColor;
@@ -100,7 +97,7 @@ static void sciApplyReelIconBrightness(SCIChromeButton *button, BOOL edr) {
 	button.iconView.tintAdjustmentMode = UIViewTintAdjustmentModeNormal;
 	button.iconView.highlighted = NO;
 
-	if (button.iconView.image) {
+	if (button.iconView.image.renderingMode != UIImageRenderingModeAlwaysTemplate) {
 		button.iconView.image = [button.iconView.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 	}
 }
@@ -306,19 +303,7 @@ static void sciRemoveReelButton(UIView *root) {
 	[[root viewWithTag:kReelActionBtnTag] removeFromSuperview];
 }
 
-%hook IGUFIButton
-- (void)setEDR:(BOOL)edr {
-	objc_setAssociatedObject(self, &kSCIIGUFIButtonEDRKey, @(edr), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	%orig;
-}
-%end
-
 %hook IGSundialViewerVerticalUFI
-
-- (void)didMoveToSuperview {
-	%orig;
-	((void(*)(id, SEL))objc_msgSend)(self, @selector(sciReloadReelActionButton));
-}
 
 - (void)layoutSubviews {
 	%orig;
@@ -368,6 +353,10 @@ static void sciRemoveReelButton(UIView *root) {
 		]];
 
 		[SCIActionIcon attachAutoUpdate:button pointSize:24 style:SCIActionIconStyleShadowBaked];
+
+		if (button.iconView.image) {
+			button.iconView.image = [button.iconView.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+		}
 	}
 
 	if (!hit) {
