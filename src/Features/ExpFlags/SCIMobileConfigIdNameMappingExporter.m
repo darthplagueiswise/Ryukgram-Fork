@@ -1,6 +1,7 @@
 #import "SCIMobileConfigIdNameMappingExporter.h"
 #import "SCIMobileConfigMapping.h"
 #import "SCIDexKitNameResolver.h"
+#include <dlfcn.h>
 
 NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotification = @"SCIMobileConfigIdNameMappingExporterDidUpdateNotification";
 
@@ -123,7 +124,81 @@ static void SCIIdMapSetStatus(NSString *status) {
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
+
+// ── paramKeyFromSpecifier glue ────────────────────────────────────────────────
+// Calls mobileconfig::paramKeyFromSpecifier(uint64_t) -> NSString* via dlsym.
+// This is an exported C++ symbol in FBSharedFramework (verified via lief scan).
+// NO hook, NO MSHookFunction — pure dlsym call. Safe for sideload.
+// Called only from exportIDNameMappingNow, which is user-triggered (ID Map button
+// in DexKit 2.0 nav bar). Never called at startup.
+typedef NSString *(*SCIParamKeyFn)(uint64_t);
+static SCIParamKeyFn SCIGetParamKeyFn(void) {
+    static SCIParamKeyFn sFn = NULL;
+    static dispatch_once_t sOnce;
+    dispatch_once(&sOnce, ^{
+        // Mangled C++ symbol confirmed present in FBSharedFramework arm64 export table
+        const char *sym = "__ZN12mobileconfig21paramKeyFromSpecifierEy";
+        void *addr = dlsym(RTLD_DEFAULT, sym);
+        if (!addr) {
+            // Try loading FBSharedFramework explicitly (already in process, RTLD_NOLOAD)
+            NSString *fwPath = [[[NSBundle mainBundle].bundlePath
+                stringByAppendingPathComponent:@"Frameworks/FBSharedFramework.framework"]
+                stringByAppendingPathComponent:@"FBSharedFramework"];
+            void *handle = dlopen(fwPath.UTF8String, RTLD_NOLOAD | RTLD_LAZY);
+            if (handle) addr = dlsym(handle, sym);
+        }
+        sFn = (SCIParamKeyFn)addr;
+        NSLog(@"[RyukGram][IDMap] paramKeyFromSpecifier resolved @ %p", addr);
+    });
+    return sFn;
+}
+
+// Try to resolve known specifiers from project analysis to seed the mapping.
+// Only called inside exportIDNameMappingNow after the file-scan comes up empty.
+// Returns a dict of "0x..." -> "param_name" with whatever was resolvable.
+static NSDictionary<NSString *, NSString *> *SCIResolveKnownSpecifiers(void) {
+    SCIParamKeyFn fn = SCIGetParamKeyFn();
+    if (!fn) return nil;
+
+    // Specifiers captured from static binary analysis (igmc_bool_direct_bl_candidates.csv)
+    // These are real specifiers observed in the Instagram binary calling
+    // _IGMobileConfigBooleanValueForInternalUse / SessionlessBooleanValueForInternalUse.
+    static uint64_t const kKnownSpecifiers[] = {
+        0x00810749002926c6ULL,  // context: media/feed rendering
+        0x00810749002e26cbULL,  // context: media/feed rendering
+        0x0081037300010d36ULL,  // context: UI/style
+        0x0081141f00006271ULL,  // context: UI/style
+        0x00810c190000439aULL,  // context: media/feed rendering
+        0x008107150001251eULL,  // context: media/feed rendering
+        0x00410adf00053dacULL,  // context: cache/sessionless
+        0x008106a9014f20b7ULL,  // context: delivery flags
+        0x00810749002526c4ULL,  // context: feed item mutation
+        0x00810e1e00004e06ULL,  // context: video state
+        0x00810e1e00014e07ULL,  // context: video state
+        0x00410adf00083dadULL,  // context: UK/EU pricing
+        0x0041094200003249ULL,  // context: stash/experiments
+        0x004109420005324aULL,  // context: stash/experiments
+        0x004109420006324bULL,  // context: stash/experiments
+        0x008106a600231fafULL,  // context: stash/experiments
+    };
+
+    NSMutableDictionary<NSString *, NSString *> *result = [NSMutableDictionary dictionary];
+    NSUInteger count = sizeof(kKnownSpecifiers) / sizeof(kKnownSpecifiers[0]);
+    for (NSUInteger i = 0; i < count; i++) {
+        uint64_t spec = kKnownSpecifiers[i];
+        @try {
+            NSString *name = fn(spec);
+            if (name.length) {
+                NSString *key = [NSString stringWithFormat:@"0x%016llx", (unsigned long long)spec];
+                result[key] = name;
+            }
+        } @catch (__unused id e) {}
+    }
+    return result.count ? result : nil;
+}
+
 @implementation SCIMobileConfigIdNameMappingExporter
+
 
 + (NSArray<NSString *> *)candidateIDNameMappingPaths {
     NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
@@ -176,7 +251,38 @@ static void SCIIdMapSetStatus(NSString *status) {
     for (NSDictionary *info in candidateInfo) if ([info[@"exists"] boolValue] || visibleCandidates.count < 80) [visibleCandidates addObject:info];
 
     if (!best) {
-        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
+        // File not found on disk. Try generating a seed mapping via paramKeyFromSpecifier.
+        // This C++ function is an exported symbol in FBSharedFramework — call via dlsym only.
+        // Only works after configs have been loaded (user already navigated in the app).
+        // Safe: no hook, user-triggered from ID Map button in DexKit 2.0.
+        NSDictionary<NSString *, NSString *> *resolved = SCIResolveKnownSpecifiers();
+        if (resolved.count) {
+            NSMutableArray<NSString *> *seedOutputs = [NSMutableArray array];
+            NSMutableArray<NSString *> *seedErrors = [NSMutableArray array];
+            NSError *jsonErr = nil;
+            NSData *seedData = [NSJSONSerialization dataWithJSONObject:resolved
+                                                               options:NSJSONWritingPrettyPrinted
+                                                                 error:&jsonErr];
+            if (seedData && !jsonErr) {
+                for (NSString *output in SCIIdMapOutputPaths()) {
+                    SCIIdMapWriteData(seedData, output, seedOutputs, seedErrors);
+                }
+            }
+            NSString *status = [NSString stringWithFormat:@"id_name_mapping seeded via paramKeyFromSpecifier · %lu entries · file-scan found nothing",
+                                (unsigned long)resolved.count];
+            SCIIdMapSetStatus(status);
+            [[NSNotificationCenter defaultCenter] postNotificationName:SCIMobileConfigIdNameMappingExporterDidUpdateNotification object:nil];
+            [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverDidUpdateNotification object:nil];
+            return @{@"ok": @(seedOutputs.count > 0), @"status": status,
+                     @"source": @"paramKeyFromSpecifier", @"outputs": seedOutputs,
+                     @"errors": seedErrors, @"count": @(resolved.count),
+                     @"probe": probe ?: @{}, @"checked": @(candidates.count),
+                     @"candidates": visibleCandidates, @"seeded": @YES};
+        }
+        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · paramKeyFromSpecifier: %@ · primary=%@ · native import observe-only",
+                            (unsigned long)candidates.count,
+                            SCIGetParamKeyFn() ? @"available (configs not yet loaded?)" : @"not resolved",
+                            [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
         SCIIdMapSetStatus(status);
         return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0, @"nativeImport": @{@"ok": @NO, @"mode": @"observe-only", @"reason": @"no validated active native trigger in sideload-safe mode"}};
     }
