@@ -29,7 +29,7 @@ These files are now shims and no longer fishhook MobileConfig/EasyGating C bool 
 
 `InternalModeHooks.xm` no longer hooks `IGMobileConfigBooleanValueForInternalUse` or `IGMobileConfigSessionlessBooleanValueForInternalUse`; it only keeps the separate `IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18` spoof.
 
-`MobileConfigRuntimePatcher.xm` remains a lab-only raw patcher, but it skips itself when MC Broker v2 has active overrides/hooks.
+`MobileConfigRuntimePatcher.xm` is excluded from the sideload build. It was a lab-only raw instruction patcher and is intentionally not compiled into RyukGram.
 
 ## Build-sensitive fixes
 

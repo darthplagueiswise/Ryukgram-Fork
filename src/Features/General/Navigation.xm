@@ -94,6 +94,7 @@ NSArray *filterSurfacesArray(NSArray *surfaces) {
 - (BOOL)isTabSwipingEnabled {
     // Swipe lands on stripped tabs in messages-only.
     if ([SCIUtils getBoolPref:@"messages_only"]) return NO;
+    if ([SCIUtils getBoolPref:@"igt_tab_swiping"]) return YES;
     if ([[SCIUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"enabled"]) return YES;
     else if ([[SCIUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"disabled"]) return NO;
     return %orig;

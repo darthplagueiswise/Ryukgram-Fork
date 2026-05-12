@@ -177,10 +177,36 @@ static NSArray *experimentalNavSections(void) {
         },
         @{
             @"header": @"Direct Notes & Inbox",
-            @"footer": @"QuickSnap and FriendMap gates. Direct Notes reply types are controlled by the native Direct Notes Dogfooding menu.",
+            @"footer": @"Direct gates confirmed in the current IPA. The native Direct Notes Dogfood entry point only opens the original settings screen; these switches patch the product checks directly.",
             @"rows": @[
                 ExpSwitch(@"QuickSnap / Instants", @"Enables QuickSnap helper and related MobileConfig groups.", @"igt_quicksnap", YES),
-                ExpSwitch(@"FriendMap / Maps", @"Enables FriendMap / location notes gates.", @"igt_directnotes_friendmap", YES)
+                ExpSwitch(@"FriendMap / Maps", @"Enables FriendMap / location notes gates.", @"igt_directnotes_friendmap", YES),
+                ExpSwitch(@"Audio Reply", @"Forces Direct Notes audio reply gates.", @"igt_directnotes_audio_reply", NO),
+                ExpSwitch(@"Avatar Reply", @"Forces Direct Notes avatar reply gates.", @"igt_directnotes_avatar_reply", NO),
+                ExpSwitch(@"GIFs / Stickers", @"Forces Direct Notes GIF and sticker reply gates.", @"igt_directnotes_gifs_reply", NO),
+                ExpSwitch(@"Photo Reply", @"Forces Direct Notes photo reply gates.", @"igt_directnotes_photo_reply", NO),
+                ExpSwitch(@"Multiple Notes", @"Forces IGDirectNotesExperimentHelper multipleNotesEnabled:.", @"igt_multiple_notes", YES),
+                ExpSwitch(@"First Note Badge", @"Forces Direct Notes first-note badge gate.", @"igt_dn_first_badge", NO)
+            ]
+        },
+        @{
+            @"header": @"Direct Notes Dogfood Gates",
+            @"footer": @"Backed by IGDirectNotesDogfoodingSettings getters found in Instagram 429.0.0. Use Can See + Show as the base pair, then enable the note types you want to test.",
+            @"rows": @[
+                ExpSwitch(@"Can See Notes", @"Forces canSeeNotes.", @"igt_dn_dfd_can_see", YES),
+                ExpSwitch(@"Show Notes", @"Forces showNotes and setShowNotes:.", @"igt_dn_dfd_show", YES),
+                ExpSwitch(@"GIF Notes", @"Forces enableGIFNotes.", @"igt_dn_dfd_gif", NO),
+                ExpSwitch(@"Icebreaker Notes", @"Forces enableIcebreakerNotes.", @"igt_dn_dfd_icebreaker", NO),
+                ExpSwitch(@"Location Notes", @"Forces enableLocationNotes.", @"igt_dn_dfd_location", NO),
+                ExpSwitch(@"Lyrics Notes", @"Forces enableLyricsNotes.", @"igt_dn_dfd_lyrics", NO),
+                ExpSwitch(@"Music Notes", @"Forces enableMusicNotes.", @"igt_dn_dfd_music", NO),
+                ExpSwitch(@"Watching Now Notes", @"Forces enableWatchingNowNotes.", @"igt_dn_dfd_watching", NO),
+                ExpSwitch(@"Media Notes Production", @"Forces enableMediaNotesProduction.", @"igt_dn_dfd_media_prod", NO),
+                ExpSwitch(@"Original Audio", @"Forces enableOriginalAudio.", @"igt_dn_dfd_original_audio", NO),
+                ExpSwitch(@"Animated Emoji", @"Forces enableAnimatedEmojisInCreation.", @"igt_dn_dfd_animated_emoji", NO),
+                ExpSwitch(@"Bubble Customization", @"Forces enableBubbleCustomization.", @"igt_dn_dfd_bubble", NO),
+                ExpSwitch(@"Tagging", @"Forces enableTagging.", @"igt_dn_dfd_tagging", NO),
+                ExpSwitch(@"Listening Now", @"Forces enableListeningNow.", @"igt_dn_dfd_listening", NO)
             ]
         },
         @{
@@ -196,7 +222,12 @@ static NSArray *experimentalNavSections(void) {
                 ExpSwitch(@"Pull to Carrera", @"Dedicated toggle for pull to Carrera experiment.", @"igt_pull_to_carrera", NO),
                 ExpSwitch(@"Mutual Interest", @"Mutual Interest feature in Direct Messages.", @"igt_mutual_interest", YES),
                 ExpSwitch(@"Icebreaker", @"Icebreaker feature for mutually liked reels.", @"igt_icebreaker", YES),
-                ExpSwitch(@"Story Grid", @"Story grid and related tray gates.", @"igt_story_grid", YES)
+                ExpSwitch(@"Story Grid", @"Story grid and related tray gates.", @"igt_story_grid", YES),
+                ExpSwitch(@"Stories Tray Decoupling", @"Forces independent Stories tray fetch/nav-chain gates.", @"igt_stories_tray_decoupling", YES),
+                ExpSwitch(@"Stories Tray All Tabs", @"Forces Stories tray availability on all tabs.", @"igt_stories_tray_all_tabs", NO),
+                ExpSwitch(@"Show Tray on Classic Feed", @"Prevents the classic feed tray hide gate.", @"igt_stories_show_classic", NO),
+                ExpSwitch(@"Vertical Stories Tray", @"Forces vertical Stories tray layout.", @"igt_vertical_stories_tray", NO),
+                ExpSwitch(@"Cinema Tray Swipe", @"Forces showCinemaStoriesTrayOnSwipeUp.", @"igt_stories_tray_cinema_swipe", NO)
             ]
         }
     ];
@@ -329,7 +360,28 @@ static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
         @"igt_directnotes_audio_reply",
         @"igt_directnotes_avatar_reply",
         @"igt_directnotes_gifs_reply",
-        @"igt_directnotes_photo_reply"
+        @"igt_directnotes_photo_reply",
+        @"igt_multiple_notes",
+        @"igt_dn_first_badge",
+        @"igt_dn_dfd_can_see",
+        @"igt_dn_dfd_show",
+        @"igt_dn_dfd_gif",
+        @"igt_dn_dfd_icebreaker",
+        @"igt_dn_dfd_location",
+        @"igt_dn_dfd_lyrics",
+        @"igt_dn_dfd_music",
+        @"igt_dn_dfd_watching",
+        @"igt_dn_dfd_media_prod",
+        @"igt_dn_dfd_original_audio",
+        @"igt_dn_dfd_animated_emoji",
+        @"igt_dn_dfd_bubble",
+        @"igt_dn_dfd_tagging",
+        @"igt_dn_dfd_listening",
+        @"igt_stories_tray_decoupling",
+        @"igt_stories_tray_all_tabs",
+        @"igt_stories_show_classic",
+        @"igt_vertical_stories_tray",
+        @"igt_stories_tray_cinema_swipe"
     ];
     if ([hiddenKeys containsObject:key]) return YES;
 

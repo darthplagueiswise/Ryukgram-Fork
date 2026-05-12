@@ -110,6 +110,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"Runtime Experiments";
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Dump" style:UIBarButtonItemStylePlain target:self action:@selector(copyIGInternalFocusedDump)];
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     self.tab = SCIRuntimeBrowserTabClasses;
 
@@ -121,7 +122,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 
     self.searchBar = [UISearchBar new];
     self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    self.searchBar.placeholder = @"Search source / experiment / enabled / method";
+    self.searchBar.placeholder = @"Search: feature gate, story tray, notes, class/method";
     self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
     self.searchBar.delegate = self;
@@ -213,7 +214,22 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (BOOL)stringLooksInteresting:(NSString *)s {
     if (!s.length) return NO;
     NSString *l = s.lowercaseString;
-    return [l containsString:@"experiment"] || [l containsString:@"enabled"] || [l containsString:@"isenabled"] || [l containsString:@"shouldenable"] || [l containsString:@"shouldshow"] || [l containsString:@"eligib"] || [l containsString:@"launcher"] || [l containsString:@"dogfood"] || [l containsString:@"internal"] || [l containsString:@"mobileconfig"] || [l containsString:@"easygating"] || [l containsString:@"blend"] || [l containsString:@"autofill"];
+    return [l containsString:@"experiment"] || [l containsString:@"enabled"] || [l containsString:@"isenabled"] || [l containsString:@"shouldenable"] || [l containsString:@"shouldshow"] || [l containsString:@"eligib"] || [l containsString:@"launcher"] || [l containsString:@"dogfood"] || [l containsString:@"internal"] || [l containsString:@"mobileconfig"] || [l containsString:@"easygating"] || [l containsString:@"feature"] || [l containsString:@"gating"] || [l containsString:@"gate"] || [l containsString:@"homecoming"] || [l containsString:@"liquidglass"] || [l containsString:@"liquid"] || [l containsString:@"story"] || [l containsString:@"stories"] || [l containsString:@"tray"] || [l containsString:@"grid"] || [l containsString:@"notes"] || [l containsString:@"directnotes"] || [l containsString:@"icebreaker"] || [l containsString:@"mutual"] || [l containsString:@"blend"] || [l containsString:@"autofill"];
+}
+
+- (BOOL)stringLooksIGInternalCandidate:(NSString *)s {
+    if (!s.length) return NO;
+    NSString *l = [self compactString:s];
+    return [l containsString:@"igonly"] ||
+           [l containsString:@"internalonly"] ||
+           [l containsString:@"internal"] ||
+           [l containsString:@"dogfood"] ||
+           [l containsString:@"debug"] ||
+           [l containsString:@"developer"] ||
+           [l containsString:@"experiment"] ||
+           [l containsString:@"featuregate"] ||
+           [l containsString:@"featuregating"] ||
+           [l containsString:@"gating"];
 }
 
 - (NSString *)sourceForClassName:(NSString *)name method:(NSString *)method {
@@ -224,7 +240,12 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
     if ([s containsString:@"lidexperimentgenerator"] || [s containsString:@"lidlocalexperiment"]) return @"LID/MetaLocalExperiment";
     if ([s containsString:@"metalocalexperiment"]) return @"MetaLocalExperiment";
     if ([s containsString:@"mobileconfig"] || [s containsString:@"easygating"]) return @"MobileConfig/EasyGating";
+    if ([s containsString:@"featuregating"] || [s containsString:@"featuregate"] || ([s containsString:@"feature"] && [s containsString:@"gate"])) return @"FeatureGating";
     if ([s containsString:@"launcherset"]) return @"IGUserLauncherSet";
+    if ([s containsString:@"liquidglass"] || ([s containsString:@"liquid"] && [s containsString:@"glass"])) return @"LiquidGlass";
+    if ([s containsString:@"homecoming"] || [s containsString:@"navconfiguration"]) return @"Homecoming/Nav";
+    if ([s containsString:@"story"] || [s containsString:@"stories"] || [s containsString:@"tray"] || [s containsString:@"grid"]) return @"Stories/Tray";
+    if ([s containsString:@"icebreaker"] || [s containsString:@"mutual"]) return @"Mutual/Icebreaker";
     if ([s containsString:@"dogfood"]) return @"Dogfood/Internal";
     if ([s containsString:@"quick"] || [s containsString:@"snap"]) return @"QuickSnap/Direct";
     if ([s containsString:@"friend"] || [s containsString:@"friending"]) return @"Friending/FriendsTab";
@@ -353,20 +374,144 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (NSArray *)filteredRows {
     NSArray *base = [self baseRows];
     if (!self.query.length) return base;
-    NSString *q = self.query.lowercaseString;
     NSMutableArray *out = [NSMutableArray array];
     for (id row in base) {
         NSString *hay = nil;
         if ([row isKindOfClass:SCIRuntimeClassEntry.class]) {
             SCIRuntimeClassEntry *c = row;
-            hay = [NSString stringWithFormat:@"%@ %@ %@ %@", c.source, c.name, [c.properties componentsJoinedByString:@" "], [c.ivars componentsJoinedByString:@" "]];
+            NSMutableArray<NSString *> *methodNames = [NSMutableArray arrayWithCapacity:c.methods.count];
+            for (SCIRuntimeMethodEntry *m in c.methods) [methodNames addObject:m.methodName ?: @""];
+            hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@", c.source, c.name, [methodNames componentsJoinedByString:@" "], [c.properties componentsJoinedByString:@" "], [c.ivars componentsJoinedByString:@" "]];
         } else {
             SCIRuntimeMethodEntry *m = row;
             hay = [NSString stringWithFormat:@"%@ %@ %@ %@", m.source, m.className, m.methodName, m.typeEncoding];
         }
-        if ([hay.lowercaseString containsString:q]) [out addObject:row];
+        if ([self string:hay matchesFuzzyQuery:self.query]) [out addObject:row];
     }
     return out;
+}
+
+- (NSString *)dumpLineForMethodEntry:(SCIRuntimeMethodEntry *)m {
+    return [NSString stringWithFormat:@"%@ [%@ %@] source=%@ returnsBool=%@ args=%u type=%@ key=%@",
+            m.classMethod ? @"+" : @"-",
+            m.className ?: @"",
+            m.methodName ?: @"",
+            m.source ?: @"",
+            m.returnsBool ? @"YES" : @"NO",
+            m.argCount,
+            m.typeEncoding ?: @"",
+            m.overrideKey ?: @""];
+}
+
+- (NSString *)igInternalFocusedDump {
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    [lines addObject:@"RyukGram Runtime Browser IG/Internal focused dump"];
+    [lines addObject:[NSString stringWithFormat:@"generatedAt=%@", [NSDate date]]];
+    [lines addObject:@"match=ig-only/internal-only/internal/debug/dogfood/developer/experiment/featuregate/gating"];
+    [lines addObject:@""];
+
+    NSUInteger classCount = 0;
+    [lines addObject:@"## Classes"];
+    for (SCIRuntimeClassEntry *c in self.classes ?: @[]) {
+        NSMutableArray<NSString *> *methodNames = [NSMutableArray arrayWithCapacity:c.methods.count];
+        for (SCIRuntimeMethodEntry *m in c.methods) [methodNames addObject:m.methodName ?: @""];
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@",
+                         c.source ?: @"",
+                         c.name ?: @"",
+                         [methodNames componentsJoinedByString:@" "],
+                         [c.properties componentsJoinedByString:@" "],
+                         [c.ivars componentsJoinedByString:@" "]];
+        if (![self stringLooksIGInternalCandidate:hay]) continue;
+        [lines addObject:[NSString stringWithFormat:@"%@ source=%@ methods=%lu props=%lu ivars=%lu",
+                          c.name ?: @"",
+                          c.source ?: @"",
+                          (unsigned long)c.methods.count,
+                          (unsigned long)c.properties.count,
+                          (unsigned long)c.ivars.count]];
+        classCount++;
+    }
+
+    NSUInteger methodCount = 0;
+    [lines addObject:@""];
+    [lines addObject:@"## BOOL / Toggleable Methods"];
+    for (SCIRuntimeMethodEntry *m in self.boolMethods ?: @[]) {
+        NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@",
+                         m.source ?: @"",
+                         m.className ?: @"",
+                         m.methodName ?: @"",
+                         m.typeEncoding ?: @""];
+        if (![self stringLooksIGInternalCandidate:hay]) continue;
+        [lines addObject:[self dumpLineForMethodEntry:m]];
+        methodCount++;
+    }
+
+    [lines insertObject:[NSString stringWithFormat:@"counts classes=%lu boolMethods=%lu", (unsigned long)classCount, (unsigned long)methodCount] atIndex:3];
+    return [lines componentsJoinedByString:@"\n"];
+}
+
+- (void)copyIGInternalFocusedDump {
+    NSString *dump = [self igInternalFocusedDump];
+    UIPasteboard.generalPasteboard.string = dump;
+    [SCIUtils showSuccessHUDWithDescription:@"IG/Internal runtime dump copied"];
+}
+
+- (NSString *)spacedLowercaseString:(NSString *)s {
+    if (!s.length) return @"";
+    NSMutableString *out = [NSMutableString stringWithCapacity:s.length + 8];
+    NSCharacterSet *alnum = NSCharacterSet.alphanumericCharacterSet;
+    unichar prev = 0;
+    for (NSUInteger i = 0; i < s.length; i++) {
+        unichar ch = [s characterAtIndex:i];
+        BOOL upperAfterLower = (ch >= 'A' && ch <= 'Z' && prev >= 'a' && prev <= 'z');
+        if (upperAfterLower) [out appendString:@" "];
+        if ([alnum characterIsMember:ch]) [out appendFormat:@"%C", ch];
+        else [out appendString:@" "];
+        prev = ch;
+    }
+    return out.lowercaseString;
+}
+
+- (NSArray<NSString *> *)queryTokensForString:(NSString *)s {
+    NSArray<NSString *> *parts = [[self spacedLowercaseString:s] componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+    for (NSString *part in parts) {
+        if (part.length) [tokens addObject:part];
+    }
+    return tokens;
+}
+
+- (NSString *)compactString:(NSString *)s {
+    NSArray<NSString *> *tokens = [self queryTokensForString:s];
+    return [tokens componentsJoinedByString:@""];
+}
+
+- (BOOL)compactString:(NSString *)hay containsOrderedCharactersFrom:(NSString *)needle {
+    if (!needle.length) return YES;
+    NSUInteger pos = 0;
+    for (NSUInteger i = 0; i < hay.length && pos < needle.length; i++) {
+        if ([hay characterAtIndex:i] == [needle characterAtIndex:pos]) pos++;
+    }
+    return pos == needle.length;
+}
+
+- (BOOL)token:(NSString *)token matchesSpacedHay:(NSString *)spacedHay compactHay:(NSString *)compactHay {
+    if (!token.length) return YES;
+    NSString *compactToken = [self compactString:token];
+    if ([spacedHay containsString:token]) return YES;
+    if (compactToken.length && [compactHay containsString:compactToken]) return YES;
+    if (compactToken.length >= 4 && [self compactString:compactHay containsOrderedCharactersFrom:compactToken]) return YES;
+    return NO;
+}
+
+- (BOOL)string:(NSString *)hay matchesFuzzyQuery:(NSString *)query {
+    NSArray<NSString *> *tokens = [self queryTokensForString:query];
+    if (!tokens.count) return YES;
+    NSString *spacedHay = [self spacedLowercaseString:hay ?: @""];
+    NSString *compactHay = [self compactString:hay ?: @""];
+    for (NSString *token in tokens) {
+        if (![self token:token matchesSpacedHay:spacedHay compactHay:compactHay]) return NO;
+    }
+    return YES;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
@@ -488,7 +633,7 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (void)updateEmpty {
     NSInteger rows = [self tableView:self.tableView numberOfRowsInSection:0];
     self.emptyLabel.hidden = rows > 0 || self.spinner.isAnimating;
-    if (!self.emptyLabel.hidden) self.emptyLabel.text = self.query.length ? @"No match." : @"Empty.";
+    if (!self.emptyLabel.hidden) self.emptyLabel.text = self.query.length ? @"No fuzzy match." : @"Empty.";
 }
 
 @end
