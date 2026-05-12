@@ -21,15 +21,15 @@ CMAKE_OSX_ARCHITECTURES="arm64e;arm64"
 CMAKE_OSX_SYSROOT="iphoneos"
 
 log() {
-	echo -e "${GREEN}$*${RESET}"
+	printf "%b\n" "${GREEN}$*${RESET}"
 }
 
 warn() {
-	echo -e "${YELLOW}$*${RESET}"
+	printf "%b\n" "${YELLOW}$*${RESET}"
 }
 
 die() {
-	echo -e "${RED}$*${RESET}" >&2
+	printf "%b\n" "${RED}$*${RESET}" >&2
 	exit 1
 }
 
@@ -37,7 +37,7 @@ need_cmd() {
 	command -v "$1" >/dev/null 2>&1 || die "$2"
 }
 
-# Auto-detect THEOS if not set
+# Auto-detect THEOS if not set.
 ensure_theos() {
 	if [ -n "${THEOS:-}" ]; then
 		return
@@ -51,21 +51,28 @@ Set THEOS or install Theos to ~/theos"
 	fi
 }
 
+ensure_packages_dir() {
+	mkdir -p "$PACKAGES_DIR"
+}
+
 clean_build() {
 	make clean 2>/dev/null || true
 	rm -rf .theos
 }
 
+# Always use FINALPACKAGE=1 for Theos builds.
 make_final() {
-	make FINALPACKAGE=1 "$@"
-}
+	local args="${1:-}"
 
-ensure_packages_dir() {
-	mkdir -p "$PACKAGES_DIR"
+	if [ -n "$args" ]; then
+		make FINALPACKAGE=1 $args
+	else
+		make FINALPACKAGE=1
+	fi
 }
 
 # Copy Localization resources (*.lproj) into a RyukGram.bundle.
-# Arg 1: destination bundle directory (created if missing).
+# Arg 1: destination bundle directory, created if missing.
 copy_localization_into_bundle() {
 	local dest="$1"
 	local src="src/Localization/Resources"
@@ -80,9 +87,9 @@ copy_localization_into_bundle() {
 	done
 }
 
-# Copy generic static assets (PNGs, etc.) into a RyukGram.bundle. Used for
-# bundled images the tweak loads via SCILocalizationBundle().
-# Arg 1: destination bundle directory (created if missing).
+# Copy generic static assets into RyukGram.bundle.
+# Used for bundled images the tweak loads via SCILocalizationBundle().
+# Arg 1: destination bundle directory, created if missing.
 copy_bundle_assets() {
 	local dest="$1"
 	local src="src/BundleAssets"
@@ -97,22 +104,6 @@ copy_bundle_assets() {
 		-iname '*.jpeg' -o \
 		-iname '*.pdf' \
 	\) -exec cp {} "$dest/" \;
-}
-
-# Collect all FFmpegKit frameworks for injection.
-# This is kept mostly as a helper/reference, but bundle building now uses
-# patch_ffmpegkit_frameworks directly to avoid duplicated logic.
-ffmpegkit_frameworks() {
-	local fws=""
-
-	if [ -d "modules/ffmpegkit/ffmpegkit.framework" ]; then
-		for fw in modules/ffmpegkit/*.framework; do
-			[ -d "$fw" ] || continue
-			fws="$fws $fw"
-		done
-	fi
-
-	echo "$fws"
 }
 
 # Copy FFmpegKit frameworks into RyukGram.bundle and rename FFmpeg libraries
@@ -178,31 +169,31 @@ build_bundle() {
 # Inject RyukGram.bundle into a .deb:
 # - Always: localization lproj resources.
 # - Optional: FFmpegKit frameworks renamed *_sci to avoid collisions.
-# Path: Library/Application Support/RyukGram.bundle/ — jailbreak dlopens by full
-# path, Feather copies .bundle without injecting load commands for sideload.
+# Path: Library/Application Support/RyukGram.bundle/
+# Jailbreak dlopens by full path, Feather copies .bundle without injecting
+# load commands for sideload.
 # Arg 1: path to .deb, cwd must be packages/.
 inject_bundle_into_deb() {
 	local base_deb="$1"
 	local tmpdir
+	local dylib_dir
+	local prefix=""
+	local bundle_dir
 
 	tmpdir="$(mktemp -d)"
-	trap 'rm -rf "$tmpdir"' RETURN
 
 	dpkg-deb -R "$base_deb" "$tmpdir"
 
-	local dylib_dir
 	dylib_dir="$(find "$tmpdir" -name "${APP_NAME}.dylib" -exec dirname {} \; | head -1)"
 
-	[ -n "$dylib_dir" ] || {
+	if [ -z "$dylib_dir" ]; then
 		rm -rf "$tmpdir"
-		trap - RETURN
 		return 0
-	}
+	fi
 
-	local prefix=""
 	[[ "$dylib_dir" == *"/var/jb/"* ]] && prefix="var/jb/"
 
-	local bundle_dir="$tmpdir/${prefix}Library/Application Support/${BUNDLE_NAME}"
+	bundle_dir="$tmpdir/${prefix}Library/Application Support/${BUNDLE_NAME}"
 
 	mkdir -p "$bundle_dir"
 
@@ -216,7 +207,6 @@ inject_bundle_into_deb() {
 	dpkg-deb -b "$tmpdir" "$base_deb"
 
 	rm -rf "$tmpdir"
-	trap - RETURN
 }
 
 # Build zxPluginsInject.dylib -> packages/zxPluginsInject.dylib
@@ -236,6 +226,7 @@ build_zxpi_dylib() {
 	[ -f "$dylib_out" ] || die "zxPluginsInject.dylib build failed"
 
 	ensure_packages_dir
+
 	cp "$dylib_out" "${PACKAGES_DIR}/zxPluginsInject.dylib"
 
 	# Match the @rpath LC that ipapatch writes into target binaries.
@@ -244,7 +235,7 @@ build_zxpi_dylib() {
 }
 
 # LC-inject zxPluginsInject.dylib into main exec + every .appex in the IPA.
-# Arg 1: path to the IPA
+# Arg 1: path to the IPA.
 run_ipapatch() {
 	local ipa="$1"
 
@@ -259,9 +250,10 @@ run_ipapatch() {
 # Find decrypted Instagram IPA.
 # Checks packages/ first, then moves a matching IPA from cwd into packages/.
 find_instagram_ipa() {
-	ensure_packages_dir
-
 	local ipa_file=""
+	local cwd_ipa=""
+
+	ensure_packages_dir
 
 	ipa_file="$(find "./${PACKAGES_DIR}" -maxdepth 1 -type f \( \
 		-iname '*com.burbn.instagram*.ipa' -o \
@@ -270,11 +262,9 @@ find_instagram_ipa() {
 	\) ! -iname "${APP_NAME}*.ipa" -exec basename {} \; 2>/dev/null | head -1)"
 
 	if [ -n "$ipa_file" ]; then
-		echo "$ipa_file"
+		printf "%s\n" "$ipa_file"
 		return 0
 	fi
-
-	local cwd_ipa=""
 
 	cwd_ipa="$(find . -maxdepth 1 -type f \( \
 		-iname '*com.burbn.instagram*.ipa' -o \
@@ -283,9 +273,9 @@ find_instagram_ipa() {
 	\) 2>/dev/null | head -1)"
 
 	if [ -n "$cwd_ipa" ]; then
-		log "Moving $(basename "$cwd_ipa") → ${PACKAGES_DIR}/"
+		log "Moving $(basename "$cwd_ipa") → ${PACKAGES_DIR}/" >&2
 		mv "$cwd_ipa" "$PACKAGES_DIR/"
-		echo "$(basename "$cwd_ipa")"
+		printf "%s\n" "$(basename "$cwd_ipa")"
 		return 0
 	fi
 
@@ -295,9 +285,9 @@ find_instagram_ipa() {
 # Check for FLEXing submodule.
 check_flex() {
 	if [ -n "$(ls -A modules/FLEXing 2>/dev/null || true)" ]; then
-		echo "1"
+		printf "1\n"
 	else
-		echo "0"
+		printf "0\n"
 	fi
 }
 
@@ -308,18 +298,17 @@ embed_safari_extension() {
 	local ipa="$1"
 	local compression="$2"
 	local appex_src="extensions/OpenInstagramSafariExtension.appex"
+	local tmpdir
+	local app_dir
 
 	[ -d "$appex_src" ] || return 0
 
 	log "Embedding Safari extension"
 
-	local tmpdir
 	tmpdir="$(mktemp -d)"
-	trap 'rm -rf "$tmpdir"' RETURN
 
 	unzip -q "$ipa" -d "$tmpdir"
 
-	local app_dir
 	app_dir="$(find "$tmpdir/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
 
 	if [ -n "$app_dir" ]; then
@@ -336,7 +325,6 @@ embed_safari_extension() {
 	fi
 
 	rm -rf "$tmpdir"
-	trap - RETURN
 }
 
 # Strip every .appex.
@@ -345,20 +333,19 @@ embed_safari_extension() {
 strip_appex_bundles() {
 	local ipa="$1"
 	local compression="$2"
+	local tmpdir
+	local app_dir
+	local appex_count="0"
 
 	log "Stripping app extensions for SideStore"
 
-	local tmpdir
 	tmpdir="$(mktemp -d)"
-	trap 'rm -rf "$tmpdir"' RETURN
 
 	unzip -q "$ipa" -d "$tmpdir"
 
-	local app_dir
 	app_dir="$(find "$tmpdir/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
 
 	if [ -n "$app_dir" ]; then
-		local appex_count
 		appex_count="$(find "$app_dir" -type d -name '*.appex' | wc -l | tr -d ' ')"
 
 		find "$app_dir" -type d -name '*.appex' -prune -exec rm -rf {} +
@@ -374,7 +361,6 @@ strip_appex_bundles() {
 	fi
 
 	rm -rf "$tmpdir"
-	trap - RETURN
 }
 
 # Build just the dylib for Feather/manual injection.
@@ -388,14 +374,16 @@ build_dylib() {
 
 	log "Building ${APP_NAME} dylib"
 
-	make_final
+	make_final ""
 
 	ensure_packages_dir
+
 	cp "$TWEAK_DYLIB" "${PACKAGES_DIR}/${APP_NAME}.dylib"
 
 	# Ship localization bundle next to the dylib so Feather/manual installs work.
 	rm -rf "$BUNDLE_PATH"
 	mkdir -p "$BUNDLE_PATH"
+
 	copy_localization_into_bundle "$BUNDLE_PATH"
 	copy_bundle_assets "$BUNDLE_PATH"
 
@@ -415,8 +403,12 @@ build_sideload() {
 	local build_label="sideloading"
 	local out_ipa="${PACKAGES_DIR}/${APP_NAME}-sideloaded.ipa"
 	local compression=9
-	local makeargs=()
-	local flexpath=()
+	local makeargs=""
+	local flexpath=""
+	local has_flex
+	local ipa_file
+	local tweakpath
+	local cyan_files=""
 
 	if [ "$mode" = "sidestore" ]; then
 		rg_sidestore=1
@@ -426,7 +418,6 @@ build_sideload() {
 	fi
 
 	# Check for FLEXing submodule.
-	local has_flex
 	has_flex="$(check_flex)"
 
 	if [ "$has_flex" = "0" ]; then
@@ -455,23 +446,24 @@ build_sideload() {
 			exit 0
 		fi
 
-		makeargs+=(DEV=1)
-		flexpath+=("${PACKAGES_DIR}/cache/FLEXing.dylib" "${PACKAGES_DIR}/cache/libflex.dylib")
+		makeargs="DEV=1"
+		flexpath="${PACKAGES_DIR}/cache/FLEXing.dylib ${PACKAGES_DIR}/cache/libflex.dylib"
 		compression=0
 	else
 		# Clear cached FLEX libs.
 		rm -rf "${PACKAGES_DIR}/cache"
 
 		if [ "$has_flex" = "1" ]; then
-			makeargs+=(SIDELOAD=1)
-			flexpath+=(".theos/obj/FLEXing.dylib" ".theos/obj/libflex.dylib")
+			makeargs="SIDELOAD=1"
+			flexpath=".theos/obj/FLEXing.dylib .theos/obj/libflex.dylib"
 		fi
 
 		compression=9
 	fi
 
 	if [ "$rg_sidestore" = "1" ]; then
-		makeargs+=(SIDESTORE=1)
+		makeargs="${makeargs} SIDESTORE=1"
+		makeargs="$(printf "%s" "$makeargs" | xargs)"
 	fi
 
 	# Clean build artifacts.
@@ -479,7 +471,6 @@ build_sideload() {
 	ensure_packages_dir
 
 	# Check for decrypted Instagram IPA.
-	local ipa_file
 	ipa_file="$(find_instagram_ipa)" || die "Decrypted Instagram IPA not found.
 Place a *com.burbn.instagram*.ipa in ./ or ./packages/."
 
@@ -500,7 +491,7 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 
 	log "Building ${APP_NAME} tweak for ${build_label} as IPA"
 
-	make_final "${makeargs[@]}"
+	make_final "$makeargs"
 
 	# Skip zxPluginsInject for SideStore — its LC injection trips ldid on resign.
 	if [ "$rg_sidestore" != "1" ]; then
@@ -520,25 +511,25 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 	log "Building ${BUNDLE_NAME}"
 	build_bundle "$BUNDLE_PATH"
 
-	local tweakpath="$TWEAK_DYLIB"
+	tweakpath="$TWEAK_DYLIB"
 
 	if [ "$option" = "--devquick" ]; then
 		tweakpath=""
 	fi
 
-	local cyan_files=()
-
 	if [ -n "$tweakpath" ]; then
-		cyan_files+=("$tweakpath")
+		cyan_files="$cyan_files $tweakpath"
 	fi
 
-	if [ "${#flexpath[@]}" -gt 0 ]; then
-		cyan_files+=("${flexpath[@]}")
+	if [ -n "$flexpath" ]; then
+		cyan_files="$cyan_files $flexpath"
 	fi
 
 	if [ -d "$BUNDLE_PATH" ]; then
-		cyan_files+=("$BUNDLE_PATH")
+		cyan_files="$cyan_files $BUNDLE_PATH"
 	fi
+
+	cyan_files="$(printf "%s" "$cyan_files" | xargs)"
 
 	# Create IPA: cyan injects dylib + copies RyukGram.bundle to app root.
 	log "Creating the IPA file"
@@ -547,7 +538,7 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 
 	cyan -i "${PACKAGES_DIR}/${ipa_file}" \
 		-o "$out_ipa" \
-		-f "${cyan_files[@]}" \
+		-f $cyan_files \
 		-c "$compression" \
 		-m 15.0 \
 		-du
@@ -573,6 +564,8 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 # Build rootless/rootful .deb with FFmpegKit.
 build_deb() {
 	local scheme="$1"
+	local base_deb
+	local new_name
 
 	clean_build
 	ensure_packages_dir
@@ -585,21 +578,20 @@ build_deb() {
 		unset THEOS_PACKAGE_SCHEME
 	fi
 
-	make_final package
+	make_final "package"
 
 	log "Injecting ${BUNDLE_NAME} with localization + FFmpegKit into deb"
 
 	(
 		cd "$PACKAGES_DIR"
 
-		local base_deb
 		base_deb="$(ls -t *.deb 2>/dev/null | head -n1)"
 
 		[ -n "$base_deb" ] || die "No deb package found."
 
 		inject_bundle_into_deb "$base_deb"
 
-		local new_name="${base_deb%.deb}-${scheme}.deb"
+		new_name="${base_deb%.deb}-${scheme}.deb"
 		mv "$base_deb" "$new_name"
 	)
 
@@ -614,21 +606,27 @@ build_deb() {
 # Skip sideload re-sign; TrollStore signs on-device.
 build_trollstore() {
 	local has_flex
+	local makeargs=""
+	local flexpath=""
+	local compression=9
+	local ipa_file
+	local out_ipa="${PACKAGES_DIR}/${APP_NAME}-trollstore.ipa"
+	local out_tipa="${PACKAGES_DIR}/${APP_NAME}-trollstore.tipa"
+	local cyan_files="$TWEAK_DYLIB"
+
 	has_flex="$(check_flex)"
 
-	local makeargs=()
-	local flexpath=()
-	local compression=9
-
 	if [ "$has_flex" = "1" ]; then
-		makeargs+=(SIDELOAD=1)
-		flexpath+=(".theos/obj/FLEXing.dylib" ".theos/obj/libflex.dylib")
+		makeargs="SIDELOAD=1"
+		flexpath=".theos/obj/FLEXing.dylib .theos/obj/libflex.dylib"
+	else
+		warn "FLEXing submodule not found — building TrollStore package without FLEX debugger."
+		echo
 	fi
 
 	clean_build
 	ensure_packages_dir
 
-	local ipa_file
 	ipa_file="$(find_instagram_ipa)" || die "Decrypted Instagram IPA not found."
 
 	need_cmd cyan "cyan not found. Install it with:
@@ -639,7 +637,7 @@ build_trollstore() {
 
 	log "Building ${APP_NAME} tweak for TrollStore .tipa"
 
-	make_final "${makeargs[@]}"
+	make_final "$makeargs"
 
 	cp "$TWEAK_DYLIB" "${PACKAGES_DIR}/${APP_NAME}.dylib"
 
@@ -649,18 +647,15 @@ build_trollstore() {
 	log "Building ${BUNDLE_NAME}"
 	build_bundle "$BUNDLE_PATH"
 
-	local out_ipa="${PACKAGES_DIR}/${APP_NAME}-trollstore.ipa"
-	local out_tipa="${PACKAGES_DIR}/${APP_NAME}-trollstore.tipa"
-
-	local cyan_files=("$TWEAK_DYLIB")
-
-	if [ "${#flexpath[@]}" -gt 0 ]; then
-		cyan_files+=("${flexpath[@]}")
+	if [ -n "$flexpath" ]; then
+		cyan_files="$cyan_files $flexpath"
 	fi
 
 	if [ -d "$BUNDLE_PATH" ]; then
-		cyan_files+=("$BUNDLE_PATH")
+		cyan_files="$cyan_files $BUNDLE_PATH"
 	fi
+
+	cyan_files="$(printf "%s" "$cyan_files" | xargs)"
 
 	log "Creating the TIPA file"
 
@@ -668,7 +663,7 @@ build_trollstore() {
 
 	cyan -i "${PACKAGES_DIR}/${ipa_file}" \
 		-o "$out_ipa" \
-		-f "${cyan_files[@]}" \
+		-f $cyan_files \
 		-c "$compression" \
 		-m 15.0 \
 		-du
