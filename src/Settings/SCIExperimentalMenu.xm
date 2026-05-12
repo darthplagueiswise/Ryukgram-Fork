@@ -188,7 +188,7 @@ static NSArray *experimentalNavSections(void) {
         },
         @{
             @"header": @"Feed & Navigation",
-            @"footer": @"Feed, tabs, Stories and navigation experiments.",
+            @"footer": @"Feed, tabs and navigation experiments.",
             @"rows": @[
                 ExpSwitch(@"Reels First / Second", @"Dedicated toggle for Reels placement experiments.", @"igt_reels_first", NO),
                 ExpSwitch(@"Friends Feed", @"Dedicated toggle for friends feed experiments.", @"igt_friends_feed", NO),
@@ -200,10 +200,10 @@ static NSArray *experimentalNavSections(void) {
                 ExpSwitch(@"Mutual Interest", @"Mutual Interest feature in Direct Messages.", @"igt_mutual_interest", YES),
                 ExpSwitch(@"Icebreaker", @"Icebreaker feature for mutually liked reels.", @"igt_icebreaker", YES),
                 ExpSwitch(@"Story Grid", @"Story grid view in profile and tray.", @"igt_story_grid", YES),
-                ExpSwitch(@"Story Tray Decoupling", @"Enables Story Tray decoupling experiments.", @"igt_stories_tray_decoupling", YES),
-                ExpSwitch(@"Story Tray Tap Prefetch", @"Enables tap prefetch in Stories tray.", @"igt_stories_tray_tap_prefetch", YES),
-                ExpSwitch(@"Story Tray Title Interaction", @"Enables Stories tray title interaction.", @"igt_stories_tray_title_interaction", YES),
-                ExpSwitch(@"Stories Independent Fetch", @"Enables independent Stories fetch handling.", @"igt_stories_independent_fetch", YES)
+                ExpSwitch(@"Stories Tray Decoupling", @"Decouple Stories tray from feed fetch.", @"igt_stories_tray_decoupling", NO),
+                ExpSwitch(@"DM Inline Like", @"Inline like button in DM message menu.", @"igt_dm_inline_like", NO),
+                ExpSwitch(@"Multiple Notes", @"Allow posting multiple Notes simultaneously.", @"igt_multiple_notes", NO),
+                ExpSwitch(@"DN First Note Badge", @"First Note badge indicator.", @"igt_dn_first_badge", NO)
             ]
         }
     ];

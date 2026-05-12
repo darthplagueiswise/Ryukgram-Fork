@@ -31,11 +31,9 @@
         @"igt_icebreaker": @(NO),
         @"igt_story_grid": @(NO),
         @"igt_stories_tray_decoupling": @(NO),
-        @"igt_stories_tray_tap_prefetch": @(NO),
-        @"igt_stories_tray_title_interaction": @(NO),
-        @"igt_stories_feed_decoupling": @(NO),
-        @"igt_stories_independent_fetch": @(NO),
         @"igt_dm_inline_like": @(NO),
+        @"igt_multiple_notes": @(NO),
+        @"igt_dn_first_badge": @(NO),
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
 }
