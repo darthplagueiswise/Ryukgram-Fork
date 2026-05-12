@@ -600,6 +600,8 @@
 "Shows an alert when you click the like button on notes to confirm the like" = "Mostra um alerta quando você clica no botão de curtir em um note para confirmar a curtida";
 "Shows an alert before sending an emoji reaction on a note" = "Mostra um alerta antes de enviar uma reação de emoji em um note";
 "Confirm unfollow" = "Confirmar deixar de seguir";
+"Confirm sticker interaction (stories)" = "Confirmar interação com figurinha (stories)";
+"Confirm vanish mode" = "Confirmar modo temporário";
 "Confirm voice messages" = "Confirmar mensagens de voz";
 "Shows an alert before sending an emoji reaction on a story" = "Mostra um alerta antes de enviar uma reação de emoji em um story";
 "Shows an alert to confirm before sending a voice message" = "Mostra um alerta para confirmar antes de enviar uma mensagem de voz";
