@@ -92,140 +92,21 @@ static BOOL new_isFirstNoteBadgeEnabled(id self, SEL _cmd) {
     return orig_isFirstNoteBadgeEnabled ? orig_isFirstNoteBadgeEnabled(self, _cmd) : NO;
 }
 
-static NSMutableSet<NSString *> *gDNHooked;
-static NSMutableDictionary<NSString *, NSValue *> *gDNOriginals;
-
-static NSString *sciDNKey(Class cls, NSString *selName) {
-    return [NSString stringWithFormat:@"%p:%@", cls, selName];
-}
-
-static NSArray<NSString *> *sciDirectNotesPrefsForSelector(NSString *selName) {
-    NSString *l = selName.lowercaseString ?: @"";
-    if ([l containsString:@"friendmap"] || [l containsString:@"friendsmap"] ||
-        [l containsString:@"friend_map"] || [l containsString:@"friends_map"] ||
-        [l containsString:@"locationnotes"] || [l containsString:@"location_notes"])
-        return @[@"igt_directnotes_friendmap"];
-    if ([l containsString:@"audioreply"] || ([l containsString:@"audio"] && [l containsString:@"reply"]))
-        return @[@"igt_directnotes_audio_reply"];
-    if ([l containsString:@"avatarreply"] || ([l containsString:@"avatar"] && [l containsString:@"reply"]))
-        return @[@"igt_directnotes_avatar_reply"];
-    if ([l containsString:@"gifs"] || [l containsString:@"gif"] || [l containsString:@"sticker"])
-        return @[@"igt_directnotes_gifs_reply"];
-    if ([l containsString:@"photoreply"] || ([l containsString:@"photo"] && [l containsString:@"reply"]))
-        return @[@"igt_directnotes_photo_reply"];
-    if ([l containsString:@"multiplenotes"] || [l containsString:@"multiple_notes"])
-        return @[@"igt_multiple_notes"];
-    if ([l containsString:@"firstnotebadge"] || [l containsString:@"first_note_badge"])
-        return @[@"igt_dn_first_badge"];
-    return nil;
-}
-
-static BOOL sciDirectNotesSelectorEnabled(NSString *selName) {
-    for (NSString *key in sciDirectNotesPrefsForSelector(selName)) {
-        if ([SCIUtils getBoolPref:key]) return YES;
-    }
-    return NO;
-}
-
-static BOOL new_directnotes_bool0(id self, SEL _cmd) {
-    NSString *selName = NSStringFromSelector(_cmd);
-    if (sciDirectNotesSelectorEnabled(selName)) return YES;
-    Class cls = object_getClass(self);
-    while (cls) {
-        NSValue *orig = gDNOriginals[sciDNKey(cls, selName)];
-        if (orig) {
-            BOOL (*fn)(id, SEL) = (BOOL (*)(id, SEL))(uintptr_t)orig.pointerValue;
-            return fn(self, _cmd);
-        }
-        cls = class_getSuperclass(cls);
-    }
-    return NO;
-}
-
-static BOOL new_directnotes_bool1(id self, SEL _cmd, id arg1) {
-    NSString *selName = NSStringFromSelector(_cmd);
-    if (([selName isEqualToString:@"isInExperiment:"] && sciDirectNotesExperimentMatch((NSString *)arg1)) ||
-        sciDirectNotesSelectorEnabled(selName)) {
-        return YES;
-    }
-    Class cls = object_getClass(self);
-    while (cls) {
-        NSValue *orig = gDNOriginals[sciDNKey(cls, selName)];
-        if (orig) {
-            BOOL (*fn)(id, SEL, id) = (BOOL (*)(id, SEL, id))(uintptr_t)orig.pointerValue;
-            return fn(self, _cmd, arg1);
-        }
-        cls = class_getSuperclass(cls);
-    }
-    return NO;
-}
-
-static BOOL hookDNMethod(Class cls, NSString *selName, IMP newImp, IMP *orig) {
-    if (!cls || !selName.length || !newImp) return NO;
-    SEL sel = NSSelectorFromString(selName);
-    Method method = class_getInstanceMethod(cls, sel);
-    if (!method) return NO;
-    NSString *key = sciDNKey(cls, selName);
-    if ([gDNHooked containsObject:key]) return NO;
-    IMP old = NULL;
-    MSHookMessageEx(cls, sel, newImp, orig ?: &old);
-    if (!orig && old) gDNOriginals[key] = [NSValue valueWithPointer:(const void *)old];
-    [gDNHooked addObject:key];
-    return YES;
-}
-
 static void hookInstanceBool0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
-    hookDNMethod(cls, selName, newImp, orig);
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, newImp, orig);
 }
 
 static void hookClassBool0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
-    hookDNMethod(object_getClass(cls), selName, newImp, orig);
-}
-
-static void hookDirectNotesRuntimeSelectors(void) {
-    unsigned int classCount = 0;
-    Class *classes = objc_copyClassList(&classCount);
-    for (unsigned int i = 0; i < classCount; i++) {
-        Class cls = classes[i];
-        NSString *lower = NSStringFromClass(cls).lowercaseString ?: @"";
-        BOOL likelyDN = [lower containsString:@"directnotes"] ||
-                        [lower containsString:@"directnote"] ||
-                        [lower containsString:@"friendmap"] ||
-                        [lower containsString:@"friendsmap"] ||
-                        [lower containsString:@"locationnotes"] ||
-                        [lower containsString:@"notestray"];
-        if (!likelyDN) continue;
-
-        for (Class hookClass in @[ cls, object_getClass(cls) ]) {
-            unsigned int methodCount = 0;
-            Method *methods = class_copyMethodList(hookClass, &methodCount);
-            for (unsigned int m = 0; m < methodCount; m++) {
-                SEL sel = method_getName(methods[m]);
-                NSString *selName = NSStringFromSelector(sel);
-                unsigned int argCount = method_getNumberOfArguments(methods[m]);
-                char ret[8] = {0};
-                method_getReturnType(methods[m], ret, sizeof(ret));
-                if (ret[0] != 'B' && ret[0] != 'c' && ret[0] != 'C') continue;
-                if (argCount == 2 && sciDirectNotesPrefsForSelector(selName)) {
-                    hookDNMethod(hookClass, selName, (IMP)new_directnotes_bool0, NULL);
-                } else if (argCount == 3 && [selName isEqualToString:@"isInExperiment:"]) {
-                    hookDNMethod(hookClass, selName, (IMP)new_directnotes_bool1, NULL);
-                }
-            }
-            if (methods) free(methods);
-        }
-    }
-    if (classes) free(classes);
-}
-
-static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return;
-    hookDNMethod(object_getClass(cls), selName, newImp, orig);
+    Class meta = object_getClass(cls);
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(meta, sel)) return;
+    MSHookMessageEx(meta, sel, newImp, orig);
 }
 
 %ctor {
@@ -233,8 +114,6 @@ static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, I
                        || sciGifsReplyEnabled() || sciPhotoReplyEnabled()
                        || sciMultipleNotesEnabled() || sciFirstNoteBadgeEnabled());
     if (!anyEnabled) return;
-    gDNHooked = [NSMutableSet set];
-    gDNOriginals = [NSMutableDictionary dictionary];
 
     //  1. fishhook C stubs
     struct rebinding notesBinds[] = {
@@ -254,10 +133,10 @@ static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, I
     if (helper) {
         SEL sel = NSSelectorFromString(@"isInExperiment:");
         if (class_getInstanceMethod(helper, sel))
-            hookDNMethod(helper, @"isInExperiment:", (IMP)new_isInExperiment, (IMP *)&orig_isInExperiment);
+            MSHookMessageEx(helper, sel, (IMP)new_isInExperiment, (IMP *)&orig_isInExperiment);
         // also class method variant
         if (class_getClassMethod(helper, sel))
-            hookClassBool1(helperName, @"isInExperiment:", (IMP)new_class_isInExperiment, (IMP *)&orig_class_isInExperiment);
+            MSHookMessageEx(object_getClass(helper), sel, (IMP)new_class_isInExperiment, (IMP *)&orig_class_isInExperiment);
     }
 
     //  3. Multiple notes / first badge gates
@@ -274,6 +153,4 @@ static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, I
         hookInstanceBool0(cls, @"isMultipleNotesEnabled:",  (IMP)new_isMultipleNotesEnabled,   NULL);
         hookClassBool0(cls,    @"isMultipleNotesEnabled",   (IMP)new_isMultipleNotesEnabled,   NULL);
     }
-
-    hookDirectNotesRuntimeSelectors();
 }

@@ -108,51 +108,45 @@ static void new_try_instants(id self, SEL _cmd) {
 }
 
 //  Hook helpers
-static NSMutableSet<NSString *> *gQSHooked;
-
-static BOOL hookQSMethod(Class cls, NSString *selName, IMP newImp, IMP *orig) {
-    if (!cls || !selName.length || !newImp) return NO;
-    SEL sel = NSSelectorFromString(selName);
-    if (!class_getInstanceMethod(cls, sel)) return NO;
-    NSString *key = [NSString stringWithFormat:@"%p:%@", cls, selName];
-    if ([gQSHooked containsObject:key]) return NO;
-    MSHookMessageEx(cls, sel, newImp, orig);
-    [gQSHooked addObject:key];
-    return YES;
-}
-
 static void hookClassBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
     if (!cls) return;
-    hookQSMethod(object_getClass(cls), selName, newImp, orig);
-}
-
-static void hookClassOrInstanceBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
-    Class cls = NSClassFromString(className);
-    if (!cls) return;
-    hookQSMethod(object_getClass(cls), selName, newImp, orig);
-    hookQSMethod(cls, selName, newImp, NULL);
+    Class meta = object_getClass(cls);
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(meta, sel)) return;
+    MSHookMessageEx(meta, sel, newImp, orig);
 }
 
 static void hookInstanceBool0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
-    hookQSMethod(cls, selName, newImp, orig);
+    if (!cls) return;
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, newImp, orig);
 }
 
 static void hookInstanceBool1(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
-    hookQSMethod(cls, selName, newImp, orig);
+    if (!cls) return;
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, newImp, orig);
 }
 
 static void hookInstanceVoid0(NSString *className, NSString *selName, IMP newImp, IMP *orig) {
     Class cls = NSClassFromString(className);
-    hookQSMethod(cls, selName, newImp, orig);
+    if (!cls) return;
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getInstanceMethod(cls, sel)) return;
+    MSHookMessageEx(cls, sel, newImp, orig);
 }
 
 static void hookZeroArgAcrossClasses(NSArray<NSString *> *classNames, NSString *selName, IMP newImp, IMP *orig) {
+    SEL sel = NSSelectorFromString(selName);
     for (NSString *className in classNames) {
         Class cls = NSClassFromString(className);
-        hookQSMethod(cls, selName, newImp, orig);
+        if (!cls || !class_getInstanceMethod(cls, sel)) continue;
+        MSHookMessageEx(cls, sel, newImp, orig);
     }
 }
 
@@ -169,112 +163,15 @@ static void hookQuickSnapFlowSelectors(NSArray<NSString *> *classNames) {
     }
 }
 
-static void hookQuickSnapSelectorsAcrossLoadedClasses(void) {
-    NSArray<NSString *> *bool1OnSelectors = @[
-        @"isQuicksnapEnabled:",
-        @"isQuicksnapEnabledInFeed:",
-        @"isQuicksnapEnabledInInbox:",
-        @"isQuicksnapEnabledInStories:",
-        @"isQuicksnapEnabledInNotesTray:",
-        @"isQuicksnapEnabledInNotesTrayWithPeek:",
-        @"isQuicksnapEnabledInNotesTrayWithPog:",
-        @"isQuicksnapNotesTrayEmptyPogEnabled:",
-        @"isQuicksnapEnabledAsPeek:",
-        @"isQPEnabled:"
-    ];
-    NSArray<NSString *> *bool0OnSelectors = @[
-        @"_isEligibleForQuicksnapCornerStackTransitionDialog",
-        @"_isEligibleForQuicksnapDialog",
-        @"isEligibleForPeek",
-        @"isQuicksnapRecap",
-        @"_isQuicksnapRecap",
-        @"hasQuicksnapRecapMedia",
-        @"isInstantsRecapVideo",
-        @"_shouldShowInstantsRecapVideoBadge",
-        @"showInstantsRecapVideoTrayBadge"
-    ];
-    NSArray<NSString *> *bool0OffSelectors = @[
-        @"isHiddenByServer",
-        @"_isHiddenByServer",
-        @"hideQuicksnapNuxDismissButton",
-        @"shouldShowTryInstants"
-    ];
-    NSArray<NSString *> *void0Selectors = @[
-        @"_showQuicksnapIntroDialog",
-        @"handleTapOnTryInstantsOrCreateAnInstant",
-        @"_performTryInstants",
-        @"tryInstants"
-    ];
-
-    unsigned int classCount = 0;
-    Class *classes = objc_copyClassList(&classCount);
-    for (unsigned int i = 0; i < classCount; i++) {
-        Class cls = classes[i];
-        NSString *name = NSStringFromClass(cls);
-        NSString *lower = name.lowercaseString ?: @"";
-        BOOL likelyQS = [lower containsString:@"quicksnap"] ||
-                        [lower containsString:@"instants"] ||
-                        [lower containsString:@"directnotestray"];
-        if (!likelyQS) continue;
-
-        Class meta = object_getClass(cls);
-        for (NSString *selName in bool1OnSelectors) {
-            IMP imp = [selName isEqualToString:@"isQPEnabled:"] ? (IMP)new_qs_isqp :
-                      [selName isEqualToString:@"isQuicksnapEnabledInInbox:"] ? (IMP)new_qs_enabled_inbox :
-                      (IMP)new_qs_enabled;
-            hookQSMethod(cls, selName, imp, NULL);
-            hookQSMethod(meta, selName, imp, NULL);
-        }
-        for (NSString *selName in bool0OnSelectors) {
-            IMP imp = [selName isEqualToString:@"isEligibleForPeek"] ? (IMP)new_is_eligible_for_peek :
-                      [selName isEqualToString:@"isQuicksnapRecap"] ? (IMP)new_is_qs_recap :
-                      [selName isEqualToString:@"_isQuicksnapRecap"] ? (IMP)new__is_qs_recap :
-                      [selName isEqualToString:@"hasQuicksnapRecapMedia"] ? (IMP)new_has_qs_recap_media :
-                      [selName isEqualToString:@"isInstantsRecapVideo"] ? (IMP)new_is_instants_recap_video :
-                      [selName isEqualToString:@"_shouldShowInstantsRecapVideoBadge"] ? (IMP)new_should_show_recap_badge :
-                      [selName isEqualToString:@"showInstantsRecapVideoTrayBadge"] ? (IMP)new_show_recap_badge :
-                      (IMP)new_is_eligible_for_peek;
-            hookQSMethod(cls, selName, imp, NULL);
-            hookQSMethod(meta, selName, imp, NULL);
-        }
-        for (NSString *selName in bool0OffSelectors) {
-            IMP imp = ([selName isEqualToString:@"isHiddenByServer"] || [selName isEqualToString:@"_isHiddenByServer"]) ?
-                      (IMP)new__is_hidden_by_server :
-                      [selName isEqualToString:@"hideQuicksnapNuxDismissButton"] ? (IMP)new_hide_nux_dismiss :
-                      (IMP)new_should_show_try_instants;
-            hookQSMethod(cls, selName, imp, NULL);
-            hookQSMethod(meta, selName, imp, NULL);
-        }
-        hookQSMethod(cls, @"shouldShowCreateInstantCta:", (IMP)new_should_show_create_instant_cta, NULL);
-        hookQSMethod(meta, @"shouldShowCreateInstantCta:", (IMP)new_should_show_create_instant_cta, NULL);
-        for (NSString *selName in void0Selectors) {
-            IMP imp = [selName isEqualToString:@"_performTryInstants"] ? (IMP)new_perform_try_instants :
-                      [selName isEqualToString:@"tryInstants"] ? (IMP)new_try_instants :
-                      (IMP)new_handle_try_or_create;
-            hookQSMethod(cls, selName, imp, NULL);
-            hookQSMethod(meta, selName, imp, NULL);
-        }
-    }
-    free(classes);
-}
-
 %ctor {
     if (!sciQuickSnapEnabled()) return;
-    gQSHooked = [NSMutableSet set];
 
     //  ExperimentationHelper (class methods)   confirmed
     // isQuicksnapEnabled: and isQuicksnapEnabledInInbox: confirmed
     // All other isQuicksnapEnabledIn* NOT in this binary  skipped
     NSString *qsHelper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabled:", (IMP)new_qs_enabled, (IMP *)&orig_qs_enabled);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInFeed:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInInbox:", (IMP)new_qs_enabled_inbox, (IMP *)&orig_qs_enabled_inbox);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInStories:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInNotesTray:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInNotesTrayWithPeek:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledInNotesTrayWithPog:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapNotesTrayEmptyPogEnabled:", (IMP)new_qs_enabled, NULL);
-    hookClassOrInstanceBool1(qsHelper, @"isQuicksnapEnabledAsPeek:", (IMP)new_qs_enabled, NULL);
+    hookClassBool1(qsHelper, @"isQuicksnapEnabled:", (IMP)new_qs_enabled, (IMP *)&orig_qs_enabled);
+    hookClassBool1(qsHelper, @"isQuicksnapEnabledInInbox:", (IMP)new_qs_enabled_inbox, (IMP *)&orig_qs_enabled_inbox);
 
     //  Service: _isHiddenByServer (underscore variant , bare variant )
     hookInstanceBool0(@"_TtC18IGQuickSnapService18IGQuickSnapService",
@@ -297,9 +194,6 @@ static void hookQuickSnapSelectorsAcrossLoadedClasses(void) {
     NSArray<NSString *> *instantsClasses = @[
         @"IGAPIQuickSnapData",           //
         @"IGAPIQuicksnapRecapMediaInfo", //
-        @"IGInstantGestureRecognizer",
-        @"XDTQuickSnapData",
-        @"XDTQuicksnapRecapMediaInfo"
     ];
     hookZeroArgAcrossClasses(instantsClasses, @"isEligibleForPeek",     (IMP)new_is_eligible_for_peek,    (IMP *)&orig_is_eligible_for_peek);
     hookZeroArgAcrossClasses(instantsClasses, @"isQuicksnapRecap",      (IMP)new_is_qs_recap,             (IMP *)&orig_is_qs_recap);
@@ -321,5 +215,4 @@ static void hookQuickSnapSelectorsAcrossLoadedClasses(void) {
         @"_TtC44IGQuickSnapWidgetMerchandisingPillController44IGQuickSnapWidgetMerchandisingPillController", //
     ];
     hookQuickSnapFlowSelectors(qsFlowClasses);
-    hookQuickSnapSelectorsAcrossLoadedClasses();
 }
