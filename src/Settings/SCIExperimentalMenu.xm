@@ -320,35 +320,6 @@ static NSArray *developerNavSections(void) {
     ];
 }
 
-
-static SCISetting *RYExperimentalNavRow(void) {
-    return [SCISetting navigationCellWithTitle:@"Experimental"
-                                      subtitle:@"QuickSnap, Maps/FriendMap, Direct Notes, Story Tray, Homecoming, Prism and feed experiment toggles."
-                                          icon:[SCISymbol symbolWithName:@"flask"]
-                                   navSections:experimentalNavSections()];
-}
-
-static BOOL RYRowsContainExperimentalMenu(NSArray *sections) {
-    for (id sectionObj in sections) {
-        if (![sectionObj isKindOfClass:[NSDictionary class]]) continue;
-        NSArray *rows = [(NSDictionary *)sectionObj objectForKey:@"rows"];
-        if (![rows isKindOfClass:[NSArray class]]) continue;
-        for (id rowObj in rows) {
-            SCISetting *row = [rowObj isKindOfClass:[SCISetting class]] ? rowObj : nil;
-            NSString *title = row.title ?: @"";
-            if ([title isEqualToString:@"Experimental"] || [title isEqualToString:@"Experiments"] || [title isEqualToString:@"Experimentos"]) {
-                return YES;
-            }
-        }
-    }
-    return NO;
-}
-
-static BOOL RYSettingLooksLikeAdvancedRoot(SCISetting *row) {
-    NSString *title = row.title ?: @"";
-    return [title isEqualToString:@"Advanced"] || [title isEqualToString:@"Avançado"];
-}
-
 static BOOL rowIsExpFlagsDuplicate(SCISetting *row) {
     if (![row isKindOfClass:[SCISetting class]]) return NO;
 
@@ -450,15 +421,6 @@ static void cleanAdvancedDuplicateRows(NSMutableArray *rows) {
             newSection[@"rows"] = cleanRows;
             [cleanSections addObject:newSection];
         }
-        if (RYSettingLooksLikeAdvancedRoot(row) && !RYRowsContainExperimentalMenu(cleanSections)) {
-            NSDictionary *expSection = @{
-                @"header": @"Experiments",
-                @"footer": @"Restored feature experiment toggles. Duplicate legacy MC observer rows stay hidden.",
-                @"rows": @[ RYExperimentalNavRow() ]
-            };
-            [cleanSections insertObject:expSection atIndex:0];
-        }
-
         row.navSections = cleanSections;
         rows[i] = row;
     }
