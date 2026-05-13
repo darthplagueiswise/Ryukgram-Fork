@@ -230,6 +230,7 @@
                                             @"header": SCILocalized(@"Hide"),
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide suggested stories") subtitle:SCILocalized(@"Removes suggested accounts from the stories tray") defaultsKey:@"hide_suggested_stories"],
+                                                [SCISetting switchCellWithTitle:SCILocalized(@"Hide mid cards stories") subtitle:SCILocalized(@"Removes Trending / Music Mid Cards from stories") defaultsKey:@"hide_stories_midcards" requiresRestart:YES],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide stories tray") subtitle:SCILocalized(@"Hides the story tray at the top") defaultsKey:@"hide_stories_tray"],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide entire feed") subtitle:SCILocalized(@"Removes all content from your home feed") defaultsKey:@"hide_entire_feed"],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide repost button") subtitle:SCILocalized(@"Hides the repost button on feed posts") defaultsKey:@"hide_feed_repost" requiresRestart:YES],
