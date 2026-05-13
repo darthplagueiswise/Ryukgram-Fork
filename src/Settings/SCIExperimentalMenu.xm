@@ -210,6 +210,16 @@ static NSArray *experimentalNavSections(void) {
 static NSArray *developerNavSections(void) {
     return @[
         @{
+            @"header": @"Shortcuts",
+            @"footer": @"Single shortcut to the same advanced experimental resources menu. The duplicated top-level Experimental menu is intentionally removed.",
+            @"rows": @[
+                [SCISetting navigationCellWithTitle:@"Advanced Experimental Features"
+                                           subtitle:@"Shortcut to the advanced experimental resources menu."
+                                               icon:[SCISymbol symbolWithName:@"testtube.2"]
+                                        navSections:experimentalNavSections()]
+            ]
+        },
+        @{
             @"header": @"Employee / Dogfood Bootstrap",
             @"footer": @"Only identity state is persisted here. Runtime C broker hooks and ObjC getter hooks are intentionally not exposed in sideload builds.",
             @"rows": @[
@@ -402,11 +412,7 @@ static NSDictionary *expDevTopSection(void) {
     return @{
         @"header": @"",
         @"rows": @[
-            [SCISetting navigationCellWithTitle:@"Advanced Experimental Features"
-                                       subtitle:@"Shortcut to Advanced > Advanced Experimental Features."
-                                           icon:[SCISymbol symbolWithName:@"testtube.2"]
-                                    navSections:experimentalNavSections()],
-            [SCISetting navigationCellWithTitle:@"Developer"
+            [SCISetting navigationCellWithTitle:@"Dev"
                                        subtitle:@"Dogfood controllers, DexKit and read-only MobileConfig diagnostics."
                                            icon:[SCISymbol symbolWithName:@"hammer"]
                                     navSections:developerNavSections()]
@@ -424,18 +430,27 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
         if (!rows.count) continue;
 
         NSMutableArray *newRows = [rows mutableCopy];
+
         for (NSInteger r = (NSInteger)newRows.count - 1; r >= 0; r--) {
             id rowObj = newRows[(NSUInteger)r];
             if (![rowObj isKindOfClass:[SCISetting class]]) continue;
+
             SCISetting *row = (SCISetting *)rowObj;
+            NSString *title = row.title ?: @"";
 
-            if ([row.title isEqualToString:@"Experimental"] ||
-                [row.title isEqualToString:@"Advanced Experimental Features"] ||
-                [row.title isEqualToString:@"Developer Mode"] ||
-                [row.title isEqualToString:@"Developer"] ||
-                [row.title isEqualToString:@"DEV Tests"]) return sections;
+            // Remove all old duplicated top-level menu entries.
+            if ([title isEqualToString:@"Experimental"] ||
+                [title isEqualToString:@"Advanced Experimental Features"] ||
+                [title isEqualToString:@"Developer Mode"] ||
+                [title isEqualToString:@"Developer"] ||
+                [title isEqualToString:@"Dev"] ||
+                [title isEqualToString:@"DEV Tests"]) {
+                [newRows removeObjectAtIndex:(NSUInteger)r];
+                continue;
+            }
 
-            if ([row.title isEqualToString:@"General"]) {
+            // Remove old General -> Experimental features duplicate section.
+            if ([title isEqualToString:@"General"]) {
                 NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
                 NSMutableArray *newNavSections = [NSMutableArray array];
                 for (NSDictionary *navSection in navSections) {
@@ -449,6 +464,7 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
         }
 
         cleanAdvancedDuplicateRows(newRows);
+
         NSMutableDictionary *newSection = [section mutableCopy];
         newSection[@"rows"] = newRows;
         sections[i] = newSection;
@@ -457,6 +473,7 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
     NSUInteger insertIndex = sections.count;
     if (insertIndex > 0) insertIndex -= 1;
     [sections insertObject:expDevTopSection() atIndex:insertIndex];
+
     return sections;
 }
 

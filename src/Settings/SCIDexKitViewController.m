@@ -1,4 +1,5 @@
 #import "SCIDexKitViewController.h"
+#import "SCIExperimentRuntimeBrowserViewController.h"
 #import "../Features/ExpFlags/SCIDexKitNameResolver.h"
 #import "../Features/ExpFlags/SCIDexKitScanner.h"
 #import "../Features/ExpFlags/SCIDexKitStore.h"
@@ -203,6 +204,8 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
         [[UIBarButtonItem alloc] initWithTitle:@"Refresh" style:UIBarButtonItemStylePlain target:self action:@selector(reload)],
         [[UIBarButtonItem alloc] initWithTitle:@"Observe" style:UIBarButtonItemStylePlain target:self action:@selector(observeVisible)]
     ];
+    self.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"Runtime" style:UIBarButtonItemStylePlain target:self action:@selector(openRuntimeBrowser)];
     UILayoutGuide *g=self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [_filter.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
@@ -314,6 +317,18 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if(a.popoverPresentationController){ a.popoverPresentationController.sourceView=sourceView ?: self.view; a.popoverPresentationController.sourceRect=(sourceView ?: self.view).bounds; }
     [self presentViewController:a animated:YES completion:nil];
+}
+
+
+- (void)openRuntimeBrowser {
+    SCIExperimentRuntimeBrowserViewController *vc = [SCIExperimentRuntimeBrowserViewController new];
+    vc.title = @"Runtime Browser";
+    if (self.navigationController) {
+        [self.navigationController pushViewController:vc animated:YES];
+    } else {
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        [self presentViewController:nav animated:YES completion:nil];
+    }
 }
 
 - (void)exportIDNameMapping {

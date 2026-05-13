@@ -207,7 +207,7 @@ static NSDictionary *SCIIdMapDeprecatedStartupConfigsDump(void) {
     for (NSDictionary *info in candidateInfo) if ([info[@"exists"] boolValue] || visibleCandidates.count < 80) [visibleCandidates addObject:info];
 
     if (!best) {
-        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
+        NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only · %@", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @"", SCIIdMapString(deprecatedDump[@"status"])];
         SCIIdMapSetStatus(status);
         return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0, @"nativeImport": @{@"ok": @NO, @"mode": @"observe-only", @"reason": @"no validated active native trigger in sideload-safe mode"}, @"deprecatedStartupConfigs": deprecatedDump ?: @{}};
     }
