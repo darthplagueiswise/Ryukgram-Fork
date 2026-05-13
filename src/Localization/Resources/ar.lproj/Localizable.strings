@@ -925,6 +925,7 @@
 
 "Add location" = "‏إضافة موقع‏";
 "Add preset" = "‏إضافة إعداد مسبق‏";
+"Background" = "‏الخلفية‏";
 "Background color" = "‏لون الخلفية‏";
 "Change location" = "‏تغيير الموقع‏";
 "Clipboard is not an Instagram URL" = "الحافظة لا تحتوي على رابط إنستغرام";
@@ -939,7 +940,9 @@
 "Disable" = "‏تعطيل‏";
 "Download GIF" = "‏تنزيل صورة جيف (GIF)‏";
 "Dropped pin" = "‏دبوس الموقع‏";
+"Emoji" = "‏إيموجي‏";
 "Enable" = "‏تفعيل‏";
+"Enter emoji" = "‏أدخل إيموجي‏";
 "Enable Location Services for Instagram in Settings to use your current location." = "‏فعّل خدمات الموقع لإنستغرام من الإعدادات لاستخدام موقعك الحالي.‏";
 "Fake location" = "‏موقع وهمي‏";
 "Location access denied" = "‏تم رفض الوصول إلى الموقع‏";
@@ -954,6 +957,7 @@
 "Select color" = "‏اختيار اللون‏";
 "Set location" = "‏تعيين الموقع‏";
 "Text color" = "‏لون النص‏";
+"Type an emoji to use as the note bubble icon." = "‏اكتب إيموجي لاستخدامه كأيقونة لفقاعة الملاحظة.‏";
 "Turn Location Services on in Settings → Privacy to use your current location." = "‏فعّل خدمات الموقع من الإعدادات ← الخصوصية لاستخدام موقعك الحالي.‏";
 
 "Theme" = "‏السمة‏";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "‏اكتملت إعادة التعيين‏";
 "Reset selected data?" = "‏إعادة تعيين البيانات المحددة؟‏";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "‏من التحليل الثاني فصاعدًا: يقارن كل تحليل بما قبله، لتظهر المتابعين الجدد والمفقودين وإجراءاتك من متابعة/إلغاء متابعة وتحديثات الملف الشخصي.‏";
-"Select all" = "‏تحديد الكل‏";
 "Selected data will be cleared. Tap any row to see what's stored." = "‏سيتم مسح البيانات المحددة. انقر على أي صف لرؤية ما هو مخزّن.‏";
 "Settings" = "‏الإعدادات‏";
 "Sort" = "‏ترتيب‏";

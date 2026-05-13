@@ -126,7 +126,7 @@ typedef NS_ENUM(NSInteger, SCIPickerRowKind) {
         initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
                              target:self action:@selector(cancelTapped)];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithTitle:SCILocalized(@"Select all") style:UIBarButtonItemStylePlain
+        initWithTitle:SCILocalized(@"Select All") style:UIBarButtonItemStylePlain
                 target:self action:@selector(selectAllTapped)];
 
     [self buildRows];

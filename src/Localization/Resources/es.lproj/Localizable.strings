@@ -925,6 +925,7 @@
 
 "Add location" = "Añadir ubicación";
 "Add preset" = "Añadir ajuste preestablecido";
+"Background" = "Fondo";
 "Background color" = "Color de fondo";
 "Change location" = "Cambiar ubicación";
 "Clipboard is not an Instagram URL" = "El portapapeles no contiene un enlace de Instagram";
@@ -939,7 +940,9 @@
 "Disable" = "Desactivado";
 "Download GIF" = "Descargar GIF";
 "Dropped pin" = "Marcador";
+"Emoji" = "Emoji";
 "Enable" = "Activado";
+"Enter emoji" = "Introduce un emoji";
 "Enable Location Services for Instagram in Settings to use your current location." = "Activa los servicios de ubicación para Instagram en Ajustes para usar tu ubicación actual.";
 "Fake location" = "Ubicación falsa";
 "Location access denied" = "Acceso a ubicación denegado";
@@ -954,6 +957,7 @@
 "Select color" = "Escoger color";
 "Set location" = "Establecer ubicación";
 "Text color" = "Color del texto";
+"Type an emoji to use as the note bubble icon." = "Escribe un emoji para usarlo como icono de la burbuja de nota.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Activa los servicios de ubicación en Ajustes → Privacidad para usar tu ubicación actual.";
 
 "Theme" = "Tema";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "Restablecimiento completado";
 "Reset selected data?" = "¿Restablecer los datos seleccionados?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "A partir del segundo análisis: cada análisis se compara con el anterior, mostrando seguidores nuevos/perdidos, tus propios movimientos de seguir/dejar de seguir y cambios de perfil.";
-"Select all" = "Seleccionar todo";
 "Selected data will be cleared. Tap any row to see what's stored." = "Los datos seleccionados se borrarán. Toca cualquier fila para ver qué hay guardado.";
 "Settings" = "Ajustes";
 "Sort" = "Ordenar";
