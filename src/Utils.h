@@ -60,6 +60,7 @@
 
 + (void)showErrorHUDWithDescription:(NSString *)errorDesc;
 + (void)showErrorHUDWithDescription:(NSString *)errorDesc dismissAfterDelay:(CGFloat)dismissDelay;
++ (void)showSuccessHUDWithDescription:(NSString *)successDesc;
 
 // Media
 // IGAPIStorableObject's snake_case Pando _fieldCache dict. Many IG fields

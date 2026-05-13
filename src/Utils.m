@@ -175,6 +175,10 @@ static UIColor *SCIDynIGColor(CGFloat lr, CGFloat lg, CGFloat lb, CGFloat dr, CG
     [[SCINotificationCenter shared] notifyError:SCI_NOTIF_ACTION_ERROR title:errorDesc message:nil];
 }
 
++ (void)showSuccessHUDWithDescription:(NSString *)successDesc {
+    SCINotifySuccess(SCI_NOTIF_SETTINGS_ACTION, successDesc, nil);
+}
+
 // Media
 
 + (NSDictionary *)fieldCacheForObject:(id)obj {

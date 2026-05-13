@@ -17,7 +17,6 @@
 #import "../Features/General/SCICacheManager.h"
 #import "../Features/General/SCIChangelog.h"
 #import "../SCIFFmpeg.h"
-#import "../Features/Experimental/SCIExperimentalGuard.h"
 #import "../Features/Theme/SCITheme.h"
 #import "../Tweak.h"
 #import "../ActionButton/SCIActionIcon.h"
@@ -1029,7 +1028,42 @@
         [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Reset") style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction *_) {
-            [SCIExperimentalGuard resetAll];
+            NSArray<NSString *> *keys = @[
+                @"igt_homecoming",
+                @"igt_quicksnap",
+                @"igt_directnotes_friendmap",
+                @"igt_directnotes_audio_reply",
+                @"igt_directnotes_avatar_reply",
+                @"igt_directnotes_gifs_reply",
+                @"igt_directnotes_photo_reply",
+                @"igt_prism",
+                @"igt_reels_first",
+                @"igt_friends_feed",
+                @"igt_tab_swiping",
+                @"igt_audio_ramping",
+                @"igt_feed_culling",
+                @"igt_feed_dedup",
+                @"igt_pull_to_carrera",
+                @"igt_screenshot_block",
+                @"igt_employee",
+                @"igt_employee_mc",
+                @"igt_employee_or_test_user_mc",
+                @"igt_internal",
+                @"igt_internal_apps_gate",
+                @"igt_internaluse_observer",
+                @"igt_employee_master",
+                @"igt_employee_devoptions_gate",
+                @"igt_internal_apps_spoof",
+                @"igt_mutual_interest",
+                @"igt_icebreaker",
+                @"igt_story_grid",
+                @"igt_stories_tray_decoupling",
+                @"igt_dm_inline_like",
+                @"igt_multiple_notes",
+                @"igt_dn_first_badge",
+            ];
+            NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+            for (NSString *key in keys) [ud setBool:NO forKey:key];
             [SCIUtils showRestartConfirmation];
         }]];
         [sciTopVC() presentViewController:a animated:YES completion:nil];

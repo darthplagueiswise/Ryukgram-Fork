@@ -1,0 +1,39 @@
+#import <Foundation/Foundation.h>
+
+%ctor {
+    NSDictionary *defaults = @{
+        @"igt_homecoming": @(NO),
+        @"igt_quicksnap": @(NO),
+        @"igt_directnotes_friendmap": @(NO),
+        @"igt_directnotes_audio_reply": @(NO),
+        @"igt_directnotes_avatar_reply": @(NO),
+        @"igt_directnotes_gifs_reply": @(NO),
+        @"igt_directnotes_photo_reply": @(NO),
+        @"igt_prism": @(NO),
+        @"igt_reels_first": @(NO),
+        @"igt_friends_feed": @(NO),
+        @"igt_tab_swiping": @(NO),
+        @"igt_audio_ramping": @(NO),
+        @"igt_feed_culling": @(NO),
+        @"igt_feed_dedup": @(NO),
+        @"igt_pull_to_carrera": @(NO),
+        @"igt_screenshot_block": @(NO),
+        @"igt_employee": @(NO),
+        @"igt_employee_mc": @(NO),
+        @"igt_employee_or_test_user_mc": @(NO),
+        @"igt_internal": @(NO),
+        @"igt_internal_apps_gate": @(NO),
+        @"igt_internaluse_observer": @(NO),
+        @"igt_employee_master": @(NO),
+        @"igt_employee_devoptions_gate": @(NO),
+        @"igt_internal_apps_spoof": @(NO),
+        @"igt_mutual_interest": @(NO),
+        @"igt_icebreaker": @(NO),
+        @"igt_story_grid": @(NO),
+        @"igt_stories_tray_decoupling": @(NO),
+        @"igt_dm_inline_like": @(NO),
+        @"igt_multiple_notes": @(NO),
+        @"igt_dn_first_badge": @(NO),
+    };
+    [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
+}
