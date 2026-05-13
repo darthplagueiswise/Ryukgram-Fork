@@ -13,7 +13,6 @@ typedef NS_ENUM(NSInteger, SCIDexKitUIFilter) {
     SCIDexKitUIFilterForced,
     SCIDexKitUIFilterHidden
 };
-static NSString *const kSCIDexKitHiddenKeywordsKey = @"sci_dexkit_hidden_keywords";
 
 static NSString *SCIIdMapUIString(id value) { return [value isKindOfClass:NSString.class] ? (NSString *)value : @""; }
 static NSString *SCIIdMapUIJoin(NSArray *values, NSUInteger limit) {
@@ -239,14 +238,6 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 - (NSString *)stateText:(SCIDexKitKnownBoolState)st { return st==SCIDexKitKnownBoolStateOn?@"ON":(st==SCIDexKitKnownBoolStateOff?@"OFF":@"unknown"); }
 - (BOOL)isHiddenNoise:(SCIDexKitDescriptor *)d {
     NSString *cat=d.semanticCategory.lowercaseString ?: @"";
-    NSString *hay=[[NSString stringWithFormat:@"%@ %@ %@ %@ %@", d.className ?: @"", d.selectorName ?: @"", d.semanticCategory ?: @"", d.classificationReason ?: @"", d.familyKey ?: @""] lowercaseString];
-    NSArray *custom = [[NSUserDefaults standardUserDefaults] arrayForKey:kSCIDexKitHiddenKeywordsKey];
-    if ([custom isKindOfClass:NSArray.class]) {
-        for (id item in custom) {
-            NSString *kw = [[item isKindOfClass:NSString.class] ? item : @"" lowercaseString];
-            if (kw.length && [hay containsString:kw]) return YES;
-        }
-    }
     if(d.riskLevel>=4) return YES;
     if(!d.observeRecommended) return YES;
     if([cat isEqualToString:@"ui-state"] || [cat isEqualToString:@"lifecycle-state"] || [cat isEqualToString:@"loading-state"] || [cat isEqualToString:@"selection-state"]) return YES;
@@ -272,7 +263,10 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 }
 
 - (BOOL)descriptorNeedsExplicitOverrideConfirmation:(SCIDexKitDescriptor *)d {
-    (void)d;
+    if([self isConflictDescriptor:d]) return YES;
+    if(!d.observedKnown) return YES;
+    if(d.riskLevel >= 3) return YES;
+    if(!d.forceRecommended) return YES;
     return NO;
 }
 - (void)setOverrideValue:(NSNumber *)value descriptor:(SCIDexKitDescriptor *)d {
@@ -294,7 +288,8 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self presentViewController:a animated:YES completion:nil];
 }
 - (void)forceDescriptor:(SCIDexKitDescriptor *)d value:(BOOL)value {
-    [self setOverrideValue:@(value) descriptor:d];
+    if([self descriptorNeedsExplicitOverrideConfirmation:d]) [self confirmAndForceDescriptor:d value:value];
+    else [self setOverrideValue:@(value) descriptor:d];
 }
 - (void)applySegment:(NSInteger)idx descriptor:(SCIDexKitDescriptor *)d {
     if(idx==0){ [self setOverrideValue:nil descriptor:d]; return; }
@@ -304,14 +299,6 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 - (NSArray<SCIDexKitDescriptor *> *)batchAllowedRows:(NSArray<SCIDexKitDescriptor *> *)rows { NSMutableArray *out=[NSMutableArray array]; for(SCIDexKitDescriptor *d in rows){ if(d.batchForceAllowed && d.forceRecommended && !d.unavailable && ![self isConflictDescriptor:d])[out addObject:d]; } return out; }
 - (void)observeRows:(NSArray<SCIDexKitDescriptor *> *)rows { SCIDexKitEnableSessionObservationForDescriptors(rows ?: @[]); [self reload]; dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1*NSEC_PER_SEC)),dispatch_get_main_queue(),^{[self reload];}); }
 - (void)forceBatchRows:(NSArray<SCIDexKitDescriptor *> *)rows value:(BOOL)value { for(SCIDexKitDescriptor *d in rows){ if([self isConflictDescriptor:d]) continue; [SCIDexKitStore setOverrideValue:@(value) forKey:d.overrideKey]; SCIDexKitInstallHookForDescriptor(d,SCIDexKitInstallReasonUserOverride,nil); } [self reload]; }
-- (void)forceClassRows:(NSArray<SCIDexKitDescriptor *> *)rows value:(BOOL)value {
-    for (SCIDexKitDescriptor *d in rows) {
-        if (!d.overrideKey.length || d.unavailable) continue;
-        [SCIDexKitStore setOverrideValue:@(value) forKey:d.overrideKey];
-        SCIDexKitInstallHookForDescriptor(d, SCIDexKitInstallReasonUserOverride, nil);
-    }
-    [self reload];
-}
 - (void)showGroupActionsForRows:(NSArray<SCIDexKitDescriptor *> *)rows sourceView:(UIView *)sourceView {
     if(!rows.count)return;
     SCIDexKitDescriptor *first=rows.firstObject;
@@ -323,8 +310,6 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:first.ownerDisplayName message:[NSString stringWithFormat:@"Group actions are observe-first. Batch force applies only to %lu safe methods, never to conflict families.\nMethods: %lu · conflicts: %lu%@",(unsigned long)safe.count,(unsigned long)rows.count,(unsigned long)conflicts,familyText] preferredStyle:UIAlertControllerStyleActionSheet];
     [a addAction:[UIAlertAction actionWithTitle:@"Observe group" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self observeRows:rows];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"Clear forced in group" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self clearOverridesInRows:rows];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force class ON (all methods)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceClassRows:rows value:YES];}]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force class OFF (all methods)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceClassRows:rows value:NO];}]];
     if(safe.count){
         [a addAction:[UIAlertAction actionWithTitle:@"Force safe recommended ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:YES];}]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force safe recommended OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:NO];}]];

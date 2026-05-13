@@ -7,7 +7,6 @@
 #import <dlfcn.h>
 
 @implementation SCIDexKitScanner
-static NSMutableDictionary<NSString *, NSArray<SCIDexKitDescriptor *> *> *gScanCache;
 
 + (BOOL)method:(Method)m isEligibleForMode:(SCIDexKitScannerMode)mode selector:(NSString *)sel {
     if (!m) return NO;
@@ -106,19 +105,6 @@ static NSMutableDictionary<NSString *, NSArray<SCIDexKitDescriptor *> *> *gScanC
 }
 
 + (NSArray<SCIDexKitDescriptor *> *)scanDescriptorsWithMode:(SCIDexKitScannerMode)mode query:(NSString *)query {
-    if (!gScanCache) gScanCache = [NSMutableDictionary dictionary];
-    NSString *cacheKey = [NSString stringWithFormat:@"%ld|%@", (long)mode, query.lowercaseString ?: @""];
-    NSArray<SCIDexKitDescriptor *> *cached = gScanCache[cacheKey];
-    if (cached.count) {
-        NSMutableArray<SCIDexKitDescriptor *> *fresh = [NSMutableArray arrayWithCapacity:cached.count];
-        for (SCIDexKitDescriptor *item in cached) {
-            SCIDexKitDescriptor *d = [item copy];
-            [self fillStateForDescriptor:d];
-            [fresh addObject:d];
-        }
-        return fresh;
-    }
-
     NSMutableDictionary<NSString *, SCIDexKitDescriptor *> *byKey = [NSMutableDictionary dictionary];
     NSString *lowerQuery = query.lowercaseString ?: @"";
 
@@ -173,14 +159,7 @@ static NSMutableDictionary<NSString *, NSArray<SCIDexKitDescriptor *> *> *gScanC
         if (c != NSOrderedSame) return c;
         return [a.selectorName caseInsensitiveCompare:b.selectorName];
     }];
-    gScanCache[cacheKey] = values;
-    NSMutableArray<SCIDexKitDescriptor *> *fresh = [NSMutableArray arrayWithCapacity:values.count];
-    for (SCIDexKitDescriptor *item in values) {
-        SCIDexKitDescriptor *d = [item copy];
-        [self fillStateForDescriptor:d];
-        [fresh addObject:d];
-    }
-    return fresh;
+    return values;
 }
 
 @end
