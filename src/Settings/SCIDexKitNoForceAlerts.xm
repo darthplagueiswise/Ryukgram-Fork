@@ -9,6 +9,7 @@
         %orig;
         return;
     }
+
     ((void (*)(id, SEL, id, id))objc_msgSend)(target, directSetter, @(value), descriptor);
 }
 %end
