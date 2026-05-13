@@ -8,8 +8,7 @@
 #import "../Features/ExpFlags/SCIMobileConfigIdNameMappingExporter.h"
 
 typedef NS_ENUM(NSInteger, SCIDexKitUIFilter) {
-    SCIDexKitUIFilterRecommended,
-    SCIDexKitUIFilterAll,
+    SCIDexKitUIFilterAll = 0,
     SCIDexKitUIFilterObserved,
     SCIDexKitUIFilterForced,
     SCIDexKitUIFilterHidden
@@ -171,8 +170,8 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     self.title=@"SCI DexKit 2.0";
     self.view.backgroundColor=UIColor.systemGroupedBackgroundColor;
     _scanMode=SCIDexKitScannerModeCurated;
-    _filter=[[UISegmentedControl alloc] initWithItems:@[@"Recommended",@"All",@"Observed",@"Forced",@"Hidden"]];
-    _filter.selectedSegmentIndex=0;
+    _filter=[[UISegmentedControl alloc] initWithItems:@[@"All",@"Observed",@"Forced",@"Hidden"]];
+    _filter.selectedSegmentIndex=SCIDexKitUIFilterAll;
     [_filter addTarget:self action:@selector(reload) forControlEvents:UIControlEventValueChanged];
     _filter.translatesAutoresizingMaskIntoConstraints=NO;
     [self.view addSubview:_filter];
@@ -200,12 +199,10 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     _table.translatesAutoresizingMaskIntoConstraints=NO;
     [self.view addSubview:_table];
     self.navigationItem.rightBarButtonItems=@[
-        [[UIBarButtonItem alloc] initWithTitle:@"ID Map" style:UIBarButtonItemStylePlain target:self action:@selector(exportIDNameMapping)],
+        [[UIBarButtonItem alloc] initWithTitle:@"Tools" style:UIBarButtonItemStylePlain target:self action:@selector(openDexKitTools)],
         [[UIBarButtonItem alloc] initWithTitle:@"Refresh" style:UIBarButtonItemStylePlain target:self action:@selector(reload)],
         [[UIBarButtonItem alloc] initWithTitle:@"Observe" style:UIBarButtonItemStylePlain target:self action:@selector(observeVisible)]
     ];
-    self.navigationItem.leftBarButtonItem =
-        [[UIBarButtonItem alloc] initWithTitle:@"Runtime" style:UIBarButtonItemStylePlain target:self action:@selector(openRuntimeBrowser)];
     UILayoutGuide *g=self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [_filter.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
@@ -256,13 +253,12 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 }
 - (NSString *)filterName {
     switch((SCIDexKitUIFilter)_filter.selectedSegmentIndex){
-        case SCIDexKitUIFilterRecommended: return @"Recommended";
         case SCIDexKitUIFilterAll: return @"All";
         case SCIDexKitUIFilterObserved: return @"Observed";
         case SCIDexKitUIFilterForced: return @"Forced";
         case SCIDexKitUIFilterHidden: return @"Hidden";
     }
-    return @"?";
+    return @"All";
 }
 
 - (BOOL)descriptorNeedsExplicitOverrideConfirmation:(SCIDexKitDescriptor *)d {
@@ -310,8 +306,8 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [a addAction:[UIAlertAction actionWithTitle:@"Observe group" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self observeRows:rows];}]];
     [a addAction:[UIAlertAction actionWithTitle:@"Clear forced in group" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self clearOverridesInRows:rows];}]];
     if(safe.count){
-        [a addAction:[UIAlertAction actionWithTitle:@"Force safe recommended ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:YES];}]];
-        [a addAction:[UIAlertAction actionWithTitle:@"Force safe recommended OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:NO];}]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Force safe ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:YES];}]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Force safe OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){[self forceBatchRows:safe value:NO];}]];
     }
     [a addAction:[UIAlertAction actionWithTitle:@"Copy group keys" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ NSMutableArray *keys=[NSMutableArray array]; for(SCIDexKitDescriptor*d in rows){ if(d.overrideKey.length)[keys addObject:d.overrideKey]; } UIPasteboard.generalPasteboard.string=[keys componentsJoinedByString:@"\n"]; }]];
     [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -319,6 +315,32 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
+
+
+- (void)openDexKitTools {
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"DexKit Tools"
+                                                             message:@"Runtime Browser and IGMobile deprecated JSON export."
+                                                      preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [a addAction:[UIAlertAction actionWithTitle:@"Open Runtime Browser"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *x) {
+        [self openRuntimeBrowser];
+    }]];
+
+    [a addAction:[UIAlertAction actionWithTitle:@"Export IGMobile Deprecated JSON"
+                                          style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *x) {
+        [self exportIGMobileDeprecatedJSON];
+    }]];
+
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+
+    if(a.popoverPresentationController){
+        a.popoverPresentationController.barButtonItem=self.navigationItem.rightBarButtonItems.firstObject;
+    }
+    [self presentViewController:a animated:YES completion:nil];
+}
 
 - (void)openRuntimeBrowser {
     SCIExperimentRuntimeBrowserViewController *vc = [SCIExperimentRuntimeBrowserViewController new];
@@ -331,20 +353,25 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     }
 }
 
+
 - (void)exportIDNameMapping {
-    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"ID Map"
-                                                                  message:@"Procurando e exportando id_name_mapping.json..."
+    [self exportIGMobileDeprecatedJSON];
+}
+
+- (void)exportIGMobileDeprecatedJSON {
+    UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"IGMobile JSON"
+                                                                  message:@"Exportando FBMobileConfigStartupConfigsDeprecated..."
                                                            preferredStyle:UIAlertControllerStyleAlert];
 
     [self presentViewController:wait animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            NSDictionary *result = [SCIMobileConfigIdNameMappingExporter exportIDNameMappingNow];
+            NSDictionary *result = [SCIMobileConfigIdNameMappingExporter exportDeprecatedStartupConfigsNow];
             NSString *message = SCIIdMapUIResultMessage(result);
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 [wait dismissViewControllerAnimated:YES completion:^{
                     BOOL ok = [result[@"ok"] boolValue];
-                    UIAlertController *alert = [UIAlertController alertControllerWithTitle:(ok ? @"ID Map exportado" : @"ID Map não encontrado")
+                    UIAlertController *alert = [UIAlertController alertControllerWithTitle:(ok ? @"IGMobile JSON exportado" : @"IGMobile JSON não exportado")
                                                                                    message:message
                                                                             preferredStyle:UIAlertControllerStyleActionSheet];
 
@@ -353,15 +380,6 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
                                                             handler:^(__unused UIAlertAction *action) {
                         UIPasteboard.generalPasteboard.string = message;
                     }]];
-
-                    NSString *source = SCIIdMapUIString(result[@"source"]);
-                    if (source.length) {
-                        [alert addAction:[UIAlertAction actionWithTitle:@"Copiar source path"
-                                                                  style:UIAlertActionStyleDefault
-                                                                handler:^(__unused UIAlertAction *action) {
-                            UIPasteboard.generalPasteboard.string = source;
-                        }]];
-                    }
 
                     NSArray *outputs = [result[@"outputs"] isKindOfClass:NSArray.class] ? result[@"outputs"] : @[];
                     NSString *outputText = SCIIdMapUIJoin(outputs, 99);
@@ -388,38 +406,55 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
         });
     }];
 }
+
 - (void)observeVisible { [self observeRows:self.rows ?: @[]]; }
 - (SCIDexKitKnownBoolState)effective:(SCIDexKitDescriptor *)d { return [SCIDexKitStore effectiveStateForOverrideKey:d.overrideKey observedKey:d.observedKey]; }
 - (void)reload {
     NSArray *all=[SCIDexKitScanner scanDescriptorsWithMode:_scanMode query:_query];
     NSMutableArray *filtered=[NSMutableArray array];
     NSUInteger hiddenTotal=0;
-    NSUInteger recommendedTotal=0;
     NSUInteger conflictTotal=0;
+
     for(SCIDexKitDescriptor *d in all){
         BOOL hidden=[self isHiddenNoise:d];
-        BOOL recommended=[self isRecommended:d];
         BOOL conflict=[self isConflictDescriptor:d];
         if(hidden)hiddenTotal++;
-        if(recommended)recommendedTotal++;
         if(conflict)conflictTotal++;
+
         NSInteger f=_filter.selectedSegmentIndex;
-        if(f==SCIDexKitUIFilterRecommended && !recommended)continue;
         if(f==SCIDexKitUIFilterAll && hidden)continue;
         if(f==SCIDexKitUIFilterObserved && (!d.observedKnown || hidden))continue;
         if(f==SCIDexKitUIFilterForced && (!d.overrideValue || hidden))continue;
         if(f==SCIDexKitUIFilterHidden && !hidden)continue;
+
         [filtered addObject:d];
     }
+
     _rows=filtered;
     NSMutableDictionary *g=[NSMutableDictionary dictionary];
-    for(SCIDexKitDescriptor *d in _rows){ NSString *k=d.ownerGroupKey; if(!g[k])g[k]=[NSMutableArray array]; [(NSMutableArray *)g[k] addObject:d]; }
+    for(SCIDexKitDescriptor *d in _rows){
+        NSString *k=d.ownerGroupKey;
+        if(!g[k])g[k]=[NSMutableArray array];
+        [(NSMutableArray *)g[k] addObject:d];
+    }
+
     _sections=[[g allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
     _groups=g;
-    NSString *idMapStatus=[SCIMobileConfigIdNameMappingExporter lastStatusLine] ?: @"idmap idle";
-    _footer.text=[NSString stringWithFormat:@"Curated %@ · filter %@ · rows=%lu · groups=%lu · recommended=%lu · hidden=%lu · conflicts=%lu · hooks=%lu\n%@", _scanMode==SCIDexKitScannerModeCurated?@"B-only":@"Raw",[self filterName],(unsigned long)_rows.count,(unsigned long)_sections.count,(unsigned long)recommendedTotal,(unsigned long)hiddenTotal,(unsigned long)conflictTotal,(unsigned long)SCIDexKitInstalledHookCount(),idMapStatus];
+
+    NSString *idMapStatus=[SCIMobileConfigIdNameMappingExporter lastStatusLine] ?: @"igmobile json idle";
+    _footer.text=[NSString stringWithFormat:@"Curated B-only · filter %@ · rows=%lu · groups=%lu · hidden=%lu · conflicts=%lu · hooks=%lu
+%@",
+                  [self filterName],
+                  (unsigned long)_rows.count,
+                  (unsigned long)_sections.count,
+                  (unsigned long)hiddenTotal,
+                  (unsigned long)conflictTotal,
+                  (unsigned long)SCIDexKitInstalledHookCount(),
+                  idMapStatus];
+
     [_table reloadData];
 }
+
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return _sections.count; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [_groups[_sections[section]] count]; }
 - (NSArray *)rowsInSection:(NSInteger)section { return _groups[_sections[section]] ?: @[]; }

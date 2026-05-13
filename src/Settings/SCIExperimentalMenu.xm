@@ -3,6 +3,7 @@
 #import "SCIResolverReportViewController.h"
 #import "SCIDogfoodingMainLauncher.h"
 #import "SCIDexKitViewController.h"
+#import "SCINumericCatalogViewController.h"
 #import "SCIEnabledExperimentTogglesViewController.h"
 #import "SCIExperimentRuntimeBrowserViewController.h"
 #import "SCIMobileConfigBrokerViewController.h"
@@ -273,6 +274,10 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Centralized MobileConfig broker with name resolution."
                                                icon:[SCISymbol symbolWithName:@"server.rack"]
                                      viewController:[SCIMobileConfigBrokerViewController new]],
+                [SCISetting navigationCellWithTitle:@"Numeric MC Catalog"
+                                           subtitle:@"Import sci_numeric_mc_overrides.json and write mcbr:ig:<hex> System/OFF/ON entries."
+                                               icon:[SCISymbol symbolWithName:@"number.square"]
+                                     viewController:[SCINumericCatalogViewController new]],
                 [SCISetting navigationCellWithTitle:@"Symbol Observer"
                                            subtitle:@"Observe MobileConfig symbol access in real-time."
                                                icon:[SCISymbol symbolWithName:@"eye"]
@@ -413,7 +418,7 @@ static NSDictionary *expDevTopSection(void) {
         @"header": @"",
         @"rows": @[
             [SCISetting navigationCellWithTitle:@"Dev"
-                                       subtitle:@"Dogfood controllers, DexKit and read-only MobileConfig diagnostics."
+                                       subtitle:@"Dogfood controllers, DexKit and MobileConfig diagnostics."
                                            icon:[SCISymbol symbolWithName:@"hammer"]
                                     navSections:developerNavSections()]
         ]
@@ -438,7 +443,6 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
             SCISetting *row = (SCISetting *)rowObj;
             NSString *title = row.title ?: @"";
 
-            // Remove all old duplicated top-level menu entries.
             if ([title isEqualToString:@"Experimental"] ||
                 [title isEqualToString:@"Advanced Experimental Features"] ||
                 [title isEqualToString:@"Developer Mode"] ||
@@ -449,7 +453,6 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
                 continue;
             }
 
-            // Remove old General -> Experimental features duplicate section.
             if ([title isEqualToString:@"General"]) {
                 NSArray *navSections = [row.navSections isKindOfClass:[NSArray class]] ? row.navSections : nil;
                 NSMutableArray *newNavSections = [NSMutableArray array];
