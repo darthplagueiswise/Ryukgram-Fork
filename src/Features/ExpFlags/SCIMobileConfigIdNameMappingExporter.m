@@ -1,6 +1,7 @@
 #import "SCIMobileConfigIdNameMappingExporter.h"
 #import "SCIMobileConfigMapping.h"
 #import "SCIDexKitNameResolver.h"
+#import <objc/message.h>
 
 NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotification = @"SCIMobileConfigIdNameMappingExporterDidUpdateNotification";
 
@@ -123,7 +124,36 @@ static void SCIIdMapSetStatus(NSString *status) {
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
+
+static id SCIIdMapCallClass0(Class cls, NSString *selName) { if (!cls || !selName.length) return nil; SEL sel=NSSelectorFromString(selName); if(!class_getClassMethod(cls,sel)) return nil; return ((id(*)(id,SEL))objc_msgSend)((id)cls,sel); }
+static id SCIIdMapCallObj0(id obj, NSString *selName) { if (!obj || !selName.length) return nil; SEL sel=NSSelectorFromString(selName); if(![obj respondsToSelector:sel]) return nil; return ((id(*)(id,SEL))objc_msgSend)(obj,sel); }
+static NSData *SCIIdMapDataFromObject(id obj) { if(!obj) return nil; if([obj isKindOfClass:NSData.class]) return obj; if([obj isKindOfClass:NSString.class]) return [(NSString *)obj dataUsingEncoding:NSUTF8StringEncoding]; if([NSJSONSerialization isValidJSONObject:obj]) return [NSJSONSerialization dataWithJSONObject:obj options:NSJSONWritingPrettyPrinted error:nil]; NSString *d=[obj respondsToSelector:@selector(description)]?[obj description]:@""; return d.length?[d dataUsingEncoding:NSUTF8StringEncoding]:nil; }
+static NSDictionary *SCIIdMapDeprecatedStartupConfigsDump(void) {
+    NSMutableArray<NSString*> *outputs=[NSMutableArray array], *errors=[NSMutableArray array];
+    Class cls=NSClassFromString(@"FBMobileConfigStartupConfigsDeprecated");
+    if(!cls) return @{@"ok":@NO,@"status":@"FBMobileConfigStartupConfigsDeprecated missing",@"outputs":outputs,@"errors":errors};
+    id inst=SCIIdMapCallClass0(cls,@"getInstance");
+    if(!inst) { @try { inst=[[cls alloc] init]; } @catch(__unused id ex) {} }
+    if(!inst) return @{@"ok":@NO,@"status":@"FBMobileConfigStartupConfigsDeprecated instance unavailable",@"outputs":outputs,@"errors":errors};
+    id toJSON=SCIIdMapCallObj0(inst,@"toJSON");
+    id values=SCIIdMapCallObj0(inst,@"configValues") ?: @{};
+    id overrides=SCIIdMapCallObj0(inst,@"configValuesOverride") ?: @{};
+    NSUInteger valuesCount=[values respondsToSelector:@selector(count)]?[values count]:0;
+    NSUInteger overrideCount=[overrides respondsToSelector:@selector(count)]?[overrides count]:0;
+    NSData *raw=SCIIdMapDataFromObject(toJSON);
+    NSData *packed=SCIIdMapDataFromObject(@{@"source":@"FBMobileConfigStartupConfigsDeprecated",@"class":NSStringFromClass(cls)?:@"",@"configValues":values,@"configValuesOverride":overrides,@"configValuesCount":@(valuesCount),@"configValuesOverrideCount":@(overrideCount),@"exportedAt":SCIIdMapISODate([NSDate date])});
+    NSString *home=NSHomeDirectory()?:@"";
+    for(NSString *dir in @[[home stringByAppendingPathComponent:@"Documents/RyukGram/mobileconfig"],[[home stringByAppendingPathComponent:@"Library/Application Support"] stringByAppendingPathComponent:@"RyukGram/mobileconfig"]]) {
+        if(raw.length) SCIIdMapWriteData(raw,[dir stringByAppendingPathComponent:@"igmobile_deprecated_toJSON.json"],outputs,errors);
+        if(packed.length) SCIIdMapWriteData(packed,[dir stringByAppendingPathComponent:@"igmobile_deprecated_configValues.json"],outputs,errors);
+    }
+    NSString *status=[NSString stringWithFormat:@"deprecated startup configs %@ · values=%lu overrides=%lu outputs=%lu",outputs.count?@"exported":@"not exported",(unsigned long)valuesCount,(unsigned long)overrideCount,(unsigned long)outputs.count];
+    return @{@"ok":@(outputs.count>0),@"status":status,@"outputs":outputs,@"errors":errors,@"configValuesCount":@(valuesCount),@"configValuesOverrideCount":@(overrideCount)};
+}
+
 @implementation SCIMobileConfigIdNameMappingExporter
+
++ (NSDictionary *)exportDeprecatedStartupConfigsNow { return SCIIdMapDeprecatedStartupConfigsDump(); }
 
 + (NSArray<NSString *> *)candidateIDNameMappingPaths {
     NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
@@ -156,6 +186,7 @@ static void SCIIdMapSetStatus(NSString *status) {
 
 + (NSDictionary *)exportIDNameMappingNow {
     NSDictionary *probe = [self installNativePathObserver];
+    NSDictionary *deprecatedDump = SCIIdMapDeprecatedStartupConfigsDump();
     NSArray<NSString *> *candidates = [self candidateIDNameMappingPaths];
     NSMutableArray<NSDictionary *> *candidateInfo = [NSMutableArray array];
     NSDictionary *best = nil;
@@ -178,7 +209,7 @@ static void SCIIdMapSetStatus(NSString *status) {
     if (!best) {
         NSString *status = [NSString stringWithFormat:@"id_name_mapping not found · checked=%lu · primary=%@ · native import observe-only", (unsigned long)candidates.count, [SCIMobileConfigMapping primaryIDNameMappingPath] ?: @""];
         SCIIdMapSetStatus(status);
-        return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0, @"nativeImport": @{@"ok": @NO, @"mode": @"observe-only", @"reason": @"no validated active native trigger in sideload-safe mode"}};
+        return @{@"ok": @NO, @"status": status, @"probe": probe ?: @{}, @"checked": @(candidates.count), @"candidates": visibleCandidates, @"count": @0, @"nativeImport": @{@"ok": @NO, @"mode": @"observe-only", @"reason": @"no validated active native trigger in sideload-safe mode"}, @"deprecatedStartupConfigs": deprecatedDump ?: @{}};
     }
 
     NSString *source = SCIIdMapString(best[@"path"]);
@@ -198,7 +229,7 @@ static void SCIIdMapSetStatus(NSString *status) {
     SCIIdMapSetStatus(status);
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIMobileConfigIdNameMappingExporterDidUpdateNotification object:nil];
     [[NSNotificationCenter defaultCenter] postNotificationName:SCIDexKitNameResolverDidUpdateNotification object:nil];
-    return @{@"ok": @(outputs.count > 0), @"status": status, @"source": source ?: @"", @"outputs": outputs, @"errors": errors, @"count": @(count), @"bytes": best[@"bytes"] ?: @0, @"modified": best[@"modified"] ?: @"", @"probe": probe ?: @{}, @"checked": @(candidates.count), @"manifest": manifestPath ?: @"", @"candidates": visibleCandidates};
+    return @{@"ok": @(outputs.count > 0), @"status": status, @"source": source ?: @"", @"outputs": outputs, @"errors": errors, @"count": @(count), @"bytes": best[@"bytes"] ?: @0, @"modified": best[@"modified"] ?: @"", @"probe": probe ?: @{}, @"checked": @(candidates.count), @"manifest": manifestPath ?: @"", @"candidates": visibleCandidates, @"deprecatedStartupConfigs": deprecatedDump ?: @{}};
 }
 
 + (nullable NSString *)lastStatusLine {

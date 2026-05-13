@@ -263,10 +263,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 }
 
 - (BOOL)descriptorNeedsExplicitOverrideConfirmation:(SCIDexKitDescriptor *)d {
-    if([self isConflictDescriptor:d]) return YES;
-    if(!d.observedKnown) return YES;
-    if(d.riskLevel >= 3) return YES;
-    if(!d.forceRecommended) return YES;
+    (void)d;
     return NO;
 }
 - (void)setOverrideValue:(NSNumber *)value descriptor:(SCIDexKitDescriptor *)d {
@@ -288,8 +285,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self presentViewController:a animated:YES completion:nil];
 }
 - (void)forceDescriptor:(SCIDexKitDescriptor *)d value:(BOOL)value {
-    if([self descriptorNeedsExplicitOverrideConfirmation:d]) [self confirmAndForceDescriptor:d value:value];
-    else [self setOverrideValue:@(value) descriptor:d];
+    [self setOverrideValue:@(value) descriptor:d];
 }
 - (void)applySegment:(NSInteger)idx descriptor:(SCIDexKitDescriptor *)d {
     if(idx==0){ [self setOverrideValue:nil descriptor:d]; return; }

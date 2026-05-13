@@ -5,12 +5,10 @@
 #import "SCIDexKitViewController.h"
 #import "SCIEnabledExperimentTogglesViewController.h"
 #import "SCIExperimentRuntimeBrowserViewController.h"
-#import "SCIExpPersistedQueryViewController.h"
 #import "SCIMobileConfigBrokerViewController.h"
 #import "SCIMobileConfigSymbolObserverViewController.h"
 #import "../Features/ExpFlags/SCIExpFlags.h"
 #import "../Features/ExpFlags/SCIAutofillInternalDevMode.h"
-#import "../Features/ExpFlags/SCIPersistedQueryCatalog.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
@@ -269,17 +267,6 @@ static NSArray *developerNavSections(void) {
                                            subtitle:@"Observe MobileConfig symbol access in real-time."
                                                icon:[SCISymbol symbolWithName:@"eye"]
                                      viewController:[SCIMobileConfigSymbolObserverViewController new]],
-                [SCISetting navigationCellWithTitle:@"Persisted GraphQL Mapping"
-                                           subtitle:@"QuickSnap/Instants, Dogfood, Homecoming and client_doc_id operation catalog from schema JSON."
-                                               icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
-                                     viewController:[SCIExpPersistedQueryViewController new]],
-                [SCISetting buttonCellWithTitle:@"Persisted GraphQL Diagnostic"
-                                       subtitle:@"Shows loaded schema source plus priority QuickSnap and Dogfood operation matches."
-                                           icon:[SCISymbol symbolWithName:@"list.bullet.clipboard"]
-                                         action:^{
-                                             [[SCIPersistedQueryCatalog sharedCatalog] reload];
-                                             RYDevShowAlertWithCopy(@"Persisted GraphQL", [[SCIPersistedQueryCatalog sharedCatalog] diagnosticReport]);
-                                         }],
                 [SCISetting buttonCellWithTitle:@"Apply Autofill Defaults"
                                        subtitle:@"Writes Autofill backing defaults for internal dev mode."
                                            icon:[SCISymbol symbolWithName:@"bolt.circle"]
@@ -415,12 +402,12 @@ static NSDictionary *expDevTopSection(void) {
     return @{
         @"header": @"",
         @"rows": @[
-            [SCISetting navigationCellWithTitle:@"Experimental"
-                                       subtitle:@"LiquidGlass, Homecoming, QuickSnap, Direct Notes and UI experiments."
+            [SCISetting navigationCellWithTitle:@"Advanced Experimental Features"
+                                       subtitle:@"Shortcut to Advanced > Advanced Experimental Features."
                                            icon:[SCISymbol symbolWithName:@"testtube.2"]
                                     navSections:experimentalNavSections()],
-            [SCISetting navigationCellWithTitle:@"Developer Mode"
-                                       subtitle:@"Dogfood controllers and read-only diagnostics. No MC hook stack."
+            [SCISetting navigationCellWithTitle:@"Developer"
+                                       subtitle:@"Dogfood controllers, DexKit and read-only MobileConfig diagnostics."
                                            icon:[SCISymbol symbolWithName:@"hammer"]
                                     navSections:developerNavSections()]
         ]
@@ -443,7 +430,9 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
             SCISetting *row = (SCISetting *)rowObj;
 
             if ([row.title isEqualToString:@"Experimental"] ||
+                [row.title isEqualToString:@"Advanced Experimental Features"] ||
                 [row.title isEqualToString:@"Developer Mode"] ||
+                [row.title isEqualToString:@"Developer"] ||
                 [row.title isEqualToString:@"DEV Tests"]) return sections;
 
             if ([row.title isEqualToString:@"General"]) {
@@ -473,7 +462,6 @@ static NSArray *new_sections_exp(id self, SEL _cmd) {
 
 %ctor {
     [SCIAutofillInternalDevMode registerDefaults];
-    [SCIPersistedQueryCatalog prewarmInBackground];
     Class cls = NSClassFromString(@"SCITweakSettings");
     if (!cls) return;
     Class meta = object_getClass(cls);

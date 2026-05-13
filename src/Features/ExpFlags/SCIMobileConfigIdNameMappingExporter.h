@@ -7,6 +7,7 @@ extern NSString * const SCIMobileConfigIdNameMappingExporterDidUpdateNotificatio
 @interface SCIMobileConfigIdNameMappingExporter : NSObject
 
 + (NSDictionary *)exportIDNameMappingNow;
++ (NSDictionary *)exportDeprecatedStartupConfigsNow;
 + (NSDictionary *)installNativePathObserver;
 + (NSArray<NSString *> *)candidateIDNameMappingPaths;
 + (nullable NSString *)lastStatusLine;
