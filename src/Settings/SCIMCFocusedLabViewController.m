@@ -9,12 +9,13 @@ extern void SCIInstallFocusedObjCGetterObserver(void);
 
 static NSString *const kSCIMCFocusEnabledKey = @"sci_exp_mc_objc_focus_enabled";
 static NSString *const kSCIMCFocusTargetKey = @"sci_exp_mc_objc_focus_target";
+static NSString *const kSCIMCFocusHiddenKeywordsKey = @"sci_exp_mc_hidden_keywords";
 static const void *kSCIMCFocusSwitchKey = &kSCIMCFocusSwitchKey;
 
 typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     SCIMCFocusedResultModeAll = 0,
-    SCIMCFocusedResultModeWouldChange,
     SCIMCFocusedResultModeForced,
+    SCIMCFocusedResultModeHidden,
 };
 
 @interface SCIMCFocusedLabRow : NSObject
@@ -31,9 +32,9 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 @property (nonatomic, copy) NSString *original;
 @property (nonatomic, copy) NSString *overrideKey;
 @property (nonatomic, assign) NSUInteger hits;
-@property (nonatomic, assign) BOOL wouldChange;
 @property (nonatomic, assign) BOOL hasOriginal;
 @property (nonatomic, assign) BOOL originalValue;
+@property (nonatomic, copy) NSString *searchCache;
 @end
 @implementation SCIMCFocusedLabRow
 @end
@@ -68,8 +69,9 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     [udInit synchronize];
 
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Bulk" style:UIBarButtonItemStylePlain target:self action:@selector(showBulkMenu)];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Hidden" style:UIBarButtonItemStylePlain target:self action:@selector(configureHiddenKeywords)];
 
-    self.resultSeg = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Would", @"Forced"]];
+    self.resultSeg = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Forced", @"Hidden"]];
     self.resultSeg.selectedSegmentIndex = SCIMCFocusedResultModeAll;
     self.resultSeg.translatesAutoresizingMaskIntoConstraints = NO;
     [self.resultSeg addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];
@@ -330,19 +332,20 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     NSMutableArray<SCIMCFocusedLabRow *> *rows = [NSMutableArray array];
     NSString *q = self.query.lowercaseString ?: @"";
     NSInteger mode = self.resultSeg.selectedSegmentIndex;
+    NSArray<NSString *> *hiddenKeywords = [self hiddenKeywords];
 
     for (SCIExpMCObservation *o in [SCIExpFlags allMCObservations] ?: @[]) {
         if (![self observation:o matchesTarget:target]) continue;
         SCIMCFocusedLabRow *r = [self rowFromObservation:o];
+        BOOL hidden = [self row:r matchesAnyKeyword:hiddenKeywords];
         SCIExpFlagOverride ov = [SCIExpFlags overrideForName:r.overrideKey];
-        if (mode == SCIMCFocusedResultModeWouldChange && !r.wouldChange) continue;
         if (mode == SCIMCFocusedResultModeForced && ov == SCIExpFlagOverrideOff) continue;
-        if (q.length && ![[self searchableStringForRow:r] containsString:q]) continue;
+        if (mode == SCIMCFocusedResultModeHidden && !hidden) continue;
+        if (q.length && ![r.searchCache containsString:q]) continue;
         [rows addObject:r];
     }
 
     self.rows = [rows sortedArrayUsingComparator:^NSComparisonResult(SCIMCFocusedLabRow *a, SCIMCFocusedLabRow *b) {
-        if (a.wouldChange != b.wouldChange) return a.wouldChange ? NSOrderedAscending : NSOrderedDescending;
         if (a.hits != b.hits) return a.hits > b.hits ? NSOrderedAscending : NSOrderedDescending;
         return [a.name caseInsensitiveCompare:b.name];
     }];
@@ -374,7 +377,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     BOOL parsed = NO;
     r.originalValue = [self boolValueFromString:r.original parsed:&parsed];
     r.hasOriginal = parsed;
-    r.wouldChange = [r.detail containsString:@"wouldChangeIfTrue=1"] || (parsed && !r.originalValue);
+    r.searchCache = [self searchableStringForRow:r];
     return r;
 }
 
@@ -392,7 +395,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     SCIExpFlagOverride ov = [SCIExpFlags overrideForName:r.overrideKey];
     if (ov == SCIExpFlagOverrideTrue) return YES;
     if (ov == SCIExpFlagOverrideFalse) return NO;
-    return r.hasOriginal ? r.originalValue : !r.wouldChange;
+    return r.hasOriginal ? r.originalValue : NO;
 }
 
 - (NSString *)searchableStringSeedForRow:(SCIMCFocusedLabRow *)r {
@@ -400,6 +403,53 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 }
 
 - (NSString *)searchableStringForRow:(SCIMCFocusedLabRow *)r { return [[self searchableStringSeedForRow:r] stringByAppendingFormat:@" %@", r.category.lowercaseString ?: @""]; }
+- (NSArray<NSString *> *)hiddenKeywords {
+    NSArray *raw = [[NSUserDefaults standardUserDefaults] arrayForKey:kSCIMCFocusHiddenKeywordsKey];
+    if (![raw isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    for (id item in raw) {
+        NSString *s = [[item isKindOfClass:NSString.class] ? item : @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+        if (s.length) [out addObject:s];
+    }
+    return out;
+}
+- (BOOL)row:(SCIMCFocusedLabRow *)r matchesAnyKeyword:(NSArray<NSString *> *)keywords {
+    if (!keywords.count) return NO;
+    NSString *hay = r.searchCache ?: @"";
+    for (NSString *k in keywords) if ([hay containsString:k]) return YES;
+    return NO;
+}
+- (void)configureHiddenKeywords {
+    NSArray<NSString *> *current = [self hiddenKeywords];
+    NSString *existing = [current componentsJoinedByString:@", "];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Hidden keywords" message:@"Separe por virgula. Ex: directnotes, quicksnap, dogfood" preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"keyword1, keyword2";
+        tf.text = existing;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Limpar" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:kSCIMCFocusHiddenKeywordsKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self refresh];
+        [SCIUtils showSuccessHUDWithDescription:@"Hidden keywords limpas"];
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Salvar" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x) {
+        NSString *text = a.textFields.firstObject.text ?: @"";
+        NSMutableArray<NSString *> *words = [NSMutableArray array];
+        for (NSString *part in [text componentsSeparatedByString:@","]) {
+            NSString *s = [part stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+            if (s.length) [words addObject:s];
+        }
+        [[NSUserDefaults standardUserDefaults] setObject:words forKey:kSCIMCFocusHiddenKeywordsKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self refresh];
+        [SCIUtils showSuccessHUDWithDescription:[NSString stringWithFormat:@"%lu hidden keyword(s)", (unsigned long)words.count]];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
 
 - (NSString *)categoryForText:(NSString *)hay {
     if ([self string:hay containsAny:@[@"employee", @"dogfood", @"dogfooding", @"internal", @"test_user", @"devoptions"]]) return @"Dogfood";
@@ -429,7 +479,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     NSMutableArray *out = [NSMutableArray array];
     for (SCIMCFocusedLabRow *r in self.rows ?: @[]) {
         SCIExpFlagOverride ov = [SCIExpFlags overrideForName:r.overrideKey];
-        [out addObject:@{@"scope": [self activeTargetKey] ?: @"", @"gate": r.gate ?: @"", @"param_id_hex": r.paramHex ?: @"", @"param_id": @(r.paramID), @"name": r.name ?: @"", @"category": r.category ?: @"", @"original": r.original ?: @"", @"effective": @([self effectiveValueForRow:r]), @"would_change_if_true": @(r.wouldChange), @"override_key": r.overrideKey ?: @"", @"override": @(ov), @"hits": @(r.hits), @"detail": r.detail ?: @""}];
+        [out addObject:@{@"scope": [self activeTargetKey] ?: @"", @"gate": r.gate ?: @"", @"param_id_hex": r.paramHex ?: @"", @"param_id": @(r.paramID), @"name": r.name ?: @"", @"category": r.category ?: @"", @"original": r.original ?: @"", @"effective": @([self effectiveValueForRow:r]), @"override_key": r.overrideKey ?: @"", @"override": @(ov), @"hits": @(r.hits), @"detail": r.detail ?: @""}];
     }
     return out;
 }
@@ -437,7 +487,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 - (NSString *)exportJSON { NSData *d = [NSJSONSerialization dataWithJSONObject:[self exportRows] options:NSJSONWritingPrettyPrinted error:nil]; return [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"[]"; }
 - (NSString *)csvEscape:(id)obj { NSString *s = [obj respondsToSelector:@selector(description)] ? [obj description] : @""; s = [s stringByReplacingOccurrencesOfString:@"\"" withString:@"\"\""]; return [NSString stringWithFormat:@"\"%@\"", s]; }
 - (NSString *)exportCSV {
-    NSArray *keys = @[@"scope", @"gate", @"param_id_hex", @"name", @"category", @"original", @"effective", @"would_change_if_true", @"override_key", @"override", @"hits", @"detail"];
+    NSArray *keys = @[@"scope", @"gate", @"param_id_hex", @"name", @"category", @"original", @"effective", @"override_key", @"override", @"hits", @"detail"];
     NSMutableArray *lines = [NSMutableArray arrayWithObject:[keys componentsJoinedByString:@","]];
     for (NSDictionary *row in [self exportRows]) { NSMutableArray *cols = [NSMutableArray array]; for (NSString *k in keys) [cols addObject:[self csvEscape:row[k] ?: @""]]; [lines addObject:[cols componentsJoinedByString:@","]]; }
     return [lines componentsJoinedByString:@"\n"];
@@ -447,7 +497,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Focused MC bulk" message:[NSString stringWithFormat:@"%@\n%lu visible rows", [self activeTargetKey], (unsigned long)self.rows.count] preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy JSON dump" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { UIPasteboard.generalPasteboard.string = [self exportJSON]; [SCIUtils showSuccessHUDWithDescription:@"JSON copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy CSV dump" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { UIPasteboard.generalPasteboard.string = [self exportCSV]; [SCIUtils showSuccessHUDWithDescription:@"CSV copied"]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force ON visible would-change" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self bulkForceWouldChange]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force ON visible" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self bulkForceVisible]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Clear overrides in visible rows" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [self bulkClearVisible]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy id_name_mapping status" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { UIPasteboard.generalPasteboard.string = [SCIMobileConfigMapping mappingStatusLine] ?: @""; [SCIUtils showSuccessHUDWithDescription:@"Mapping status copied"]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
@@ -455,10 +505,10 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
-- (void)bulkForceWouldChange {
+- (void)bulkForceVisible {
     NSUInteger n = 0;
     for (SCIMCFocusedLabRow *r in self.rows) {
-        if (!r.wouldChange || !r.overrideKey.length) continue;
+        if (!r.overrideKey.length) continue;
         [SCIExpFlags setOverride:SCIExpFlagOverrideTrue forName:r.overrideKey];
         n++;
     }
@@ -484,7 +534,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Gate / getter target" : @"Observed bools for selected target"; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return @"Selecione UM getter/gate por vez. Depois abra a tela relevante no Instagram e volte aqui para ver só os bools que passaram por esse caminho.";
-    return @"O switch mostra o valor efetivo. Tocar no switch cria override só para aquele param/nome. Use Bulk para exportar ou forçar linhas visíveis.";
+    return @"O switch aplica override direto. Hidden usa palavras-chave configuraveis no botao Hidden.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -508,7 +558,7 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
     SCIMCFocusedLabRow *r = self.rows[(NSUInteger)indexPath.row];
     SCIExpFlagOverride ov = [SCIExpFlags overrideForName:r.overrideKey];
     NSString *ovText = ov == SCIExpFlagOverrideTrue ? @"FORCED ON" : (ov == SCIExpFlagOverrideFalse ? @"FORCED OFF" : @"default");
-    cell.textLabel.text = [NSString stringWithFormat:@"[%@] %@ %@%@", r.category ?: @"", r.name ?: @"", r.paramHex ?: @"", r.wouldChange ? @" WOULD_TRUE" : @""];
+    cell.textLabel.text = [NSString stringWithFormat:@"[%@] %@ %@", r.category ?: @"", r.name ?: @"", r.paramHex ?: @""];
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
     cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · original=%@ · effective=%@ · override=%@ · ×%lu", r.gate ?: @"", r.original ?: @"?", [self effectiveValueForRow:r] ? @"YES" : @"NO", ovText, (unsigned long)r.hits];
     cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
@@ -539,18 +589,8 @@ typedef NS_ENUM(NSInteger, SCIMCFocusedResultMode) {
 
     SCIMCFocusedLabRow *r = self.rows[(NSUInteger)indexPath.row];
     NSString *msg = [NSString stringWithFormat:@"gate=%@\nparam=%@\nname=%@\ncategory=%@\noriginal=%@\neffective=%@\noverrideKey=%@\nhits=%lu\n\n%@", r.gate ?: @"", r.paramHex ?: @"", r.name ?: @"", r.category ?: @"", r.original ?: @"", [self effectiveValueForRow:r] ? @"YES" : @"NO", r.overrideKey ?: @"", (unsigned long)r.hits, r.detail ?: @""];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:r.name ?: @"MC param" message:msg preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy row" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { UIPasteboard.generalPasteboard.string = msg; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"No override" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [SCIExpFlags setOverride:SCIExpFlagOverrideOff forName:r.overrideKey]; [self refresh]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [SCIExpFlags setOverride:SCIExpFlagOverrideTrue forName:r.overrideKey]; [self refresh]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { [SCIExpFlags setOverride:SCIExpFlagOverrideFalse forName:r.overrideKey]; [self refresh]; }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (sheet.popoverPresentationController) {
-        UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-        sheet.popoverPresentationController.sourceView = cell ?: self.view;
-        sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
+    UIPasteboard.generalPasteboard.string = msg;
+    [SCIUtils showSuccessHUDWithDescription:@"Row copied"];
 }
 
 #pragma mark - Search

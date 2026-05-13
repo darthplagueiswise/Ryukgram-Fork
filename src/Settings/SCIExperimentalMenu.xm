@@ -430,10 +430,6 @@ static NSDictionary *expDevTopSection(void) {
     return @{
         @"header": @"",
         @"rows": @[
-            [SCISetting navigationCellWithTitle:@"Experimental"
-                                       subtitle:@"LiquidGlass, Homecoming, QuickSnap, Direct Notes and UI experiments."
-                                           icon:[SCISymbol symbolWithName:@"testtube.2"]
-                                    navSections:experimentalNavSections()],
             [SCISetting navigationCellWithTitle:@"Developer Mode"
                                        subtitle:@"Dogfood controllers and read-only diagnostics. No MC hook stack."
                                            icon:[SCISymbol symbolWithName:@"hammer"]

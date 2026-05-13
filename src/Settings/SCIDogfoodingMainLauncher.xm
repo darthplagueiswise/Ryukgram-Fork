@@ -388,18 +388,27 @@ void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
         NSLog(@"[RyukGram][Dogfood] notes abort: no presenter");
         return;
     }
-    RYDogShowAlert(presenter,
-                   @"Dogfooding Notes disabled",
-                   @"This native Direct Notes dogfooding opener is disabled in dev2 because it crashes this Instagram build. Direct Notes feature flags remain handled by ExpFlags.");
-    return;
-
     Class notesClass = RYDogResolveClass(@[
         @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
-        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs"
+        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettings"
     ]);
-    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
-    Method notesMethod = notesClass ? class_getClassMethod(notesClass, notesSel) : NULL;
-    if (!notesClass || !notesMethod) {
+    NSArray<NSString *> *selectors = @[
+        @"notesDogfoodingSettingsOpenOnViewController:userSession:",
+        @"openOnViewController:userSession:"
+    ];
+    SEL notesSel = NULL;
+    Method notesMethod = NULL;
+    for (NSString *selName in selectors) {
+        SEL candidate = NSSelectorFromString(selName);
+        Method candidateMethod = notesClass ? class_getClassMethod(notesClass, candidate) : NULL;
+        if (candidateMethod) {
+            notesSel = candidate;
+            notesMethod = candidateMethod;
+            break;
+        }
+    }
+    if (!notesClass || !notesMethod || !notesSel) {
         RYDogShowAlert(presenter, @"Dogfooding Notes", @"Runtime não expôs +notesDogfoodingSettingsOpenOnViewController:userSession: nesta build.");
         return;
     }
