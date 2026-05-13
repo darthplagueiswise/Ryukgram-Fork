@@ -10,41 +10,8 @@
 @end
 
 @implementation SCINumericCatalogCell
-- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
-    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
-    if (!self) return nil;
-    self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-    self.contentView.backgroundColor = self.backgroundColor;
-    _title = [UILabel new];
-    _title.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
-    _title.numberOfLines = 2;
-    _title.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_title];
-    _detail = [UILabel new];
-    _detail.font = [UIFont systemFontOfSize:10];
-    _detail.textColor = UIColor.secondaryLabelColor;
-    _detail.numberOfLines = 4;
-    _detail.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_detail];
-    _state = [[UISegmentedControl alloc] initWithItems:@[@"System", @"OFF", @"ON"]];
-    _state.translatesAutoresizingMaskIntoConstraints = NO;
-    [_state addTarget:self action:@selector(stateChanged) forControlEvents:UIControlEventValueChanged];
-    [self.contentView addSubview:_state];
-    [NSLayoutConstraint activateConstraints:@[
-        [_state.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [_state.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],
-        [_state.widthAnchor constraintEqualToConstant:176],
-        [_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:9],
-        [_title.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
-        [_title.trailingAnchor constraintEqualToAnchor:_state.leadingAnchor constant:-8],
-        [_detail.topAnchor constraintEqualToAnchor:_title.bottomAnchor constant:3],
-        [_detail.leadingAnchor constraintEqualToAnchor:_title.leadingAnchor],
-        [_detail.trailingAnchor constraintEqualToAnchor:_title.trailingAnchor],
-        [_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-9]
-    ]];
-    return self;
-}
-- (void)stateChanged { if (self.changed) self.changed(self.state.selectedSegmentIndex); }
+- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier { self=[super initWithStyle:style reuseIdentifier:reuseIdentifier]; if(!self)return nil; self.backgroundColor=UIColor.secondarySystemGroupedBackgroundColor; self.contentView.backgroundColor=self.backgroundColor; _title=[UILabel new]; _title.font=[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]; _title.numberOfLines=2; _title.translatesAutoresizingMaskIntoConstraints=NO; [self.contentView addSubview:_title]; _detail=[UILabel new]; _detail.font=[UIFont systemFontOfSize:10]; _detail.textColor=UIColor.secondaryLabelColor; _detail.numberOfLines=4; _detail.translatesAutoresizingMaskIntoConstraints=NO; [self.contentView addSubview:_detail]; _state=[[UISegmentedControl alloc] initWithItems:@[@"System",@"OFF",@"ON"]]; _state.translatesAutoresizingMaskIntoConstraints=NO; [_state addTarget:self action:@selector(stateChanged) forControlEvents:UIControlEventValueChanged]; [self.contentView addSubview:_state]; [NSLayoutConstraint activateConstraints:@[[_state.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],[_state.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],[_state.widthAnchor constraintEqualToConstant:176],[_title.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:9],[_title.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],[_title.trailingAnchor constraintEqualToAnchor:_state.leadingAnchor constant:-8],[_detail.topAnchor constraintEqualToAnchor:_title.bottomAnchor constant:3],[_detail.leadingAnchor constraintEqualToAnchor:_title.leadingAnchor],[_detail.trailingAnchor constraintEqualToAnchor:_title.trailingAnchor],[_detail.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-9]]]; return self; }
+- (void)stateChanged { if(self.changed) self.changed(self.state.selectedSegmentIndex); }
 @end
 
 @interface SCINumericCatalogViewController () <UISearchResultsUpdating>
@@ -55,117 +22,21 @@
 @end
 
 @implementation SCINumericCatalogViewController
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"Numeric MC Catalog";
-    self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    [self.tableView registerClass:SCINumericCatalogCell.class forCellReuseIdentifier:@"numeric"];
-    self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importFromPasteboard)],
-        [[UIBarButtonItem alloc] initWithTitle:@"Reload" style:UIBarButtonItemStylePlain target:self action:@selector(reloadCatalog)]
-    ];
-    UISearchController *sc = [[UISearchController alloc] initWithSearchResultsController:nil];
-    sc.searchResultsUpdater = self;
-    sc.obscuresBackgroundDuringPresentation = NO;
-    sc.searchBar.placeholder = @"Search label, id, group, evidence";
-    self.navigationItem.searchController = sc;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.searchController = sc;
-    [self rebuildRows];
-}
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    self.query = searchController.searchBar.text ?: @"";
-    [self rebuildRows];
-}
+- (void)viewDidLoad { [super viewDidLoad]; self.title=@"Numeric MC Catalog"; self.tableView.backgroundColor=UIColor.systemGroupedBackgroundColor; [self.tableView registerClass:SCINumericCatalogCell.class forCellReuseIdentifier:@"numeric"]; self.navigationItem.rightBarButtonItems=@[[[UIBarButtonItem alloc] initWithTitle:@"Import" style:UIBarButtonItemStylePlain target:self action:@selector(importFromPasteboard)],[[UIBarButtonItem alloc] initWithTitle:@"Reload" style:UIBarButtonItemStylePlain target:self action:@selector(reloadCatalog)]]; UISearchController *sc=[[UISearchController alloc] initWithSearchResultsController:nil]; sc.searchResultsUpdater=self; sc.obscuresBackgroundDuringPresentation=NO; sc.searchBar.placeholder=@"Search label, id, group, evidence"; self.navigationItem.searchController=sc; self.navigationItem.hidesSearchBarWhenScrolling=NO; self.searchController=sc; [self rebuildRows]; }
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { self.query=searchController.searchBar.text ?: @""; [self rebuildRows]; }
 - (void)reloadCatalog { [SCINumericMCCatalog reload]; [self rebuildRows]; }
-- (void)rebuildRows {
-    NSMutableDictionary *map = [NSMutableDictionary dictionary];
-    NSMutableArray *groups = [NSMutableArray array];
-    NSArray *baseGroups = [SCINumericMCCatalog allFeatureGroups];
-    for (NSString *group in baseGroups) {
-        NSArray *rows = [SCINumericMCCatalog entriesMatchingQuery:self.query group:group];
-        if (!rows.count) continue;
-        map[group] = rows;
-        [groups addObject:group];
-    }
-    NSArray *ungrouped = [SCINumericMCCatalog entriesMatchingQuery:self.query group:nil];
-    if (!baseGroups.count && ungrouped.count) { map[@"all"] = ungrouped; [groups addObject:@"all"]; }
-    self.groups = groups;
-    self.rowsByGroup = map;
-    [self.tableView reloadData];
-}
-- (void)importFromPasteboard {
-    NSString *text = UIPasteboard.generalPasteboard.string ?: @"";
-    NSData *data = [text dataUsingEncoding:NSUTF8StringEncoding];
-    NSError *err = nil;
-    BOOL ok = [SCINumericMCCatalog installCatalogJSONData:data error:&err];
-    NSString *msg = ok ? [NSString stringWithFormat:@"Imported %lu entries.\n%@", (unsigned long)[SCINumericMCCatalog entryCount], [SCINumericMCCatalog catalogPath]] : (err.localizedDescription ?: @"Pasteboard does not contain a valid sci_numeric_mc_overrides.json");
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:ok ? @"Catalog imported" : @"Import failed" message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
-    if (ok) [self rebuildRows];
-}
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.groups.count + 1; }
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 1;
-    return self.rowsByGroup[self.groups[section - 1]].count;
-}
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section == 0 ? @"Catalog" : self.groups[section - 1]; }
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Paste the generated sci_numeric_mc_overrides.json and tap Import. Rows write mcbr:ig:<hex> values only when changed manually.";
-    return nil;
-}
-- (UITableViewCell *)infoCell {
-    UITableViewCell *c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    c.textLabel.text = [NSString stringWithFormat:@"%lu entries", (unsigned long)[SCINumericMCCatalog entryCount]];
-    c.detailTextLabel.text = [SCINumericMCCatalog sourceDescription];
-    c.detailTextLabel.numberOfLines = 0;
-    c.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-    return c;
-}
-- (SCINumericMCEntry *)entryAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section == 0) return nil;
-    NSArray *rows = self.rowsByGroup[self.groups[indexPath.section - 1]];
-    return indexPath.row < rows.count ? rows[indexPath.row] : nil;
-}
-- (NSInteger)segmentForEntry:(SCINumericMCEntry *)e {
-    id v = [[NSUserDefaults standardUserDefaults] objectForKey:e.overrideKey];
-    if (![v isKindOfClass:NSNumber.class]) return 0;
-    return [v boolValue] ? 2 : 1;
-}
-- (void)setSegment:(NSInteger)idx entry:(SCINumericMCEntry *)e {
-    NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-    if (idx == 0) [defs removeObjectForKey:e.overrideKey];
-    else [defs setBool:(idx == 2) forKey:e.overrideKey];
-    [defs setBool:YES forKey:@"mcbr.hook:ig"];
-    [defs synchronize];
-    [self.tableView reloadData];
-}
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section == 0) return [self infoCell];
-    SCINumericMCEntry *e = [self entryAtIndexPath:indexPath];
-    SCINumericCatalogCell *c = [tableView dequeueReusableCellWithIdentifier:@"numeric" forIndexPath:indexPath];
-    c.title.text = e.displayTitle;
-    c.detail.text = e.displaySubtitle;
-    c.state.selectedSegmentIndex = [self segmentForEntry:e];
-    __weak typeof(self) ws = self;
-    c.changed = ^(NSInteger idx) { [ws setSegment:idx entry:e]; };
-    return c;
-}
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    SCINumericMCEntry *e = [self entryAtIndexPath:indexPath];
-    if (!e) return;
-    NSString *msg = [NSString stringWithFormat:@"%@\n\n%@\n\nsource=%@\nclassification=%@\nvmaddr=%@\nfileoff=%@\nkey=%@\n\n%@", e.specifierHex, e.displaySubtitle, e.source, e.classification, e.vmaddr, e.fileoff, e.overrideKey, [e.evidence componentsJoinedByString:@"\n"]];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:e.displayTitle message:msg preferredStyle:UIAlertControllerStyleActionSheet];
-    [a addAction:[UIAlertAction actionWithTitle:@"Copy ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = e.specifierHex; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string = e.overrideKey; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [self setSegment:2 entry:e]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [self setSegment:1 entry:e]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [self setSegment:0 entry:e]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    if (a.popoverPresentationController) { a.popoverPresentationController.sourceView = cell; a.popoverPresentationController.sourceRect = cell.bounds; }
-    [self presentViewController:a animated:YES completion:nil];
-}
+- (void)rebuildRows { NSMutableDictionary *map=[NSMutableDictionary dictionary]; NSMutableArray *groups=[NSMutableArray array]; NSArray *baseGroups=[SCINumericMCCatalog allFeatureGroups]; for(NSString *group in baseGroups){ NSArray *rows=[SCINumericMCCatalog entriesMatchingQuery:self.query group:group]; if(!rows.count)continue; map[group]=rows; [groups addObject:group]; } NSArray *ungrouped=[SCINumericMCCatalog entriesMatchingQuery:self.query group:nil]; if(!baseGroups.count&&ungrouped.count){ map[@"all"]=ungrouped; [groups addObject:@"all"]; } self.groups=groups; self.rowsByGroup=map; [self.tableView reloadData]; }
+- (void)importFromPasteboard { NSString *text=UIPasteboard.generalPasteboard.string ?: @""; NSData *data=[text dataUsingEncoding:NSUTF8StringEncoding]; NSError *err=nil; BOOL ok=[SCINumericMCCatalog installCatalogJSONData:data error:&err]; NSString *msg=ok?[NSString stringWithFormat:@"Imported %lu entries.\n%@",(unsigned long)[SCINumericMCCatalog entryCount],[SCINumericMCCatalog catalogPath]]:(err.localizedDescription ?: @"Pasteboard does not contain a valid sci_numeric_mc_overrides.json"); UIAlertController *a=[UIAlertController alertControllerWithTitle:ok?@"Catalog imported":@"Import failed" message:msg preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]]; [self presentViewController:a animated:YES completion:nil]; if(ok)[self rebuildRows]; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return self.groups.count+1; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { if(section==0)return 1; return self.rowsByGroup[self.groups[section-1]].count; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { return section==0?@"Catalog":self.groups[section-1]; }
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { if(section==0)return @"Paste the generated JSON and tap Import. Rows are indexed as mcbr:ig:<hex> only when changed manually."; return nil; }
+- (UITableViewCell *)infoCell { UITableViewCell *c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil]; c.textLabel.text=[NSString stringWithFormat:@"%lu entries",(unsigned long)[SCINumericMCCatalog entryCount]]; c.detailTextLabel.text=[SCINumericMCCatalog sourceDescription]; c.detailTextLabel.numberOfLines=0; c.backgroundColor=UIColor.secondarySystemGroupedBackgroundColor; return c; }
+- (SCINumericMCEntry *)entryAtIndexPath:(NSIndexPath *)indexPath { if(indexPath.section==0)return nil; NSArray *rows=self.rowsByGroup[self.groups[indexPath.section-1]]; return indexPath.row<rows.count?rows[indexPath.row]:nil; }
+- (NSInteger)segmentForEntry:(SCINumericMCEntry *)e { id v=[[NSUserDefaults standardUserDefaults] objectForKey:e.overrideKey]; if(![v isKindOfClass:NSNumber.class])return 0; return [v boolValue]?2:1; }
+- (void)addValue:(id)value toArrayDefault:(NSString *)key { if(!key.length||!value)return; NSUserDefaults *defs=NSUserDefaults.standardUserDefaults; NSMutableOrderedSet *set=[NSMutableOrderedSet orderedSetWithArray:([defs objectForKey:key] ?: @[])]; [set addObject:value]; [defs setObject:set.array forKey:key]; }
+- (void)removeValue:(id)value fromArrayDefault:(NSString *)key { if(!key.length||!value)return; NSUserDefaults *defs=NSUserDefaults.standardUserDefaults; NSMutableOrderedSet *set=[NSMutableOrderedSet orderedSetWithArray:([defs objectForKey:key] ?: @[])]; [set removeObject:value]; [defs setObject:set.array forKey:key]; }
+- (void)setSegment:(NSInteger)idx entry:(SCINumericMCEntry *)e { NSUserDefaults *defs=NSUserDefaults.standardUserDefaults; if(idx==0){ [defs removeObjectForKey:e.overrideKey]; [self removeValue:e.overrideKey fromArrayDefault:@"mcbr.idx"]; } else { [defs setBool:(idx==2) forKey:e.overrideKey]; [self addValue:e.overrideKey toArrayDefault:@"mcbr.idx"]; [defs setBool:YES forKey:@"mcbr.hook:ig"]; [self addValue:@"ig" toArrayDefault:@"mcbr.hooks"]; } [defs synchronize]; [self.tableView reloadData]; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath { if(indexPath.section==0)return [self infoCell]; SCINumericMCEntry *e=[self entryAtIndexPath:indexPath]; SCINumericCatalogCell *c=[tableView dequeueReusableCellWithIdentifier:@"numeric" forIndexPath:indexPath]; c.title.text=e.displayTitle; c.detail.text=e.displaySubtitle; c.state.selectedSegmentIndex=[self segmentForEntry:e]; __weak typeof(self) ws=self; c.changed=^(NSInteger idx){ [ws setSegment:idx entry:e]; }; return c; }
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath { [tableView deselectRowAtIndexPath:indexPath animated:YES]; SCINumericMCEntry *e=[self entryAtIndexPath:indexPath]; if(!e)return; NSString *msg=[NSString stringWithFormat:@"%@\n\n%@\n\nsource=%@\nclassification=%@\nvmaddr=%@\nfileoff=%@\nkey=%@\n\n%@",e.specifierHex,e.displaySubtitle,e.source,e.classification,e.vmaddr,e.fileoff,e.overrideKey,[e.evidence componentsJoinedByString:@"\n"]]; UIAlertController *a=[UIAlertController alertControllerWithTitle:e.displayTitle message:msg preferredStyle:UIAlertControllerStyleActionSheet]; [a addAction:[UIAlertAction actionWithTitle:@"Copy ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ UIPasteboard.generalPasteboard.string=e.specifierHex; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Copy key" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ UIPasteboard.generalPasteboard.string=e.overrideKey; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ [self setSegment:2 entry:e]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ [self setSegment:1 entry:e]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"System" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction*x){ [self setSegment:0 entry:e]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; UITableViewCell *cell=[tableView cellForRowAtIndexPath:indexPath]; if(a.popoverPresentationController){ a.popoverPresentationController.sourceView=cell; a.popoverPresentationController.sourceRect=cell.bounds; } [self presentViewController:a animated:YES completion:nil]; }
 @end
