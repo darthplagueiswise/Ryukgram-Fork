@@ -262,21 +262,12 @@ static void RYDogLiveInstall(void) {
     SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
     if (dogEntry && class_getClassMethod(dogEntry, openSel) && !origRYDogLiveOpenWithConfig) MSHookMessageEx(object_getClass(dogEntry), openSel, (IMP)hookRYDogLiveOpenWithConfig, (IMP *)&origRYDogLiveOpenWithConfig);
 
-    Class notesEntry = RYDogLiveResolveClass(@[@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs", @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs"]);
-    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
-    if (notesEntry && class_getClassMethod(notesEntry, notesSel) && !origRYDogLiveNotesOpen) MSHookMessageEx(object_getClass(notesEntry), notesSel, (IMP)hookRYDogLiveNotesOpen, (IMP *)&origRYDogLiveNotesOpen);
-
     class_replaceMethod(NSObject.class, @selector(ryDogOpenMainButtonTapped:), (IMP)RYDogLiveMainAction, "v@:@");
-    class_replaceMethod(NSObject.class, @selector(ryDogOpenNotesButtonTapped:), (IMP)RYDogLiveNotesAction, "v@:@");
 }
 
 __attribute__((constructor))
 static void RYDogLiveNativeHooksInit(void) {
     @autoreleasepool {
-        RYDogLiveInstall();
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ RYDogLiveInstall(); });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ RYDogLiveInstall(); });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ RYDogLiveInstall(); });
-        NSLog(@"[RyukGram][DogfoodLive] live VC native selector hooks loaded");
+        NSLog(@"[RyukGram][DogfoodLive] disabled; SCIDogfoodingMainLauncher owns dogfood hooks in dev2");
     }
 }

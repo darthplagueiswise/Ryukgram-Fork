@@ -155,21 +155,6 @@ static void RYDevOpenMainDogfood(void) {
     RYDogOpenMainFrom(top);
 }
 
-static void RYDevOpenDirectNotesDogfood(void) {
-    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
-    if (!top) { RYDevShowAlert(@"Direct Notes Dogfood unavailable", @"No active presenter was found."); return; }
-    RYDogOpenDirectNotesFrom(top);
-}
-
-static NSArray<NSNumber *> *RYDevDirectNotesDogfoodSpecifiers(void) {
-    return @[
-        @(0x0041094200003249ULL),
-        @(0x004109420005324aULL),
-        @(0x004109420006324bULL),
-        @(0x008106a600231fafULL)
-    ];
-}
-
 static NSString *RYDevMCOverrideDiagnosticsText(void) {
     NSDictionary *diag = SCIMCOverrideDiagnostics();
     NSDictionary *known = SCIMCKnownSpecifiers();
@@ -188,40 +173,6 @@ static NSString *RYDevMCOverrideDiagnosticsText(void) {
 
 static void RYDevShowMCOverrideDiagnostics(void) {
     RYDevShowAlertWithCopy(@"MobileConfig Overrides", RYDevMCOverrideDiagnosticsText());
-}
-
-static void RYDevApplyDirectNotesDogfoodMCOverrides(void) {
-    UIViewController *top = RYDevTopViewControllerFrom(RYDevRootViewController());
-    if (!top) { RYDevShowAlert(@"MobileConfig Overrides", @"No active presenter was found."); return; }
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Enable Direct Notes MC Overrides"
-                                                                   message:@"Writes four Direct Notes dogfooding candidate specifiers to the MobileConfig override table with persist=YES."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Enable" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            NSMutableString *result = [NSMutableString stringWithString:@"Direct Notes dogfooding overrides\n\n"];
-            NSUInteger okCount = 0;
-            for (NSNumber *num in RYDevDirectNotesDogfoodSpecifiers()) {
-                uint64_t spec = num.unsignedLongLongValue;
-                NSString *name = SCIMCParamName(spec) ?: @"unknown";
-                BOOL ok = SCIMCSetBoolOverride(spec, YES, YES);
-                if (ok) okCount++;
-                [result appendFormat:@"0x%016llx (%@) = %@\n", (unsigned long long)spec, name, ok ? @"ON" : @"FAILED"];
-            }
-            NSDictionary *diag = SCIMCOverrideDiagnostics();
-            [result appendFormat:@"\nSuccess: %lu/%lu\nfunctions_available = %@\nmanager_cpp_ptr = %@\noverrides_table_ptr = %@",
-                                  (unsigned long)okCount,
-                                  (unsigned long)RYDevDirectNotesDogfoodSpecifiers().count,
-                                  [diag[@"functions_available"] boolValue] ? @"YES" : @"NO",
-                                  diag[@"manager_cpp_ptr"] ?: @"nil",
-                                  diag[@"overrides_table_ptr"] ?: @"nil"];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                RYDevShowAlertWithCopy(@"Direct Notes MC Overrides", result);
-            });
-        });
-    }]];
-    [top presentViewController:alert animated:YES completion:nil];
 }
 
 static NSArray *experimentalNavSections(void) {
@@ -298,15 +249,7 @@ static NSArray *developerNavSections(void) {
                 [SCISetting buttonCellWithTitle:@"Open Main Dogfood Settings"
                                        subtitle:@"Selector: +[IGDogfoodingSettings openWithConfig:onViewController:userSession:]"
                                            icon:[SCISymbol symbolWithName:@"pawprint.circle"]
-                                         action:^{ RYDevOpenMainDogfood(); }],
-                [SCISetting buttonCellWithTitle:@"Open Direct Notes Dogfood"
-                                       subtitle:@"Selector: +[IGDirectNotesDogfoodingSettingsStaticFuncs notesDogfoodingSettingsOpenOnViewController:userSession:]"
-                                           icon:[SCISymbol symbolWithName:@"bolt.circle"]
-                                         action:^{ RYDevOpenDirectNotesDogfood(); }],
-                [SCISetting buttonCellWithTitle:@"Enable Direct Notes MC Overrides"
-                                       subtitle:@"Manually persists the four Direct Notes dogfooding candidate specifiers."
-                                           icon:[SCISymbol symbolWithName:@"checkmark.seal"]
-                                         action:^{ RYDevApplyDirectNotesDogfoodMCOverrides(); }]
+                                         action:^{ RYDevOpenMainDogfood(); }]
             ]
         },
         @{

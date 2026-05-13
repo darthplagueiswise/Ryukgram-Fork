@@ -6,7 +6,6 @@
 #import "SCIDogfoodingMainLauncher.h"
 
 static const NSInteger RYDogMainButtonTag = 0xD06F00D;
-static const NSInteger RYDogNotesButtonTag = 0xD06F00E;
 
 static __weak id RYDogCachedUserSession = nil;
 static __weak id RYDogCachedConfig = nil;
@@ -389,6 +388,10 @@ void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
         NSLog(@"[RyukGram][Dogfood] notes abort: no presenter");
         return;
     }
+    RYDogShowAlert(presenter,
+                   @"Dogfooding Notes disabled",
+                   @"This native Direct Notes dogfooding opener is disabled in dev2 because it crashes this Instagram build. Direct Notes feature flags remain handled by ExpFlags.");
+    return;
 
     Class notesClass = RYDogResolveClass(@[
         @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
@@ -420,18 +423,12 @@ void RYDogOpenDirectNotesFrom(UIViewController *sourceVC) {
 
 @interface NSObject (RYDogNativeOpeners)
 - (void)ryDogOpenMainButtonTapped:(id)sender;
-- (void)ryDogOpenNotesButtonTapped:(id)sender;
 @end
 
 @implementation NSObject (RYDogNativeOpeners)
 - (void)ryDogOpenMainButtonTapped:(id)sender {
     UIViewController *vc = [self isKindOfClass:UIViewController.class] ? (UIViewController *)self : nil;
     RYDogOpenMainFrom(vc);
-}
-
-- (void)ryDogOpenNotesButtonTapped:(id)sender {
-    UIViewController *vc = [self isKindOfClass:UIViewController.class] ? (UIViewController *)self : nil;
-    RYDogOpenDirectNotesFrom(vc);
 }
 @end
 
@@ -453,21 +450,14 @@ static void RYDogAttachButtons(UIViewController *vc) {
     if (!vc || !vc.view) return;
 
     UIView *existingMain = [vc.view viewWithTag:RYDogMainButtonTag];
-    UIView *existingNotes = [vc.view viewWithTag:RYDogNotesButtonTag];
-    if (existingMain && existingNotes) return;
+    if (existingMain) return;
 
     UILayoutGuide *guide = vc.view.safeAreaLayoutGuide;
-    UIButton *notes = existingNotes ? (UIButton *)existingNotes : RYDogMakeButton(@"Notes", RYDogNotesButtonTag, @selector(ryDogOpenNotesButtonTapped:), vc);
     UIButton *main = existingMain ? (UIButton *)existingMain : RYDogMakeButton(@"Dogfood", RYDogMainButtonTag, @selector(ryDogOpenMainButtonTapped:), vc);
 
-    if (!existingNotes) [vc.view addSubview:notes];
     if (!existingMain) [vc.view addSubview:main];
 
     [NSLayoutConstraint activateConstraints:@[
-        [notes.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:14.0],
-        [notes.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-14.0],
-        [notes.widthAnchor constraintGreaterThanOrEqualToConstant:84.0],
-        [notes.heightAnchor constraintEqualToConstant:36.0],
         [main.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-14.0],
         [main.bottomAnchor constraintEqualToAnchor:guide.bottomAnchor constant:-14.0],
         [main.widthAnchor constraintGreaterThanOrEqualToConstant:104.0],
@@ -529,18 +519,6 @@ static void RYDogInstallRuntimeHooks(void) {
                         openSel,
                         (IMP)hookRYDogNativeOpenWithConfig,
                         (IMP *)&origRYDogNativeOpenWithConfig);
-    }
-
-    Class notesEntry = RYDogResolveClass(@[
-        @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs",
-        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs"
-    ]);
-    SEL notesSel = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
-    if (notesEntry && class_getClassMethod(notesEntry, notesSel) && !origRYDogNativeNotesOpen) {
-        MSHookMessageEx(object_getClass(notesEntry),
-                        notesSel,
-                        (IMP)hookRYDogNativeNotesOpen,
-                        (IMP *)&origRYDogNativeNotesOpen);
     }
 
     Class dogVC = RYDogResolveClass(@[

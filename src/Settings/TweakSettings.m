@@ -675,7 +675,6 @@
                                                                         subtitle:@""
                                                                             icon:nil
                                                                           action:^{ sciPresentTeenIconPicker(); }],
-                                                [self advancedExperimentalShortcutCell],
                                             ]
                                         }]
                 ],
@@ -876,13 +875,6 @@
                                                                                icon:[SCISymbol symbolWithIGName:@"bcn_arrow-ccw_outline_24" fallback:@"arrow.counterclockwise.circle"]
                                                                              action:^(void) { [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"SCInstaFirstRun"]; [SCIUtils showRestartConfirmation];}
                                                 ],
-                                            ]
-                                        },
-                                        @{
-                                            @"header": SCILocalized(@"Advanced experimental features"),
-                                            @"footer": SCILocalized(@"Toggle hidden Instagram experiments. Some may not work on every account or IG version."),
-                                            @"rows": @[
-                                                [self experimentalEntryCell],
                                             ]
                                         }]
                 ],

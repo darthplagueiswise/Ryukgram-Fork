@@ -111,14 +111,5 @@ static NSArray *new_sections_pq(id self, SEL _cmd) {
 }
 
 %ctor {
-    Class cls = NSClassFromString(@"SCITweakSettings");
-    if (!cls) return;
-
-    Class meta = object_getClass(cls);
-    if (!meta) return;
-
-    SEL sel = @selector(sections);
-    if (!class_getInstanceMethod(meta, sel)) return;
-
-    MSHookMessageEx(meta, sel, (IMP)new_sections_pq, (IMP *)&orig_sections_pq);
+    [SCIPersistedQueryCatalog prewarmInBackground];
 }
