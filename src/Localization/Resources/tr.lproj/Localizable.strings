@@ -925,6 +925,7 @@
 
 "Add location" = "Konum ekle";
 "Add preset" = "Hazır ayar ekle";
+"Background" = "Arka plan";
 "Background color" = "Arka plan rengi";
 "Change location" = "Konumu değiştir";
 "Clipboard is not an Instagram URL" = "Pano bir Instagram URL'si değil";
@@ -939,7 +940,9 @@
 "Disable" = "Kapat";
 "Download GIF" = "GIF indir";
 "Dropped pin" = "Bırakılan iğne";
+"Emoji" = "Emoji";
 "Enable" = "Etkinleştir";
+"Enter emoji" = "Emoji girin";
 "Enable Location Services for Instagram in Settings to use your current location." = "Geçerli konumunuzu kullanmak için Ayarlar'da Instagram için Konum Servisleri'ni etkinleştirin.";
 "Fake location" = "Sahte konum";
 "Location access denied" = "Konum erişimi reddedildi";
@@ -954,6 +957,7 @@
 "Select color" = "Renk seç";
 "Set location" = "Konumu ayarla";
 "Text color" = "Metin rengi";
+"Type an emoji to use as the note bubble icon." = "Not balonu simgesi olarak kullanılacak emojiyi yazın.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Geçerli konumunuzu kullanmak için Ayarlar → Gizlilik içinde Konum Servisleri'ni açın.";
 
 "Theme" = "Tema";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "Sıfırlama tamamlandı";
 "Reset selected data?" = "Seçili veriler sıfırlansın mı?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "İkinci taramadan itibaren her tarama bir öncekiyle karşılaştırılır; böylece kazanılan/kaybedilen takipçileri, kendi takip/takip bırakma hareketlerinizi ve profil güncellemelerini gösterebiliriz.";
-"Select all" = "Tümünü seç";
 "Selected data will be cleared. Tap any row to see what's stored." = "Seçili veriler temizlenecek. Nelerin saklandığını görmek için herhangi bir satıra dokunun.";
 "Settings" = "Ayarlar";
 "Sort" = "Sırala";

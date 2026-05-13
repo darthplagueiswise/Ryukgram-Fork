@@ -925,6 +925,7 @@
 
 "Add location" = "新增位置";
 "Add preset" = "新增預設";
+"Background" = "背景";
 "Background color" = "背景顏色";
 "Change location" = "更改位置";
 "Clipboard is not an Instagram URL" = "剪貼簿內容不是 Instagram 網址";
@@ -939,7 +940,9 @@
 "Disable" = "停用";
 "Download GIF" = "下載 GIF";
 "Dropped pin" = "釘選位置";
+"Emoji" = "表情符號";
 "Enable" = "啟用";
+"Enter emoji" = "輸入表情符號";
 "Enable Location Services for Instagram in Settings to use your current location." = "請在設定中為 Instagram 啟用定位服務以使用目前位置。";
 "Fake location" = "假位置";
 "Location access denied" = "定位存取被拒";
@@ -954,6 +957,7 @@
 "Select color" = "選擇顏色";
 "Set location" = "設定位置";
 "Text color" = "文字顏色";
+"Type an emoji to use as the note bubble icon." = "輸入用作便箋氣泡圖示的表情符號。";
 "Turn Location Services on in Settings → Privacy to use your current location." = "請在設定 → 隱私中開啟定位服務以使用目前位置。";
 
 "Theme" = "主題";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "重設完成";
 "Reset selected data?" = "要重設選取的資料嗎？";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "第二次掃描起：每次掃描都會與上一次比較，以顯示增加/失去的粉絲、你自己的追蹤/取消追蹤動作，以及個人檔案更新。";
-"Select all" = "全選";
 "Selected data will be cleared. Tap any row to see what's stored." = "選取的資料將被清除。點擊任一列以檢視已儲存內容。";
 "Settings" = "設定";
 "Sort" = "排序";

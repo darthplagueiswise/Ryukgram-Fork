@@ -925,6 +925,7 @@
 
 "Add location" = "위치 추가";
 "Add preset" = "프리셋 추가";
+"Background" = "배경";
 "Background color" = "배경 색상";
 "Change location" = "위치 변경";
 "Clipboard is not an Instagram URL" = "클립보드가 Instagram URL이 아닙니다";
@@ -939,7 +940,9 @@
 "Disable" = "비활성화";
 "Download GIF" = "GIF 다운로드";
 "Dropped pin" = "놓은 핀";
+"Emoji" = "이모지";
 "Enable" = "활성화";
+"Enter emoji" = "이모지 입력";
 "Enable Location Services for Instagram in Settings to use your current location." = "현재 위치를 사용하려면 설정에서 Instagram의 위치 서비스를 활성화하세요.";
 "Fake location" = "가짜 위치";
 "Location access denied" = "위치 접근이 거부됨";
@@ -954,6 +957,7 @@
 "Select color" = "색상 선택";
 "Set location" = "위치 설정";
 "Text color" = "텍스트 색상";
+"Type an emoji to use as the note bubble icon." = "노트 말풍선 아이콘으로 사용할 이모지를 입력하세요.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "현재 위치를 사용하려면 설정 → 개인정보에서 위치 서비스를 켜세요.";
 
 "Theme" = "테마";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "초기화 완료";
 "Reset selected data?" = "선택한 데이터를 초기화할까요?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "두 번째 분석부터: 매 분석마다 이전과 비교해 새/이탈 팔로워, 본인의 팔로우/언팔로우 변화, 프로필 변경을 보여줍니다.";
-"Select all" = "모두 선택";
 "Selected data will be cleared. Tap any row to see what's stored." = "선택한 데이터가 삭제됩니다. 저장된 내용을 보려면 항목을 탭하세요.";
 "Settings" = "설정";
 "Sort" = "정렬";

@@ -582,7 +582,6 @@
 "Absolute date + time" = "Absolute date + time";
 "How timestamps render in the log" = "How timestamps render in the log";
 "Select" = "Select";
-"Select all" = "Select all";
 "Select messages to download" = "Select messages to download";
 "%lu selected" = "%lu selected";
 "Photos" = "Photos";
@@ -1009,6 +1008,7 @@
 
 "Add location" = "Add location";
 "Add preset" = "Add preset";
+"Background" = "Background";
 "Background color" = "Background color";
 "Change location" = "Change location";
 "Clipboard is not an Instagram URL" = "Clipboard is not an Instagram URL";
@@ -1023,7 +1023,9 @@
 "Disable" = "Disable";
 "Download GIF" = "Download GIF";
 "Dropped pin" = "Dropped pin";
+"Emoji" = "Emoji";
 "Enable" = "Enable";
+"Enter emoji" = "Enter emoji";
 "Enable Location Services for Instagram in Settings to use your current location." = "Enable Location Services for Instagram in Settings to use your current location.";
 "Fake location" = "Fake location";
 "Location access denied" = "Location access denied";
@@ -1038,6 +1040,7 @@
 "Select color" = "Select color";
 "Set location" = "Set location";
 "Text color" = "Text color";
+"Type an emoji to use as the note bubble icon." = "Type an emoji to use as the note bubble icon.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Turn Location Services on in Settings → Privacy to use your current location.";
 
 "Theme" = "Theme";

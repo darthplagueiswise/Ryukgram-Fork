@@ -925,6 +925,7 @@
 
 "Add location" = "Добавить местоположение";
 "Add preset" = "Добавить пресет";
+"Background" = "Фон";
 "Background color" = "Цвет фона";
 "Change location" = "Изменить местоположение";
 "Clipboard is not an Instagram URL" = "В буфере обмена нет ссылки Instagram";
@@ -939,7 +940,9 @@
 "Disable" = "Отключить";
 "Download GIF" = "Скачать GIF";
 "Dropped pin" = "Установленная метка";
+"Emoji" = "Эмодзи";
 "Enable" = "Включить";
+"Enter emoji" = "Введите эмодзи";
 "Enable Location Services for Instagram in Settings to use your current location." = "Включите службы геолокации для Instagram в настройках, чтобы использовать текущее местоположение.";
 "Fake location" = "Поддельное местоположение";
 "Location access denied" = "Доступ к геолокации запрещён";
@@ -954,6 +957,7 @@
 "Select color" = "Выбрать цвет";
 "Set location" = "Установить местоположение";
 "Text color" = "Цвет текста";
+"Type an emoji to use as the note bubble icon." = "Введите эмодзи для использования в качестве значка пузыря заметки.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Включите службы геолокации в Настройках → Конфиденциальность, чтобы использовать текущее местоположение.";
 
 "Theme" = "Тема";
@@ -1084,7 +1088,6 @@
 "Reset complete" = "Сброс завершён";
 "Reset selected data?" = "Сбросить выбранные данные?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "Со второго анализа: каждый сравнивается с предыдущим — видно новых/потерянных подписчиков, ваши собственные подписки/отписки и изменения профилей.";
-"Select all" = "Выбрать всё";
 "Selected data will be cleared. Tap any row to see what's stored." = "Выбранные данные будут удалены. Нажмите любую строку, чтобы увидеть, что сохранено.";
 "Settings" = "Настройки";
 "Sort" = "Сортировка";
