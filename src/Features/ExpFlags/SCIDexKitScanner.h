@@ -9,6 +9,7 @@ typedef NS_ENUM(NSInteger, SCIDexKitScannerMode) {
 };
 
 @interface SCIDexKitScanner : NSObject
++ (void)invalidateCache;
 + (NSArray<SCIDexKitDescriptor *> *)scanDescriptorsWithMode:(SCIDexKitScannerMode)mode query:(nullable NSString *)query;
 @end
 

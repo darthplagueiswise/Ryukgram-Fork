@@ -458,8 +458,6 @@ typedef NS_ENUM(NSInteger, SCIRuntimeBrowserTab) {
 - (void)setOverride:(SCIExpFlagOverride)o forMethodEntry:(SCIRuntimeMethodEntry *)entry {
     [SCIExpFlags setOverride:o forName:[entry overrideKey]];
     [self.tableView reloadData];
-    if (o == SCIExpFlagOverrideOff) [SCIUtils showToastForDuration:2.0 title:@"System restored" subtitle:@"Following original getter return"];
-    else [SCIUtils showToastForDuration:2.5 title:@"Override saved" subtitle:@"Switch now forces getter return"];
 }
 
 - (void)presentMethodEntry:(SCIRuntimeMethodEntry *)entry fromCell:(UITableViewCell *)cell {

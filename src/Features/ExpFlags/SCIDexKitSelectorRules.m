@@ -3,13 +3,13 @@
 @implementation SCIDexKitSelectorRules
 
 + (NSArray<NSString *> *)ownerTokens {
-    return @[@"experiment", @"feature", @"config", @"configuration", @"provider", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"homecoming", @"liquidglass", @"tabbar", @"friendmap", @"notes", @"identityswitcher", @"cta"];
+    return @[@"experiment", @"feature", @"config", @"configuration", @"provider", @"gating", @"gate", @"rollout", @"settings", @"internal", @"dogfood", @"mobileconfig", @"launcher", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"homecoming", @"liquidglass", @"tabbar", @"friendmap", @"notes", @"identityswitcher", @"icebreaker", @"mutualinterest", @"mutual_interest", @"mutual", @"cta"];
 }
 + (NSArray<NSString *> *)strongOwnerTokens {
     return @[@"experiment", @"experimentation", @"gating", @"gate", @"config", @"configuration", @"provider", @"mobileconfig", @"autofill", @"prism", @"directnotes", @"directnote", @"quicksnap", @"homecoming", @"liquidglass", @"dogfood"];
 }
 + (NSArray<NSString *> *)selectorTokens {
-    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"friendmap", @"dogfood"];
+    return @[@"enabled", @"enable", @"eligible", @"available", @"availability", @"shouldshow", @"shouldenable", @"shoulduse", @"isprism", @"isliquidglass", @"homecoming", @"quicksnap", @"friendmap", @"icebreaker", @"mutualinterest", @"mutual_interest", @"mutual", @"dogfood"];
 }
 + (NSArray<NSString *> *)rootGateTokens {
     return @[@"enabled", @"isenabled", @"shouldenable", @"shouldshow", @"eligible", @"iseligible", @"available", @"isavailable", @"supported", @"issupported", @"allowed", @"isallowed"];
@@ -78,6 +78,8 @@
     else if ([ls containsString:@"homecoming"]) family = @"Homecoming";
     else if ([ls containsString:@"quicksnap"]) family = @"QuickSnap";
     else if ([ls containsString:@"friendmap"]) family = @"FriendMap";
+    else if ([ls containsString:@"icebreaker"]) family = @"Icebreaker";
+    else if ([ls containsString:@"mutualinterest"] || [ls containsString:@"mutual_interest"] || ([ls containsString:@"mutual"] && [ls containsString:@"interest"])) family = @"MutualInterest";
     else if ([ls containsString:@"liquidglass"]) family = @"LiquidGlass";
     else if ([ls containsString:@"prism"]) family = @"Prism";
     return [NSString stringWithFormat:@"%@|%@", className ?: @"?", family];
@@ -136,7 +138,24 @@
     NSString *conflictFamily = [self conflictFamilyLabelForFamilyKey:familyKey];
     BOOL conflict = conflictFamily.length > 0;
 
-    if (uiState || [self isExcludedClassName:className selector:selector]) {
+    BOOL crashProneIcebreakerOrMutual =
+        [lc containsString:@"icebreaker"] ||
+        [ls containsString:@"icebreaker"] ||
+        [lc containsString:@"mutualinterest"] ||
+        [ls containsString:@"mutualinterest"] ||
+        [lc containsString:@"mutual_interest"] ||
+        [ls containsString:@"mutual_interest"] ||
+        (([lc containsString:@"mutual"] || [ls containsString:@"mutual"]) &&
+         ([lc containsString:@"interest"] || [ls containsString:@"interest"]));
+
+    if (crashProneIcebreakerOrMutual) {
+        category = @"crash-prone-gate";
+        risk = 4;
+        observe = YES;
+        force = NO;
+        batch = NO;
+        [reasons addObject:@"Icebreaker/Mutual Interest broad force is blocked because it caused crashes; require static MC/callsite validation first"];
+    } else     if (uiState || [self isExcludedClassName:className selector:selector]) {
         category = @"ui-state";
         risk = 4;
         observe = NO;

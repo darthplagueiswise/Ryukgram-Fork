@@ -6,6 +6,14 @@
 #import <objc/runtime.h>
 #import <dlfcn.h>
 
+static NSMutableDictionary<NSNumber *, NSArray<SCIDexKitDescriptor *> *> *SCIDexKitScannerCache(void) {
+    static NSMutableDictionary<NSNumber *, NSArray<SCIDexKitDescriptor *> *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSMutableDictionary dictionary]; });
+    return cache;
+}
+
+
 @implementation SCIDexKitScanner
 
 + (BOOL)method:(Method)m isEligibleForMode:(SCIDexKitScannerMode)mode selector:(NSString *)sel {
@@ -104,13 +112,53 @@
     }
 }
 
-+ (NSArray<SCIDexKitDescriptor *> *)scanDescriptorsWithMode:(SCIDexKitScannerMode)mode query:(NSString *)query {
+
++ (void)invalidateCache {
+    @synchronized(self) {
+        [SCIDexKitScannerCache() removeAllObjects];
+    }
+}
+
++ (BOOL)className:(NSString *)className selectorLooksRuntimeInteresting:(NSString *)selector {
+    NSString *hay = [NSString stringWithFormat:@"%@ %@", className ?: @"", selector ?: @""].lowercaseString;
+    NSArray<NSString *> *tokens = @[
+        @"enabled", @"isenabled", @"shouldenable", @"shouldshow", @"eligible", @"iseligible",
+        @"available", @"allowed", @"supported", @"experiment", @"feature", @"gate", @"gating",
+        @"mobileconfig", @"easygating", @"dogfood", @"internal", @"launcher", @"prism",
+        @"quicksnap", @"friendmap", @"directnotes", @"directnote", @"notes", @"story", @"stories",
+        @"icebreaker", @"mutualinterest", @"mutual_interest", @"mutual"
+    ];
+    for (NSString *t in tokens) if ([hay containsString:t]) return YES;
+    return NO;
+}
+
++ (BOOL)descriptor:(SCIDexKitDescriptor *)d matchesLowercaseQuery:(NSString *)lowerQuery {
+    if (!lowerQuery.length) return YES;
+    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@ %@ %@",
+                     d.imageBasename ?: @"",
+                     d.className ?: @"",
+                     d.selectorName ?: @"",
+                     d.typeEncoding ?: @"",
+                     d.semanticCategory ?: @"",
+                     d.classificationReason ?: @"",
+                     d.familyKey ?: @"",
+                     d.impSymbol ?: @""].lowercaseString;
+    return [hay containsString:lowerQuery];
+}
+
++ (NSArray<SCIDexKitDescriptor *> *)cachedBaseDescriptorsWithMode:(SCIDexKitScannerMode)mode {
+    NSNumber *cacheKey = @(mode);
+    @synchronized(self) {
+        NSArray *cached = SCIDexKitScannerCache()[cacheKey];
+        if (cached) return cached;
+    }
+
     NSMutableDictionary<NSString *, SCIDexKitDescriptor *> *byKey = [NSMutableDictionary dictionary];
-    NSString *lowerQuery = query.lowercaseString ?: @"";
 
     for (SCIDexKitImageInfo *image in [SCIDexKitImagePolicy loadedAllowedImages]) {
         unsigned int classCount = 0;
         const char **classNames = objc_copyClassNamesForImage(image.path.UTF8String, &classCount);
+
         for (unsigned int i = 0; i < classCount; i++) {
             NSString *className = classNames[i] ? @(classNames[i]) : @"";
             if (!className.length) continue;
@@ -121,12 +169,15 @@
                 BOOL classMethod = (pass == 1);
                 Class methodClass = classMethod ? object_getClass(cls) : cls;
                 if (!methodClass) continue;
+
                 unsigned int methodCount = 0;
                 Method *methods = class_copyMethodList(methodClass, &methodCount);
+
                 for (unsigned int mIdx = 0; mIdx < methodCount; mIdx++) {
                     Method m = methods[mIdx];
                     SEL sel = method_getName(m);
                     NSString *selName = NSStringFromSelector(sel);
+
                     if (![self method:m isEligibleForMode:mode selector:selName]) continue;
 
                     Dl_info info; memset(&info, 0, sizeof(info));
@@ -135,23 +186,20 @@
                     if (![impBase isEqualToString:image.basename]) continue;
 
                     NSInteger score = [SCIDexKitSelectorRules curatedScoreForClassName:className selector:selName];
-                    if (mode == SCIDexKitScannerModeCurated && score < 10) continue;
-                    NSString *typeEncoding = [self typeEncodingForMethod:m];
-                    NSDictionary<NSString *, id> *classification = [SCIDexKitSelectorRules classificationForClassName:className selector:selName imageBasename:image.basename typeEncoding:typeEncoding];
-                    NSString *semantic = classification[@"semanticCategory"] ?: @"";
-                    NSString *reason = classification[@"classificationReason"] ?: @"";
-                    NSString *hay = [NSString stringWithFormat:@"%@ %@ %@ %@ %@ %@ %@", image.basename, className, selName, typeEncoding, semantic, reason, classification[@"familyKey"] ?: @""].lowercaseString;
-                    if (lowerQuery.length && ![hay containsString:lowerQuery]) continue;
+                    BOOL runtimeInteresting = [self className:className selectorLooksRuntimeInteresting:selName];
+                    if (mode == SCIDexKitScannerModeCurated && score < 10 && !runtimeInteresting) continue;
 
                     SCIDexKitDescriptor *d = [self descriptorForImage:image className:className selectorName:selName classMethod:classMethod method:m score:score dlInfo:&info];
                     if (d.overrideKey.length) byKey[d.overrideKey] = d;
                 }
+
                 if (methods) free(methods);
             }
         }
+
         if (classNames) free(classNames);
     }
-    [self addLegacyActiveOverridesToMap:byKey];
+
     NSArray *values = [byKey.allValues sortedArrayUsingComparator:^NSComparisonResult(SCIDexKitDescriptor *a, SCIDexKitDescriptor *b) {
         NSComparisonResult c = [a.imageBasename caseInsensitiveCompare:b.imageBasename];
         if (c != NSOrderedSame) return c;
@@ -159,7 +207,33 @@
         if (c != NSOrderedSame) return c;
         return [a.selectorName caseInsensitiveCompare:b.selectorName];
     }];
-    return values;
+
+    @synchronized(self) { SCIDexKitScannerCache()[cacheKey] = values ?: @[]; }
+    return values ?: @[];
+}
+
+
++ (NSArray<SCIDexKitDescriptor *> *)scanDescriptorsWithMode:(SCIDexKitScannerMode)mode query:(NSString *)query {
+    NSString *lowerQuery = query.lowercaseString ?: @"";
+    NSMutableDictionary<NSString *, SCIDexKitDescriptor *> *byKey = [NSMutableDictionary dictionary];
+
+    for (SCIDexKitDescriptor *d in [self cachedBaseDescriptorsWithMode:mode]) {
+        [self fillStateForDescriptor:d];
+        if (![self descriptor:d matchesLowercaseQuery:lowerQuery]) continue;
+        if (d.overrideKey.length) byKey[d.overrideKey] = d;
+    }
+
+    [self addLegacyActiveOverridesToMap:byKey];
+
+    NSArray *values = [byKey.allValues sortedArrayUsingComparator:^NSComparisonResult(SCIDexKitDescriptor *a, SCIDexKitDescriptor *b) {
+        NSComparisonResult c = [a.imageBasename caseInsensitiveCompare:b.imageBasename];
+        if (c != NSOrderedSame) return c;
+        c = [a.className caseInsensitiveCompare:b.className];
+        if (c != NSOrderedSame) return c;
+        return [a.selectorName caseInsensitiveCompare:b.selectorName];
+    }];
+
+    return values ?: @[];
 }
 
 @end

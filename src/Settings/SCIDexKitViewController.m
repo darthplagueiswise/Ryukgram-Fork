@@ -1,5 +1,4 @@
 #import "SCIDexKitViewController.h"
-#import "SCIExperimentRuntimeBrowserViewController.h"
 #import "../Features/ExpFlags/SCIDexKitNameResolver.h"
 #import "../Features/ExpFlags/SCIDexKitScanner.h"
 #import "../Features/ExpFlags/SCIDexKitStore.h"
@@ -167,7 +166,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 @implementation SCIDexKitViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title=@"SCI DexKit 2.0";
+    self.title=@"SCI DexKit v3";
     self.view.backgroundColor=UIColor.systemGroupedBackgroundColor;
     _scanMode=SCIDexKitScannerModeCurated;
     _filter=[[UISegmentedControl alloc] initWithItems:@[@"All",@"Observed",@"Forced",@"Hidden"]];
@@ -200,7 +199,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self.view addSubview:_table];
     self.navigationItem.rightBarButtonItems=@[
         [[UIBarButtonItem alloc] initWithTitle:@"Tools" style:UIBarButtonItemStylePlain target:self action:@selector(openDexKitTools)],
-        [[UIBarButtonItem alloc] initWithTitle:@"Refresh" style:UIBarButtonItemStylePlain target:self action:@selector(reload)],
+        [[UIBarButtonItem alloc] initWithTitle:@"Refresh" style:UIBarButtonItemStylePlain target:self action:@selector(refreshScan)],
         [[UIBarButtonItem alloc] initWithTitle:@"Observe" style:UIBarButtonItemStylePlain target:self action:@selector(observeVisible)]
     ];
     UILayoutGuide *g=self.view.safeAreaLayoutGuide;
@@ -271,19 +270,13 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self reload];
 }
 - (void)confirmAndForceDescriptor:(SCIDexKitDescriptor *)d value:(BOOL)value {
-    NSString *conflict=[self conflictFamilyForDescriptor:d];
-    NSMutableArray<NSString *> *reasons=[NSMutableArray array];
-    if(conflict.length)[reasons addObject:[NSString stringWithFormat:@"Conflict family: %@. Batch force is blocked; override is explicit per-row only.", conflict]];
-    if(!d.observedKnown)[reasons addObject:@"This method has not been observed in runtime yet."];
-    if(!d.forceRecommended)[reasons addObject:@"Classifier does not mark it as forceRecommended."];
-    if(d.riskLevel>=3)[reasons addObject:[NSString stringWithFormat:@"Risk: %@.",[self riskText:d.riskLevel]]];
-    NSString *message=[NSString stringWithFormat:@"Discovery -> Observation -> Override\n\n%@\n\n%@", d.selectorName ?: @"", [reasons componentsJoinedByString:@"\n"] ?: @""];
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:value?@"Confirm Force ON":@"Confirm Force OFF" message:message preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *x){ [self reload]; }]];
-    [a addAction:[UIAlertAction actionWithTitle:value?@"Force ON":@"Force OFF" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x){ [self setOverrideValue:@(value) descriptor:d]; }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self forceDescriptor:d value:value];
 }
 - (void)forceDescriptor:(SCIDexKitDescriptor *)d value:(BOOL)value {
+    if (d.riskLevel >= 4) {
+        [self reload];
+        return;
+    }
     [self setOverrideValue:@(value) descriptor:d];
 }
 - (void)applySegment:(NSInteger)idx descriptor:(SCIDexKitDescriptor *)d {
@@ -318,15 +311,9 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
 
 
 - (void)openDexKitTools {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"DexKit Tools"
-                                                             message:@"Runtime Browser and IGMobile deprecated JSON export."
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"DexKit v3 Tools"
+                                                             message:@"IGMobile deprecated StartupConfigs export. Runtime BOOL discovery is unified in the main DexKit list."
                                                       preferredStyle:UIAlertControllerStyleActionSheet];
-
-    [a addAction:[UIAlertAction actionWithTitle:@"Open Runtime Browser"
-                                          style:UIAlertActionStyleDefault
-                                        handler:^(__unused UIAlertAction *x) {
-        [self openRuntimeBrowser];
-    }]];
 
     [a addAction:[UIAlertAction actionWithTitle:@"Export IGMobile Deprecated JSON"
                                           style:UIAlertActionStyleDefault
@@ -342,16 +329,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     [self presentViewController:a animated:YES completion:nil];
 }
 
-- (void)openRuntimeBrowser {
-    SCIExperimentRuntimeBrowserViewController *vc = [SCIExperimentRuntimeBrowserViewController new];
-    vc.title = @"Runtime Browser";
-    if (self.navigationController) {
-        [self.navigationController pushViewController:vc animated:YES];
-    } else {
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        [self presentViewController:nav animated:YES completion:nil];
-    }
-}
+
 
 
 - (void)exportIDNameMapping {
@@ -407,6 +385,11 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     }];
 }
 
+- (void)refreshScan {
+    [SCIDexKitScanner invalidateCache];
+    [self reload];
+}
+
 - (void)observeVisible { [self observeRows:self.rows ?: @[]]; }
 - (SCIDexKitKnownBoolState)effective:(SCIDexKitDescriptor *)d { return [SCIDexKitStore effectiveStateForOverrideKey:d.overrideKey observedKey:d.observedKey]; }
 - (void)reload {
@@ -441,8 +424,8 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     _sections=[[g allKeys] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
     _groups=g;
 
-    NSString *idMapStatus=[SCIMobileConfigIdNameMappingExporter lastStatusLine] ?: @"igmobile json idle";
-    _footer.text=[NSString stringWithFormat:@"Curated B-only · filter %@ · rows=%lu · groups=%lu · hidden=%lu · conflicts=%lu · hooks=%lu
+    NSString *idMapStatus=[SCIMobileConfigIdNameMappingExporter lastStatusLine] ?: @"igmobile deprecated json idle";
+    _footer.text=[NSString stringWithFormat:@"DexKit v3 cached B-only · filter %@ · rows=%lu · groups=%lu · hidden=%lu · conflicts=%lu · hooks=%lu
 %@",
                   [self filterName],
                   (unsigned long)_rows.count,
@@ -496,7 +479,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     NSString *conflictPart=conflict.length?[NSString stringWithFormat:@" · conflict %@",conflict]:@"";
     c.detail.text=[NSString stringWithFormat:@"%@ · risk %@ · %@%@ · effective %@ · system %@ · %@ · %@",cat,[self riskText:d.riskLevel],[self policyText:d],conflictPart,eff,sys,forced,SCIDexKitIsHookInstalled(d.overrideKey)?@"live":@"off"];
     if(d.overrideValue){ c.state.selectedSegmentIndex=d.overrideValue.boolValue?2:1; } else { c.state.selectedSegmentIndex=0; }
-    c.state.enabled=!d.unavailable;
+    c.state.enabled=(!d.unavailable && d.riskLevel < 4);
     c.state.alpha=d.unavailable?.45:1;
     __weak typeof(self) ws=self;
     c.stateChanged=^(NSInteger idx){ [ws applySegment:idx descriptor:d]; };
