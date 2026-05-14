@@ -6,6 +6,13 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
+# Optional bundled FLEX debugger. This uses the existing modules/FLEXing
+# submodule and builds FLEXing + libFLEX as separate dylibs inside the same deb.
+# It is intentionally not merged into RyukGram.dylib.
+ifneq ($(wildcard modules/FLEXing/libflex/FLEX/Classes),)
+TWEAK_NAME += libFLEX FLEXing
+endif
+
 SCHEMA_JSON ?= resources/igios-instagram-schema_client-persist.json
 GENERATED_SCHEMA_SRC := src/Generated/SCIEmbeddedMobileConfigSchema.m
 
@@ -20,32 +27,37 @@ before-all::
 
 RYUKGRAM_SRC_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
 RYUKGRAM_SRC_FILES := $(filter-out src/Generated/%,$(RYUKGRAM_SRC_FILES))
+RYUKGRAM_SRC_FILES := $(filter-out src/FLEXing/%,$(RYUKGRAM_SRC_FILES))
 
-$(TWEAK_NAME)_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
+RyukGram_FILES = $(RYUKGRAM_SRC_FILES) $(GENERATED_SCHEMA_SRC) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
 
 # SideStore-only: legacy sideload compat patch (keychain, app groups, CloudKit).
 ifdef SIDESTORE
-	$(TWEAK_NAME)_FILES += modules/SideloadPatch/SideloadPatch.xm
+	RyukGram_FILES += modules/SideloadPatch/SideloadPatch.xm
 endif
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit
-$(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -include src/SCIPrefix.h
-$(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
+RyukGram_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit
+RyukGram_PRIVATE_FRAMEWORKS = Preferences
+RyukGram_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -include src/SCIPrefix.h
+RyukGram_LOGOSFLAGS = --c warnings=none
+
+FLEX_ROOT := modules/FLEXing/libflex/FLEX
+FLEXING_ROOT := modules/FLEXing
+FLEX_SOURCES := $(shell find $(FLEX_ROOT)/Classes \( -name '*.c' -o -name '*.m' -o -name '*.mm' \) 2>/dev/null)
+FLEX_IMPORT_DIRS := $(shell find $(FLEX_ROOT)/Classes -type d 2>/dev/null)
+FLEX_IMPORTS := -I$(FLEXING_ROOT) -I$(FLEXING_ROOT)/libflex -I$(FLEX_ROOT)/Classes $(foreach d,$(FLEX_IMPORT_DIRS),-I$(d))
+
+libFLEX_FILES = modules/FLEXing/libflex/libFLEX.x $(FLEX_SOURCES)
+libFLEX_FRAMEWORKS = CoreGraphics UIKit ImageIO QuartzCore
+libFLEX_LIBRARIES = sqlite3 z
+libFLEX_CFLAGS = -fobjc-arc -w -Wno-unsupported-availability-guard $(FLEX_IMPORTS)
+libFLEX_CCFLAGS = -std=gnu++11
+libFLEX_LOGOSFLAGS = --c warnings=none
+
+FLEXing_FILES = modules/FLEXing/Tweak.xm
+FLEXing_FRAMEWORKS = UIKit Foundation
+FLEXing_CFLAGS = -fobjc-arc -w -Wno-unsupported-availability-guard -Imodules/FLEXing
+FLEXing_LOGOSFLAGS = --c warnings=none
 
 CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-
-# Bundle FLEXing/libFLEX into the same .deb as RyukGram.
-# This does not link FLEX into RyukGram.dylib; it stages separate dylibs and a
-# FLEXing.plist filtered to Instagram/beta/custom bundle IDs via executable.
-BUNDLE_FLEXING ?= 1
-ifeq ($(BUNDLE_FLEXING),1)
-before-package::
-	@bash scripts/build-and-bundle-flexing-deb.sh "$(THEOS_STAGING_DIR)" "$(THEOS_PACKAGE_INSTALL_PREFIX)"
-endif
-
-# Build FLEXing for sideloading/dev IPA flows.
-ifdef SIDELOAD
-	$(TWEAK_NAME)_SUBPROJECTS += modules/FLEXing
-endif
