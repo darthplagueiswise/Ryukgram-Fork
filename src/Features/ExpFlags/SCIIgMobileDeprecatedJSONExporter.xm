@@ -126,12 +126,4 @@ static NSDictionary *SCIIGExportDeprecatedJSON(void) {
     return SCIIGExportDeprecatedJSON();
 }
 
-+ (NSDictionary *)exportDeprecatedStartupConfigsNow {
-    return SCIIGExportDeprecatedJSON();
-}
-
-+ (NSDictionary *)exportIDNameMappingNow {
-    return SCIIGExportDeprecatedJSON();
-}
-
 @end
