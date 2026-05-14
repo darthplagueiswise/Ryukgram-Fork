@@ -10,6 +10,12 @@ static NSString *const kName = @"fake_location_name";
 static NSString *const kPresets = @"fake_location_presets";
 static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 
+typedef NS_ENUM(NSInteger, SCIFakeLocationSection) {
+	SCIFakeLocationSectionToggle,
+	SCIFakeLocationSectionCurrent,
+	SCIFakeLocationSectionPresets,
+};
+
 @interface SCIFakeLocationSettingsVC ()
 @property (nonatomic, strong) UITableView *tableView;
 @end
@@ -24,12 +30,14 @@ static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	self.tableView.backgroundColor = self.view.backgroundColor;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
+
 	[self.view addSubview:self.tableView];
 }
 
-// MARK: - Helpers
+#pragma mark - Helpers
 
 - (NSUserDefaults *)defaults {
 	return NSUserDefaults.standardUserDefaults;
@@ -44,208 +52,315 @@ static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 	[self.defaults setObject:(presets ?: @[]) forKey:kPresets];
 }
 
-- (CLLocationCoordinate2D)currentCoord {
-	return CLLocationCoordinate2DMake([[self.defaults objectForKey:kLat] doubleValue], [[self.defaults objectForKey:kLon] doubleValue]);
+- (double)currentLat {
+	return [[self.defaults objectForKey:kLat] doubleValue];
 }
 
-- (void)refreshMapButton {
+- (double)currentLon {
+	return [[self.defaults objectForKey:kLon] doubleValue];
+}
+
+- (NSString *)currentName {
+	NSString *name = [self.defaults objectForKey:kName];
+	return [name isKindOfClass:NSString.class] ? name : @"";
+}
+
+- (CLLocationCoordinate2D)currentCoord {
+	return CLLocationCoordinate2DMake(self.currentLat, self.currentLon);
+}
+
+- (NSString *)coordTextWithLat:(double)lat lon:(double)lon {
+	return [NSString stringWithFormat:@"%.5f, %.5f", lat, lon];
+}
+
+- (void)postMapButtonRefresh {
 	[NSNotificationCenter.defaultCenter postNotificationName:kMapBtnChanged object:nil];
 }
 
 - (void)applyLat:(double)lat lon:(double)lon name:(NSString *)name enable:(BOOL)enable {
 	NSUserDefaults *d = self.defaults;
+
 	[d setObject:@(lat) forKey:kLat];
 	[d setObject:@(lon) forKey:kLon];
 	[d setObject:(name ?: @"") forKey:kName];
+
 	if (enable) [d setBool:YES forKey:kEnabled];
 
 	[self.tableView reloadData];
-	[self refreshMapButton];
+	[self postMapButtonRefresh];
 }
 
-- (UITableViewCell *)cell:(UITableView *)tv id:(NSString *)rid style:(UITableViewCellStyle)style {
-	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	return cell ?: [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:rid];
+- (UITableViewCell *)cellForTableView:(UITableView *)tableView reuseID:(NSString *)reuseID {
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseID];
+
+	if (!cell) {
+		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseID];
+	}
+
+	cell.accessoryView = nil;
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+	cell.contentView.alpha = 1.0;
+
+	return cell;
 }
 
-- (UISwitch *)switchOn:(BOOL)on action:(SEL)action {
+- (UISwitch *)switchWithOn:(BOOL)on action:(SEL)action {
 	UISwitch *sw = UISwitch.new;
 	sw.on = on;
+	sw.onTintColor = [SCIUtils SCIColor_Primary];
 	[sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
 	return sw;
 }
 
 - (void)presentPickerWithTitle:(NSString *)title completion:(void (^)(double lat, double lon, NSString *name))completion {
 	SCIFakeLocationPickerVC *vc = SCIFakeLocationPickerVC.new;
-	vc.initialCoord = [self currentCoord];
+	vc.initialCoord = self.currentCoord;
 	vc.titleText = title;
 	vc.onPick = completion;
 
 	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
 	nav.modalPresentationStyle = UIModalPresentationPageSheet;
+
 	[self presentViewController:nav animated:YES completion:nil];
 }
 
 - (void)askNameAndSavePresetWithLat:(double)lat lon:(double)lon name:(NSString *)name {
 	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Save preset") message:nil preferredStyle:UIAlertControllerStyleAlert];
 
-	[alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-		tf.placeholder = SCILocalized(@"Name");
-		tf.text = name;
-		tf.autocapitalizationType = UITextAutocapitalizationTypeSentences;
+	[alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+		field.placeholder = SCILocalized(@"Name");
+		field.text = name;
+		field.autocapitalizationType = UITextAutocapitalizationTypeSentences;
 	}];
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Save") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+
+	__weak typeof(self) weakSelf = self;
+
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Save") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
 		NSString *finalName = alert.textFields.firstObject.text.length ? alert.textFields.firstObject.text : name;
+		NSDictionary *preset = @{@"name": finalName ?: @"", @"lat": @(lat), @"lon": @(lon)};
+
 		NSMutableArray *items = self.presets.mutableCopy ?: NSMutableArray.array;
-		[items addObject:@{@"name": finalName ?: @"", @"lat": @(lat), @"lon": @(lon)}];
+		[items addObject:preset];
+
 		[self setPresets:items];
-		[self.tableView reloadData];
+		[self.tableView reloadSections:[NSIndexSet indexSetWithIndex:SCIFakeLocationSectionPresets] withRowAnimation:UITableViewRowAnimationAutomatic];
 	}]];
 
 	[self presentViewController:alert animated:YES completion:nil];
 }
 
-// MARK: - Table
+#pragma mark - Table
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
 	return 3;
 }
 
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
-	if (section == 0) return 2;
-	if (section == 1) return 2;
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	if (section == SCIFakeLocationSectionToggle) return 2;
+	if (section == SCIFakeLocationSectionCurrent) return 2;
 	return self.presets.count + 1;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
-	if (section == 1) return SCILocalized(@"Current location");
-	if (section == 2) return SCILocalized(@"Saved locations");
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+	if (section == SCIFakeLocationSectionCurrent) return SCILocalized(@"Current location");
+	if (section == SCIFakeLocationSectionPresets) return SCILocalized(@"Saved locations");
 	return nil;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-	if (section == 0) return SCILocalized(@"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map.");
-	if (section == 2) return SCILocalized(@"Tap a preset to make it active. Swipe left to delete.");
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	if (section == SCIFakeLocationSectionToggle) return SCILocalized(@"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map.");
+	if (section == SCIFakeLocationSectionPresets) return SCILocalized(@"Tap a preset to make it active. Swipe left to delete.");
 	return nil;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-	NSUserDefaults *d = self.defaults;
-
-	if (ip.section == 0) {
-		BOOL isEnabledRow = ip.row == 0;
-		UITableViewCell *cell = [self cell:tv id:(isEnabledRow ? @"enabled" : @"show") style:UITableViewCellStyleDefault];
-		cell.textLabel.text = isEnabledRow ? SCILocalized(@"Enable fake location") : SCILocalized(@"Show map button");
-		cell.accessoryView = [self switchOn:[SCIUtils getBoolPref:(isEnabledRow ? kEnabled : kShowBtn)] action:(isEnabledRow ? @selector(enabledToggled:) : @selector(showButtonToggled:))];
-		cell.selectionStyle = UITableViewCellSelectionStyleNone;
-		cell.imageView.image = nil;
-		return cell;
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	if (indexPath.section == SCIFakeLocationSectionToggle) {
+		return [self switchCellForTableView:tableView indexPath:indexPath];
 	}
 
-	if (ip.section == 1 && ip.row == 0) {
-		UITableViewCell *cell = [self cell:tv id:@"current" style:UITableViewCellStyleSubtitle];
-		double lat = [[d objectForKey:kLat] doubleValue], lon = [[d objectForKey:kLon] doubleValue];
-		NSString *name = [d objectForKey:kName] ?: @"";
-
-		cell.textLabel.text = name.length ? name : SCILocalized(@"(unset)");
-		cell.detailTextLabel.text = [NSString stringWithFormat:@"%.5f, %.5f", lat, lon];
-		cell.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
-		cell.imageView.image = [UIImage systemImageNamed:@"location.fill"];
-		cell.imageView.tintColor = UIColor.systemGreenColor;
-		cell.selectionStyle = UITableViewCellSelectionStyleNone;
-		cell.accessoryType = UITableViewCellAccessoryNone;
-		return cell;
+	if (indexPath.section == SCIFakeLocationSectionCurrent) {
+		return indexPath.row == 0
+			? [self currentLocationCellForTableView:tableView]
+			: [self selectLocationCellForTableView:tableView];
 	}
 
-	if (ip.section == 1) {
-		UITableViewCell *cell = [self cell:tv id:@"select" style:UITableViewCellStyleDefault];
-		cell.textLabel.text = SCILocalized(@"Select location on map");
-		cell.textLabel.textColor = UIColor.systemBlueColor;
-		cell.imageView.image = [UIImage systemImageNamed:@"map"];
-		cell.imageView.tintColor = UIColor.systemBlueColor;
-		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-		return cell;
-	}
+	return [self presetCellForTableView:tableView indexPath:indexPath];
+}
 
-	NSArray<NSDictionary *> *presets = self.presets;
+#pragma mark - Cells
 
-	if (ip.row < (NSInteger)presets.count) {
-		NSDictionary *p = presets[ip.row];
-		UITableViewCell *cell = [self cell:tv id:@"preset" style:UITableViewCellStyleSubtitle];
+- (UITableViewCell *)switchCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+	BOOL enabledRow = indexPath.row == 0;
+	NSString *title = enabledRow ? SCILocalized(@"Enable fake location") : SCILocalized(@"Show map button");
+	NSString *subtitle = enabledRow ? SCILocalized(@"Override Instagram location reads.") : SCILocalized(@"Show the quick button in Friends Map.");
+	NSString *key = enabledRow ? kEnabled : kShowBtn;
+	SEL action = enabledRow ? @selector(enabledToggled:) : @selector(showButtonToggled:);
 
-		cell.textLabel.text = p[@"name"] ?: SCILocalized(@"Preset");
-		cell.textLabel.textColor = UIColor.labelColor;
-		cell.detailTextLabel.text = [NSString stringWithFormat:@"%.5f, %.5f", [p[@"lat"] doubleValue], [p[@"lon"] doubleValue]];
-		cell.detailTextLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
-		cell.imageView.image = [UIImage systemImageNamed:@"mappin.circle.fill"];
-		cell.imageView.tintColor = UIColor.systemRedColor;
-		cell.accessoryType = UITableViewCellAccessoryNone;
-		return cell;
-	}
+	UITableViewCell *cell = [self cellForTableView:tableView reuseID:enabledRow ? @"enabled" : @"showButton"];
 
-	UITableViewCell *cell = [self cell:tv id:@"add" style:UITableViewCellStyleDefault];
-	cell.textLabel.text = SCILocalized(@"Add preset");
-	cell.textLabel.textColor = UIColor.systemBlueColor;
-	cell.imageView.image = [UIImage systemImageNamed:@"plus.circle.fill"];
-	cell.imageView.tintColor = UIColor.systemBlueColor;
-	cell.accessoryType = UITableViewCellAccessoryNone;
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = title;
+	config.secondaryText = subtitle;
+	config.textProperties.font = [UIFont systemFontOfSize:16.0];
+	config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+	config.textToSecondaryTextVerticalPadding = 4.5;
+
+	cell.contentConfiguration = config;
+	cell.accessoryView = [self switchWithOn:[SCIUtils getBoolPref:key] action:action];
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
 	return cell;
 }
 
-- (BOOL)tableView:(UITableView *)tv canEditRowAtIndexPath:(NSIndexPath *)ip {
-	return ip.section == 2 && ip.row < (NSInteger)self.presets.count;
+- (UITableViewCell *)currentLocationCellForTableView:(UITableView *)tableView {
+	UITableViewCell *cell = [self cellForTableView:tableView reuseID:@"current"];
+
+	NSString *name = self.currentName;
+	double lat = self.currentLat;
+	double lon = self.currentLon;
+
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = name.length ? name : SCILocalized(@"(unset)");
+	config.secondaryText = [self coordTextWithLat:lat lon:lon];
+	config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
+	config.secondaryTextProperties.font = [UIFont monospacedDigitSystemFontOfSize:12.0 weight:UIFontWeightRegular];
+	config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+	config.textToSecondaryTextVerticalPadding = 4.5;
+	config.image = [UIImage systemImageNamed:@"location.fill"];
+	config.imageProperties.tintColor = UIColor.systemGreenColor;
+
+	cell.contentConfiguration = config;
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+	return cell;
 }
 
-- (void)tableView:(UITableView *)tv commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)ip {
+- (UITableViewCell *)selectLocationCellForTableView:(UITableView *)tableView {
+	UITableViewCell *cell = [self cellForTableView:tableView reuseID:@"select"];
+
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = SCILocalized(@"Select location on map");
+	config.textProperties.color = UIColor.systemBlueColor;
+	config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
+	config.image = [UIImage systemImageNamed:@"map"];
+	config.imageProperties.tintColor = UIColor.systemBlueColor;
+
+	cell.contentConfiguration = config;
+	cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+	return cell;
+}
+
+- (UITableViewCell *)presetCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+	NSArray<NSDictionary *> *items = self.presets;
+
+	if (indexPath.row >= (NSInteger)items.count) {
+		return [self addPresetCellForTableView:tableView];
+	}
+
+	NSDictionary *preset = items[indexPath.row];
+	NSString *name = [preset[@"name"] isKindOfClass:NSString.class] ? preset[@"name"] : SCILocalized(@"Preset");
+	double lat = [preset[@"lat"] doubleValue];
+	double lon = [preset[@"lon"] doubleValue];
+
+	UITableViewCell *cell = [self cellForTableView:tableView reuseID:@"preset"];
+
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = name.length ? name : SCILocalized(@"Preset");
+	config.secondaryText = [self coordTextWithLat:lat lon:lon];
+	config.secondaryTextProperties.font = [UIFont monospacedDigitSystemFontOfSize:12.0 weight:UIFontWeightRegular];
+	config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+	config.textToSecondaryTextVerticalPadding = 4.5;
+	config.image = [UIImage systemImageNamed:@"mappin.circle.fill"];
+	config.imageProperties.tintColor = UIColor.systemRedColor;
+
+	cell.contentConfiguration = config;
+
+	return cell;
+}
+
+- (UITableViewCell *)addPresetCellForTableView:(UITableView *)tableView {
+	UITableViewCell *cell = [self cellForTableView:tableView reuseID:@"addPreset"];
+
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = SCILocalized(@"Add preset");
+	config.textProperties.color = UIColor.systemBlueColor;
+	config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
+	config.image = [UIImage systemImageNamed:@"plus.circle.fill"];
+	config.imageProperties.tintColor = UIColor.systemBlueColor;
+
+	cell.contentConfiguration = config;
+
+	return cell;
+}
+
+#pragma mark - Editing
+
+- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+	return indexPath.section == SCIFakeLocationSectionPresets && indexPath.row < (NSInteger)self.presets.count;
+}
+
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
 	if (style != UITableViewCellEditingStyleDelete) return;
 
-	NSMutableArray *items = self.presets.mutableCopy;
-	[items removeObjectAtIndex:ip.row];
+	NSMutableArray *items = self.presets.mutableCopy ?: NSMutableArray.array;
+	if (indexPath.row >= (NSInteger)items.count) return;
+
+	[items removeObjectAtIndex:indexPath.row];
 	[self setPresets:items];
 
-	[tv deleteRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationAutomatic];
+	[tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
 }
 
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-	[tv deselectRowAtIndexPath:ip animated:YES];
+#pragma mark - Selection
 
-	if (ip.section == 1 && ip.row == 1) {
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+	if (indexPath.section == SCIFakeLocationSectionCurrent && indexPath.row == 1) {
 		[self openCurrentPicker];
 		return;
 	}
 
-	if (ip.section != 2) return;
+	if (indexPath.section != SCIFakeLocationSectionPresets) return;
 
 	NSArray<NSDictionary *> *items = self.presets;
 
-	if (ip.row < (NSInteger)items.count) {
-		NSDictionary *p = items[ip.row];
-		[self applyLat:[p[@"lat"] doubleValue] lon:[p[@"lon"] doubleValue] name:p[@"name"] enable:YES];
+	if (indexPath.row < (NSInteger)items.count) {
+		NSDictionary *preset = items[indexPath.row];
+		[self applyLat:[preset[@"lat"] doubleValue] lon:[preset[@"lon"] doubleValue] name:preset[@"name"] enable:YES];
 		return;
 	}
 
 	[self openPresetPicker];
 }
 
-// MARK: - Actions
+#pragma mark - Actions
 
-- (void)enabledToggled:(UISwitch *)sw {
-	[self.defaults setBool:sw.on forKey:kEnabled];
-	[self refreshMapButton];
+- (void)enabledToggled:(UISwitch *)sender {
+	[self.defaults setBool:sender.on forKey:kEnabled];
+	[self postMapButtonRefresh];
 }
 
-- (void)showButtonToggled:(UISwitch *)sw {
-	[self.defaults setBool:sw.on forKey:kShowBtn];
-	[self refreshMapButton];
+- (void)showButtonToggled:(UISwitch *)sender {
+	[self.defaults setBool:sender.on forKey:kShowBtn];
+	[self postMapButtonRefresh];
 }
 
 - (void)openCurrentPicker {
 	__weak typeof(self) weakSelf = self;
 
 	[self presentPickerWithTitle:SCILocalized(@"Set current location") completion:^(double lat, double lon, NSString *name) {
-		[weakSelf applyLat:lat lon:lon name:name enable:YES];
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
+		[self applyLat:lat lon:lon name:name enable:YES];
 	}];
 }
 
@@ -253,7 +368,10 @@ static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 	__weak typeof(self) weakSelf = self;
 
 	[self presentPickerWithTitle:SCILocalized(@"Add preset") completion:^(double lat, double lon, NSString *name) {
-		[weakSelf askNameAndSavePresetWithLat:lat lon:lon name:name];
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
+		[self askNameAndSavePresetWithLat:lat lon:lon name:name];
 	}];
 }
 
