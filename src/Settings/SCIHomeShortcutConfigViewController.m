@@ -1,42 +1,154 @@
 #import "SCIHomeShortcutConfigViewController.h"
 #import "../Utils.h"
 #import "../Features/Feed/SCIHomeShortcutCatalog.h"
+#import "../UI/SCIPopupChrome.h"
 
 #pragma mark - Persistence
 
-// New catalog entries get appended (disabled). Stale ones get dropped.
 static NSMutableArray<NSMutableDictionary *> *sciLoadOrderedActions(void) {
 	NSArray *stored = [SCIUtils getArrayPref:kSCIHomeShortcutActionsPrefKey];
-	NSMutableArray<NSMutableDictionary *> *out = [NSMutableArray array];
-	NSMutableSet<NSString *> *seen = [NSMutableSet set];
+	NSMutableArray<NSMutableDictionary *> *out = NSMutableArray.array;
+	NSMutableSet<NSString *> *seen = NSMutableSet.set;
 
 	for (NSDictionary *row in stored) {
-		if (![row isKindOfClass:[NSDictionary class]]) continue;
+		if (![row isKindOfClass:NSDictionary.class]) continue;
+
 		NSString *aid = row[@"id"];
-		if (![aid isKindOfClass:[NSString class]] || !aid.length) continue;
+		if (![aid isKindOfClass:NSString.class] || !aid.length) continue;
 		if (![SCIHomeShortcutCatalog actionForID:aid]) continue;
 		if ([seen containsObject:aid]) continue;
+
 		[seen addObject:aid];
-		[out addObject:[@{ @"id": aid, @"enabled": @([row[@"enabled"] boolValue]) } mutableCopy]];
+		[out addObject:[@{@"id": aid, @"enabled": @([row[@"enabled"] boolValue])} mutableCopy]];
 	}
-	for (SCIHomeShortcutAction *a in [SCIHomeShortcutCatalog allActions]) {
-		if ([seen containsObject:a.actionID]) continue;
-		[out addObject:[@{ @"id": a.actionID, @"enabled": @(NO) } mutableCopy]];
+
+	for (SCIHomeShortcutAction *action in [SCIHomeShortcutCatalog allActions]) {
+		if ([seen containsObject:action.actionID]) continue;
+		[out addObject:[@{@"id": action.actionID, @"enabled": @NO} mutableCopy]];
 	}
+
 	return out;
 }
 
 static void sciSaveOrderedActions(NSArray<NSDictionary *> *actions) {
-	[SCIUtils setPref:[actions copy] forKey:kSCIHomeShortcutActionsPrefKey];
-	[[NSNotificationCenter defaultCenter] postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
+	[SCIUtils setPref:actions.copy forKey:kSCIHomeShortcutActionsPrefKey];
+	[NSNotificationCenter.defaultCenter postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
 }
 
 static NSString *sciCurrentIcon(void) {
-	NSString *cur = [SCIUtils getStringPref:kSCIHomeShortcutIconPrefKey];
-	return cur.length ? cur : @"auto";
+	NSString *icon = [SCIUtils getStringPref:kSCIHomeShortcutIconPrefKey];
+	return icon.length ? icon : @"auto";
 }
 
-#pragma mark - Icon picker (sub-page)
+static UISwitch *sciSwitch(BOOL on, id target, SEL action) {
+	UISwitch *sw = UISwitch.new;
+	sw.on = on;
+	sw.onTintColor = [SCIUtils SCIColor_Primary];
+	[sw addTarget:target action:action forControlEvents:UIControlEventValueChanged];
+	return sw;
+}
+
+static UITableViewCell *sciCell(UITableViewCellStyle style) {
+	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
+	cell.accessoryView = nil;
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+	cell.contentView.alpha = 1.0;
+	cell.textLabel.text = nil;
+	cell.detailTextLabel.text = nil;
+	cell.imageView.image = nil;
+	return cell;
+}
+
+static UIListContentConfiguration *sciContent(NSString *title, NSString *subtitle) {
+	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+
+	config.text = title ?: @"";
+	config.textProperties.color = UIColor.labelColor;
+
+	if (subtitle.length) {
+		config.secondaryText = subtitle;
+		config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+		config.textToSecondaryTextVerticalPadding = 4.5;
+	}
+
+	return config;
+}
+
+static void sciApplyIcon(UIListContentConfiguration *config, NSString *symbol, UIColor *tint) {
+	if (!symbol.length) return;
+
+	UIImage *image = [UIImage systemImageNamed:symbol];
+	if (!image) return;
+
+	config.image = image;
+	config.imageProperties.tintColor = tint ?: UIColor.labelColor;
+	config.imageToTextPadding = 14.0;
+}
+
+#pragma mark - Reorder row helpers
+
+static UIImageView *sciGripView(void) {
+	UIImageView *view = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal"]];
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.tintColor = UIColor.tertiaryLabelColor;
+	view.contentMode = UIViewContentModeCenter;
+	return view;
+}
+
+static UIImageView *sciIconView(NSString *symbol) {
+	UIImageView *view = [[UIImageView alloc] initWithImage:(symbol.length ? [UIImage systemImageNamed:symbol] : nil)];
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.tintColor = UIColor.labelColor;
+	view.contentMode = UIViewContentModeCenter;
+	return view;
+}
+
+static UILabel *sciTitleLabel(NSString *title) {
+	UILabel *label = UILabel.new;
+	label.translatesAutoresizingMaskIntoConstraints = NO;
+	label.text = title ?: @"";
+	label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+	label.textColor = UIColor.labelColor;
+	return label;
+}
+
+static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSString *title, UISwitch *sw) {
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	cell.textLabel.text = nil;
+	cell.imageView.image = nil;
+
+	UIImageView *grip = sciGripView();
+	UIImageView *icon = sciIconView(symbol);
+	UILabel *titleLabel = sciTitleLabel(title);
+
+	sw.translatesAutoresizingMaskIntoConstraints = NO;
+
+	[cell.contentView addSubview:grip];
+	[cell.contentView addSubview:icon];
+	[cell.contentView addSubview:titleLabel];
+	[cell.contentView addSubview:sw];
+
+	[NSLayoutConstraint activateConstraints:@[
+		[grip.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
+		[grip.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[grip.widthAnchor constraintEqualToConstant:20.0],
+
+		[icon.leadingAnchor constraintEqualToAnchor:grip.trailingAnchor constant:14.0],
+		[icon.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[icon.widthAnchor constraintEqualToConstant:24.0],
+
+		[titleLabel.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:12.0],
+		[titleLabel.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:sw.leadingAnchor constant:-12.0],
+
+		[sw.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
+		[sw.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+	]];
+}
+
+#pragma mark - Icon picker
 
 @interface SCIHomeShortcutIconPickerCell : UICollectionViewCell
 - (void)configureWithSymbol:(NSString *)symbol selected:(BOOL)selected;
@@ -46,79 +158,95 @@ static NSString *sciCurrentIcon(void) {
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UIImageView *checkBadge;
 @property (nonatomic, strong) UILabel *autoLabel;
+@property (nonatomic, strong) NSLayoutConstraint *iconCenterYConstraint;
 @end
 
 @implementation SCIHomeShortcutIconPickerCell
 
 - (instancetype)initWithFrame:(CGRect)frame {
-	if (!(self = [super initWithFrame:frame])) return nil;
-	self.contentView.layer.cornerRadius = 16;
+	self = [super initWithFrame:frame];
+	if (!self) return nil;
+
+	self.contentView.layer.cornerRadius = 16.0;
 	self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
-	self.contentView.layer.borderColor = [UIColor separatorColor].CGColor;
-	self.contentView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+	self.contentView.layer.borderColor = UIColor.separatorColor.CGColor;
+	self.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
-	_iconView = [UIImageView new];
+	_iconView = UIImageView.new;
 	_iconView.translatesAutoresizingMaskIntoConstraints = NO;
 	_iconView.contentMode = UIViewContentModeCenter;
-	_iconView.tintColor = [UIColor labelColor];
+	_iconView.tintColor = UIColor.labelColor;
 	[self.contentView addSubview:_iconView];
 
-	_autoLabel = [UILabel new];
+	_autoLabel = UILabel.new;
 	_autoLabel.translatesAutoresizingMaskIntoConstraints = NO;
 	_autoLabel.text = SCILocalized(@"Auto");
-	_autoLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
-	_autoLabel.textColor = [UIColor secondaryLabelColor];
+	_autoLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold];
+	_autoLabel.textColor = UIColor.secondaryLabelColor;
 	_autoLabel.hidden = YES;
 	[self.contentView addSubview:_autoLabel];
 
-	UIImageSymbolConfiguration *checkCfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightBold];
+	UIImageSymbolConfiguration *checkCfg = [UIImageSymbolConfiguration configurationWithPointSize:18.0 weight:UIImageSymbolWeightBold];
 	_checkBadge = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle.fill" withConfiguration:checkCfg]];
 	_checkBadge.translatesAutoresizingMaskIntoConstraints = NO;
-	_checkBadge.tintColor = [UIColor systemBlueColor];
-	_checkBadge.backgroundColor = [UIColor whiteColor];
-	_checkBadge.layer.cornerRadius = 9;
+	_checkBadge.tintColor = [SCIUtils SCIColor_Primary];
+	_checkBadge.backgroundColor = UIColor.whiteColor;
+	_checkBadge.layer.cornerRadius = 9.0;
 	_checkBadge.layer.masksToBounds = YES;
 	_checkBadge.hidden = YES;
 	[self.contentView addSubview:_checkBadge];
 
+	self.iconCenterYConstraint = [_iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor];
+
 	[NSLayoutConstraint activateConstraints:@[
 		[_iconView.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
-		[_iconView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor constant:-6],
+		self.iconCenterYConstraint,
+
 		[_autoLabel.centerXAnchor constraintEqualToAnchor:self.contentView.centerXAnchor],
-		[_autoLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4],
-		[_checkBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
-		[_checkBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6],
-		[_checkBadge.widthAnchor constraintEqualToConstant:18],
-		[_checkBadge.heightAnchor constraintEqualToConstant:18],
+		[_autoLabel.topAnchor constraintEqualToAnchor:_iconView.bottomAnchor constant:4.0],
+
+		[_checkBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6.0],
+		[_checkBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6.0],
+		[_checkBadge.widthAnchor constraintEqualToConstant:18.0],
+		[_checkBadge.heightAnchor constraintEqualToConstant:18.0],
 	]];
+
 	return self;
 }
 
 - (void)applySelected:(BOOL)selected {
+	UIColor *primary = [SCIUtils SCIColor_Primary];
+
 	self.checkBadge.hidden = !selected;
-	UIColor *iconTint = selected ? [UIColor systemBlueColor] : [UIColor labelColor];
-	self.iconView.tintColor = iconTint;
-	self.autoLabel.textColor = selected ? [UIColor systemBlueColor] : [UIColor secondaryLabelColor];
-	self.contentView.backgroundColor = selected
-		? [[UIColor systemBlueColor] colorWithAlphaComponent:0.16]
-		: [UIColor secondarySystemGroupedBackgroundColor];
-	self.contentView.layer.borderColor = (selected ? [UIColor systemBlueColor] : [UIColor separatorColor]).CGColor;
+	self.iconView.tintColor = selected ? primary : UIColor.labelColor;
+	self.autoLabel.textColor = selected ? primary : UIColor.secondaryLabelColor;
+	self.contentView.backgroundColor = selected ? [primary colorWithAlphaComponent:0.16] : UIColor.secondarySystemGroupedBackgroundColor;
+	self.contentView.layer.borderColor = (selected ? primary : UIColor.separatorColor).CGColor;
 	self.contentView.layer.borderWidth = selected ? 2.0 : (1.0 / UIScreen.mainScreen.scale);
 }
 
 - (void)configureWithSymbol:(NSString *)symbol selected:(BOOL)selected {
-	UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:24 weight:UIImageSymbolWeightSemibold];
 	BOOL isAuto = [symbol isEqualToString:@"auto"];
+	UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:24.0 weight:UIImageSymbolWeightSemibold];
+
 	self.iconView.image = [UIImage systemImageNamed:(isAuto ? @"wand.and.stars" : symbol) withConfiguration:cfg];
 	self.autoLabel.hidden = !isAuto;
+	self.iconCenterYConstraint.constant = isAuto ? -6.0 : 0.0;
+
 	[self applySelected:selected];
 }
 
-- (void)prepareForReuse { [super prepareForReuse]; [self applySelected:NO]; }
+- (void)prepareForReuse {
+	[super prepareForReuse];
+
+	self.iconView.image = nil;
+	self.autoLabel.hidden = YES;
+	self.iconCenterYConstraint.constant = 0.0;
+	[self applySelected:NO];
+}
 
 @end
-
 
 @interface SCIHomeShortcutIconPickerViewController : UIViewController <UICollectionViewDataSource, UICollectionViewDelegate>
 @property (nonatomic, strong) UICollectionView *collectionView;
@@ -129,28 +257,31 @@ static NSString *sciCurrentIcon(void) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
+
 	self.title = SCILocalized(@"Icon");
-	self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 
 	NSMutableArray *valid = [NSMutableArray arrayWithObject:@"auto"];
 	for (NSString *name in [SCIHomeShortcutCatalog availableIcons]) {
 		if ([UIImage systemImageNamed:name]) [valid addObject:name];
 	}
-	self.icons = valid;
+	self.icons = valid.copy;
 
-	UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
-	layout.minimumInteritemSpacing = 10;
-	layout.minimumLineSpacing = 10;
-	layout.sectionInset = UIEdgeInsetsMake(16, 16, 24, 16);
+	UICollectionViewFlowLayout *layout = UICollectionViewFlowLayout.new;
+	layout.minimumInteritemSpacing = 10.0;
+	layout.minimumLineSpacing = 10.0;
+	layout.sectionInset = UIEdgeInsetsMake(16.0, 16.0, 24.0, 16.0);
 
 	self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];
 	self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
-	self.collectionView.backgroundColor = [UIColor clearColor];
+	self.collectionView.backgroundColor = UIColor.clearColor;
 	self.collectionView.delegate = self;
 	self.collectionView.dataSource = self;
 	self.collectionView.alwaysBounceVertical = YES;
-	[self.collectionView registerClass:[SCIHomeShortcutIconPickerCell class] forCellWithReuseIdentifier:@"icon"];
+
+	[self.collectionView registerClass:SCIHomeShortcutIconPickerCell.class forCellWithReuseIdentifier:@"icon"];
 	[self.view addSubview:self.collectionView];
+
 	[NSLayoutConstraint activateConstraints:@[
 		[self.collectionView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
 		[self.collectionView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
@@ -161,6 +292,7 @@ static NSString *sciCurrentIcon(void) {
 
 - (void)viewDidAppear:(BOOL)animated {
 	[super viewDidAppear:animated];
+
 	NSUInteger idx = [self.icons indexOfObject:sciCurrentIcon()];
 	if (idx != NSNotFound && idx > 4) {
 		[self.collectionView scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:idx inSection:0]
@@ -171,36 +303,44 @@ static NSString *sciCurrentIcon(void) {
 
 - (void)viewWillLayoutSubviews {
 	[super viewWillLayoutSubviews];
+
 	UICollectionViewFlowLayout *layout = (UICollectionViewFlowLayout *)self.collectionView.collectionViewLayout;
-	CGFloat available = self.view.bounds.size.width - 32;
+	CGFloat available = self.view.bounds.size.width - 32.0;
 	NSInteger cols = MAX(4, (NSInteger)floor(available / 76.0));
 	CGFloat side = floor((available - layout.minimumInteritemSpacing * (cols - 1)) / cols);
+
 	layout.itemSize = CGSizeMake(side, side);
 }
 
-- (NSInteger)collectionView:(UICollectionView *)cv numberOfItemsInSection:(NSInteger)s { return self.icons.count; }
+- (NSInteger)collectionView:(UICollectionView *)collectionView numberOfItemsInSection:(NSInteger)section {
+	return self.icons.count;
+}
 
-- (UICollectionViewCell *)collectionView:(UICollectionView *)cv cellForItemAtIndexPath:(NSIndexPath *)ip {
-	SCIHomeShortcutIconPickerCell *cell = [cv dequeueReusableCellWithReuseIdentifier:@"icon" forIndexPath:ip];
-	NSString *name = self.icons[ip.item];
+- (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
+	SCIHomeShortcutIconPickerCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"icon" forIndexPath:indexPath];
+	NSString *name = self.icons[indexPath.item];
+
 	[cell configureWithSymbol:name selected:[name isEqualToString:sciCurrentIcon()]];
+
 	return cell;
 }
 
-- (void)collectionView:(UICollectionView *)cv didSelectItemAtIndexPath:(NSIndexPath *)ip {
-	NSString *picked = self.icons[ip.item];
+- (void)collectionView:(UICollectionView *)collectionView didSelectItemAtIndexPath:(NSIndexPath *)indexPath {
+	NSString *picked = self.icons[indexPath.item];
+
 	if ([picked isEqualToString:sciCurrentIcon()]) {
-		[cv deselectItemAtIndexPath:ip animated:YES];
+		[collectionView deselectItemAtIndexPath:indexPath animated:YES];
 		return;
 	}
+
 	[SCIUtils setPref:picked forKey:kSCIHomeShortcutIconPrefKey];
-	[[NSNotificationCenter defaultCenter] postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
-	[cv reloadData];
+	[NSNotificationCenter.defaultCenter postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
+
+	[collectionView reloadData];
 	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
 }
 
 @end
-
 
 #pragma mark - Main config VC
 
@@ -213,190 +353,177 @@ static NSString *sciCurrentIcon(void) {
 - (instancetype)init {
 	self = [super initWithStyle:UITableViewStyleInsetGrouped];
 	if (!self) return nil;
+
 	self.title = SCILocalized(@"Home shortcut button");
+
 	return self;
 }
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
+
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.tableView.backgroundColor = self.view.backgroundColor;
 	self.actions = sciLoadOrderedActions();
+
 	self.tableView.dragInteractionEnabled = YES;
 	self.tableView.dragDelegate = self;
 	self.tableView.dropDelegate = self;
-	[self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"row"];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-	[self.tableView reloadData]; // refresh icon row title on return from picker
+	[self.tableView reloadData];
 }
 
 #pragma mark - Sections
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return 2;
+}
 
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
 	return section == 0 ? 2 : (NSInteger)self.actions.count;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
 	return section == 0 ? SCILocalized(@"Behavior") : SCILocalized(@"Actions");
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
 	if (section == 0) {
 		return SCILocalized(@"Adds a button to the home top bar, right of the create-post +. Off entirely turns it off.");
 	}
+
 	return SCILocalized(@"Drag the ≡ handle to reorder. Toggle a row off to hide that destination. With one action enabled tapping fires it; with two or more, tapping presents a menu.");
 }
 
 #pragma mark - Cells
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-	if (ip.section == 0) return [self behaviorCellForRow:ip.row];
-	return [self actionCellForRow:ip.row];
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	return indexPath.section == 0 ? [self behaviorCellForRow:indexPath.row] : [self actionCellForRow:indexPath.row];
 }
 
 - (UITableViewCell *)behaviorCellForRow:(NSInteger)row {
-	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"row"];
-	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+
 	if (row == 0) {
-		cell.textLabel.text = SCILocalized(@"Show button");
-		UISwitch *sw = [UISwitch new];
-		sw.on = [SCIUtils getBoolPref:kSCIHomeShortcutEnabledPrefKey];
-		[sw addTarget:self action:@selector(masterToggleChanged:) forControlEvents:UIControlEventValueChanged];
-		cell.accessoryView = sw;
-		cell.imageView.image = [UIImage systemImageNamed:@"power"];
+		UIListContentConfiguration *config = sciContent(SCILocalized(@"Show button"), nil);
+		sciApplyIcon(config, @"power", UIColor.labelColor);
+
+		cell.contentConfiguration = config;
+		cell.accessoryView = sciSwitch([SCIUtils getBoolPref:kSCIHomeShortcutEnabledPrefKey], self, @selector(masterToggleChanged:));
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
 		return cell;
 	}
+
 	NSString *cur = sciCurrentIcon();
 	BOOL isAuto = [cur isEqualToString:@"auto"];
-	cell.textLabel.text = SCILocalized(@"Icon");
-	cell.detailTextLabel.text = isAuto ? SCILocalized(@"Auto") : cur;
-	cell.imageView.image = [UIImage systemImageNamed:(isAuto ? @"wand.and.stars" : cur)];
+	NSString *symbol = isAuto ? @"wand.and.stars" : cur;
+
+	UIListContentConfiguration *config = sciContent(SCILocalized(@"Icon"), isAuto ? SCILocalized(@"Auto") : cur);
+	sciApplyIcon(config, symbol, UIColor.labelColor);
+
+	cell.contentConfiguration = config;
 	cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+
 	return cell;
 }
 
 - (UITableViewCell *)actionCellForRow:(NSInteger)row {
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+
+	if (row < 0 || row >= (NSInteger)self.actions.count) return cell;
+
 	NSDictionary *rowDict = self.actions[row];
-	SCIHomeShortcutAction *entry = [SCIHomeShortcutCatalog actionForID:rowDict[@"id"]];
+	NSString *aid = rowDict[@"id"];
+	SCIHomeShortcutAction *entry = [SCIHomeShortcutCatalog actionForID:aid];
 
-	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"row"];
-	cell.selectionStyle = UITableViewCellSelectionStyleNone;
-	cell.textLabel.text = nil;
-	cell.imageView.image = nil;
+	UISwitch *sw = sciSwitch([rowDict[@"enabled"] boolValue], self, @selector(actionToggleChanged:));
+	sw.accessibilityIdentifier = aid;
 
-	UIImageView *grip = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal"]];
-	grip.translatesAutoresizingMaskIntoConstraints = NO;
-	grip.tintColor = [UIColor tertiaryLabelColor];
-	grip.contentMode = UIViewContentModeCenter;
+	sciInstallActionRow(cell, entry.symbol, entry.title ?: aid, sw);
 
-	UIImageView *icon = [[UIImageView alloc] initWithImage:entry.symbol ? [UIImage systemImageNamed:entry.symbol] : nil];
-	icon.translatesAutoresizingMaskIntoConstraints = NO;
-	icon.tintColor = [UIColor labelColor];
-	icon.contentMode = UIViewContentModeCenter;
-
-	UILabel *title = [UILabel new];
-	title.translatesAutoresizingMaskIntoConstraints = NO;
-	title.text = entry.title ?: rowDict[@"id"];
-	title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-
-	UISwitch *sw = [UISwitch new];
-	sw.translatesAutoresizingMaskIntoConstraints = NO;
-	sw.on = [rowDict[@"enabled"] boolValue];
-	sw.accessibilityIdentifier = entry.actionID;
-	[sw addTarget:self action:@selector(actionToggleChanged:) forControlEvents:UIControlEventValueChanged];
-
-	[cell.contentView addSubview:grip];
-	[cell.contentView addSubview:icon];
-	[cell.contentView addSubview:title];
-	[cell.contentView addSubview:sw];
-
-	[NSLayoutConstraint activateConstraints:@[
-		[grip.leadingAnchor  constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
-		[grip.centerYAnchor  constraintEqualToAnchor:cell.contentView.centerYAnchor],
-		[grip.widthAnchor	constraintEqualToConstant:20],
-
-		[icon.leadingAnchor  constraintEqualToAnchor:grip.trailingAnchor constant:14],
-		[icon.centerYAnchor  constraintEqualToAnchor:cell.contentView.centerYAnchor],
-		[icon.widthAnchor	constraintEqualToConstant:24],
-
-		[title.leadingAnchor  constraintEqualToAnchor:icon.trailingAnchor constant:12],
-		[title.centerYAnchor  constraintEqualToAnchor:cell.contentView.centerYAnchor],
-		[title.trailingAnchor constraintLessThanOrEqualToAnchor:sw.leadingAnchor constant:-12],
-
-		[sw.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
-		[sw.centerYAnchor  constraintEqualToAnchor:cell.contentView.centerYAnchor],
-	]];
 	return cell;
 }
 
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-	[tv deselectRowAtIndexPath:ip animated:YES];
-	if (ip.section == 0 && ip.row == 1) {
-		[self.navigationController pushViewController:[SCIHomeShortcutIconPickerViewController new] animated:YES];
+#pragma mark - Selection
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+	if (indexPath.section == 0 && indexPath.row == 1) {
+		[self.navigationController pushViewController:SCIHomeShortcutIconPickerViewController.new animated:YES];
 	}
 }
 
-#pragma mark - Toggle handlers
+#pragma mark - Toggles
 
-- (void)masterToggleChanged:(UISwitch *)sw {
-	[SCIUtils setPref:@(sw.isOn) forKey:kSCIHomeShortcutEnabledPrefKey];
-	[[NSNotificationCenter defaultCenter] postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
+- (void)masterToggleChanged:(UISwitch *)sender {
+	[SCIUtils setPref:@(sender.isOn) forKey:kSCIHomeShortcutEnabledPrefKey];
+	[NSNotificationCenter.defaultCenter postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
 }
 
-- (void)actionToggleChanged:(UISwitch *)sw {
-	NSString *aid = sw.accessibilityIdentifier;
+- (void)actionToggleChanged:(UISwitch *)sender {
+	NSString *aid = sender.accessibilityIdentifier;
+	if (!aid.length) return;
+
 	for (NSMutableDictionary *row in self.actions) {
 		if ([row[@"id"] isEqualToString:aid]) {
-			row[@"enabled"] = @(sw.isOn);
+			row[@"enabled"] = @(sender.isOn);
 			break;
 		}
 	}
+
 	sciSaveOrderedActions(self.actions);
 }
 
-#pragma mark - Drag and drop reorder
+#pragma mark - Drag and drop
 
-- (BOOL)tableView:(UITableView *)tv canMoveRowAtIndexPath:(NSIndexPath *)ip { return ip.section == 1; }
+- (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath {
+	return indexPath.section == 1;
+}
 
-- (NSArray<UIDragItem *> *)tableView:(UITableView *)tv itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)ip {
-	if (ip.section != 1) return @[];
-	NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:self.actions[ip.row][@"id"] ?: @""];
+- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
+	if (indexPath.section != 1) return @[];
+
+	NSString *aid = self.actions[indexPath.row][@"id"] ?: @"";
+	NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:aid];
 	UIDragItem *item = [[UIDragItem alloc] initWithItemProvider:provider];
-	item.localObject = ip;
+
+	item.localObject = indexPath;
+
 	return @[item];
 }
 
-- (UITableViewDropProposal *)tableView:(UITableView *)tv dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)dst {
-	if (!session.localDragSession || !dst || dst.section != 1) {
+- (UITableViewDropProposal *)tableView:(UITableView *)tableView dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
+	if (!session.localDragSession || !destinationIndexPath || destinationIndexPath.section != 1) {
 		return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
 	}
-	return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove
-															intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+
+	return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove intent:UITableViewDropIntentInsertAtDestinationIndexPath];
 }
 
-- (void)tableView:(UITableView *)tv performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
+- (void)tableView:(UITableView *)tableView performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
 	NSIndexPath *dst = coordinator.destinationIndexPath;
 	if (!dst || dst.section != 1) return;
+
 	for (id<UITableViewDropItem> dropItem in coordinator.items) {
 		NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
-		if (!src || src.section != 1 || src.row == dst.row) continue;
+		if (![src isKindOfClass:NSIndexPath.class]) continue;
+		if (src.section != 1 || src.row == dst.row) continue;
+		if (src.row >= (NSInteger)self.actions.count) continue;
 
-		NSMutableDictionary *row = self.actions[src.row];
+		NSMutableDictionary *item = self.actions[src.row];
 		[self.actions removeObjectAtIndex:src.row];
-		NSInteger insertIdx = MIN(dst.row, (NSInteger)self.actions.count);
-		[self.actions insertObject:row atIndex:insertIdx];
 
-		[tv performBatchUpdates:^{
-			[tv deleteRowsAtIndexPaths:@[src] withRowAnimation:UITableViewRowAnimationFade];
-			[tv insertRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:insertIdx inSection:1]]
-					   withRowAnimation:UITableViewRowAnimationFade];
-		} completion:nil];
-		[coordinator dropItem:dropItem.dragItem toRowAtIndexPath:[NSIndexPath indexPathForRow:insertIdx inSection:1]];
+		NSInteger insertIndex = MIN(dst.row, (NSInteger)self.actions.count);
+		[self.actions insertObject:item atIndex:insertIndex];
+
+		[tableView reloadData];
 	}
+
 	sciSaveOrderedActions(self.actions);
 }
 
