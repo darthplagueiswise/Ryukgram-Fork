@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
+#import "SCIDexKitViewController.h"
 #import "../Features/ExpFlags/SCIMobileConfigIdNameMappingExporter.h"
 #import "../Features/ExpFlags/SCIIgMobileDeprecatedConfigCatalog.h"
 
@@ -42,8 +43,8 @@ static NSString *SCIIgDexExportMessage(NSDictionary *result) {
 
 static id SCIIgDexDescriptorForIndexPath(id self, NSIndexPath *indexPath) {
     SEL sel = NSSelectorFromString(@"desc:");
-    if (![self respondsToSelector:sel]) return nil;
-    return ((id (*)(id, SEL, NSIndexPath *))objc_msgSend)(self, sel, indexPath);
+    if (![(id)self respondsToSelector:sel]) return nil;
+    return ((id (*)(id, SEL, NSIndexPath *))objc_msgSend)((id)self, sel, indexPath);
 }
 
 static NSString *SCIIgDexValueForKey(id obj, NSString *key) {
@@ -77,30 +78,32 @@ static UILabel *SCIIgDexCellLabel(UITableViewCell *cell, NSString *key) {
 - (void)viewDidLoad {
     %orig;
 
-    NSMutableArray<UIBarButtonItem *> *items = [[self.navigationItem.rightBarButtonItems ?: @[] mutableCopy] ?: [NSMutableArray array] mutableCopy];
+    UIViewController *vc = (UIViewController *)self;
+    NSMutableArray<UIBarButtonItem *> *items = [[vc.navigationItem.rightBarButtonItems ?: @[] mutableCopy] ?: [NSMutableArray array] mutableCopy];
     BOOL found = NO;
     for (UIBarButtonItem *item in items) {
         if ([item.title isEqualToString:@"ID Map"] || [item.title isEqualToString:@"Tools"] || [item.title isEqualToString:@"IGMobile JSON"]) {
             item.title = @"IGMobile JSON";
-            item.target = self;
+            item.target = (id)self;
             item.action = @selector(exportIGMobileDeprecatedJSON);
             found = YES;
         }
     }
     if (!found) {
-        UIBarButtonItem *json = [[UIBarButtonItem alloc] initWithTitle:@"IGMobile JSON" style:UIBarButtonItemStylePlain target:self action:@selector(exportIGMobileDeprecatedJSON)];
+        UIBarButtonItem *json = [[UIBarButtonItem alloc] initWithTitle:@"IGMobile JSON" style:UIBarButtonItemStylePlain target:(id)self action:@selector(exportIGMobileDeprecatedJSON)];
         [items insertObject:json atIndex:0];
     }
-    self.navigationItem.rightBarButtonItems = items;
+    vc.navigationItem.rightBarButtonItems = items;
 
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reload) name:SCIIgMobileDeprecatedConfigCatalogDidUpdateNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:(id)self selector:@selector(reload) name:SCIIgMobileDeprecatedConfigCatalogDidUpdateNotification object:nil];
 }
 
 - (void)exportIGMobileDeprecatedJSON {
+    UIViewController *vc = (UIViewController *)self;
     UIAlertController *wait = [UIAlertController alertControllerWithTitle:@"IGMobile JSON"
                                                                   message:@"Exportando FBMobileConfigStartupConfigsDeprecated e importando catálogo interno..."
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:wait animated:YES completion:^{
+    [vc presentViewController:wait animated:YES completion:^{
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             NSDictionary *result = [SCIMobileConfigIdNameMappingExporter exportIGMobileDeprecatedJSONNow];
             NSString *message = SCIIgDexExportMessage(result);
@@ -121,9 +124,9 @@ static UILabel *SCIIgDexCellLabel(UITableViewCell *cell, NSString *key) {
                         }]];
                     }
                     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-                    if (alert.popoverPresentationController) alert.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItems.firstObject;
-                    [self presentViewController:alert animated:YES completion:nil];
-                    if ([self respondsToSelector:@selector(reload)]) [self performSelector:@selector(reload)];
+                    if (alert.popoverPresentationController) alert.popoverPresentationController.barButtonItem = vc.navigationItem.rightBarButtonItems.firstObject;
+                    [vc presentViewController:alert animated:YES completion:nil];
+                    if ([(id)self respondsToSelector:@selector(reload)]) [(id)self performSelector:@selector(reload)];
                 }];
             });
         });
@@ -131,13 +134,13 @@ static UILabel *SCIIgDexCellLabel(UITableViewCell *cell, NSString *key) {
 }
 
 - (void)exportIDNameMapping {
-    [self exportIGMobileDeprecatedJSON];
+    [(id)self performSelector:@selector(exportIGMobileDeprecatedJSON)];
 }
 
 - (void)reload {
     %orig;
     UILabel *footer = nil;
-    @try { footer = [self valueForKey:@"footer"]; } @catch (__unused id ex) {}
+    @try { footer = [(id)self valueForKey:@"footer"]; } @catch (__unused id ex) {}
     if (![footer isKindOfClass:UILabel.class]) return;
 
     NSString *summary = [SCIIgMobileDeprecatedConfigCatalog summaryLine] ?: @"igmobile deprecated catalog not imported";
@@ -149,7 +152,7 @@ static UILabel *SCIIgDexCellLabel(UITableViewCell *cell, NSString *key) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = %orig;
-    id d = SCIIgDexDescriptorForIndexPath(self, indexPath);
+    id d = SCIIgDexDescriptorForIndexPath((id)self, indexPath);
     if (!d) return cell;
 
     NSString *className = SCIIgDexValueForKey(d, @"className");
@@ -179,7 +182,7 @@ static UILabel *SCIIgDexCellLabel(UITableViewCell *cell, NSString *key) {
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    id d = SCIIgDexDescriptorForIndexPath(self, indexPath);
+    id d = SCIIgDexDescriptorForIndexPath((id)self, indexPath);
     NSString *className = SCIIgDexValueForKey(d, @"className");
     NSString *selectorName = SCIIgDexValueForKey(d, @"selectorName");
     NSString *familyKey = SCIIgDexValueForKey(d, @"familyKey");
