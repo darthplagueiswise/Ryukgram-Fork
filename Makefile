@@ -36,7 +36,16 @@ CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-# Build FLEXing for sideloading (not building in dev-mode)
+# Bundle FLEXing/libFLEX into the same .deb as RyukGram.
+# This does not link FLEX into RyukGram.dylib; it stages separate dylibs and a
+# FLEXing.plist filtered to Instagram/beta/custom bundle IDs via executable.
+BUNDLE_FLEXING ?= 1
+ifeq ($(BUNDLE_FLEXING),1)
+before-package::
+	@bash scripts/build-and-bundle-flexing-deb.sh "$(THEOS_STAGING_DIR)" "$(THEOS_PACKAGE_INSTALL_PREFIX)"
+endif
+
+# Build FLEXing for sideloading/dev IPA flows.
 ifdef SIDELOAD
-	$(TWEAK_NAME)_SUBPROJECTS += modules/flexing
+	$(TWEAK_NAME)_SUBPROJECTS += modules/FLEXing
 endif
