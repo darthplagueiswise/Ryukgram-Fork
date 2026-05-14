@@ -24,6 +24,8 @@ static NSMutableArray<NSMutableDictionary *> *sciLoadOrderedActions(void) {
 
 	for (SCIHomeShortcutAction *action in [SCIHomeShortcutCatalog allActions]) {
 		if ([seen containsObject:action.actionID]) continue;
+
+		[seen addObject:action.actionID];
 		[out addObject:[@{@"id": action.actionID, @"enabled": @NO} mutableCopy]];
 	}
 
@@ -50,6 +52,7 @@ static UISwitch *sciSwitch(BOOL on, id target, SEL action) {
 
 static UITableViewCell *sciCell(UITableViewCellStyle style) {
 	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
+
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -57,6 +60,7 @@ static UITableViewCell *sciCell(UITableViewCellStyle style) {
 	cell.textLabel.text = nil;
 	cell.detailTextLabel.text = nil;
 	cell.imageView.image = nil;
+
 	return cell;
 }
 
@@ -91,26 +95,32 @@ static void sciApplyIcon(UIListContentConfiguration *config, NSString *symbol, U
 
 static UIImageView *sciGripView(void) {
 	UIImageView *view = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal"]];
+
 	view.translatesAutoresizingMaskIntoConstraints = NO;
 	view.tintColor = UIColor.tertiaryLabelColor;
 	view.contentMode = UIViewContentModeCenter;
+
 	return view;
 }
 
 static UIImageView *sciIconView(NSString *symbol) {
 	UIImageView *view = [[UIImageView alloc] initWithImage:(symbol.length ? [UIImage systemImageNamed:symbol] : nil)];
+
 	view.translatesAutoresizingMaskIntoConstraints = NO;
 	view.tintColor = UIColor.labelColor;
 	view.contentMode = UIViewContentModeCenter;
+
 	return view;
 }
 
 static UILabel *sciTitleLabel(NSString *title) {
 	UILabel *label = UILabel.new;
+
 	label.translatesAutoresizingMaskIntoConstraints = NO;
 	label.text = title ?: @"";
 	label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
 	label.textColor = UIColor.labelColor;
+
 	return label;
 }
 
@@ -243,6 +253,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.iconView.image = nil;
 	self.autoLabel.hidden = YES;
 	self.iconCenterYConstraint.constant = 0.0;
+
 	[self applySelected:NO];
 }
 
@@ -262,9 +273,11 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 
 	NSMutableArray *valid = [NSMutableArray arrayWithObject:@"auto"];
+
 	for (NSString *name in [SCIHomeShortcutCatalog availableIcons]) {
 		if ([UIImage systemImageNamed:name]) [valid addObject:name];
 	}
+
 	self.icons = valid.copy;
 
 	UICollectionViewFlowLayout *layout = UICollectionViewFlowLayout.new;
@@ -383,40 +396,29 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-	return section == 0 ? 2 : (NSInteger)self.actions.count;
+	return section == 0 ? 1 : (NSInteger)self.actions.count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-	return section == 0 ? SCILocalized(@"Behavior") : SCILocalized(@"Actions");
+	return section == 0 ? SCILocalized(@"Appearance") : SCILocalized(@"Actions");
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
 	if (section == 0) {
-		return SCILocalized(@"Adds a button to the home top bar, right of the create-post +. Off entirely turns it off.");
+		return SCILocalized(@"Choose the icon shown on the home top bar. Auto uses the selected action icon when only one action is enabled.");
 	}
 
-	return SCILocalized(@"Drag the ≡ handle to reorder. Toggle a row off to hide that destination. With one action enabled tapping fires it; with two or more, tapping presents a menu.");
+	return SCILocalized(@"Drag the ≡ handle to reorder. Toggle actions off to hide them. With one action enabled, tapping fires it directly. With two or more, tapping opens a menu.");
 }
 
 #pragma mark - Cells
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return indexPath.section == 0 ? [self behaviorCellForRow:indexPath.row] : [self actionCellForRow:indexPath.row];
+	return indexPath.section == 0 ? [self iconCell] : [self actionCellForRow:indexPath.row];
 }
 
-- (UITableViewCell *)behaviorCellForRow:(NSInteger)row {
+- (UITableViewCell *)iconCell {
 	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
-
-	if (row == 0) {
-		UIListContentConfiguration *config = sciContent(SCILocalized(@"Show button"), nil);
-		sciApplyIcon(config, @"power", UIColor.labelColor);
-
-		cell.contentConfiguration = config;
-		cell.accessoryView = sciSwitch([SCIUtils getBoolPref:kSCIHomeShortcutEnabledPrefKey], self, @selector(masterToggleChanged:));
-		cell.selectionStyle = UITableViewCellSelectionStyleNone;
-
-		return cell;
-	}
 
 	NSString *cur = sciCurrentIcon();
 	BOOL isAuto = [cur isEqualToString:@"auto"];
@@ -453,17 +455,12 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-	if (indexPath.section == 0 && indexPath.row == 1) {
+	if (indexPath.section == 0 && indexPath.row == 0) {
 		[self.navigationController pushViewController:SCIHomeShortcutIconPickerViewController.new animated:YES];
 	}
 }
 
 #pragma mark - Toggles
-
-- (void)masterToggleChanged:(UISwitch *)sender {
-	[SCIUtils setPref:@(sender.isOn) forKey:kSCIHomeShortcutEnabledPrefKey];
-	[NSNotificationCenter.defaultCenter postNotificationName:SCIHomeShortcutConfigDidChangeNotification object:nil];
-}
 
 - (void)actionToggleChanged:(UISwitch *)sender {
 	NSString *aid = sender.accessibilityIdentifier;
@@ -486,7 +483,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 }
 
 - (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
-	if (indexPath.section != 1) return @[];
+	if (indexPath.section != 1 || indexPath.row >= (NSInteger)self.actions.count) return @[];
 
 	NSString *aid = self.actions[indexPath.row][@"id"] ?: @"";
 	NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:aid];
@@ -511,6 +508,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 
 	for (id<UITableViewDropItem> dropItem in coordinator.items) {
 		NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
+
 		if (![src isKindOfClass:NSIndexPath.class]) continue;
 		if (src.section != 1 || src.row == dst.row) continue;
 		if (src.row >= (NSInteger)self.actions.count) continue;

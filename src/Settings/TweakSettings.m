@@ -620,16 +620,27 @@
 										}]
 				],
 				[SCISetting navigationCellWithTitle:SCILocalized(@"Interface")
+
 										   subtitle:@""
 											   icon:[SCISymbol symbolWithIGName:@"layout" fallback:@"hand.draw.fill"]
-										navSections:@[@{
-											@"header": SCILocalized(@"Tab bar shortcuts"),
-											@"footer": SCILocalized(@"Configure the home shortcut button (extra icon on the home top bar) and the system-wide action button icon."),
+										navSections:@[
+										@{
+											@"header": SCILocalized(@"Home shortcut button"),
+											@"footer": SCILocalized(@"Adds an extra shortcut button beside the create-post + button on the home top bar."),
 											@"rows": @[
-												[SCISetting navigationCellWithTitle:SCILocalized(@"Home shortcut button")
-																		   subtitle:SCILocalized(@"Configure the extra button on the home top bar")
+												[SCISetting switchCellWithTitle:SCILocalized(@"Show home shortcut button")
+																	   subtitle:SCILocalized(@"Show the extra button on the home top bar")
+																	defaultsKey:@"home_shortcut_enabled" requiresRestart:YES],
+												[SCISetting navigationCellWithTitle:SCILocalized(@"Configure button")
+																		   subtitle:SCILocalized(@"Choose icon, reorder actions, and enable menu items")
 																			   icon:[SCISymbol symbolWithIGName:@"home" fallback:@"house"]
 																	 viewController:[SCIHomeShortcutConfigViewController new]],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Global Action Icons"),
+											@"footer": SCILocalized(@"Used across feed, stories, reels, and DMs."),
+											@"rows": @[
 												[self actionIconNavCell],
 											]
 										},
