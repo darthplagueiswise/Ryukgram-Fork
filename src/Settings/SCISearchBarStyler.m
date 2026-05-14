@@ -3,43 +3,78 @@
 
 @implementation SCISearchBarStyler
 
-+ (UIColor *)fieldColor {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        if (tc.userInterfaceStyle == UIUserInterfaceStyleDark) {
-            return [UIColor colorWithRed:58/255.0 green:58/255.0 blue:60/255.0 alpha:1.0];
-        }
-        return [UIColor colorWithRed:190/255.0 green:190/255.0 blue:195/255.0 alpha:1.0];
-    }];
++ (BOOL)shouldUseNativeGlass {
+	return [SCIUtils getBoolPref:@"liquid_glass_buttons"];
 }
 
-+ (void)styleSearchBar:(UISearchBar *)sb {
-    // Liquid glass already gives the field a proper backdrop.
-    if ([SCIUtils getBoolPref:@"liquid_glass_buttons"]) return;
++ (UIColor *)searchFieldColor {
+	return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+		return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+			? [UIColor colorWithRed:58.0 / 255.0 green:58.0 / 255.0 blue:60.0 / 255.0 alpha:1.0]
+			: [UIColor colorWithRed:232.0 / 255.0 green:232.0 / 255.0 blue:237.0 / 255.0 alpha:1.0];
+	}];
+}
 
-    UITextField *tf = sb.searchTextField;
-    if (!tf) return;
++ (UIColor *)placeholderColor {
+	return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+		return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+			? [UIColor colorWithWhite:0.72 alpha:1.0]
+			: [UIColor colorWithWhite:0.42 alpha:1.0];
+	}];
+}
 
-    UIColor *fill = [self fieldColor];
++ (void)resetSearchBar:(UISearchBar *)searchBar {
+	if (!searchBar) return;
 
-    // Hide UIKit's wide rectangular bg; we paint the text field itself
-    // so the rounded pill shape survives and UIKit keeps owning layout.
-    for (UIView *v in sb.subviews) {
-        for (UIView *c in v.subviews) {
-            if ([NSStringFromClass(c.class) isEqualToString:@"UISearchBarBackground"]) c.hidden = YES;
-        }
-    }
-    for (UIView *v in tf.subviews) {
-        NSString *n = NSStringFromClass(v.class);
-        if ([n containsString:@"Background"] || [n containsString:@"Backdrop"]) v.hidden = YES;
-    }
+	searchBar.backgroundImage = nil;
+	searchBar.barTintColor = nil;
+	searchBar.backgroundColor = UIColor.clearColor;
 
-    tf.borderStyle = UITextBorderStyleNone;
-    tf.backgroundColor = fill;
-    tf.layer.backgroundColor = [fill resolvedColorWithTraitCollection:sb.traitCollection].CGColor;
-    tf.layer.cornerCurve = kCACornerCurveContinuous;
-    tf.layer.cornerRadius = 18;
-    tf.layer.masksToBounds = YES;
-    tf.opaque = YES;
+	UITextField *field = searchBar.searchTextField;
+	field.borderStyle = UITextBorderStyleRoundedRect;
+	field.backgroundColor = nil;
+	field.layer.backgroundColor = nil;
+	field.layer.cornerRadius = 0.0;
+	field.layer.masksToBounds = NO;
+}
+
++ (void)styleSearchBar:(UISearchBar *)searchBar {
+	if (!searchBar) return;
+
+	if ([self shouldUseNativeGlass]) {
+		[self resetSearchBar:searchBar];
+		return;
+	}
+
+	UITextField *field = searchBar.searchTextField;
+	if (!field) return;
+
+	UIColor *fill = [self searchFieldColor];
+	UIColor *placeholder = [self placeholderColor];
+
+	searchBar.searchBarStyle = UISearchBarStyleMinimal;
+	searchBar.backgroundImage = UIImage.new;
+	searchBar.barTintColor = UIColor.clearColor;
+	searchBar.backgroundColor = UIColor.clearColor;
+	searchBar.translucent = YES;
+
+	field.borderStyle = UITextBorderStyleNone;
+	field.backgroundColor = fill;
+	field.textColor = UIColor.labelColor;
+	field.tintColor = [SCIUtils respondsToSelector:@selector(SCIColor_Primary)] ? SCIUtils.SCIColor_Primary : UIColor.systemBlueColor;
+	field.layer.backgroundColor = [fill resolvedColorWithTraitCollection:searchBar.traitCollection].CGColor;
+	field.layer.cornerRadius = 18.0;
+	field.layer.cornerCurve = kCACornerCurveContinuous;
+	field.layer.masksToBounds = YES;
+	field.clipsToBounds = YES;
+
+	field.leftView.tintColor = placeholder;
+	field.rightView.tintColor = placeholder;
+
+	NSString *text = field.attributedPlaceholder.string ?: field.placeholder ?: SCILocalized(@"Search");
+	field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:text attributes:@{
+		NSForegroundColorAttributeName: placeholder
+	}];
 }
 
 @end

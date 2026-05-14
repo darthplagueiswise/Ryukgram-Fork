@@ -34,8 +34,8 @@ static NSArray<NSArray<NSString *> *> *sciSurfaceEntries(void) {
 	static NSArray *entries = nil;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		NSMutableArray *m = [NSMutableArray array];
-		NSMutableSet *seen = [NSMutableSet set];
+		NSMutableArray *m = NSMutableArray.array;
+		NSMutableSet *seen = NSMutableSet.set;
 
 		#define SCI_EMIT(NAME, SEL_, LABEL, ARITY, PREF) \
 			if (strlen(LABEL) && ![seen containsObject:@PREF]) { \
@@ -47,7 +47,7 @@ static NSArray<NSArray<NSString *> *> *sciSurfaceEntries(void) {
 
 		#undef SCI_EMIT
 
-		entries = [m copy];
+		entries = m.copy;
 	});
 	return entries;
 }
@@ -67,15 +67,16 @@ static NSString *sciExampleForKey(NSString *key) {
 	BOOL sec = [SCIUtils getBoolPref:kSecKey];
 
 	for (NSArray *opt in sciDateFormatOptions()) {
-		if ([opt[0] isEqualToString:key]) {
-			NSString *pattern = sec ? opt[2] : opt[1];
-			if (!pattern.length) return SCILocalized(@"Default");
+		if (![opt[0] isEqualToString:key]) continue;
 
-			NSDateFormatter *df = [NSDateFormatter new];
-			df.locale = [NSLocale currentLocale];
-			df.dateFormat = pattern;
-			return [df stringFromDate:sciRefDate()];
-		}
+		NSString *pattern = sec ? opt[2] : opt[1];
+		if (!pattern.length) return SCILocalized(@"Default");
+
+		NSDateFormatter *df = NSDateFormatter.new;
+		df.locale = NSLocale.currentLocale;
+		df.dateFormat = pattern;
+
+		return [df stringFromDate:sciRefDate()];
 	}
 
 	return SCILocalized(@"Default");
@@ -83,8 +84,10 @@ static NSString *sciExampleForKey(NSString *key) {
 
 static NSString *sciThresholdText(void) {
 	NSInteger days = (NSInteger)[SCIUtils getDoublePref:kThresholdKey];
+
 	if (days <= 0) return SCILocalized(@"Off");
 	if (days == 1) return SCILocalized(@"Within 1 day");
+
 	return [NSString stringWithFormat:SCILocalized(@"Within %ld days"), (long)days];
 }
 
@@ -100,149 +103,172 @@ static NSString *sciThresholdText(void) {
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Date format");
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	_tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	_tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	_tableView.backgroundColor = self.view.backgroundColor;
 	_tableView.dataSource = self;
 	_tableView.delegate = self;
 
 	[self.view addSubview:_tableView];
 }
 
-// 0 = format, 1 = seconds, 2 = relative, 3 = surfaces
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
+#pragma mark - Table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
 	return 4;
 }
 
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
 	if (section == 0) return (NSInteger)sciDateFormatOptions().count;
 	if (section == 1) return 1;
 	if (section == 2) return 3;
 	return (NSInteger)sciSurfaceEntries().count;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
 	if (section == 0) return SCILocalized(@"Absolute format");
 	if (section == 1) return SCILocalized(@"Time");
 	if (section == 2) return SCILocalized(@"Relative time");
 	return SCILocalized(@"Apply to");
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-	if (section == 0) {
-		return SCILocalized(@"Pick how absolute dates are written. “Default” leaves IG's own format untouched.");
-	}
-
-	if (section == 1) {
-		return SCILocalized(@"Include seconds when the format already shows time.");
-	}
-
-	if (section == 2) {
-		return SCILocalized(@"Dates younger than the threshold show as relative time (e.g. “2h”). Older dates fall back to the absolute format. “Append after absolute date” shows both — “Jan 5, 2026 (2h)”.");
-	}
-
-	if (section == 3) {
-		return SCILocalized(@"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to.");
-	}
-
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	if (section == 0) return SCILocalized(@"Pick how absolute dates are written. “Default” leaves IG's own format untouched.");
+	if (section == 1) return SCILocalized(@"Include seconds when the format already shows time.");
+	if (section == 2) return SCILocalized(@"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”.");
+	if (section == 3) return SCILocalized(@"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to.");
 	return nil;
 }
 
-- (UITableViewCell *)switchCellWithTitle:(NSString *)title key:(NSString *)key action:(SEL)action reuseID:(NSString *)reuseID {
-	UITableViewCell *cell = [_tableView dequeueReusableCellWithIdentifier:reuseID];
-	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseID];
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	if (indexPath.section == 0) return [self formatCellForTableView:tableView indexPath:indexPath];
+	if (indexPath.section == 1) return [self switchCellForTableView:tableView title:SCILocalized(@"Show seconds") subtitle:nil key:kSecKey action:@selector(secondsToggled:) reuseID:@"seconds"];
+	if (indexPath.section == 2) return [self relativeCellForTableView:tableView indexPath:indexPath];
 
-	cell.textLabel.text = title;
-	cell.textLabel.numberOfLines = 0;
-	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	NSArray *entry = sciSurfaceEntries()[indexPath.row];
 
-	UISwitch *sw = [UISwitch new];
-	sw.on = [SCIUtils getBoolPref:key];
-	[sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+	return [self switchCellForTableView:tableView
+								  title:SCILocalized(entry[1])
+							   subtitle:nil
+									key:entry[0]
+								 action:@selector(surfaceToggled:)
+								reuseID:@"surface"];
+}
 
-	cell.accessoryView = sw;
+#pragma mark - Cells
+
+- (UITableViewCell *)formatCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"format"];
+	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"format"];
+
+	NSString *key = sciDateFormatOptions()[indexPath.row][0];
+	NSString *current = [SCIUtils getStringPref:kFmtKey];
+	if (!current.length) current = @"default";
+
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = sciExampleForKey(key);
+	config.textProperties.font = [UIFont systemFontOfSize:16.0];
+
+	cell.contentConfiguration = config;
+	cell.accessoryView = nil;
+	cell.accessoryType = [current isEqualToString:key] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+
 	return cell;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-	if (ip.section == 0) {
-		UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"df"];
-		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"df"];
+- (UITableViewCell *)relativeCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
+	if (indexPath.row == 0) {
+		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"threshold"];
+		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"threshold"];
 
-		NSString *key = sciDateFormatOptions()[ip.row][0];
-		NSString *current = [SCIUtils getStringPref:kFmtKey];
-		if (!current.length) current = @"default";
-
-		cell.textLabel.text = sciExampleForKey(key);
-		cell.textLabel.font = [UIFont systemFontOfSize:16.0];
-		cell.accessoryType = [current isEqualToString:key] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+		cell.textLabel.text = SCILocalized(@"Relative within");
+		cell.textLabel.numberOfLines = 0;
+		cell.detailTextLabel.text = sciThresholdText();
+		cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+		cell.accessoryView = nil;
+		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 
 		return cell;
 	}
 
-	if (ip.section == 1) {
-		return [self switchCellWithTitle:SCILocalized(@"Show seconds")
-									 key:kSecKey
-								  action:@selector(secondsToggled:)
-								 reuseID:@"sec"];
+	if (indexPath.row == 1) {
+		return [self switchCellForTableView:tableView
+									  title:SCILocalized(@"Compact style")
+								   subtitle:SCILocalized(@"Example: “1h” instead of “1 hour ago”")
+										key:kCompactKey
+									 action:@selector(compactToggled:)
+									reuseID:@"compact"];
 	}
 
-	if (ip.section == 2) {
-		if (ip.row == 0) {
-			UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"threshold"];
-			if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"threshold"];
+	return [self switchCellForTableView:tableView
+								  title:SCILocalized(@"Append after absolute date")
+							   subtitle:SCILocalized(@"Example: “Jan 5, 2026 (2h)”")
+									key:kAppendKey
+								 action:@selector(appendToggled:)
+								reuseID:@"append"];
+}
 
-			cell.textLabel.text = SCILocalized(@"Relative within");
-			cell.detailTextLabel.text = sciThresholdText();
-			cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+- (UITableViewCell *)switchCellForTableView:(UITableView *)tableView title:(NSString *)title subtitle:(NSString *)subtitle key:(NSString *)key action:(SEL)action reuseID:(NSString *)reuseID {
+	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseID];
+	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseID];
 
-			return cell;
-		}
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = title;
+	config.textProperties.font = [UIFont systemFontOfSize:16.0];
 
-		if (ip.row == 1) {
-			return [self switchCellWithTitle:SCILocalized(@"Compact style (e.g. “1h” instead of “1 hour ago”)")
-										 key:kCompactKey
-									  action:@selector(compactToggled:)
-									 reuseID:@"compact"];
-		}
-
-		return [self switchCellWithTitle:SCILocalized(@"Append after absolute date")
-									 key:kAppendKey
-								  action:@selector(appendToggled:)
-								 reuseID:@"append"];
+	if (subtitle.length) {
+		config.secondaryText = subtitle;
+		config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+		config.textToSecondaryTextVerticalPadding = 4.5;
 	}
 
-	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"surf"];
-	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"surf"];
+	UISwitch *sw = UISwitch.new;
+	sw.on = [SCIUtils getBoolPref:key];
+	sw.onTintColor = [SCIUtils SCIColor_Primary];
+	sw.tag = [self switchTagForKey:key];
+	[sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
 
-	NSArray *entry = sciSurfaceEntries()[ip.row];
-
-	cell.textLabel.text = SCILocalized(entry[1]);
-	cell.textLabel.numberOfLines = 0;
-	cell.textLabel.font = [UIFont systemFontOfSize:15.0];
-	cell.selectionStyle = UITableViewCellSelectionStyleNone;
-
-	UISwitch *sw = [UISwitch new];
-	sw.on = [SCIUtils getBoolPref:entry[0]];
-	sw.tag = ip.row;
-	[sw addTarget:self action:@selector(surfaceToggled:) forControlEvents:UIControlEventValueChanged];
-
+	cell.contentConfiguration = config;
+	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.accessoryView = sw;
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
 	return cell;
 }
 
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-	[tv deselectRowAtIndexPath:ip animated:YES];
+- (NSInteger)switchTagForKey:(NSString *)key {
+	if ([key isEqualToString:kSecKey]) return 0;
+	if ([key isEqualToString:kCompactKey]) return 1;
+	if ([key isEqualToString:kAppendKey]) return 2;
 
-	if (ip.section == 0) {
-		[[NSUserDefaults standardUserDefaults] setObject:sciDateFormatOptions()[ip.row][0] forKey:kFmtKey];
-		[tv reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
+	NSInteger index = [sciSurfaceEntries() indexOfObjectPassingTest:^BOOL(NSArray<NSString *> *entry, NSUInteger idx, BOOL *stop) {
+		return [entry[0] isEqualToString:key];
+	}];
+
+	return index == NSNotFound ? -1 : index;
+}
+
+#pragma mark - Selection
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+	if (indexPath.section == 0) {
+		[NSUserDefaults.standardUserDefaults setObject:sciDateFormatOptions()[indexPath.row][0] forKey:kFmtKey];
+		[tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 		return;
 	}
 
-	if (ip.section != 2 || ip.row != 0) return;
+	if (indexPath.section == 2 && indexPath.row == 0) {
+		[self showThresholdEditorFromTableView:tableView indexPath:indexPath];
+	}
+}
 
+- (void)showThresholdEditorFromTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
 	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Relative within")
 																   message:SCILocalized(@"Show relative time for dates younger than this many days. 0 disables it.")
 															preferredStyle:UIAlertControllerStyleAlert];
@@ -261,29 +287,33 @@ static NSString *sciThresholdText(void) {
 		if (days < 0) days = 0;
 		if (days > 365) days = 365;
 
-		[[NSUserDefaults standardUserDefaults] setInteger:days forKey:kThresholdKey];
-		[tv reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+		[NSUserDefaults.standardUserDefaults setInteger:days forKey:kThresholdKey];
+		[tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
 	}]];
 
 	[self presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)secondsToggled:(UISwitch *)sw {
-	[[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:kSecKey];
+#pragma mark - Actions
+
+- (void)secondsToggled:(UISwitch *)sender {
+	[NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kSecKey];
 	[_tableView reloadSections:[NSIndexSet indexSetWithIndex:0] withRowAnimation:UITableViewRowAnimationNone];
 }
 
-- (void)compactToggled:(UISwitch *)sw {
-	[[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:kCompactKey];
+- (void)compactToggled:(UISwitch *)sender {
+	[NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kCompactKey];
 }
 
-- (void)appendToggled:(UISwitch *)sw {
-	[[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:kAppendKey];
+- (void)appendToggled:(UISwitch *)sender {
+	[NSUserDefaults.standardUserDefaults setBool:sender.on forKey:kAppendKey];
 }
 
-- (void)surfaceToggled:(UISwitch *)sw {
-	NSArray *entry = sciSurfaceEntries()[sw.tag];
-	[[NSUserDefaults standardUserDefaults] setBool:sw.on forKey:entry[0]];
+- (void)surfaceToggled:(UISwitch *)sender {
+	if (sender.tag < 0 || sender.tag >= (NSInteger)sciSurfaceEntries().count) return;
+
+	NSArray *entry = sciSurfaceEntries()[sender.tag];
+	[NSUserDefaults.standardUserDefaults setBool:sender.on forKey:entry[0]];
 }
 
 @end

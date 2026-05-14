@@ -217,7 +217,6 @@ NSDictionary *SCIDefaultsDictionary(void) {
 
 		@"enable_story_user_exclusions": @(YES),
 		@"story_blocking_mode": @"block_all",
-		@"story_excluded_show_unexclude_eye": @(YES),
 		@"story_seen_mode": @"button",
 		@"story_audio_toggle": @(NO),
 		@"view_story_mentions": @(YES),
