@@ -425,8 +425,7 @@ static NSString *SCIIdMapUIResultMessage(NSDictionary *result) {
     _groups=g;
 
     NSString *idMapStatus=[SCIMobileConfigIdNameMappingExporter lastStatusLine] ?: @"igmobile deprecated json idle";
-    _footer.text=[NSString stringWithFormat:@"DexKit v3 cached B-only · filter %@ · rows=%lu · groups=%lu · hidden=%lu · conflicts=%lu · hooks=%lu
-%@",
+    _footer.text=[NSString stringWithFormat:@"DexKit v3 cached B-only · filter %@ · rows=%lu · groups=%lu · hidden=%lu · conflicts=%lu · hooks=%lu\n%@",
                   [self filterName],
                   (unsigned long)_rows.count,
                   (unsigned long)_sections.count,

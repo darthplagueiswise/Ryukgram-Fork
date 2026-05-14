@@ -106,6 +106,8 @@
 "Enables experimental liquid glass buttons" = "Enables experimental liquid glass buttons";
 "Enables liquid glass tab bar, floating navigation, and other UI elements" = "Enables liquid glass tab bar, floating navigation, and other UI elements";
 "Experimental features" = "Experimental features";
+"Fixed" = "Fixed";
+"Fixed prevents shrinking. Hide makes it disappear when scrolling down" = "Fixed prevents shrinking. Hide makes it disappear when scrolling down";
 "Focus/distractions" = "Focus/distractions";
 "General" = "General";
 "Hide ads" = "Hide ads";
@@ -114,6 +116,7 @@
 "Hide Meta AI" = "Hide Meta AI";
 "Hide metrics" = "Hide metrics";
 "Hide notes tray" = "Hide notes tray";
+"Hide on scroll" = "Hide on scroll";
 "Hide trending searches" = "Hide trending searches";
 "Hide UI on capture" = "Hide UI on capture";
 "Hides all suggested users for you to follow, outside your feed" = "Hides all suggested users for you to follow, outside your feed";
@@ -125,6 +128,7 @@
 "Hides the suggested broadcast channels in direct messages" = "Hides the suggested broadcast channels in direct messages";
 "Hides the trending searches under the explore search bar" = "Hides the trending searches under the explore search bar";
 "Hold down on the Instagram logo to change the app icon" = "Hold down on the Instagram logo to change the app icon";
+"Liquid glass tab bar" = "Liquid glass tab bar";
 "Live" = "Live";
 "Long press on the eyedropper tool in stories to customize the text color more precisely" = "Long press on the eyedropper tool in stories to customize the text color more precisely";
 "Long-press the heart button in a live to hide or show the comments" = "Long-press the heart button in a live to hide or show the comments";
@@ -397,7 +401,11 @@
 "Sending a reply or emoji reaction automatically advances to the next story" = "Sending a reply or emoji reaction automatically advances to the next story";
 "Adds a 'View mentions' entry to the action button menu and story 3-dot menu" = "Adds a 'View mentions' entry to the action button menu and story 3-dot menu";
 "Mentions overlay button" = "Mentions overlay button";
+"Mentions count badge" = "Mentions count badge";
 "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels" = "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels";
+"Shows the number of unique mentioned accounts as a red badge on the overlay button" = "Shows the number of unique mentioned accounts as a red badge on the overlay button";
+"Hide stories midcards" = "Hide stories midcards";
+"Removes the Trending and Music promo cards from the stories tray" = "Removes the Trending and Music promo cards from the stories tray";
 "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only" = "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only";
 "Stickers" = "Stickers";
 "Peek at poll/quiz/slider results before interacting — you can still tap to vote normally. Force legacy adds the Quiz and Reveal stickers back to the story composer." = "Peek at poll/quiz/slider results before interacting — you can still tap to vote normally. Force legacy adds the Quiz and Reveal stickers back to the story composer.";
@@ -582,7 +590,6 @@
 "Absolute date + time" = "Absolute date + time";
 "How timestamps render in the log" = "How timestamps render in the log";
 "Select" = "Select";
-"Select all" = "Select all";
 "Select messages to download" = "Select messages to download";
 "%lu selected" = "%lu selected";
 "Photos" = "Photos";
@@ -1009,6 +1016,7 @@
 
 "Add location" = "Add location";
 "Add preset" = "Add preset";
+"Background" = "Background";
 "Background color" = "Background color";
 "Change location" = "Change location";
 "Clipboard is not an Instagram URL" = "Clipboard is not an Instagram URL";
@@ -1023,7 +1031,9 @@
 "Disable" = "Disable";
 "Download GIF" = "Download GIF";
 "Dropped pin" = "Dropped pin";
+"Emoji" = "Emoji";
 "Enable" = "Enable";
+"Enter emoji" = "Enter emoji";
 "Enable Location Services for Instagram in Settings to use your current location." = "Enable Location Services for Instagram in Settings to use your current location.";
 "Fake location" = "Fake location";
 "Location access denied" = "Location access denied";
@@ -1038,6 +1048,7 @@
 "Select color" = "Select color";
 "Set location" = "Set location";
 "Text color" = "Text color";
+"Type an emoji to use as the note bubble icon." = "Type an emoji to use as the note bubble icon.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Turn Location Services on in Settings → Privacy to use your current location.";
 
 "Theme" = "Theme";
@@ -1225,7 +1236,19 @@
 "Follow default" = "Follow default";
 "Force OFF (allow unsends)" = "Force OFF (allow unsends)";
 "Force ON (preserve unsends)" = "Force ON (preserve unsends)";
-"Format" = "Format";
+"Absolute format" = "Absolute format";
+"Append after absolute date" = "Append after absolute date";
+"Compact style (e.g. \"1h\" instead of \"1 hour ago\")" = "Compact style (e.g. \"1h\" instead of \"1 hour ago\")";
+"Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\"." = "Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\".";
+"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to." = "Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to.";
+"Include seconds when the format already shows time." = "Include seconds when the format already shows time.";
+"Pick how absolute dates are written. \"Default\" leaves IG's own format untouched." = "Pick how absolute dates are written. \"Default\" leaves IG's own format untouched.";
+"Relative time" = "Relative time";
+"Relative within" = "Relative within";
+"Show relative time for dates younger than this many days. 0 disables it." = "Show relative time for dates younger than this many days. 0 disables it.";
+"Time" = "Time";
+"Within %ld days" = "Within %ld days";
+"Within 1 day" = "Within 1 day";
 "Import failed" = "Import failed";
 "Included chats" = "Included chats";
 "Included users" = "Included users";
@@ -1255,7 +1278,6 @@
 "Show seconds" = "Show seconds";
 "Sort by" = "Sort by";
 "Story users" = "Story users";
-"Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to." = "Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to.";
 "Use this location" = "Use this location";
 "User '%@' not found" = "User '%@' not found";
 "Username (A–Z)" = "Username (A–Z)";

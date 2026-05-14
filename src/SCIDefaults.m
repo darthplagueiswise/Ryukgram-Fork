@@ -15,6 +15,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"deleted_messages_log_enabled": @(NO),
 		@"dm_log_date_format": @"relative",
 		@"hide_suggested_stories": @(NO),
+		@"hide_stories_midcards": @(NO),
 		@"profile_analyzer_accumulate": @(NO),
 		@"profile_analyzer_track_visits": @(NO),
 		@"story_tray_actions": @(NO),
@@ -50,6 +51,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 
 		@"liquid_glass_buttons": @(NO),
 		@"liquid_glass_surfaces": @(NO),
+		@"liquid_glass_tabbar_mode": @"default",
 
 		@"flex_app_launch": @(NO),
 		@"flex_app_start": @(NO),
@@ -118,6 +120,10 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"note_actions": @(NO),
 		@"note_copy_on_hold": @(NO),
 		@"feed_date_format": @"default",
+		@"feed_date_show_seconds": @(NO),
+		@"feed_date_relative_days_threshold": @(0),
+		@"feed_date_compact_relative": @(NO),
+		@"feed_date_append_relative": @(NO),
 
 		@"date_fmt_mixed": @(YES),
 		@"date_fmt_notes_comments_stories": @(NO),
@@ -216,6 +222,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"story_audio_toggle": @(NO),
 		@"view_story_mentions": @(YES),
 		@"story_mentions_button": @(NO),
+		@"story_mentions_counter": @(NO),
 
 		@"stories_show_quiz_answer": @(NO),
 		@"stories_show_poll_votes_count": @(NO),

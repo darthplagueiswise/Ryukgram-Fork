@@ -106,6 +106,8 @@
 "Enables experimental liquid glass buttons" = "‏تفعيل أزرار الزجاج السائل التجريبية‏";
 "Enables liquid glass tab bar, floating navigation, and other UI elements" = "‏تفعيل شريط تبويبات الزجاج السائل، والتنقل العائم، وعناصر واجهة المستخدم الأخرى‏";
 "Experimental features" = "‏ميزات تجريبية‏";
+"Fixed" = "‏ثابت‏";
+"Fixed prevents shrinking. Hide makes it disappear when scrolling down" = "‏ثابت يمنع التقلص. إخفاء يجعله يختفي عند التمرير لأسفل‏";
 "Focus/distractions" = "‏التركيز والمشتتات‏";
 "General" = "‏عام‏";
 "Hide ads" = "‏إخفاء الإعلانات‏";
@@ -114,6 +116,7 @@
 "Hide Meta AI" = "‏إخفاء ذكاء ميتا الاصطناعي‏";
 "Hide metrics" = "‏إخفاء الإحصائيات‏";
 "Hide notes tray" = "‏إخفاء شريط الملاحظات‏";
+"Hide on scroll" = "‏إخفاء عند التمرير‏";
 "Hide trending searches" = "‏إخفاء عمليات البحث الرائجة‏";
 "Hide UI on capture" = "‏إخفاء الواجهة عند الالتقاط‏";
 "Hides all suggested users for you to follow, outside your feed" = "‏إخفاء جميع المستخدمين المقترحين لمتابعتهم، خارج يومياتك‏";
@@ -125,6 +128,7 @@
 "Hides the suggested broadcast channels in direct messages" = "‏إخفاء قنوات البث المقترحة في الرسائل الخاصة‏";
 "Hides the trending searches under the explore search bar" = "‏إخفاء عمليات البحث الرائجة أسفل شريط البحث في الإكسبلور‏";
 "Hold down on the Instagram logo to change the app icon" = "‏اضغط مطولاً على شعار إنستغرام لتغيير أيقونة التطبيق‏";
+"Liquid glass tab bar" = "‏شريط تبويبات الزجاج السائل‏";
 "Live" = "‏البث المباشر‏";
 "Long press on the eyedropper tool in stories to customize the text color more precisely" = "‏اضغط مطولاً على أداة القطارة في القصص لتخصيص لون النص بدقة أكبر‏";
 "Long-press the heart button in a live to hide or show the comments" = "‏اضغط مطولاً على زر القلب في البث المباشر لإخفاء التعليقات أو إظهارها‏";
@@ -397,6 +401,10 @@
 "Sending a reply or emoji reaction automatically advances to the next story" = "‏إرسال رد أو تفاعل ينقلك تلقائيًا للقصة التالية‏";
 "Adds a 'View mentions' entry to the action button menu and story 3-dot menu" = "‏يضيف خيار 'عرض الإشارات' إلى قائمة زر الإجراء وقائمة النقاط الثلاث في القصص‏";
 "Mentions overlay button" = "‏زر الإشارات على القصة‏";
+"Shows the number of unique mentioned accounts as a red badge on the overlay button" = "يعرض عدد الحسابات المُشار إليها كشارة حمراء على الزر التراكبي";
+"Mentions count badge" = "شارة عدد الإشارات";
+"Removes the Trending and Music promo cards from the stories tray" = "يزيل بطاقات الترويج للرائج والموسيقى من شريط القصص";
+"Hide stories midcards" = "إخفاء البطاقات الوسطى للقصص";
 "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels" = "‏يضيف زرًا بجوار زر الإجراء/المشاهدة على القصة. يظهر فقط عند احتواء القصة الحالية على إشارات أو منشورات/ريلز مشتركة‏";
 "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only" = "‏يعرض زر عين في القصص لإضافة وإزالة المستخدمين من القائمة. إيقاف = استخدم قائمة النقاط الثلاث أو الضغط المطول فقط‏";
 "Stickers" = "‏ملصقات‏";
@@ -925,6 +933,7 @@
 
 "Add location" = "‏إضافة موقع‏";
 "Add preset" = "‏إضافة إعداد مسبق‏";
+"Background" = "‏الخلفية‏";
 "Background color" = "‏لون الخلفية‏";
 "Change location" = "‏تغيير الموقع‏";
 "Clipboard is not an Instagram URL" = "الحافظة لا تحتوي على رابط إنستغرام";
@@ -939,7 +948,9 @@
 "Disable" = "‏تعطيل‏";
 "Download GIF" = "‏تنزيل صورة جيف (GIF)‏";
 "Dropped pin" = "‏دبوس الموقع‏";
+"Emoji" = "‏إيموجي‏";
 "Enable" = "‏تفعيل‏";
+"Enter emoji" = "‏أدخل إيموجي‏";
 "Enable Location Services for Instagram in Settings to use your current location." = "‏فعّل خدمات الموقع لإنستغرام من الإعدادات لاستخدام موقعك الحالي.‏";
 "Fake location" = "‏موقع وهمي‏";
 "Location access denied" = "‏تم رفض الوصول إلى الموقع‏";
@@ -954,6 +965,7 @@
 "Select color" = "‏اختيار اللون‏";
 "Set location" = "‏تعيين الموقع‏";
 "Text color" = "‏لون النص‏";
+"Type an emoji to use as the note bubble icon." = "‏اكتب إيموجي لاستخدامه كأيقونة لفقاعة الملاحظة.‏";
 "Turn Location Services on in Settings → Privacy to use your current location." = "‏فعّل خدمات الموقع من الإعدادات ← الخصوصية لاستخدام موقعك الحالي.‏";
 
 "Theme" = "‏السمة‏";
@@ -1084,7 +1096,6 @@
 "Reset complete" = "‏اكتملت إعادة التعيين‏";
 "Reset selected data?" = "‏إعادة تعيين البيانات المحددة؟‏";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "‏من التحليل الثاني فصاعدًا: يقارن كل تحليل بما قبله، لتظهر المتابعين الجدد والمفقودين وإجراءاتك من متابعة/إلغاء متابعة وتحديثات الملف الشخصي.‏";
-"Select all" = "‏تحديد الكل‏";
 "Selected data will be cleared. Tap any row to see what's stored." = "‏سيتم مسح البيانات المحددة. انقر على أي صف لرؤية ما هو مخزّن.‏";
 "Settings" = "‏الإعدادات‏";
 "Sort" = "‏ترتيب‏";
@@ -1146,7 +1157,6 @@
 "Follow default" = "‏اتباع الافتراضي‏";
 "Force OFF (allow unsends)" = "‏إيقاف إجباري (السماح بإلغاء الإرسال)‏";
 "Force ON (preserve unsends)" = "‏تشغيل إجباري (الاحتفاظ بالرسائل الملغاة)‏";
-"Format" = "‏التنسيق‏";
 "Import failed" = "‏فشل الاستيراد‏";
 "Included chats" = "‏الدردشات المشمولة‏";
 "Included users" = "‏المستخدمون المشمولون‏";
@@ -1175,9 +1185,21 @@
 "Settings exported" = "‏تم تصدير الإعدادات‏";
 "Show map button" = "‏إظهار زر الخريطة‏";
 "Show seconds" = "‏إظهار الثواني‏";
+"Within 1 day" = "خلال يوم واحد";
+"Within %ld days" = "خلال %ld أيام";
+"Time" = "الوقت";
+"Show relative time for dates younger than this many days. 0 disables it." = "عرض الوقت النسبي للتواريخ الأحدث من هذا العدد من الأيام. 0 يعطّله.";
+"Relative within" = "نسبي خلال";
+"Relative time" = "الوقت النسبي";
+"Pick how absolute dates are written. \"Default\" leaves IG's own format untouched." = "اختر كيفية كتابة التواريخ المطلقة. \"افتراضي\" يترك تنسيق IG كما هو.";
+"Include seconds when the format already shows time." = "تضمين الثواني عندما يعرض التنسيق الوقت.";
+"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to." = "كل واجهة في IG تستخدم منسّق NSDate مختلف. فعّل الواجهات التي تريد تطبيق هذا التنسيق عليها.";
+"Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\"." = "التواريخ الأحدث من الحد تُعرض كوقت نسبي (مثل \"2س\"). التواريخ الأقدم تستخدم التنسيق المطلق. \"إلحاق بعد التاريخ المطلق\" يعرض كليهما — \"5 يناير 2026 (2س)\".";
+"Compact style (e.g. \"1h\" instead of \"1 hour ago\")" = "نمط مضغوط (مثل \"1س\" بدلاً من \"منذ ساعة\")";
+"Append after absolute date" = "إلحاق بعد التاريخ المطلق";
+"Absolute format" = "تنسيق مطلق";
 "Sort by" = "‏فرز حسب‏";
 "Story users" = "‏مستخدمي القصص‏";
-"Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to." = "‏بدّل كل أداة تنسيق NSDate يستخدمها إنستغرام. الأقسام المختلفة (اليوميات، التعليقات، القصص، الرسائل الخاصة) لها طرق مختلفة — فعّل ما تريد تطبيق التنسيق المخصص عليه.‏";
 "Use this location" = "‏استخدام هذا الموقع‏";
 "User '%@' not found" = "‏لم يتم العثور على المستخدم '%@'‏";
 "Username (A–Z)" = "‏اسم المستخدم (أ–ي)‏";

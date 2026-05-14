@@ -229,6 +229,7 @@
                                             @"header": SCILocalized(@"Hide"),
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide suggested stories") subtitle:SCILocalized(@"Removes suggested accounts from the stories tray") defaultsKey:@"hide_suggested_stories"],
+                                                [SCISetting switchCellWithTitle:SCILocalized(@"Hide stories midcards") subtitle:SCILocalized(@"Removes the Trending and Music promo cards from the stories tray") defaultsKey:@"hide_stories_midcards" requiresRestart:YES],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide stories tray") subtitle:SCILocalized(@"Hides the story tray at the top") defaultsKey:@"hide_stories_tray"],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide entire feed") subtitle:SCILocalized(@"Removes all content from your home feed") defaultsKey:@"hide_entire_feed"],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Hide repost button") subtitle:SCILocalized(@"Hides the repost button on feed posts") defaultsKey:@"hide_feed_repost" requiresRestart:YES],
@@ -333,7 +334,8 @@
                                             @"header": SCILocalized(@"Mentions"),
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"View story mentions") subtitle:SCILocalized(@"Adds a 'View mentions' entry to the action button menu and story 3-dot menu") defaultsKey:@"view_story_mentions"],
-                                                [SCISetting switchCellWithTitle:SCILocalized(@"Mentions overlay button") subtitle:SCILocalized(@"Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels") defaultsKey:@"story_mentions_button" requiresRestart:YES]
+                                                [SCISetting switchCellWithTitle:SCILocalized(@"Mentions overlay button") subtitle:SCILocalized(@"Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels") defaultsKey:@"story_mentions_button" requiresRestart:YES],
+                                                [SCISetting switchCellWithTitle:SCILocalized(@"Mentions count badge") subtitle:SCILocalized(@"Shows the number of unique mentioned accounts as a red badge on the overlay button") defaultsKey:@"story_mentions_counter"]
                                             ]
                                         }]
                 ],
@@ -669,6 +671,7 @@
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Enable liquid glass buttons") subtitle:SCILocalized(@"Enables experimental liquid glass buttons") defaultsKey:@"liquid_glass_buttons" requiresRestart:YES],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Enable liquid glass surfaces") subtitle:SCILocalized(@"Enables liquid glass tab bar, floating navigation, and other UI elements") defaultsKey:@"liquid_glass_surfaces" requiresRestart:YES],
+                                                [SCISetting menuCellWithTitle:SCILocalized(@"Liquid glass tab bar") subtitle:SCILocalized(@"Fixed prevents shrinking. Hide makes it disappear when scrolling down") menu:[self menus][@"liquid_glass_tabbar_mode"]],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Enable teen app icons") subtitle:SCILocalized(@"Hold down on the Instagram logo to change the app icon") defaultsKey:@"teen_app_icons" requiresRestart:YES],
                                                 [SCISetting switchCellWithTitle:SCILocalized(@"Disable app haptics") subtitle:SCILocalized(@"Disables haptics/vibrations within the app") defaultsKey:@"disable_haptics"],
                                                 [SCISetting buttonCellWithTitle:SCILocalized(@"Open app icon picker")
@@ -1856,6 +1859,14 @@ static void sciPresentTeenIconPicker(void) {
                            propertyList:@{@"defaultsKey": @"main_feed_mode", @"value": @"default", @"requiresRestart": @YES}],
             [UICommand commandWithTitle:SCILocalized(@"Following") image:nil action:@selector(menuChanged:)
                            propertyList:@{@"defaultsKey": @"main_feed_mode", @"value": @"following", @"requiresRestart": @YES}],
+        ]],
+        @"liquid_glass_tabbar_mode": [UIMenu menuWithChildren:@[
+            [UICommand commandWithTitle:SCILocalized(@"Default") image:nil action:@selector(menuChanged:)
+                           propertyList:@{@"defaultsKey": @"liquid_glass_tabbar_mode", @"value": @"default", @"requiresRestart": @YES}],
+            [UICommand commandWithTitle:SCILocalized(@"Fixed") image:nil action:@selector(menuChanged:)
+                           propertyList:@{@"defaultsKey": @"liquid_glass_tabbar_mode", @"value": @"fixed", @"requiresRestart": @YES}],
+            [UICommand commandWithTitle:SCILocalized(@"Hide on scroll") image:nil action:@selector(menuChanged:)
+                           propertyList:@{@"defaultsKey": @"liquid_glass_tabbar_mode", @"value": @"hide", @"requiresRestart": @YES}],
         ]],
 
         @"default_video_quality": [UIMenu menuWithChildren:@[

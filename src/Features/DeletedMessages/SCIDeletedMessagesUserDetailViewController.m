@@ -967,7 +967,7 @@ static char kSCIDMVoiceDraggingKey;
     UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                                           target:self
                                                                           action:@selector(exitSelectionMode)];
-    UIBarButtonItem *all  = [[UIBarButtonItem alloc] initWithTitle:SCILocalized(@"Select all")
+    UIBarButtonItem *all  = [[UIBarButtonItem alloc] initWithTitle:SCILocalized(@"Select All")
                                                               style:UIBarButtonItemStylePlain
                                                              target:self
                                                              action:@selector(selectAllSelectable)];

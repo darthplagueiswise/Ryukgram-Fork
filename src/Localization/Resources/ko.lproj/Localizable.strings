@@ -106,6 +106,8 @@
 "Enables experimental liquid glass buttons" = "실험적인 리퀴드 글래스 버튼을 활성화합니다";
 "Enables liquid glass tab bar, floating navigation, and other UI elements" = "리퀴드 글래스 탭 바, 플로팅 내비게이션 및 기타 UI 요소를 활성화합니다";
 "Experimental features" = "실험실 기능";
+"Fixed" = "고정";
+"Fixed prevents shrinking. Hide makes it disappear when scrolling down" = "고정은 축소를 방지합니다. 숨기기는 아래로 스크롤할 때 사라지게 합니다";
 "Focus/distractions" = "집중/방해 요소";
 "General" = "일반";
 "Hide ads" = "광고 숨기기";
@@ -114,6 +116,7 @@
 "Hide Meta AI" = "Meta AI 숨기기";
 "Hide metrics" = "수치 숨기기";
 "Hide notes tray" = "노트 트레이 숨기기";
+"Hide on scroll" = "스크롤 시 숨기기";
 "Hide trending searches" = "인기 검색어 숨기기";
 "Hide UI on capture" = "캡처 시 UI 숨기기";
 "Hides all suggested users for you to follow, outside your feed" = "피드 외부에서 팔로우할 추천 사용자를 모두 숨깁니다";
@@ -125,6 +128,7 @@
 "Hides the suggested broadcast channels in direct messages" = "다이렉트 메시지에서 추천 공지 채널을 숨깁니다";
 "Hides the trending searches under the explore search bar" = "탐색 검색창 아래의 인기 검색어를 숨깁니다";
 "Hold down on the Instagram logo to change the app icon" = "Instagram 로고를 길게 눌러 앱 아이콘을 변경합니다";
+"Liquid glass tab bar" = "리퀴드 글래스 탭 바";
 "Live" = "라이브";
 "Long press on the eyedropper tool in stories to customize the text color more precisely" = "스토리의 스포이트 도구를 길게 눌러 텍스트 색상을 더 정밀하게 사용자 지정합니다";
 "Long-press the heart button in a live to hide or show the comments" = "라이브 중 하트 버튼을 길게 눌러 댓글을 숨기거나 표시";
@@ -397,6 +401,10 @@
 "Sending a reply or emoji reaction automatically advances to the next story" = "답장이나 이모티콘 반응을 보내면 자동으로 다음 스토리로 넘어갑니다";
 "Adds a 'View mentions' entry to the action button menu and story 3-dot menu" = "작업 버튼 메뉴와 스토리 점 3개 메뉴에 '멘션 보기' 항목을 추가합니다";
 "Mentions overlay button" = "멘션 오버레이 버튼";
+"Shows the number of unique mentioned accounts as a red badge on the overlay button" = "오버레이 버튼에 멘션된 고유 계정 수를 빨간 배지로 표시합니다";
+"Mentions count badge" = "멘션 개수 배지";
+"Removes the Trending and Music promo cards from the stories tray" = "스토리 트레이의 인기 / 음악 홍보 카드를 제거합니다";
+"Hide stories midcards" = "스토리 미드카드 숨기기";
 "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels" = "스토리 오버레이의 작업/눈 버튼 옆에 버튼을 추가합니다. 현재 스토리에 멘션이나 공유된 게시물/릴스가 있을 때만 표시됩니다";
 "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only" = "스토리에 눈 모양 버튼을 표시하여 목록에서 사용자를 추가/제거합니다. 끄기 = 점 3개 메뉴를 사용하거나 길게 누르기만 허용";
 "Stickers" = "스티커";
@@ -925,6 +933,7 @@
 
 "Add location" = "위치 추가";
 "Add preset" = "프리셋 추가";
+"Background" = "배경";
 "Background color" = "배경 색상";
 "Change location" = "위치 변경";
 "Clipboard is not an Instagram URL" = "클립보드가 Instagram URL이 아닙니다";
@@ -939,7 +948,9 @@
 "Disable" = "비활성화";
 "Download GIF" = "GIF 다운로드";
 "Dropped pin" = "놓은 핀";
+"Emoji" = "이모지";
 "Enable" = "활성화";
+"Enter emoji" = "이모지 입력";
 "Enable Location Services for Instagram in Settings to use your current location." = "현재 위치를 사용하려면 설정에서 Instagram의 위치 서비스를 활성화하세요.";
 "Fake location" = "가짜 위치";
 "Location access denied" = "위치 접근이 거부됨";
@@ -954,6 +965,7 @@
 "Select color" = "색상 선택";
 "Set location" = "위치 설정";
 "Text color" = "텍스트 색상";
+"Type an emoji to use as the note bubble icon." = "노트 말풍선 아이콘으로 사용할 이모지를 입력하세요.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "현재 위치를 사용하려면 설정 → 개인정보에서 위치 서비스를 켜세요.";
 
 "Theme" = "테마";
@@ -1084,7 +1096,6 @@
 "Reset complete" = "초기화 완료";
 "Reset selected data?" = "선택한 데이터를 초기화할까요?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "두 번째 분석부터: 매 분석마다 이전과 비교해 새/이탈 팔로워, 본인의 팔로우/언팔로우 변화, 프로필 변경을 보여줍니다.";
-"Select all" = "모두 선택";
 "Selected data will be cleared. Tap any row to see what's stored." = "선택한 데이터가 삭제됩니다. 저장된 내용을 보려면 항목을 탭하세요.";
 "Settings" = "설정";
 "Sort" = "정렬";
@@ -1146,7 +1157,6 @@
 "Follow default" = "기본값 따르기";
 "Force OFF (allow unsends)" = "강제 끄기 (전송 취소 허용)";
 "Force ON (preserve unsends)" = "강제 켜기 (전송 취소 보존)";
-"Format" = "형식";
 "Import failed" = "가져오기 실패";
 "Included chats" = "포함된 채팅";
 "Included users" = "포함된 사용자";
@@ -1175,9 +1185,21 @@
 "Settings exported" = "설정 내보내기 완료";
 "Show map button" = "지도 버튼 표시";
 "Show seconds" = "초 표시";
+"Within 1 day" = "1일 이내";
+"Within %ld days" = "%ld일 이내";
+"Time" = "시간";
+"Show relative time for dates younger than this many days. 0 disables it." = "지정한 일수보다 최근 날짜에만 상대 시간을 표시합니다. 0이면 비활성화됩니다.";
+"Relative within" = "상대 시간 적용 범위";
+"Relative time" = "상대 시간";
+"Pick how absolute dates are written. \"Default\" leaves IG's own format untouched." = "절대 날짜 표기 방식을 선택하세요. \"기본\"은 IG의 형식을 그대로 둡니다.";
+"Include seconds when the format already shows time." = "형식에 시간이 포함될 때 초도 함께 표시합니다.";
+"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to." = "IG의 각 화면은 서로 다른 NSDate 포매터를 사용합니다. 이 형식을 적용할 화면을 켜세요.";
+"Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\"." = "기준일보다 최근 날짜는 상대 시간으로 표시됩니다 (예: \"2h\"). 더 오래된 날짜는 절대 형식을 사용합니다. \"절대 날짜 뒤에 추가\"는 둘 다 표시합니다 — \"2026년 1월 5일 (2h)\".";
+"Compact style (e.g. \"1h\" instead of \"1 hour ago\")" = "축약 형식 (예: \"1시간 전\" 대신 \"1h\")";
+"Append after absolute date" = "절대 날짜 뒤에 추가";
+"Absolute format" = "절대 형식";
 "Sort by" = "정렬 기준";
 "Story users" = "스토리 사용자";
-"Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to." = "IG가 사용하는 각 NSDate 포맷터를 전환합니다. 각 영역(피드, 댓글, 스토리, DM)은 다른 방법을 거칩니다 — 사용자 지정 형식을 적용할 영역을 활성화하세요.";
 "Use this location" = "이 위치 사용";
 "User '%@' not found" = "'%@' 사용자를 찾을 수 없습니다";
 "Username (A–Z)" = "사용자명 (가나다)";
