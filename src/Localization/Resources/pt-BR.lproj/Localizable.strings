@@ -1743,3 +1743,13 @@
 "Colors" = "Cores";
 "+ Add new language" = "+ Adicionar novo idioma";
 "Each chat can override this in the list" = "Cada conversa pode substituir isto na lista";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "Quando ativado, as solicitações de localização do Instagram retornam o local falso selecionado. O botão do mapa adiciona um atalho rápido no Mapa de amigos.";
+"Tap a preset to make it active. Swipe left to delete." = "Toque em um preset para ativá-lo. Deslize para a esquerda para excluir.";
+"Override Instagram location reads." = "Substitui as leituras de localização do Instagram.";
+"Show the quick button in Friends Map." = "Mostrar o botão rápido no Mapa de amigos.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "Escolha como as datas absolutas são escritas. “Padrão” mantém o formato do IG inalterado.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "Datas mais recentes que o limite são mostradas como tempo relativo. Datas mais antigas voltam ao formato absoluto. O modo anexar mostra ambos, como “Jan 5, 2026 (2h)”.";
+"Compact style" = "Estilo compacto";
+"Example: “1h” instead of “1 hour ago”" = "Exemplo: “1h” em vez de “há 1 hora”";
+"Example: “Jan 5, 2026 (2h)”" = "Exemplo: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "As APIs de áudio do iOS não conseguiram processar este arquivo%@%@\n\nVocê pode tentar enviá-lo ao Instagram como está ou abrir um issue de suporte.";

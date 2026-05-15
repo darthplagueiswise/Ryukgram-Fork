@@ -1743,3 +1743,13 @@
 "Colors" = "Renkler";
 "+ Add new language" = "+ Yeni dil ekle";
 "Each chat can override this in the list" = "Her sohbet bunu listede geçersiz kılabilir";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "Açıkken, Instagram konum istekleri seçilen sahte konumu döndürür. Harita düğmesi Arkadaşlar Haritası içine bir kısayol ekler.";
+"Tap a preset to make it active. Swipe left to delete." = "Etkinleştirmek için bir ön ayara dokunun. Silmek için sola kaydırın.";
+"Override Instagram location reads." = "Instagram'ın konum okumalarını geçersiz kılar.";
+"Show the quick button in Friends Map." = "Hızlı düğmeyi Arkadaşlar Haritası içinde göster.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "Mutlak tarihlerin nasıl yazılacağını seçin. “Varsayılan”, IG'nin kendi biçimine dokunmaz.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "Eşikten yeni tarihler göreli zaman olarak gösterilir. Eski tarihler mutlak biçime döner. Ekleme modu her ikisini birden gösterir, ör. “Jan 5, 2026 (2h)”.";
+"Compact style" = "Sıkışık stil";
+"Example: “1h” instead of “1 hour ago”" = "Örnek: “1 saat önce” yerine “1h”";
+"Example: “Jan 5, 2026 (2h)”" = "Örnek: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "iOS ses API'leri bu dosyayı işleyemedi%@%@\n\nDosyayı Instagram'a olduğu gibi göndermeyi deneyebilir veya bir destek bildirimi açabilirsiniz.";

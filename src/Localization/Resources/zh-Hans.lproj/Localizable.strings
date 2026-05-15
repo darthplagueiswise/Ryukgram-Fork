@@ -1743,3 +1743,13 @@
 "Colors" = "颜色";
 "+ Add new language" = "+ 添加新语言";
 "Each chat can override this in the list" = "每个对话可在列表中单独设置";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "启用后，Instagram 位置请求将返回您选定的伪造位置。地图按钮在朋友地图中添加快捷方式。";
+"Tap a preset to make it active. Swipe left to delete." = "点击预设以激活。向左滑动删除。";
+"Override Instagram location reads." = "覆盖 Instagram 的位置读取。";
+"Show the quick button in Friends Map." = "在朋友地图中显示快捷按钮。";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "选择绝对日期的写法。“默认”保留 IG 自己的格式。";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "早于阈值的日期显示为相对时间。较旧的日期回退到绝对格式。追加模式同时显示两者,如“Jan 5, 2026 (2h)”。";
+"Compact style" = "紧凑样式";
+"Example: “1h” instead of “1 hour ago”" = "示例:“1h” 替代 “1 小时前”";
+"Example: “Jan 5, 2026 (2h)”" = "示例:“Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "iOS 音频 API 无法处理此文件%@%@\n\n您可以尝试按原样发送到 Instagram,或提交支持问题。";

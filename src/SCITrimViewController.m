@@ -5,6 +5,7 @@ static const CGFloat kTrackHeight = 56.0;
 static const CGFloat kTrackMargin = 24.0;
 static const CGFloat kHandleWidth = 16.0;
 static const CGFloat kHandleHitWidth = 48.0;
+static const CGFloat kHandleHitBleed = 10.0;
 static const CGFloat kMinTrimDuration = 0.5;
 
 @interface SCITrimViewController ()
@@ -312,7 +313,7 @@ static const CGFloat kMinTrimDuration = 0.5;
 	hit.userInteractionEnabled = YES;
 
 	UIView *visual = UIView.new;
-	visual.frame = CGRectMake((kHandleHitWidth - kHandleWidth) * 0.5, 0.0, kHandleWidth, kTrackHeight);
+	visual.frame = CGRectMake((kHandleHitWidth - kHandleWidth) * 0.5, kHandleHitBleed, kHandleWidth, kTrackHeight);
 	visual.backgroundColor = UIColor.systemBlueColor;
 	visual.layer.cornerRadius = 5.0;
 	visual.layer.cornerCurve = kCACornerCurveContinuous;
@@ -422,8 +423,8 @@ static const CGFloat kMinTrimDuration = 0.5;
 	CGFloat rightX = [self timeToX:self.endTime];
 
 	self.selectedRangeView.frame = CGRectMake(leftX, 0.0, MAX(0.0, rightX - leftX), kTrackHeight);
-	self.leftHandle.frame = CGRectMake(leftX - (kHandleHitWidth * 0.5), 0.0, kHandleHitWidth, kTrackHeight);
-	self.rightHandle.frame = CGRectMake(rightX - (kHandleHitWidth * 0.5), 0.0, kHandleHitWidth, kTrackHeight);
+	self.leftHandle.frame = CGRectMake(leftX - (kHandleHitWidth * 0.5), -kHandleHitBleed, kHandleHitWidth, kTrackHeight + (kHandleHitBleed * 2.0));
+	self.rightHandle.frame = CGRectMake(rightX - (kHandleHitWidth * 0.5), -kHandleHitBleed, kHandleHitWidth, kTrackHeight + (kHandleHitBleed * 2.0));
 
 	double selected = MAX(0.0, self.endTime - self.startTime);
 	self.rangeLabel.text = [NSString stringWithFormat:@"%@  —  %@   (%@)",

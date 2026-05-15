@@ -1741,3 +1741,13 @@
 "Colors" = "Colors";
 "+ Add new language" = "+ Add new language";
 "Each chat can override this in the list" = "Each chat can override this in the list";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map.";
+"Tap a preset to make it active. Swipe left to delete." = "Tap a preset to make it active. Swipe left to delete.";
+"Override Instagram location reads." = "Override Instagram location reads.";
+"Show the quick button in Friends Map." = "Show the quick button in Friends Map.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "Pick how absolute dates are written. “Default” leaves IG's own format untouched.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”.";
+"Compact style" = "Compact style";
+"Example: “1h” instead of “1 hour ago”" = "Example: “1h” instead of “1 hour ago”";
+"Example: “Jan 5, 2026 (2h)”" = "Example: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue.";

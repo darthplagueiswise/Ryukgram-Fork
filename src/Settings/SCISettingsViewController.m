@@ -19,6 +19,7 @@ static char kSCIRowKey;
 
 @property (nonatomic, assign) BOOL reduceMargin;
 @property (nonatomic, assign) BOOL isRoot;
+@property (nonatomic, assign) BOOL searchBarStyled;
 
 @end
 
@@ -142,7 +143,7 @@ static char kSCIRowKey;
 
 - (void)viewDidLayoutSubviews {
 	[super viewDidLayoutSubviews];
-	[self sciStyleSearchBar];
+	if (!self.searchBarStyled) [self sciStyleSearchBar];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -219,17 +220,22 @@ static char kSCIRowKey;
 }
 
 - (void)sciStyleSearchBar {
-	if (self.searchController.searchBar) [SCISearchBarStyler styleSearchBar:self.searchController.searchBar];
+	if (!self.searchController.searchBar) return;
+	[SCISearchBarStyler styleSearchBar:self.searchController.searchBar];
+	self.searchBarStyled = YES;
 }
 
 - (void)willPresentSearchController:(UISearchController *)searchController {
+	self.searchBarStyled = NO;
 	[self sciStyleSearchBar];
 }
 
 - (void)didPresentSearchController:(UISearchController *)searchController {
+	self.searchBarStyled = NO;
 	[self sciStyleSearchBar];
 
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		self.searchBarStyled = NO;
 		[self sciStyleSearchBar];
 	});
 }

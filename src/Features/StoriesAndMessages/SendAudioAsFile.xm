@@ -57,10 +57,13 @@ static NSSet<NSString *> *sciPassthroughAudioExts(void) {
 	return set;
 }
 
-static CGFloat sciAudioDuration(NSURL *url) {
-	AVAsset *asset = [AVAsset assetWithURL:url];
+static CGFloat sciAudioDurationFromAsset(AVAsset *asset) {
 	Float64 duration = CMTimeGetSeconds(asset.duration);
 	return (duration > 0.0 && !isnan(duration) && isfinite(duration)) ? (CGFloat)duration : 1.0;
+}
+
+static CGFloat sciAudioDuration(NSURL *url) {
+	return sciAudioDurationFromAsset([AVAsset assetWithURL:url]);
 }
 
 static BOOL sciAssetHasAudio(AVAsset *asset) {
@@ -371,7 +374,7 @@ static void sciPrepareAndShowTrim(NSURL *url, UIViewController *threadVC) {
 
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
 		AVAsset *asset = [AVAsset assetWithURL:url];
-		BOOL canRead = sciAssetHasAudio(asset) && sciAudioDuration(url) > 0.0;
+		BOOL canRead = sciAssetHasAudio(asset) && sciAudioDurationFromAsset(asset) > 0.0;
 
 		if (!canRead) {
 			dispatch_async(dispatch_get_main_queue(), ^{

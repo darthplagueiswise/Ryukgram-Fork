@@ -1743,3 +1743,13 @@
 "Colors" = "색상";
 "+ Add new language" = "+ 새 언어 추가";
 "Each chat can override this in the list" = "각 채팅은 목록에서 개별 설정을 적용할 수 있습니다";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "활성화하면 Instagram 위치 요청이 선택한 가짜 위치를 반환합니다. 지도 버튼은 친구 지도에 빠른 바로가기를 추가합니다.";
+"Tap a preset to make it active. Swipe left to delete." = "프리셋을 탭하여 활성화하세요. 왼쪽으로 밀어 삭제하세요.";
+"Override Instagram location reads." = "Instagram 위치 읽기를 재정의합니다.";
+"Show the quick button in Friends Map." = "친구 지도에 빠른 버튼 표시.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "절대 날짜 표기 방식을 선택하세요. “기본값”은 IG의 형식을 그대로 둡니다.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "임계값보다 최근 날짜는 상대 시간으로 표시됩니다. 오래된 날짜는 절대 형식으로 돌아갑니다. 추가 모드는 “Jan 5, 2026 (2h)”처럼 둘 다 표시합니다.";
+"Compact style" = "간결 스타일";
+"Example: “1h” instead of “1 hour ago”" = "예: “1시간 전” 대신 “1h”";
+"Example: “Jan 5, 2026 (2h)”" = "예: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "iOS 오디오 API가 이 파일을 처리할 수 없습니다%@%@\n\nInstagram에 그대로 보내거나 지원 이슈를 열어보세요.";

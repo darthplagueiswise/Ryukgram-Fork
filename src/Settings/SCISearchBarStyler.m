@@ -61,7 +61,7 @@
 	field.borderStyle = UITextBorderStyleNone;
 	field.backgroundColor = fill;
 	field.textColor = UIColor.labelColor;
-	field.tintColor = [SCIUtils respondsToSelector:@selector(SCIColor_Primary)] ? SCIUtils.SCIColor_Primary : UIColor.systemBlueColor;
+	field.tintColor = SCIUtils.SCIColor_Primary;
 	field.layer.backgroundColor = [fill resolvedColorWithTraitCollection:searchBar.traitCollection].CGColor;
 	field.layer.cornerRadius = 18.0;
 	field.layer.cornerCurve = kCACornerCurveContinuous;

@@ -50,39 +50,19 @@ static void SCIFeedFakeLocation(CLLocationManager *manager) {
 	return SCIFakeLocationEnabled() ? SCIFakeLocation() : %orig;
 }
 
-- (void)setDelegate:(id<CLLocationManagerDelegate>)delegate {
-	%orig;
-
-	if (SCIFakeLocationEnabled()) {
-		SCIFeedFakeLocation(self);
-	}
-}
-
 - (void)startUpdatingLocation {
-	if (SCIFakeLocationEnabled()) {
-		SCIFeedFakeLocation(self);
-		return;
-	}
-
 	%orig;
+	if (SCIFakeLocationEnabled()) SCIFeedFakeLocation(self);
 }
 
 - (void)requestLocation {
-	if (SCIFakeLocationEnabled()) {
-		SCIFeedFakeLocation(self);
-		return;
-	}
-
 	%orig;
+	if (SCIFakeLocationEnabled()) SCIFeedFakeLocation(self);
 }
 
 - (void)startMonitoringSignificantLocationChanges {
-	if (SCIFakeLocationEnabled()) {
-		SCIFeedFakeLocation(self);
-		return;
-	}
-
 	%orig;
+	if (SCIFakeLocationEnabled()) SCIFeedFakeLocation(self);
 }
 
 %end

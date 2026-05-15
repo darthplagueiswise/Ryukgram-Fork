@@ -506,21 +506,25 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	NSIndexPath *dst = coordinator.destinationIndexPath;
 	if (!dst || dst.section != 1) return;
 
-	for (id<UITableViewDropItem> dropItem in coordinator.items) {
-		NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
+	[tableView performBatchUpdates:^{
+		for (id<UITableViewDropItem> dropItem in coordinator.items) {
+			NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
 
-		if (![src isKindOfClass:NSIndexPath.class]) continue;
-		if (src.section != 1 || src.row == dst.row) continue;
-		if (src.row >= (NSInteger)self.actions.count) continue;
+			if (![src isKindOfClass:NSIndexPath.class]) continue;
+			if (src.section != 1 || src.row == dst.row) continue;
+			if (src.row >= (NSInteger)self.actions.count) continue;
 
-		NSMutableDictionary *item = self.actions[src.row];
-		[self.actions removeObjectAtIndex:src.row];
+			NSMutableDictionary *item = self.actions[src.row];
+			[self.actions removeObjectAtIndex:src.row];
 
-		NSInteger insertIndex = MIN(dst.row, (NSInteger)self.actions.count);
-		[self.actions insertObject:item atIndex:insertIndex];
+			NSInteger insertIndex = MIN(dst.row, (NSInteger)self.actions.count);
+			[self.actions insertObject:item atIndex:insertIndex];
 
-		[tableView reloadData];
-	}
+			[tableView deleteRowsAtIndexPaths:@[src] withRowAnimation:UITableViewRowAnimationFade];
+			[tableView insertRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:insertIndex inSection:1]] withRowAnimation:UITableViewRowAnimationFade];
+			[coordinator dropItem:dropItem.dragItem toRowAtIndexPath:[NSIndexPath indexPathForRow:insertIndex inSection:1]];
+		}
+	} completion:nil];
 
 	sciSaveOrderedActions(self.actions);
 }
