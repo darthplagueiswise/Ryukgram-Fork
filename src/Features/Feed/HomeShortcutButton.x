@@ -217,7 +217,7 @@ static void sciRefreshTrackedHomeShortcutHosts(void) {
 		}
 
 		objc_setAssociatedObject(parent, kSCIHomeShortcutSigKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-		sciPlaceButtonAfterPlus(plus, plus, @selector(sciHomeShortcutFireSingle:));
+		sciPlaceButtonAfterPlus(plus, parent, @selector(sciHomeShortcutFireSingle:));
 	}
 }
 

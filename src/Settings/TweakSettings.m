@@ -1195,6 +1195,7 @@
 				[SCISetting linkCellWithTitle:@"jaydenjcpy" subtitle:SCILocalized(@"Chinese (Traditional and Simplified) translation") icon:nil url:@"https://github.com/jaydenjcpy"],
 				[SCISetting linkCellWithTitle:@"Bruno (@brunorainha)" subtitle:SCILocalized(@"Portuguese (Brazil) translation") icon:nil url:@"https://github.com/brunorainha"],
 				[SCISetting linkCellWithTitle:@"yesnt10" subtitle:SCILocalized(@"Turkish translation") icon:nil url:@"https://github.com/yesnt10"],
+				[SCISetting linkCellWithTitle:@"tranbinh02" subtitle:SCILocalized(@"Vietnamese translation") icon:nil url:@"https://github.com/tranbinh02"],
 			]
 		},
 		@{
