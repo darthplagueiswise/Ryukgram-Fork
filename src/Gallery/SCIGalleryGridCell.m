@@ -4,134 +4,156 @@
 #import "../Utils.h"
 #import "SCIGalleryShim.h"
 
+static CGFloat const kSCIGalleryGridCornerRadius = 6.0;
+static CGFloat const kSCIGalleryGridBadgeInset = 6.0;
+static CGFloat const kSCIGalleryGridInfoHeight = 26.0;
+
 @interface SCIGalleryGridCell ()
 
 @property (nonatomic, strong) SCIGalleryFile *file;
+@property (nonatomic, copy) NSString *reuseToken;
+
 @property (nonatomic, strong) UIImageView *thumbnailView;
-@property (nonatomic, strong) UIImageView *videoBadge;
+@property (nonatomic, strong) UIImageView *mediaBadge;
 @property (nonatomic, strong) UIImageView *favoriteBadge;
 @property (nonatomic, strong) UIImageView *selectionBadge;
-@property (nonatomic, strong) NSLayoutConstraint *favoriteTrailingConstraint;
 
 @property (nonatomic, strong) UIView *infoOverlay;
 @property (nonatomic, strong) CAGradientLayer *infoGradient;
 @property (nonatomic, strong) UIImageView *sourceIcon;
 @property (nonatomic, strong) UILabel *infoLabel;
 
+@property (nonatomic, strong) NSLayoutConstraint *favoriteTrailingConstraint;
+
 @end
 
 @implementation SCIGalleryGridCell
 
+#pragma mark - Init
+
 - (instancetype)initWithFrame:(CGRect)frame {
 	self = [super initWithFrame:frame];
-	if (self) {
-		self.contentView.clipsToBounds = YES;
-		self.contentView.layer.cornerRadius = 6.0;
-		self.contentView.backgroundColor = [UIColor secondarySystemBackgroundColor];
+	if (!self) return nil;
 
-		_thumbnailView = [UIImageView new];
-		_thumbnailView.translatesAutoresizingMaskIntoConstraints = NO;
-		_thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
-		_thumbnailView.clipsToBounds = YES;
-		[self.contentView addSubview:_thumbnailView];
+	self.contentView.clipsToBounds = YES;
+	self.contentView.layer.cornerRadius = kSCIGalleryGridCornerRadius;
+	self.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
 
-		// Bottom info overlay — gradient + source icon + label.
-		_infoOverlay = [UIView new];
-		_infoOverlay.translatesAutoresizingMaskIntoConstraints = NO;
-		_infoOverlay.userInteractionEnabled = NO;
-		_infoOverlay.hidden = YES;
-		[self.contentView addSubview:_infoOverlay];
+	[self setupThumbnail];
+	[self setupInfoOverlay];
+	[self setupBadges];
+	[self setupConstraints];
 
-		_infoGradient = [CAGradientLayer layer];
-		_infoGradient.colors = @[
-			(id)[[UIColor clearColor] CGColor],
-			(id)[[[UIColor blackColor] colorWithAlphaComponent:0.65] CGColor],
-		];
-		_infoGradient.startPoint = CGPointMake(0.5, 0.0);
-		_infoGradient.endPoint = CGPointMake(0.5, 1.0);
-		[_infoOverlay.layer addSublayer:_infoGradient];
-
-		_sourceIcon = [UIImageView new];
-		_sourceIcon.translatesAutoresizingMaskIntoConstraints = NO;
-		_sourceIcon.contentMode = UIViewContentModeScaleAspectFit;
-		_sourceIcon.tintColor = [UIColor whiteColor];
-		[_infoOverlay addSubview:_sourceIcon];
-
-		_infoLabel = [UILabel new];
-		_infoLabel.translatesAutoresizingMaskIntoConstraints = NO;
-		_infoLabel.font = [UIFont systemFontOfSize:9.5 weight:UIFontWeightSemibold];
-		_infoLabel.textColor = [UIColor whiteColor];
-		_infoLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-		_infoLabel.adjustsFontSizeToFitWidth = YES;
-		_infoLabel.minimumScaleFactor = 0.85;
-		_infoLabel.shadowColor = [[UIColor blackColor] colorWithAlphaComponent:0.5];
-		_infoLabel.shadowOffset = CGSizeMake(0, 0.5);
-		[_infoOverlay addSubview:_infoLabel];
-
-		_videoBadge = [UIImageView new];
-		_videoBadge.translatesAutoresizingMaskIntoConstraints = NO;
-		_videoBadge.image = [UIImage systemImageNamed:@"video.fill"];
-		_videoBadge.tintColor = [UIColor whiteColor];
-		_videoBadge.contentMode = UIViewContentModeScaleAspectFit;
-		_videoBadge.hidden = YES;
-		[self.contentView addSubview:_videoBadge];
-
-		_favoriteBadge = [UIImageView new];
-		_favoriteBadge.translatesAutoresizingMaskIntoConstraints = NO;
-		_favoriteBadge.image = [UIImage systemImageNamed:@"heart.fill"];
-		_favoriteBadge.contentMode = UIViewContentModeScaleAspectFit;
-		_favoriteBadge.tintColor = [SCIUtils SCIColor_InstagramFavorite];
-		_favoriteBadge.hidden = YES;
-		[self.contentView addSubview:_favoriteBadge];
-
-		_selectionBadge = [UIImageView new];
-		_selectionBadge.translatesAutoresizingMaskIntoConstraints = NO;
-		_selectionBadge.contentMode = UIViewContentModeScaleAspectFit;
-		_selectionBadge.tintColor = [UIColor whiteColor];
-		_selectionBadge.hidden = YES;
-		[self.contentView addSubview:_selectionBadge];
-
-		_favoriteTrailingConstraint = [_favoriteBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6];
-
-		[NSLayoutConstraint activateConstraints:@[
-			[_thumbnailView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
-			[_thumbnailView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
-			[_thumbnailView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-			[_thumbnailView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-
-			[_infoOverlay.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
-			[_infoOverlay.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
-			[_infoOverlay.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
-			[_infoOverlay.heightAnchor constraintEqualToConstant:26],
-
-			[_sourceIcon.leadingAnchor constraintEqualToAnchor:_infoOverlay.leadingAnchor constant:5],
-			[_sourceIcon.bottomAnchor constraintEqualToAnchor:_infoOverlay.bottomAnchor constant:-5],
-			[_sourceIcon.widthAnchor constraintEqualToConstant:10],
-			[_sourceIcon.heightAnchor constraintEqualToConstant:10],
-
-			[_infoLabel.leadingAnchor constraintEqualToAnchor:_sourceIcon.trailingAnchor constant:3],
-			[_infoLabel.trailingAnchor constraintEqualToAnchor:_infoOverlay.trailingAnchor constant:-5],
-			[_infoLabel.centerYAnchor constraintEqualToAnchor:_sourceIcon.centerYAnchor],
-
-			[_videoBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
-			[_videoBadge.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:6],
-			[_videoBadge.widthAnchor constraintEqualToConstant:14],
-			[_videoBadge.heightAnchor constraintEqualToConstant:14],
-
-			[_favoriteBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
-			[_favoriteBadge.widthAnchor constraintEqualToConstant:16],
-			[_favoriteBadge.heightAnchor constraintEqualToConstant:16],
-
-			[_selectionBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
-			[_selectionBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-6],
-			[_selectionBadge.widthAnchor constraintEqualToConstant:20],
-			[_selectionBadge.heightAnchor constraintEqualToConstant:20],
-
-			_favoriteTrailingConstraint,
-		]];
-	}
 	return self;
 }
+
+#pragma mark - Setup
+
+- (void)setupThumbnail {
+	self.thumbnailView = UIImageView.new;
+	self.thumbnailView.translatesAutoresizingMaskIntoConstraints = NO;
+	self.thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
+	self.thumbnailView.clipsToBounds = YES;
+	[self.contentView addSubview:self.thumbnailView];
+}
+
+- (void)setupInfoOverlay {
+	self.infoOverlay = UIView.new;
+	self.infoOverlay.translatesAutoresizingMaskIntoConstraints = NO;
+	self.infoOverlay.userInteractionEnabled = NO;
+	self.infoOverlay.hidden = YES;
+	[self.contentView addSubview:self.infoOverlay];
+
+	self.infoGradient = CAGradientLayer.layer;
+	self.infoGradient.colors = @[
+		(id)UIColor.clearColor.CGColor,
+		(id)[UIColor.blackColor colorWithAlphaComponent:0.65].CGColor,
+	];
+	self.infoGradient.startPoint = CGPointMake(0.5, 0.0);
+	self.infoGradient.endPoint = CGPointMake(0.5, 1.0);
+	[self.infoOverlay.layer addSublayer:self.infoGradient];
+
+	self.sourceIcon = UIImageView.new;
+	self.sourceIcon.translatesAutoresizingMaskIntoConstraints = NO;
+	self.sourceIcon.contentMode = UIViewContentModeScaleAspectFit;
+	self.sourceIcon.tintColor = UIColor.whiteColor;
+	[self.infoOverlay addSubview:self.sourceIcon];
+
+	self.infoLabel = UILabel.new;
+	self.infoLabel.translatesAutoresizingMaskIntoConstraints = NO;
+	self.infoLabel.font = [UIFont systemFontOfSize:9.5 weight:UIFontWeightSemibold];
+	self.infoLabel.textColor = UIColor.whiteColor;
+	self.infoLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+	self.infoLabel.adjustsFontSizeToFitWidth = YES;
+	self.infoLabel.minimumScaleFactor = 0.85;
+	self.infoLabel.shadowColor = [UIColor.blackColor colorWithAlphaComponent:0.5];
+	self.infoLabel.shadowOffset = CGSizeMake(0.0, 0.5);
+	[self.infoOverlay addSubview:self.infoLabel];
+}
+
+- (void)setupBadges {
+	self.mediaBadge = [self badgeViewWithSize:14.0];
+	self.favoriteBadge = [self badgeViewWithSize:16.0];
+	self.selectionBadge = [self badgeViewWithSize:20.0];
+
+	self.favoriteBadge.image = [UIImage systemImageNamed:@"heart.fill"];
+	self.favoriteBadge.tintColor = [SCIUtils SCIColor_InstagramFavorite];
+
+	[self.contentView addSubview:self.mediaBadge];
+	[self.contentView addSubview:self.favoriteBadge];
+	[self.contentView addSubview:self.selectionBadge];
+
+	self.favoriteTrailingConstraint = [self.favoriteBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-kSCIGalleryGridBadgeInset];
+}
+
+- (UIImageView *)badgeViewWithSize:(CGFloat)size {
+	UIImageView *view = UIImageView.new;
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.contentMode = UIViewContentModeScaleAspectFit;
+	view.tintColor = UIColor.whiteColor;
+	view.hidden = YES;
+	return view;
+}
+
+- (void)setupConstraints {
+	[NSLayoutConstraint activateConstraints:@[
+		[self.thumbnailView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
+		[self.thumbnailView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+		[self.thumbnailView.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+		[self.thumbnailView.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+
+		[self.infoOverlay.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor],
+		[self.infoOverlay.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor],
+		[self.infoOverlay.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
+		[self.infoOverlay.heightAnchor constraintEqualToConstant:kSCIGalleryGridInfoHeight],
+
+		[self.sourceIcon.leadingAnchor constraintEqualToAnchor:self.infoOverlay.leadingAnchor constant:5.0],
+		[self.sourceIcon.bottomAnchor constraintEqualToAnchor:self.infoOverlay.bottomAnchor constant:-5.0],
+		[self.sourceIcon.widthAnchor constraintEqualToConstant:10.0],
+		[self.sourceIcon.heightAnchor constraintEqualToConstant:10.0],
+
+		[self.infoLabel.leadingAnchor constraintEqualToAnchor:self.sourceIcon.trailingAnchor constant:3.0],
+		[self.infoLabel.trailingAnchor constraintEqualToAnchor:self.infoOverlay.trailingAnchor constant:-5.0],
+		[self.infoLabel.centerYAnchor constraintEqualToAnchor:self.sourceIcon.centerYAnchor],
+
+		[self.mediaBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:kSCIGalleryGridBadgeInset],
+		[self.mediaBadge.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:kSCIGalleryGridBadgeInset],
+		[self.mediaBadge.widthAnchor constraintEqualToConstant:14.0],
+		[self.mediaBadge.heightAnchor constraintEqualToConstant:14.0],
+
+		[self.favoriteBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:kSCIGalleryGridBadgeInset],
+		[self.favoriteBadge.widthAnchor constraintEqualToConstant:16.0],
+		[self.favoriteBadge.heightAnchor constraintEqualToConstant:16.0],
+		self.favoriteTrailingConstraint,
+
+		[self.selectionBadge.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:kSCIGalleryGridBadgeInset],
+		[self.selectionBadge.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-kSCIGalleryGridBadgeInset],
+		[self.selectionBadge.widthAnchor constraintEqualToConstant:20.0],
+		[self.selectionBadge.heightAnchor constraintEqualToConstant:20.0],
+	]];
+}
+
+#pragma mark - Layout / Reuse
 
 - (void)layoutSubviews {
 	[super layoutSubviews];
@@ -140,125 +162,163 @@
 
 - (void)prepareForReuse {
 	[super prepareForReuse];
+
 	self.file = nil;
+	self.reuseToken = nil;
+
 	self.thumbnailView.image = nil;
-	self.videoBadge.hidden = YES;
+
+	self.mediaBadge.hidden = YES;
+	self.mediaBadge.image = nil;
+
 	self.favoriteBadge.hidden = YES;
+	self.favoriteTrailingConstraint.constant = -kSCIGalleryGridBadgeInset;
+
 	self.selectionBadge.hidden = YES;
-	self.selectionBadge.image = nil;
 	self.selectionBadge.alpha = 0.0;
-	self.favoriteTrailingConstraint.constant = -6;
+	self.selectionBadge.image = nil;
+
 	self.infoOverlay.hidden = YES;
 	self.sourceIcon.image = nil;
 	self.infoLabel.text = nil;
 }
 
-- (UIImage *)selectionBadgeImageSelected:(BOOL)selected {
-	return [UIImage systemImageNamed:selected ? @"checkmark.circle.fill" : @"circle"];
-}
+#pragma mark - Configure
 
 - (void)configureWithGalleryFile:(SCIGalleryFile *)file
-				 selectionMode:(BOOL)selectionMode
-					  selected:(BOOL)selected {
+				   selectionMode:(BOOL)selectionMode
+						selected:(BOOL)selected {
 	self.file = file;
-	UIImage *thumb = [SCIGalleryFile loadThumbnailForFile:file];
-	if (thumb) {
-		self.thumbnailView.image = thumb;
-	} else {
-		self.thumbnailView.image = nil;
-		__weak typeof(self) weakSelf = self;
-		[SCIGalleryFile generateThumbnailForFile:file completion:^(BOOL success) {
-			if (success && weakSelf && weakSelf.file == file) {
-				UIImage *newThumb = [UIImage imageWithContentsOfFile:[file thumbnailPath]];
-				if (newThumb) {
-					weakSelf.thumbnailView.image = newThumb;
-				}
-			}
-		}];
-	}
+	self.reuseToken = file.identifier ?: file.relativePath ?: file.thumbnailPath ?: NSUUID.UUID.UUIDString;
 
-	BOOL isVideo = (file.mediaType == SCIGalleryMediaTypeVideo);
-	BOOL isAudio = (file.mediaType == SCIGalleryMediaTypeAudio);
-	BOOL isGIF = (file.mediaType == SCIGalleryMediaTypeGIF);
-	if (isAudio) {
-		self.videoBadge.hidden = NO;
-		self.videoBadge.image = [UIImage systemImageNamed:@"waveform.circle.fill"];
-	} else if (isGIF) {
-		self.videoBadge.hidden = NO;
-		self.videoBadge.image = [UIImage systemImageNamed:@"sparkles"];
-	} else {
-		self.videoBadge.hidden = !isVideo;
-		self.videoBadge.image = [UIImage systemImageNamed:@"video.fill"];
-	}
-	self.favoriteBadge.hidden = !file.isFavorite;
-
+	[self updateThumbnailForFile:file token:self.reuseToken];
+	[self updateMediaBadgeForFile:file];
+	[self updateFavoriteBadgeForFile:file];
 	[self updateInfoOverlayForFile:file];
-
 	[self setSelectionMode:selectionMode selected:selected animated:NO];
+}
+
+- (void)updateThumbnailForFile:(SCIGalleryFile *)file token:(NSString *)token {
+	UIImage *thumbnail = [SCIGalleryFile loadThumbnailForFile:file];
+	if (thumbnail) {
+		self.thumbnailView.image = thumbnail;
+		return;
+	}
+
+	self.thumbnailView.image = nil;
+
+	__weak typeof(self) weakSelf = self;
+	[SCIGalleryFile generateThumbnailForFile:file completion:^(BOOL success) {
+		if (!success) return;
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			__strong typeof(weakSelf) self = weakSelf;
+			if (!self || ![self.reuseToken isEqualToString:token]) return;
+
+			UIImage *image = [UIImage imageWithContentsOfFile:file.thumbnailPath];
+			if (image) self.thumbnailView.image = image;
+		});
+	}];
+}
+
+- (void)updateMediaBadgeForFile:(SCIGalleryFile *)file {
+	NSString *symbol = nil;
+
+	switch (file.mediaType) {
+		case SCIGalleryMediaTypeVideo:
+			symbol = @"video.fill";
+			break;
+
+		case SCIGalleryMediaTypeAudio:
+			symbol = @"waveform.circle.fill";
+			break;
+
+		case SCIGalleryMediaTypeGIF:
+			symbol = @"sparkles";
+			break;
+
+		case SCIGalleryMediaTypeImage:
+		default:
+			break;
+	}
+
+	self.mediaBadge.image = symbol.length ? [UIImage systemImageNamed:symbol] : nil;
+	self.mediaBadge.hidden = symbol.length == 0;
+}
+
+- (void)updateFavoriteBadgeForFile:(SCIGalleryFile *)file {
+	self.favoriteBadge.hidden = !file.isFavorite;
 }
 
 - (void)updateInfoOverlayForFile:(SCIGalleryFile *)file {
 	SCIGallerySource source = (SCIGallerySource)file.source;
-	NSString *username = file.sourceUsername;
+	NSString *sourceText = source == SCIGallerySourceOther ? nil : [SCIGalleryFile shortLabelForSource:source];
+	NSString *username = file.sourceUsername.length ? [@"@" stringByAppendingString:file.sourceUsername] : nil;
 
-	NSMutableArray<NSString *> *parts = [NSMutableArray array];
-	if (source != SCIGallerySourceOther) {
-		[parts addObject:[SCIGalleryFile shortLabelForSource:source]];
-	}
-	if (username.length) {
-		[parts addObject:[@"@" stringByAppendingString:username]];
-	}
-	if (parts.count == 0) {
+	if (!sourceText.length && !username.length) {
 		self.infoOverlay.hidden = YES;
 		return;
 	}
-	self.infoOverlay.hidden = NO;
+
+	if (sourceText.length && username.length) {
+		self.infoLabel.text = [NSString stringWithFormat:@"%@ · %@", sourceText, username];
+	} else {
+		self.infoLabel.text = sourceText ?: username;
+	}
+
 	self.sourceIcon.image = [UIImage systemImageNamed:[self systemSymbolForSource:source]];
-	self.infoLabel.text = [parts componentsJoinedByString:@" · "];
+	self.infoOverlay.hidden = NO;
 }
 
-- (NSString *)systemSymbolForSource:(SCIGallerySource)source {
-	switch (source) {
-		case SCIGallerySourceFeed:	  return @"rectangle.stack";
-		case SCIGallerySourceStories:   return @"circle.dashed";
-		case SCIGallerySourceReels:	 return @"film";
-		case SCIGallerySourceProfile:   return @"person.crop.circle";
-		case SCIGallerySourceDMs:	   return @"bubble.left.and.bubble.right";
-		case SCIGallerySourceThumbnail: return @"photo.on.rectangle.angled";
-		case SCIGallerySourceNotes:	 return @"note.text";
-		case SCIGallerySourceComments:  return @"text.bubble";
-		case SCIGallerySourceInstants:  return @"square.dashed";
-		case SCIGallerySourceOther:
-		default:						return @"photo";
-	}
+#pragma mark - Selection
+
+- (UIImage *)selectionBadgeImageSelected:(BOOL)selected {
+	return [UIImage systemImageNamed:(selected ? @"checkmark.circle.fill" : @"circle")];
 }
 
 - (void)setSelectionMode:(BOOL)selectionMode selected:(BOOL)selected animated:(BOOL)animated {
 	self.selectionBadge.image = selectionMode ? [self selectionBadgeImageSelected:selected] : nil;
-	if (selectionMode) {
-		self.selectionBadge.hidden = NO;
-	}
-	self.favoriteTrailingConstraint.constant = selectionMode ? -30.0 : -6.0;
+	self.selectionBadge.hidden = !selectionMode && !animated;
+	self.favoriteTrailingConstraint.constant = selectionMode ? -30.0 : -kSCIGalleryGridBadgeInset;
 
-	void (^applyState)(void) = ^{
+	void (^changes)(void) = ^{
 		self.selectionBadge.alpha = selectionMode ? 1.0 : 0.0;
 		[self.contentView layoutIfNeeded];
 	};
-	void (^finishState)(void) = ^{
+
+	void (^completion)(BOOL) = ^(BOOL finished) {
+		(void)finished;
 		self.selectionBadge.hidden = !selectionMode;
 	};
 
-	if (animated) {
-		[UIView animateWithDuration:0.22
-							  delay:0.0
-							options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
-						 animations:applyState
-						 completion:^(__unused BOOL finished) {
-			finishState();
-		}];
-	} else {
-		applyState();
-		finishState();
+	if (!animated) {
+		changes();
+		completion(YES);
+		return;
+	}
+
+	[UIView animateWithDuration:0.20
+						  delay:0.0
+						options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
+					 animations:changes
+					 completion:completion];
+}
+
+#pragma mark - Source
+
+- (NSString *)systemSymbolForSource:(SCIGallerySource)source {
+	switch (source) {
+		case SCIGallerySourceFeed:		return @"rectangle.stack";
+		case SCIGallerySourceStories:	return @"circle.dashed";
+		case SCIGallerySourceReels:		return @"film";
+		case SCIGallerySourceProfile:	return @"person.crop.circle";
+		case SCIGallerySourceDMs:		return @"bubble.left.and.bubble.right";
+		case SCIGallerySourceThumbnail:	return @"photo.on.rectangle.angled";
+		case SCIGallerySourceNotes:		return @"note.text";
+		case SCIGallerySourceComments:	return @"text.bubble";
+		case SCIGallerySourceInstants:	return @"square.dashed";
+		case SCIGallerySourceOther:
+		default:						return @"photo";
 	}
 }
 
