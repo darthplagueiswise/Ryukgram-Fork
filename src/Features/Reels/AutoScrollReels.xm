@@ -1,7 +1,8 @@
-// Auto-scroll reels. Modes:
-//   * ig     — flip IG's own auto-scroll gates; covers video + photo reels
-//   * custom — same flag flip (photos) + per-cell loopCount trigger calling
-//     WantsScrollToNextItem each loop (videos keep advancing after back-swipe)
+// Auto-scroll reels.
+// Modes:
+//   off    — IG default behavior
+//   ig     — force IG auto-scroll gates ON
+//   custom — force IG auto-scroll gates ON + advance after video loop
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
@@ -12,60 +13,92 @@ static const void *kSCILoopCountKey = &kSCILoopCountKey;
 static BOOL sciAdvanceInFlight = NO;
 
 static inline NSString *sciMode(void) {
-    NSString *m = [SCIUtils getStringPref:@"auto_scroll_reels_mode"];
-    return m.length ? m : @"off";
+	NSString *mode = [SCIUtils getStringPref:@"auto_scroll_reels_mode"];
+	return mode.length ? mode : @"off";
 }
+
 static inline BOOL sciModeOn(void) { return ![sciMode() isEqualToString:@"off"]; }
 static inline BOOL sciModeCustom(void) { return [sciMode() isEqualToString:@"custom"]; }
 
-static UIViewController *sciFindFeedVCFromView(UIView *view) {
-    UIResponder *r = view;
-    while (r) {
-        if ([r isKindOfClass:[UIViewController class]] &&
-            [NSStringFromClass([r class]) isEqualToString:@"IGSundialFeedViewController"])
-            return (UIViewController *)r;
-        r = [r nextResponder];
-    }
-    return nil;
+static UIViewController *sciFeedVCFromView(UIView *view) {
+	for (UIResponder *r = view; r; r = r.nextResponder) {
+		if ([r isKindOfClass:UIViewController.class] &&
+			[NSStringFromClass(r.class) isEqualToString:@"IGSundialFeedViewController"]) {
+			return (UIViewController *)r;
+		}
+	}
+	return nil;
+}
+
+static void sciScrollToNextFromView(UIView *view) {
+	if (sciAdvanceInFlight) return;
+
+	UIViewController *vc = sciFeedVCFromView(view);
+	if (!vc || !vc.viewIfLoaded.window) return;
+
+	sciAdvanceInFlight = YES;
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		SEL sel1 = @selector(scrollToNextItemAnimated:);
+		SEL sel2 = @selector(sundialViewerInteractionCoordinatorWantsScrollToNextItemAnimated:);
+
+		if ([vc respondsToSelector:sel1]) {
+			((void (*)(id, SEL, BOOL))objc_msgSend)(vc, sel1, YES);
+		} else if ([vc respondsToSelector:sel2]) {
+			((void (*)(id, SEL, BOOL))objc_msgSend)(vc, sel2, YES);
+		}
+
+		sciAdvanceInFlight = NO;
+	});
 }
 
 %hook IGSundialFeedViewController
+
 - (BOOL)shouldForceEnableAutoScroll {
-    if (sciModeOn()) return YES;
-    return %orig;
+	return sciModeOn() ? YES : %orig;
 }
+
 - (BOOL)autoAdvanceToNextItem {
-    if (sciModeOn()) return YES;
-    return %orig;
+	return sciModeOn() ? YES : %orig;
 }
+
+- (void)setAutoAdvanceToNextItem:(BOOL)value {
+	%orig(sciModeOn() ? YES : value);
+}
+
 %end
 
 %hook IGSundialViewerVideoCell
-- (void)videoView:(id)v didUpdatePlaybackStatus:(id)status {
-    %orig;
-    if (!sciModeCustom() || !status) return;
-    SEL loopSel = @selector(loopCount);
-    if (![status respondsToSelector:loopSel]) return;
 
-    long long cur = ((long long(*)(id, SEL))objc_msgSend)(status, loopSel);
-    NSNumber *prev = objc_getAssociatedObject(self, kSCILoopCountKey);
-    objc_setAssociatedObject(self, kSCILoopCountKey, @(cur), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!prev || cur <= prev.longLongValue || sciAdvanceInFlight) return;
+- (void)videoView:(id)view didUpdatePlaybackStatus:(id)status {
+	%orig;
 
-    UIViewController *feedVC = sciFindFeedVCFromView((UIView *)self);
-    if (!feedVC || !feedVC.viewIfLoaded.window) return;
+	if (!sciModeCustom() || !status) return;
 
-    sciAdvanceInFlight = YES;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        SEL wants = @selector(sundialViewerInteractionCoordinatorWantsScrollToNextItemAnimated:);
-        if ([feedVC respondsToSelector:wants])
-            ((void(*)(id, SEL, BOOL))objc_msgSend)(feedVC, wants, YES);
-        sciAdvanceInFlight = NO;
-    });
+	SEL loopSel = @selector(loopCount);
+	if (![status respondsToSelector:loopSel]) return;
+
+	long long current = ((long long (*)(id, SEL))objc_msgSend)(status, loopSel);
+	NSNumber *previous = objc_getAssociatedObject(self, kSCILoopCountKey);
+
+	objc_setAssociatedObject(self, kSCILoopCountKey, @(current), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	if (!previous || current <= previous.longLongValue) return;
+
+	sciScrollToNextFromView((UIView *)self);
+}
+
+- (void)videoViewDidPlayThroughToCompletion:(id)view {
+	%orig;
+
+	if (sciModeCustom()) {
+		sciScrollToNextFromView((UIView *)self);
+	}
 }
 
 - (void)prepareForReuse {
-    objc_setAssociatedObject(self, kSCILoopCountKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    %orig;
+	objc_setAssociatedObject(self, kSCILoopCountKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	%orig;
 }
+
 %end
