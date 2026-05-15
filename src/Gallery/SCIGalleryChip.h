@@ -11,12 +11,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign, getter=isOnState) BOOL onState;
 
 + (instancetype)chipWithTitle:(NSString *)title
-                       symbol:(nullable NSString *)sfSymbol;
+					   symbol:(nullable NSString *)sfSymbol;
 
 /// Smaller chip — tighter padding + 12pt font. Used for high-density rows
 /// like the username scroll strip in the filter sheet.
 + (instancetype)compactChipWithTitle:(NSString *)title
-                              symbol:(nullable NSString *)sfSymbol;
+							  symbol:(nullable NSString *)sfSymbol;
 
 - (void)setOnState:(BOOL)on animated:(BOOL)animated;
 

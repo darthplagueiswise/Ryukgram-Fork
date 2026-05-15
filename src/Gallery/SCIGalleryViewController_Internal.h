@@ -13,18 +13,18 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, SCIGalleryViewMode) {
-    SCIGalleryViewModeGrid = 0,
-    SCIGalleryViewModeList = 1,
+	SCIGalleryViewModeGrid = 0,
+	SCIGalleryViewModeList = 1,
 };
 
 @interface SCIGalleryViewController () <UICollectionViewDataSource,
-                                        UICollectionViewDelegate,
-                                        UICollectionViewDelegateFlowLayout,
-                                        NSFetchedResultsControllerDelegate,
-                                        SCIGallerySortViewControllerDelegate,
-                                        SCIGalleryFilterViewControllerDelegate,
-                                        UIAdaptivePresentationControllerDelegate,
-                                        UISearchResultsUpdating>
+										UICollectionViewDelegate,
+										UICollectionViewDelegateFlowLayout,
+										NSFetchedResultsControllerDelegate,
+										SCIGallerySortViewControllerDelegate,
+										SCIGalleryFilterViewControllerDelegate,
+										UIAdaptivePresentationControllerDelegate,
+										UISearchResultsUpdating>
 
 @property (nonatomic, strong) UICollectionView *collectionView;
 @property (nonatomic, strong) NSFetchedResultsController *fetchedResultsController;

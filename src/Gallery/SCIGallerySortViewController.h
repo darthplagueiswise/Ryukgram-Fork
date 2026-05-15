@@ -4,14 +4,14 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, SCIGallerySortMode) {
-    SCIGallerySortModeDateAddedDesc = 0,  // Newest first (default)
-    SCIGallerySortModeDateAddedAsc,       // Oldest first
-    SCIGallerySortModeNameAsc,            // A→Z
-    SCIGallerySortModeNameDesc,           // Z→A
-    SCIGallerySortModeSizeDesc,           // Largest first
-    SCIGallerySortModeSizeAsc,            // Smallest first
-    SCIGallerySortModeTypeAsc,            // Images then videos
-    SCIGallerySortModeTypeDesc,           // Videos then images
+	SCIGallerySortModeDateAddedDesc = 0,  // Newest first (default)
+	SCIGallerySortModeDateAddedAsc,	   // Oldest first
+	SCIGallerySortModeNameAsc,			// A→Z
+	SCIGallerySortModeNameDesc,		   // Z→A
+	SCIGallerySortModeSizeDesc,		   // Largest first
+	SCIGallerySortModeSizeAsc,			// Smallest first
+	SCIGallerySortModeTypeAsc,			// Images then videos
+	SCIGallerySortModeTypeDesc,		   // Videos then images
 };
 
 @class SCIGallerySortViewController;

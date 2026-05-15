@@ -3,8 +3,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, SCIGalleryDeletePageMode) {
-    SCIGalleryDeletePageModeRoot = 0,
-    SCIGalleryDeletePageModeUsers
+	SCIGalleryDeletePageModeRoot = 0,
+	SCIGalleryDeletePageModeUsers
 };
 
 @interface SCIGalleryDeleteViewController : UITableViewController

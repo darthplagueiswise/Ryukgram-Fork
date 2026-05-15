@@ -6,10 +6,10 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(int16_t, SCIGalleryMediaType) {
-    SCIGalleryMediaTypeImage = 0,
-    SCIGalleryMediaTypeVideo = 1,
-    SCIGalleryMediaTypeAudio = 2,
-    SCIGalleryMediaTypeGIF   = 3
+	SCIGalleryMediaTypeImage = 0,
+	SCIGalleryMediaTypeVideo = 1,
+	SCIGalleryMediaTypeAudio = 2,
+	SCIGalleryMediaTypeGIF   = 3
 };
 
 FOUNDATION_EXPORT NSString *SCIFileNameForMedia(NSURL *originalURL, SCIGalleryMediaType mediaType, SCIGallerySaveMetadata * _Nullable metadata);
@@ -22,16 +22,16 @@ FOUNDATION_EXPORT BOOL SCIGalleryExtensionIsAudio(NSString * _Nullable ext);
 
 
 typedef NS_ENUM(int16_t, SCIGallerySource) {
-    SCIGallerySourceOther   = 0,
-    SCIGallerySourceFeed    = 1,
-    SCIGallerySourceStories = 2,
-    SCIGallerySourceReels   = 3,
-    SCIGallerySourceProfile = 4,
-    SCIGallerySourceDMs     = 5,
-    SCIGallerySourceThumbnail = 6,
-    SCIGallerySourceNotes   = 7,
-    SCIGallerySourceComments = 8,
-    SCIGallerySourceInstants = 9
+	SCIGallerySourceOther   = 0,
+	SCIGallerySourceFeed	= 1,
+	SCIGallerySourceStories = 2,
+	SCIGallerySourceReels   = 3,
+	SCIGallerySourceProfile = 4,
+	SCIGallerySourceDMs	 = 5,
+	SCIGallerySourceThumbnail = 6,
+	SCIGallerySourceNotes   = 7,
+	SCIGallerySourceComments = 8,
+	SCIGallerySourceInstants = 9
 };
 
 @interface SCIGalleryFile : NSManagedObject
@@ -56,24 +56,24 @@ typedef NS_ENUM(int16_t, SCIGallerySource) {
 @property (nonatomic) double durationSeconds;
 
 + (nullable SCIGalleryFile *)saveFileToGallery:(NSURL *)fileURL
-                                        source:(SCIGallerySource)source
-                                     mediaType:(SCIGalleryMediaType)mediaType
-                                         error:(NSError **)error;
+										source:(SCIGallerySource)source
+									 mediaType:(SCIGalleryMediaType)mediaType
+										 error:(NSError **)error;
 
 /// Convenience: adds to gallery inside the given folder.
 + (nullable SCIGalleryFile *)saveFileToGallery:(NSURL *)fileURL
-                                        source:(SCIGallerySource)source
-                                     mediaType:(SCIGalleryMediaType)mediaType
-                                    folderPath:(nullable NSString *)folderPath
-                                         error:(NSError **)error;
+										source:(SCIGallerySource)source
+									 mediaType:(SCIGalleryMediaType)mediaType
+									folderPath:(nullable NSString *)folderPath
+										 error:(NSError **)error;
 
 /// When `metadata` is non-nil, its fields override `source` and populate list UI. File is probed for any missing dimensions/duration.
 + (nullable SCIGalleryFile *)saveFileToGallery:(NSURL *)fileURL
-                                        source:(SCIGallerySource)source
-                                     mediaType:(SCIGalleryMediaType)mediaType
-                                    folderPath:(nullable NSString *)folderPath
-                                      metadata:(nullable SCIGallerySaveMetadata *)metadata
-                                         error:(NSError **)error;
+										source:(SCIGallerySource)source
+									 mediaType:(SCIGalleryMediaType)mediaType
+									folderPath:(nullable NSString *)folderPath
+									  metadata:(nullable SCIGallerySaveMetadata *)metadata
+										 error:(NSError **)error;
 
 - (BOOL)removeWithError:(NSError *_Nullable *_Nullable)error;
 
@@ -108,7 +108,7 @@ typedef NS_ENUM(int16_t, SCIGallerySource) {
 + (NSString *)shortLabelForSource:(SCIGallerySource)source;
 
 + (void)generateThumbnailForFile:(SCIGalleryFile *)file
-                      completion:(void(^_Nullable)(BOOL success))completion;
+					  completion:(void(^_Nullable)(BOOL success))completion;
 
 + (nullable UIImage *)loadThumbnailForFile:(SCIGalleryFile *)file;
 
