@@ -14,6 +14,7 @@
 #import "SCIExcludedStoryUsersViewController.h"
 #import "SCIEmbedDomainViewController.h"
 #import "SCIDateFormatPickerVC.h"
+#import "SCIAppIconPickerViewController.h"
 #import "../Features/General/SCICacheManager.h"
 #import "../Features/General/SCIChangelog.h"
 #import "../SCIFFmpeg.h"
@@ -688,7 +689,7 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable app haptics") subtitle:SCILocalized(@"Disables haptics/vibrations within the app") defaultsKey:@"disable_haptics"],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Open app icon picker")
 																		subtitle:@""
-																			icon:nil
+																			icon:[SCISymbol symbolWithIGName:@"app.badge" fallback:@"app"]
 																		  action:^{ sciPresentTeenIconPicker(); }],
 												[self advancedExperimentalShortcutCell],
 											]
@@ -1389,22 +1390,14 @@ static UIViewController *sciFindHomeFeedHeader(void) {
 
 // Dismiss the settings modal then trigger the native teen icon picker.
 static void sciPresentTeenIconPicker(void) {
-	UIViewController *top = sciTopVC();
-	void (^invoke)(void) = ^{
-		id vc = sciFindHomeFeedHeader();
-		SEL sel = @selector(headerDidLongPressLogo:);
-		if ([vc respondsToSelector:sel]) {
-			((void(*)(id, SEL, id))objc_msgSend)(vc, sel, nil);
-		}
-	};
-	if (top.presentingViewController) {
-		[top dismissViewControllerAnimated:YES completion:^{
-			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
-						   dispatch_get_main_queue(), invoke);
-		}];
-	} else {
-		invoke();
-	}
+
+	UIViewController *top = topMostController();
+	if (!top) return;
+	SCIAppIconPickerViewController *vc = SCIAppIconPickerViewController.new;
+	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+	nav.modalPresentationStyle = UIModalPresentationFormSheet;
+	[top presentViewController:nav animated:YES completion:nil];
+
 }
 
 
