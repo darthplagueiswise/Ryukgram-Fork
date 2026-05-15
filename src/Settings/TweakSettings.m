@@ -687,11 +687,9 @@
 												[SCISetting menuCellWithTitle:SCILocalized(@"Liquid glass tab bar") subtitle:SCILocalized(@"Fixed prevents shrinking. Hide makes it disappear when scrolling down") menu:[self menus][@"liquid_glass_tabbar_mode"]],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Enable teen app icons") subtitle:SCILocalized(@"Hold down on the Instagram logo to change the app icon") defaultsKey:@"teen_app_icons" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable app haptics") subtitle:SCILocalized(@"Disables haptics/vibrations within the app") defaultsKey:@"disable_haptics"],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Open app icon picker")
-																		subtitle:@""
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Open app icon picker") subtitle:SCILocalized(@"Change the app icon from the bundled icons")
 																			icon:[SCISymbol symbolWithIGName:@"app.badge" fallback:@"app"]
 																		  action:^{ sciPresentTeenIconPicker(); }],
-												[self advancedExperimentalShortcutCell],
 											]
 										}]
 				],
