@@ -6,10 +6,6 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-ifneq ($(wildcard modules/FLEXing/libflex/FLEX/Classes),)
-TWEAK_NAME += AllFLEXing
-endif
-
 SCHEMA_JSON ?= resources/igios-instagram-schema_client-persist.json
 GENERATED_SCHEMA_SRC := src/Generated/SCIEmbeddedMobileConfigSchema.m
 
@@ -36,19 +32,6 @@ RyukGram_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemCo
 RyukGram_PRIVATE_FRAMEWORKS = Preferences
 RyukGram_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -include src/SCIPrefix.h
 RyukGram_LOGOSFLAGS = --c warnings=none
-
-FLEX_ROOT := modules/FLEXing/libflex/FLEX
-FLEXING_ROOT := modules/FLEXing
-FLEX_SOURCES := $(shell find $(FLEX_ROOT)/Classes -name '*.c' -o -name '*.m' -o -name '*.mm' 2>/dev/null)
-FLEX_IMPORT_DIRS := $(shell find $(FLEX_ROOT)/Classes -type d 2>/dev/null)
-FLEX_IMPORTS := -I$(FLEXING_ROOT) -I$(FLEXING_ROOT)/libflex -I$(FLEX_ROOT)/Classes $(foreach d,$(FLEX_IMPORT_DIRS),-I$(d))
-
-AllFLEXing_FILES = src/FLEXing/AllFLEXing.xm modules/FLEXing/libflex/libFLEX.x $(FLEX_SOURCES)
-AllFLEXing_FRAMEWORKS = UIKit Foundation CoreGraphics ImageIO QuartzCore WebKit
-AllFLEXing_LIBRARIES = sqlite3 z
-AllFLEXing_CFLAGS = -fobjc-arc -w -Wno-unsupported-availability-guard $(FLEX_IMPORTS)
-AllFLEXing_CCFLAGS = -std=gnu++11
-AllFLEXing_LOGOSFLAGS = --c warnings=none
 
 CCFLAGS += -std=c++11
 
