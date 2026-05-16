@@ -222,6 +222,10 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
             d(SCIAID_DownloadShare,       SCILocalized(@"Download and share"),     @"square.and.arrow.up",                YES),
             d(SCIAID_DownloadSave,        SCILocalized(@"Download to Photos"),     @"square.and.arrow.down",              YES),
          dOff(SCIAID_DownloadGallery,     SCILocalized(@"Download to Gallery"),    @"photo.on.rectangle.angled",          YES),
+            d(SCIAID_BulkCopyURLs,        SCILocalized(@"Copy all URLs"),          @"doc.on.doc",                         NO),
+            d(SCIAID_BulkDownloadShare,   SCILocalized(@"Download and share all"), @"square.and.arrow.up.on.square",      NO),
+            d(SCIAID_BulkDownloadSave,    SCILocalized(@"Download all to Photos"), @"square.and.arrow.down.on.square",    NO),
+         dOff(SCIAID_BulkDownloadGallery, SCILocalized(@"Download all to Gallery"),@"square.stack.3d.down.right",         NO),
             d(SCIAID_Settings,            SCILocalized(@"Reels settings"),         @"gearshape",                          NO),
         ];
 
@@ -339,6 +343,9 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
                 section(@"download",
                         SCILocalized(@"Download"), @"arrow.down.circle", NO,
                         @[SCIAID_DownloadShare, SCIAID_DownloadSave, SCIAID_DownloadGallery]),
+                section(@"bulk",
+                        SCILocalized(@"Bulk download"), @"square.stack.3d.down.right", YES,
+                        @[SCIAID_BulkCopyURLs, SCIAID_BulkDownloadShare, SCIAID_BulkDownloadSave, SCIAID_BulkDownloadGallery]),
             ];
 
         case SCIActionSourceStories:

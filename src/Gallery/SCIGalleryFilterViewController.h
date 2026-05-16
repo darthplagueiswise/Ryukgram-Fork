@@ -8,10 +8,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol SCIGalleryFilterViewControllerDelegate <NSObject>
 - (void)filterController:(SCIGalleryFilterViewController *)controller
-           didApplyTypes:(NSSet<NSNumber *> *)types
-                 sources:(NSSet<NSNumber *> *)sources
-               usernames:(NSSet<NSString *> *)usernames
-           favoritesOnly:(BOOL)favoritesOnly;
+		   didApplyTypes:(NSSet<NSNumber *> *)types
+				 sources:(NSSet<NSNumber *> *)sources
+			   usernames:(NSSet<NSString *> *)usernames
+		   favoritesOnly:(BOOL)favoritesOnly;
 
 - (void)filterControllerDidClear:(SCIGalleryFilterViewController *)controller;
 @end
@@ -28,10 +28,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Composes an NSPredicate from the given filters, or nil if no filters are active.
 + (nullable NSPredicate *)predicateForTypes:(NSSet<NSNumber *> *)types
-                                    sources:(NSSet<NSNumber *> *)sources
-                                  usernames:(NSSet<NSString *> *)usernames
-                              favoritesOnly:(BOOL)favoritesOnly
-                                 folderPath:(nullable NSString *)folderPath;
+									sources:(NSSet<NSNumber *> *)sources
+								  usernames:(NSSet<NSString *> *)usernames
+							  favoritesOnly:(BOOL)favoritesOnly
+								 folderPath:(nullable NSString *)folderPath;
 
 @end
 

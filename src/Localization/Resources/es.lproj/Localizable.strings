@@ -106,6 +106,8 @@
 "Enables experimental liquid glass buttons" = "Habilita botones experimentales Liquid Glass";
 "Enables liquid glass tab bar, floating navigation, and other UI elements" = "Habilita Liquid Glass en la barra de pestañas, navegación flotante y otros elementos de la interfaz";
 "Experimental features" = "Funciones experimentales";
+"Fixed" = "Fijo";
+"Fixed prevents shrinking. Hide makes it disappear when scrolling down" = "Fijo evita que se reduzca. Ocultar lo hace desaparecer al desplazar hacia abajo";
 "Focus/distractions" = "Concentración/Distracciones";
 "General" = "General";
 "Hide ads" = "Ocultar anuncios";
@@ -114,6 +116,9 @@
 "Hide Meta AI" = "Ocultar Meta AI";
 "Hide metrics" = "Ocultar métricas";
 "Hide notes tray" = "Ocultar bandeja de notas";
+"Hide on scroll" = "Ocultar al desplazar";
+"Hide TestFlight popup" = "Ocultar ventana de TestFlight";
+"Suppresses the \"It's time to update Instagram Beta\" nag" = "Suprime el aviso \"It's time to update Instagram Beta\"";
 "Hide trending searches" = "Ocultar búsquedas en tendencia";
 "Hide UI on capture" = "Ocultar UI al capturar";
 "Hides all suggested users for you to follow, outside your feed" = "Oculta 'Sugerencias para ti' en tu Feed (Inicio)";
@@ -125,6 +130,7 @@
 "Hides the suggested broadcast channels in direct messages" = "Oculta los canales sugeridos en mensajes";
 "Hides the trending searches under the explore search bar" = "Oculta las búsquedas en tendencia debajo de la barra de búsqueda";
 "Hold down on the Instagram logo to change the app icon" = "Mantén pulsado el logo de Instagram para cambiar el ícono de la aplicación";
+"Liquid glass tab bar" = "Barra de pestañas Liquid Glass";
 "Live" = "En vivo";
 "Long press on the eyedropper tool in stories to customize the text color more precisely" = "Mantener pulsada la herramienta de selección de color en historias para seleccionar el color del texto de manera más precisa";
 "Long-press the heart button in a live to hide or show the comments" = "Mantén presionado el botón de corazón en un directo para ocultar o mostrar los comentarios";
@@ -397,6 +403,10 @@
 "Sending a reply or emoji reaction automatically advances to the next story" = "Enviar una respuesta o una reacción con emoji automáticamente avanza a la siguiente historia";
 "Adds a 'View mentions' entry to the action button menu and story 3-dot menu" = "Añade la opción 'Ver menciones' al menú del botón de acción y al menú de los 3 puntos de las historias";
 "Mentions overlay button" = "Botón de menciones en la superposición";
+"Shows the number of unique mentioned accounts as a red badge on the overlay button" = "Muestra el número de cuentas mencionadas únicas como una insignia roja en el botón superpuesto";
+"Mentions count badge" = "Insignia con número de menciones";
+"Removes the Trending and Music promo cards from the stories tray" = "Elimina las tarjetas promocionales de Tendencias y Música de la bandeja de historias";
+"Hide stories midcards" = "Ocultar tarjetas intermedias de historias";
 "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels" = "Añade un botón junto al botón de acción / ojo en la superposición de las historias. Solo aparece cuando la historia actual contiene menciones o publicaciones / reels compartidos";
 "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only" = "Muestra un botón con forma de ojo (👁) en las historias para añadir o eliminar usuarios de la lista. Desactivado = Usar el menú de los 3 puntos o solo mantener pulsado";
 "Stickers" = "Stickers";
@@ -925,6 +935,7 @@
 
 "Add location" = "Añadir ubicación";
 "Add preset" = "Añadir ajuste preestablecido";
+"Background" = "Fondo";
 "Background color" = "Color de fondo";
 "Change location" = "Cambiar ubicación";
 "Clipboard is not an Instagram URL" = "El portapapeles no contiene un enlace de Instagram";
@@ -939,7 +950,9 @@
 "Disable" = "Desactivado";
 "Download GIF" = "Descargar GIF";
 "Dropped pin" = "Marcador";
+"Emoji" = "Emoji";
 "Enable" = "Activado";
+"Enter emoji" = "Introduce un emoji";
 "Enable Location Services for Instagram in Settings to use your current location." = "Activa los servicios de ubicación para Instagram en Ajustes para usar tu ubicación actual.";
 "Fake location" = "Ubicación falsa";
 "Location access denied" = "Acceso a ubicación denegado";
@@ -954,6 +967,7 @@
 "Select color" = "Escoger color";
 "Set location" = "Establecer ubicación";
 "Text color" = "Color del texto";
+"Type an emoji to use as the note bubble icon." = "Escribe un emoji para usarlo como icono de la burbuja de nota.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Activa los servicios de ubicación en Ajustes → Privacidad para usar tu ubicación actual.";
 
 "Theme" = "Tema";
@@ -1084,7 +1098,6 @@
 "Reset complete" = "Restablecimiento completado";
 "Reset selected data?" = "¿Restablecer los datos seleccionados?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "A partir del segundo análisis: cada análisis se compara con el anterior, mostrando seguidores nuevos/perdidos, tus propios movimientos de seguir/dejar de seguir y cambios de perfil.";
-"Select all" = "Seleccionar todo";
 "Selected data will be cleared. Tap any row to see what's stored." = "Los datos seleccionados se borrarán. Toca cualquier fila para ver qué hay guardado.";
 "Settings" = "Ajustes";
 "Sort" = "Ordenar";
@@ -1146,7 +1159,6 @@
 "Follow default" = "Seguir predeterminada";
 "Force OFF (allow unsends)" = "Forzar DESACTIVADO (Permite anular envío)";
 "Force ON (preserve unsends)" = "Forzar ACTIVADO (Mantiene eliminados)";
-"Format" = "Formato";
 "Import failed" = "Importación fallida";
 "Included chats" = "Conversaciones incluidas";
 "Included users" = "Usuarios incluidos";
@@ -1175,9 +1187,21 @@
 "Settings exported" = "Configuración exportada";
 "Show map button" = "Botón de mostrar mapa";
 "Show seconds" = "Mostrar segundos";
+"Within 1 day" = "Dentro de 1 día";
+"Within %ld days" = "Dentro de %ld días";
+"Time" = "Hora";
+"Show relative time for dates younger than this many days. 0 disables it." = "Muestra el tiempo relativo para fechas más recientes que este número de días. 0 lo desactiva.";
+"Relative within" = "Relativo dentro de";
+"Relative time" = "Tiempo relativo";
+"Pick how absolute dates are written. \"Default\" leaves IG's own format untouched." = "Elige cómo se escriben las fechas absolutas. \"Predeterminado\" deja el formato de IG sin cambios.";
+"Include seconds when the format already shows time." = "Incluir segundos cuando el formato ya muestra la hora.";
+"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to." = "Cada superficie de IG usa un formateador NSDate distinto. Activa las que quieras que usen este formato.";
+"Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\"." = "Las fechas más recientes que el umbral se muestran como tiempo relativo (p. ej. \"2h\"). Las fechas más antiguas usan el formato absoluto. \"Añadir después de la fecha absoluta\" muestra ambos — \"5 ene 2026 (2h)\".";
+"Compact style (e.g. \"1h\" instead of \"1 hour ago\")" = "Estilo compacto (p. ej. \"1h\" en lugar de \"hace 1 hora\")";
+"Append after absolute date" = "Añadir después de la fecha absoluta";
+"Absolute format" = "Formato absoluto";
 "Sort by" = "Ordenar por";
 "Story users" = "Usuarios de historias";
-"Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to." = "Alterna cada formato NSDate que utiliza Instagram. Las distintas secciones (Feed (Inicio), comentarios, historias, mensajes) utilizan métodos diferentes: activa aquellos a los que quieras aplicar el formato personalizado.";
 "Use this location" = "Usar esta ubicación";
 "User '%@' not found" = "Usuario '%@' no encontrado";
 "Username (A–Z)" = "Usuario (A–Z)";
@@ -1262,6 +1286,7 @@
 "Korean translation" = "Traducción al coreano";
 "Portuguese (Brazil) translation" = "Traducción al portugués (Brasil)";
 "Turkish translation" = "Traducción al turco";
+"Vietnamese translation" = "Traducción al vietnamita";
 "Code contributions" = "Contribuciones de código";
 "Following feed mode (from InstaSane)" = "Modo de feed de Siguiendo (de InstaSane)";
 "latest" = "última";
@@ -1719,3 +1744,13 @@
 "Colors" = "Colores";
 "+ Add new language" = "+ Añadir idioma nuevo";
 "Each chat can override this in the list" = "Cada chat puede anular esto en la lista";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "Cuando está activado, las solicitudes de ubicación de Instagram devuelven la ubicación falsa seleccionada. El botón del mapa añade un acceso rápido en el mapa de amigos.";
+"Tap a preset to make it active. Swipe left to delete." = "Toca un preajuste para activarlo. Desliza a la izquierda para eliminar.";
+"Override Instagram location reads." = "Anula las lecturas de ubicación de Instagram.";
+"Show the quick button in Friends Map." = "Mostrar el botón rápido en el mapa de amigos.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "Elige cómo se escriben las fechas absolutas. “Predeterminado” deja intacto el formato de IG.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "Las fechas anteriores al umbral se muestran como tiempo relativo. Las fechas más antiguas vuelven al formato absoluto. El modo añadir muestra ambos, como “Jan 5, 2026 (2h)”.";
+"Compact style" = "Estilo compacto";
+"Example: “1h” instead of “1 hour ago”" = "Ejemplo: “1h” en lugar de “hace 1 hora”";
+"Example: “Jan 5, 2026 (2h)”" = "Ejemplo: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "Las APIs de audio de iOS no pudieron procesar este archivo%@%@\n\nPuedes intentar enviarlo a Instagram tal cual, o abrir un problema de soporte.";

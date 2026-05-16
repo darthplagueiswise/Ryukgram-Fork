@@ -106,6 +106,127 @@ copy_bundle_assets() {
 	\) -exec cp {} "$dest/" \;
 }
 
+# Post-process IPA in one extraction pass:
+# - Copy custom alternate app icons from ./AppIcon/
+# - Patch Info.plist CFBundleAlternateIcons
+# - Embed Safari extension for sideload/trollstore
+# - Strip .appex bundles for SideStore
+# Arg 1: path to IPA.
+# Arg 2: zip compression level.
+# Arg 3: mode: normal / sidestore / trollstore
+postprocess_ipa_bundle() {
+	local ipa="$1"
+	local compression="$2"
+	local mode="${3:-normal}"
+
+	local tmpdir
+	local app_dir
+	local plist
+	local pb="/usr/libexec/PlistBuddy"
+
+	local icon_src="AppIcon"
+	local appex_src="extensions/OpenInstagramSafariExtension.appex"
+
+	local icons=(
+		"2010@2x.png"
+		"2010@3x.png"
+		"2010-iPad@2x.png"
+		"2010-iPadPro@2x.png"
+		"2011@2x.png"
+		"2011@3x.png"
+		"2011-iPad@2x.png"
+		"2011-iPadPro@2x.png"
+	)
+
+	log "Post-processing IPA"
+
+	tmpdir="$(mktemp -d)"
+
+	unzip -q "$ipa" -d "$tmpdir"
+
+	app_dir="$(find "$tmpdir/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
+
+	if [ -z "$app_dir" ]; then
+		rm -rf "$tmpdir"
+		die "Could not find .app bundle inside IPA."
+	fi
+
+	plist="$app_dir/Info.plist"
+
+	if [ ! -f "$plist" ]; then
+		rm -rf "$tmpdir"
+		die "Info.plist not found inside app bundle."
+	fi
+
+	# Patch alternate icons if ./AppIcon exists.
+	if [ -d "$icon_src" ]; then
+		[ -x "$pb" ] || {
+			rm -rf "$tmpdir"
+			die "PlistBuddy not found at $pb"
+		}
+
+		log "Patching alternate app icons"
+
+		for icon in "${icons[@]}"; do
+			if [ ! -f "$icon_src/$icon" ]; then
+				rm -rf "$tmpdir"
+				die "Missing icon file: $icon_src/$icon"
+			fi
+
+			cp -f "$icon_src/$icon" "$app_dir/"
+		done
+
+		"$pb" -c "Print :CFBundleIcons" "$plist" >/dev/null 2>&1 || \
+			"$pb" -c "Add :CFBundleIcons dict" "$plist"
+
+		"$pb" -c "Print :CFBundleIcons:CFBundleAlternateIcons" "$plist" >/dev/null 2>&1 || \
+			"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons dict" "$plist"
+
+		"$pb" -c "Delete :CFBundleIcons:CFBundleAlternateIcons:2010" "$plist" >/dev/null 2>&1 || true
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010 dict" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010:CFBundleIconFiles array" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010:CFBundleIconFiles: string 2010@2x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010:CFBundleIconFiles: string 2010@3x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010:CFBundleIconFiles: string 2010-iPad@2x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2010:CFBundleIconFiles: string 2010-iPadPro@2x" "$plist"
+
+		"$pb" -c "Delete :CFBundleIcons:CFBundleAlternateIcons:2011" "$plist" >/dev/null 2>&1 || true
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011 dict" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011:CFBundleIconFiles array" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011:CFBundleIconFiles: string 2011@2x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011:CFBundleIconFiles: string 2011@3x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011:CFBundleIconFiles: string 2011-iPad@2x" "$plist"
+		"$pb" -c "Add :CFBundleIcons:CFBundleAlternateIcons:2011:CFBundleIconFiles: string 2011-iPadPro@2x" "$plist"
+	fi
+
+	if [ "$mode" = "sidestore" ]; then
+		local appex_count="0"
+
+		log "Stripping app extensions for SideStore"
+
+		appex_count="$(find "$app_dir" -type d -name '*.appex' | wc -l | tr -d ' ')"
+		find "$app_dir" -type d -name '*.appex' -prune -exec rm -rf {} +
+
+		warn "  removed ${appex_count} .appex bundle(s)"
+	else
+		if [ -d "$appex_src" ]; then
+			log "Embedding Safari extension"
+
+			mkdir -p "$app_dir/PlugIns"
+			rm -rf "$app_dir/PlugIns/OpenInstagramSafariExtension.appex"
+			cp -R "$appex_src" "$app_dir/PlugIns/"
+		fi
+	fi
+
+	(
+		cd "$tmpdir"
+		zip -qr -"${compression}" ../repacked.ipa Payload
+	)
+
+	mv "$tmpdir/../repacked.ipa" "$ipa"
+	rm -rf "$tmpdir"
+}
+
 # Copy FFmpegKit frameworks into RyukGram.bundle and rename FFmpeg libraries
 # to *_sci to avoid collisions with frameworks that may already exist inside
 # the target app.
@@ -291,78 +412,6 @@ check_flex() {
 	fi
 }
 
-# Embed Safari extension before ipapatch resign.
-# Free signing rewrites the parent bundle ID and breaks the appex prefix, so
-# this is skipped for SideStore.
-embed_safari_extension() {
-	local ipa="$1"
-	local compression="$2"
-	local appex_src="extensions/OpenInstagramSafariExtension.appex"
-	local tmpdir
-	local app_dir
-
-	[ -d "$appex_src" ] || return 0
-
-	log "Embedding Safari extension"
-
-	tmpdir="$(mktemp -d)"
-
-	unzip -q "$ipa" -d "$tmpdir"
-
-	app_dir="$(find "$tmpdir/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
-
-	if [ -n "$app_dir" ]; then
-		mkdir -p "$app_dir/PlugIns"
-		rm -rf "$app_dir/PlugIns/OpenInstagramSafariExtension.appex"
-		cp -R "$appex_src" "$app_dir/PlugIns/"
-
-		(
-			cd "$tmpdir"
-			zip -qr -"${compression}" ../repacked.ipa Payload
-		)
-
-		mv "$tmpdir/../repacked.ipa" "$ipa"
-	fi
-
-	rm -rf "$tmpdir"
-}
-
-# Strip every .appex.
-# Instagram keeps some under Extensions/, not only PlugIns/.
-# Free signing's bundle ID rewrite breaks the parent-prefix check otherwise.
-strip_appex_bundles() {
-	local ipa="$1"
-	local compression="$2"
-	local tmpdir
-	local app_dir
-	local appex_count="0"
-
-	log "Stripping app extensions for SideStore"
-
-	tmpdir="$(mktemp -d)"
-
-	unzip -q "$ipa" -d "$tmpdir"
-
-	app_dir="$(find "$tmpdir/Payload" -maxdepth 1 -type d -name '*.app' | head -1)"
-
-	if [ -n "$app_dir" ]; then
-		appex_count="$(find "$app_dir" -type d -name '*.appex' | wc -l | tr -d ' ')"
-
-		find "$app_dir" -type d -name '*.appex' -prune -exec rm -rf {} +
-
-		warn "  removed ${appex_count} .appex bundle(s)"
-
-		(
-			cd "$tmpdir"
-			zip -qr -"${compression}" ../repacked.ipa Payload
-		)
-
-		mv "$tmpdir/../repacked.ipa" "$ipa"
-	fi
-
-	rm -rf "$tmpdir"
-}
-
 # Build just the dylib for Feather/manual injection.
 build_dylib() {
 	local option="${1:-}"
@@ -543,13 +592,10 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 		-m 15.0 \
 		-du
 
-	# Embed Safari extension before ipapatch resign.
-	# Skip on SideStore because free signing rewrites the parent bundle ID
-	# and breaks the appex prefix.
-	if [ "$rg_sidestore" != "1" ]; then
-		embed_safari_extension "$out_ipa" "$compression"
+	if [ "$rg_sidestore" = "1" ]; then
+		postprocess_ipa_bundle "$out_ipa" "$compression" "sidestore"
 	else
-		strip_appex_bundles "$out_ipa" "$compression"
+		postprocess_ipa_bundle "$out_ipa" "$compression" "normal"
 	fi
 
 	if [ "$rg_sidestore" != "1" ]; then
@@ -668,8 +714,7 @@ build_trollstore() {
 		-m 15.0 \
 		-du
 
-	# Embed Safari extension.
-	embed_safari_extension "$out_ipa" "$compression"
+	postprocess_ipa_bundle "$out_ipa" "$compression" "trollstore"
 
 	run_ipapatch "$out_ipa"
 

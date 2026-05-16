@@ -1,72 +1,132 @@
 #import "SCIActionMenuConfigViewController.h"
 #import "../ActionButton/SCIActionMenuConfig.h"
 #import "../UI/SCIIcon.h"
+#import "../UI/SCIPopupChrome.h"
 #import "../Utils.h"
 
-#pragma mark - Reusable row layout helpers
-//
-// Reorderable row: ≡ grip → icon → title → optional accessory.
+#pragma mark - Helpers
 
-static UIImageView *sciMakeGripImageView(void) {
-    UIImageView *grip = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal"]];
-    grip.translatesAutoresizingMaskIntoConstraints = NO;
-    grip.tintColor = [UIColor tertiaryLabelColor];
-    grip.contentMode = UIViewContentModeCenter;
-    return grip;
+static UITableViewCell *sciCell(UITableViewCellStyle style) {
+	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:style reuseIdentifier:nil];
+	cell.accessoryView = nil;
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+	cell.contentView.alpha = 1.0;
+	cell.textLabel.text = nil;
+	cell.detailTextLabel.text = nil;
+	cell.imageView.image = nil;
+	return cell;
 }
 
-static UIImageView *sciMakeRowIconImageView(UIImage *image) {
-    UIImageView *iv = [[UIImageView alloc] initWithImage:image];
-    iv.translatesAutoresizingMaskIntoConstraints = NO;
-    iv.tintColor = [UIColor labelColor];
-    iv.contentMode = UIViewContentModeCenter;
-    return iv;
+static UIListContentConfiguration *sciContentForCell(UITableViewCell *cell, NSString *title, NSString *subtitle) {
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	config.text = title ?: @"";
+	config.textProperties.color = UIColor.labelColor;
+
+	if (subtitle.length) {
+		config.secondaryText = subtitle;
+		config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+		config.textToSecondaryTextVerticalPadding = 4.5;
+	}
+
+	return config;
 }
 
-static void sciInstallReorderRow(UITableViewCell *cell,
-                                  UIView *grip,
-                                  UIView *_Nullable icon,
-                                  UIView *title,
-                                  UIView *_Nullable accessory) {
-    cell.textLabel.text = nil;
-    cell.imageView.image = nil;
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+static void sciApplyIcon(UIListContentConfiguration *config, NSString *name, UIColor *tint) {
+	if (!name.length) return;
 
-    [cell.contentView addSubview:grip];
-    if (icon) [cell.contentView addSubview:icon];
-    [cell.contentView addSubview:title];
-    if (accessory) [cell.contentView addSubview:accessory];
+	UIImage *image = [SCIIcon sfImageNamed:name pointSize:18];
+	if (!image) image = [UIImage systemImageNamed:name];
+	if (!image) return;
 
-    NSMutableArray *cs = [NSMutableArray array];
-    [cs addObjectsFromArray:@[
-        [grip.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
-        [grip.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-        [grip.widthAnchor constraintEqualToConstant:20],
-    ]];
-    if (icon) {
-        [cs addObjectsFromArray:@[
-            [icon.leadingAnchor constraintEqualToAnchor:grip.trailingAnchor constant:14],
-            [icon.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [icon.widthAnchor constraintEqualToConstant:24],
-            [title.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:12],
-        ]];
-    } else {
-        [cs addObject:[title.leadingAnchor constraintEqualToAnchor:grip.trailingAnchor constant:14]];
-    }
-    [cs addObject:[title.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor]];
-    if (accessory) {
-        [cs addObjectsFromArray:@[
-            [accessory.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
-            [accessory.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [title.trailingAnchor constraintLessThanOrEqualToAnchor:accessory.leadingAnchor constant:-12],
-        ]];
-    } else {
-        [cs addObject:[title.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor]];
-    }
-    [NSLayoutConstraint activateConstraints:cs];
+	config.image = image;
+	config.imageProperties.tintColor = tint ?: UIColor.labelColor;
+	config.imageToTextPadding = 14.0;
 }
 
-// MARK: - Section reorder VC (pushed from main page)
+static UISwitch *sciSwitch(BOOL on, id target, SEL action) {
+	UISwitch *sw = UISwitch.new;
+	sw.on = on;
+	sw.onTintColor = [SCIUtils SCIColor_Primary];
+	[sw addTarget:target action:action forControlEvents:UIControlEventValueChanged];
+	return sw;
+}
+
+static UIImageView *sciGripView(void) {
+	UIImageView *view = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal"]];
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.tintColor = UIColor.tertiaryLabelColor;
+	view.contentMode = UIViewContentModeCenter;
+	return view;
+}
+
+static UIImageView *sciRowIconView(NSString *name) {
+	UIImage *image = name.length ? [SCIIcon sfImageNamed:name pointSize:18] : nil;
+	if (!image && name.length) image = [UIImage systemImageNamed:name];
+
+	UIImageView *view = [[UIImageView alloc] initWithImage:image];
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.tintColor = UIColor.labelColor;
+	view.contentMode = UIViewContentModeCenter;
+	return view;
+}
+
+static UILabel *sciRowTitleLabel(NSString *title) {
+	UILabel *label = UILabel.new;
+	label.translatesAutoresizingMaskIntoConstraints = NO;
+	label.text = title ?: @"";
+	label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+	label.textColor = UIColor.labelColor;
+	label.numberOfLines = 1;
+	return label;
+}
+
+static void sciInstallReorderRow(UITableViewCell *cell, NSString *iconName, NSString *title, UIView *accessory) {
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
+	cell.textLabel.text = nil;
+	cell.detailTextLabel.text = nil;
+	cell.imageView.image = nil;
+
+	UIImageView *grip = sciGripView();
+	UIImageView *icon = sciRowIconView(iconName);
+	UILabel *titleLabel = sciRowTitleLabel(title);
+
+	[cell.contentView addSubview:grip];
+	[cell.contentView addSubview:icon];
+	[cell.contentView addSubview:titleLabel];
+
+	if (accessory) {
+		accessory.translatesAutoresizingMaskIntoConstraints = NO;
+		[cell.contentView addSubview:accessory];
+	}
+
+	NSMutableArray *constraints = [NSMutableArray arrayWithArray:@[
+		[grip.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
+		[grip.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[grip.widthAnchor constraintEqualToConstant:20.0],
+
+		[icon.leadingAnchor constraintEqualToAnchor:grip.trailingAnchor constant:14.0],
+		[icon.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[icon.widthAnchor constraintEqualToConstant:24.0],
+
+		[titleLabel.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:12.0],
+		[titleLabel.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+	]];
+
+	if (accessory) {
+		[constraints addObjectsFromArray:@[
+			[accessory.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
+			[accessory.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+			[titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:accessory.leadingAnchor constant:-12.0],
+		]];
+	} else {
+		[constraints addObject:[titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor]];
+	}
+
+	[NSLayoutConstraint activateConstraints:constraints];
+}
+
+#pragma mark - Section reorder VC
 
 @interface SCISectionReorderViewController : UITableViewController <UITableViewDragDelegate, UITableViewDropDelegate>
 - (instancetype)initWithConfig:(SCIActionMenuConfig *)config;
@@ -79,80 +139,89 @@ static void sciInstallReorderRow(UITableViewCell *cell,
 @implementation SCISectionReorderViewController
 
 - (instancetype)initWithConfig:(SCIActionMenuConfig *)config {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (!self) return nil;
-    _config = config;
-    self.title = SCILocalized(@"Reorder sections");
-    return self;
+	self = [super initWithStyle:UITableViewStyleInsetGrouped];
+	if (!self) return nil;
+
+	self.config = config;
+	self.title = SCILocalized(@"Reorder sections");
+
+	return self;
 }
 
 - (void)viewDidLoad {
-    [super viewDidLoad];
-    self.tableView.dragInteractionEnabled = YES;
-    self.tableView.dragDelegate = self;
-    self.tableView.dropDelegate = self;
-    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"section"];
+	[super viewDidLoad];
+
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.tableView.backgroundColor = self.view.backgroundColor;
+	self.tableView.dragInteractionEnabled = YES;
+	self.tableView.dragDelegate = self;
+	self.tableView.dropDelegate = self;
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
-    return self.config.sections.count;
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return 1;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
-    return SCILocalized(@"Drag the ≡ handle to reorder sections.");
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	return self.config.sections.count;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"section" forIndexPath:ip];
-    SCIActionConfigSection *s = self.config.sections[ip.row];
-
-    UIImageView *grip = sciMakeGripImageView();
-    UIImage *iconImg = s.iconSF.length ? [SCIIcon sfImageNamed:s.iconSF pointSize:18] : nil;
-    UIImageView *icon = iconImg ? sciMakeRowIconImageView(iconImg) : nil;
-    UILabel *title = [UILabel new];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = s.title.length ? s.title : s.identifier;
-    title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-
-    sciInstallReorderRow(cell, grip, icon, title, nil);
-    return cell;
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	return SCILocalized(@"Drag the ≡ handle to reorder sections.");
 }
 
-- (BOOL)tableView:(UITableView *)tv canMoveRowAtIndexPath:(NSIndexPath *)ip { return YES; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+	SCIActionConfigSection *section = self.config.sections[indexPath.row];
+	NSString *title = section.title.length ? section.title : section.identifier;
+	NSString *icon = section.iconSF.length ? section.iconSF : @"folder";
 
-- (NSArray<UIDragItem *> *)tableView:(UITableView *)tv itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)ip {
-    SCIActionConfigSection *s = self.config.sections[ip.row];
-    NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:s.identifier ?: @""];
-    UIDragItem *item = [[UIDragItem alloc] initWithItemProvider:provider];
-    item.localObject = ip;
-    return @[item];
+	sciInstallReorderRow(cell, icon, title, nil);
+
+	return cell;
 }
 
-- (UITableViewDropProposal *)tableView:(UITableView *)tv dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)dst {
-    if (!session.localDragSession || !dst) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
-    }
-    return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove
-                                                            intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+- (BOOL)tableView:(UITableView *)tableView canMoveRowAtIndexPath:(NSIndexPath *)indexPath {
+	return YES;
 }
 
-- (void)tableView:(UITableView *)tv performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
-    NSIndexPath *dst = coordinator.destinationIndexPath;
-    if (!dst) return;
-    for (id<UITableViewDropItem> dropItem in coordinator.items) {
-        NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
-        if (!src || src.row == dst.row) continue;
-        [self.config moveSectionFromIndex:src.row toIndex:dst.row];
-        [self.config save];
-    }
-    [tv reloadData];
+- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
+	SCIActionConfigSection *section = self.config.sections[indexPath.row];
+	NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:section.identifier ?: @""];
+	UIDragItem *item = [[UIDragItem alloc] initWithItemProvider:provider];
+
+	item.localObject = indexPath;
+
+	return @[item];
+}
+
+- (UITableViewDropProposal *)tableView:(UITableView *)tableView dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
+	if (!session.localDragSession || !destinationIndexPath) {
+		return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
+	}
+
+	return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+}
+
+- (void)tableView:(UITableView *)tableView performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
+	NSIndexPath *dst = coordinator.destinationIndexPath;
+	if (!dst) return;
+
+	for (id<UITableViewDropItem> dropItem in coordinator.items) {
+		NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
+		if (![src isKindOfClass:NSIndexPath.class]) continue;
+		if (src.row == dst.row) continue;
+
+		[self.config moveSectionFromIndex:src.row toIndex:dst.row];
+	}
+
+	[self.config save];
+	[tableView reloadData];
 }
 
 @end
 
-
-// MARK: - Default tap picker
+#pragma mark - Default tap picker
 
 @interface SCIDefaultTapPickerViewController : UITableViewController
 - (instancetype)initWithConfig:(SCIActionMenuConfig *)config;
@@ -166,59 +235,69 @@ static void sciInstallReorderRow(UITableViewCell *cell,
 @implementation SCIDefaultTapPickerViewController
 
 - (instancetype)initWithConfig:(SCIActionMenuConfig *)config {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (!self) return nil;
-    _config = config;
-    NSMutableArray *eligible = [NSMutableArray array];
-    for (SCIActionDescriptor *d in [SCIActionCatalog descriptorsForSource:config.source]) {
-        if (d.eligibleForDefaultTap) [eligible addObject:d];
-    }
-    _eligible = eligible;
-    self.title = SCILocalized(@"Default tap action");
-    return self;
+	self = [super initWithStyle:UITableViewStyleInsetGrouped];
+	if (!self) return nil;
+
+	self.config = config;
+
+	NSMutableArray *items = NSMutableArray.array;
+	for (SCIActionDescriptor *descriptor in [SCIActionCatalog descriptorsForSource:config.source]) {
+		if (descriptor.eligibleForDefaultTap) [items addObject:descriptor];
+	}
+
+	self.eligible = items.copy;
+	self.title = SCILocalized(@"Default tap action");
+
+	return self;
 }
 
 - (void)viewDidLoad {
-    [super viewDidLoad];
-    [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"opt"];
+	[super viewDidLoad];
+
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.tableView.backgroundColor = self.view.backgroundColor;
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
-    return self.eligible.count + 1; // +1 for "Open menu"
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return 1;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
-    return SCILocalized(@"What happens on a single tap. Long-press always opens the full menu.");
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	return self.eligible.count + 1;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"opt" forIndexPath:ip];
-    NSString *currentID = self.config.defaultTap.length ? self.config.defaultTap : @"menu";
-    NSString *aid = (ip.row == 0) ? @"menu" : self.eligible[ip.row - 1].identifier;
-    NSString *title = (ip.row == 0)
-        ? SCILocalized(@"Open menu")
-        : self.eligible[ip.row - 1].title;
-    NSString *icon = (ip.row == 0) ? @"line.3.horizontal" : self.eligible[ip.row - 1].iconSF;
-    cell.textLabel.text = title;
-    cell.imageView.image = icon.length ? [SCIIcon sfImageNamed:icon pointSize:18] : nil;
-    cell.imageView.tintColor = [UIColor labelColor];
-    cell.accessoryType = [aid isEqualToString:currentID] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    return cell;
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	return SCILocalized(@"What happens on a single tap. Long-press always opens the full menu.");
 }
 
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    NSString *aid = (ip.row == 0) ? @"menu" : self.eligible[ip.row - 1].identifier;
-    self.config.defaultTap = aid;
-    [self.config save];
-    [tv reloadData];
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+
+	NSString *currentID = self.config.defaultTap.length ? self.config.defaultTap : @"menu";
+	NSString *actionID = indexPath.row == 0 ? @"menu" : self.eligible[indexPath.row - 1].identifier;
+	NSString *title = indexPath.row == 0 ? SCILocalized(@"Open menu") : self.eligible[indexPath.row - 1].title;
+	NSString *icon = indexPath.row == 0 ? @"line.3.horizontal" : self.eligible[indexPath.row - 1].iconSF;
+
+	UIListContentConfiguration *config = sciContentForCell(cell, title, nil);
+	sciApplyIcon(config, icon, UIColor.labelColor);
+
+	cell.contentConfiguration = config;
+	cell.accessoryType = [actionID isEqualToString:currentID] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+
+	return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+	self.config.defaultTap = indexPath.row == 0 ? @"menu" : self.eligible[indexPath.row - 1].identifier;
+	[self.config save];
+	[tableView reloadData];
 }
 
 @end
 
-
-// MARK: - Main configure VC
+#pragma mark - Main configure VC
 
 @interface SCIActionMenuConfigViewController () <UITableViewDragDelegate, UITableViewDropDelegate>
 @property (nonatomic, assign) SCIActionSource source;
@@ -228,281 +307,309 @@ static void sciInstallReorderRow(UITableViewCell *cell,
 @implementation SCIActionMenuConfigViewController
 
 - (instancetype)initForSource:(SCIActionSource)source {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (!self) return nil;
-    _source = source;
-    _config = [SCIActionMenuConfig configForSource:source];
-    self.title = [NSString stringWithFormat:SCILocalized(@"Configure: %@"),
-                  [SCIActionCatalog displayNameForSource:source]];
-    return self;
+	self = [super initWithStyle:UITableViewStyleInsetGrouped];
+	if (!self) return nil;
+
+	self.source = source;
+	self.config = [SCIActionMenuConfig configForSource:source];
+	self.title = [NSString stringWithFormat:SCILocalized(@"Configure: %@"), [SCIActionCatalog displayNameForSource:source]];
+
+	return self;
 }
 
 - (void)viewDidLoad {
-    [super viewDidLoad];
-    self.tableView.dragInteractionEnabled = YES;
-    self.tableView.dragDelegate = self;
-    self.tableView.dropDelegate = self;
-}
+	[super viewDidLoad];
 
-// MARK: - UI section layout
-//   0 = Behavior (show date / default tap / reorder sections / reset)
-//   1..N = Config sections (one UI section per config section)
-//   Within each config section the first row is the "Show as submenu" toggle.
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
-    return 1 + (NSInteger)self.config.sections.count;
-}
-
-- (BOOL)isBehaviorSection:(NSInteger)section { return section == 0; }
-
-- (SCIActionConfigSection *)configSectionForUISection:(NSInteger)section {
-    NSInteger idx = section - 1;
-    if (idx < 0 || idx >= (NSInteger)self.config.sections.count) return nil;
-    return self.config.sections[idx];
-}
-
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
-    if ([self isBehaviorSection:section]) {
-        NSInteger n = 1; // default tap
-        if ([SCIActionCatalog sourceSupportsDate:self.source]) n++;
-        n += 2; // reorder sections + reset
-        return n;
-    }
-    SCIActionConfigSection *cs = [self configSectionForUISection:section];
-    return 1 + (NSInteger)cs.actionIDs.count; // toggle + actions
-}
-
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
-    if ([self isBehaviorSection:section]) return SCILocalized(@"Behavior");
-    SCIActionConfigSection *cs = [self configSectionForUISection:section];
-    return cs.title.length ? cs.title : cs.identifier;
-}
-
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"";
-    if (section == 1) {
-        return SCILocalized(@"Drag the ≡ handle to reorder. Toggle a row off to hide it from the menu. Mark a section as a submenu to collapse its actions behind a single entry.");
-    }
-    return @"";
-}
-
-// MARK: - Behavior cells
-
-- (UITableViewCell *)cellForBehaviorRow:(NSInteger)row reuse:(UITableView *)tv {
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"row"];
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-
-    NSInteger r = row;
-    BOOL hasDate = [SCIActionCatalog sourceSupportsDate:self.source];
-    if (hasDate && r == 0) {
-        cell.textLabel.text = SCILocalized(@"Show date");
-        UISwitch *sw = [UISwitch new];
-        sw.on = self.config.showDate;
-        [sw addTarget:self action:@selector(showDateChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-        cell.imageView.image = [SCIIcon sfImageNamed:@"calendar" pointSize:18];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        return cell;
-    }
-    if (hasDate) r--;
-
-    if (r == 0) {
-        cell.textLabel.text = SCILocalized(@"Default tap action");
-        SCIActionDescriptor *d = [SCIActionCatalog descriptorForActionID:self.config.defaultTap source:self.source];
-        cell.detailTextLabel.text = d ? d.title : SCILocalized(@"Open menu");
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.imageView.image = [SCIIcon sfImageNamed:@"hand.tap" pointSize:18];
-        return cell;
-    }
-    r--;
-
-    if (r == 0) {
-        cell.textLabel.text = SCILocalized(@"Reorder sections");
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.imageView.image = [SCIIcon sfImageNamed:@"arrow.up.arrow.down" pointSize:18];
-        return cell;
-    }
-
-    cell.textLabel.text = SCILocalized(@"Reset to defaults");
-    cell.textLabel.textColor = [UIColor systemRedColor];
-    cell.imageView.image = [SCIIcon imageNamed:@"bcn_arrow-ccw_outline_24" pointSize:18 weight:UIImageSymbolWeightRegular];
-    cell.imageView.tintColor = [UIColor systemRedColor];
-    return cell;
-}
-
-- (void)didSelectBehaviorRow:(NSInteger)row {
-    NSInteger r = row;
-    BOOL hasDate = [SCIActionCatalog sourceSupportsDate:self.source];
-    if (hasDate && r == 0) return; // switch row, no-op
-    if (hasDate) r--;
-
-    if (r == 0) {
-        SCIDefaultTapPickerViewController *vc = [[SCIDefaultTapPickerViewController alloc] initWithConfig:self.config];
-        [self.navigationController pushViewController:vc animated:YES];
-        return;
-    }
-    r--;
-    if (r == 0) {
-        SCISectionReorderViewController *vc = [[SCISectionReorderViewController alloc] initWithConfig:self.config];
-        [self.navigationController pushViewController:vc animated:YES];
-        return;
-    }
-
-    UIAlertController *a = [UIAlertController
-        alertControllerWithTitle:[NSString stringWithFormat:@"%@?", SCILocalized(@"Reset to defaults")]
-                         message:SCILocalized(@"This will restore the default sections, order, and toggles for this menu.")
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Reset")
-                                          style:UIAlertActionStyleDestructive
-                                        handler:^(__unused UIAlertAction *x) {
-        [self.config resetToDefaults];
-        [self.tableView reloadData];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
-}
-
-// MARK: - Action cells
-
-- (UITableViewCell *)cellForActionRow:(NSInteger)row inSection:(SCIActionConfigSection *)section reuse:(UITableView *)tv {
-    if (row == 0) {
-        // Section options "Show as submenu" toggle — not draggable, stock cell.
-        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"row"];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = SCILocalized(@"Show as submenu");
-        cell.detailTextLabel.text = SCILocalized(@"Collapse this section's actions behind a single entry");
-        UISwitch *sw = [UISwitch new];
-        sw.on = section.collapsible;
-        sw.tag = (NSInteger)[self.config.sections indexOfObject:section];
-        [sw addTarget:self action:@selector(collapsibleChanged:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-        cell.imageView.image = [SCIIcon sfImageNamed:section.iconSF.length ? section.iconSF : @"folder" pointSize:18];
-        return cell;
-    }
-
-    // Action row — drag-reorderable. Layout: ≡ grip → action icon → title → toggle.
-    NSInteger actionIdx = row - 1;
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"row"];
-    if (actionIdx < 0 || actionIdx >= (NSInteger)section.actionIDs.count) return cell;
-    NSString *aid = section.actionIDs[actionIdx];
-    SCIActionDescriptor *d = [SCIActionCatalog descriptorForActionID:aid source:self.source];
-
-    UIImageView *grip = sciMakeGripImageView();
-    UIImage *iconImg = d.iconSF.length ? [SCIIcon sfImageNamed:d.iconSF pointSize:18] : nil;
-    UIImageView *icon = iconImg ? sciMakeRowIconImageView(iconImg) : nil;
-    UILabel *title = [UILabel new];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = d ? d.title : aid;
-    title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-
-    UISwitch *sw = [UISwitch new];
-    sw.translatesAutoresizingMaskIntoConstraints = NO;
-    sw.on = ![self.config isActionDisabled:aid];
-    sw.accessibilityIdentifier = aid;
-    [sw addTarget:self action:@selector(actionToggleChanged:) forControlEvents:UIControlEventValueChanged];
-
-    sciInstallReorderRow(cell, grip, icon, title, sw);
-    return cell;
-}
-
-// MARK: - Datasource shell
-
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    if ([self isBehaviorSection:ip.section]) {
-        return [self cellForBehaviorRow:ip.row reuse:tv];
-    }
-    SCIActionConfigSection *cs = [self configSectionForUISection:ip.section];
-    return [self cellForActionRow:ip.row inSection:cs reuse:tv];
-}
-
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    if ([self isBehaviorSection:ip.section]) {
-        [self didSelectBehaviorRow:ip.row];
-    }
-}
-
-// MARK: - Drag and drop reorder
-
-- (NSArray<UIDragItem *> *)tableView:(UITableView *)tv itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)ip {
-    if ([self isBehaviorSection:ip.section]) return @[];
-    if (ip.row == 0) return @[]; // section-options toggle row
-    SCIActionConfigSection *cs = [self configSectionForUISection:ip.section];
-    NSInteger actionIdx = ip.row - 1;
-    if (!cs || actionIdx < 0 || actionIdx >= (NSInteger)cs.actionIDs.count) return @[];
-
-    NSString *aid = cs.actionIDs[actionIdx];
-    NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:aid];
-    UIDragItem *item = [[UIDragItem alloc] initWithItemProvider:provider];
-    item.localObject = ip;
-    return @[item];
-}
-
-- (UITableViewDropProposal *)tableView:(UITableView *)tv dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)dst {
-    if (!session.localDragSession) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
-    }
-    if (!dst || [self isBehaviorSection:dst.section]) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
-    }
-    return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove
-                                                            intent:UITableViewDropIntentInsertAtDestinationIndexPath];
-}
-
-- (void)tableView:(UITableView *)tv performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
-    NSIndexPath *dst = coordinator.destinationIndexPath;
-    if (!dst || [self isBehaviorSection:dst.section]) return;
-    SCIActionConfigSection *dstSec = [self configSectionForUISection:dst.section];
-    if (!dstSec) return;
-
-    // Drop above the section-options toggle row pins to position 0 of the action list.
-    NSInteger dstActionIdx = MAX(0, dst.row - 1);
-
-    for (id<UITableViewDropItem> dropItem in coordinator.items) {
-        UIDragItem *dragItem = dropItem.dragItem;
-        NSIndexPath *src = dragItem.localObject;
-        if (![src isKindOfClass:[NSIndexPath class]]) continue;
-        if ([self isBehaviorSection:src.section] || src.row == 0) continue;
-
-        SCIActionConfigSection *srcSec = [self configSectionForUISection:src.section];
-        NSInteger srcActionIdx = src.row - 1;
-        if (!srcSec || srcActionIdx < 0 || srcActionIdx >= (NSInteger)srcSec.actionIDs.count) continue;
-
-        NSString *aid = srcSec.actionIDs[srcActionIdx];
-        if (srcSec == dstSec) {
-            [self.config moveActionInSection:srcSec fromIndex:srcActionIdx toIndex:dstActionIdx];
-        } else {
-            [self.config moveActionID:aid toSection:dstSec index:dstActionIdx];
-        }
-    }
-    [self.config save];
-    [tv reloadData];
-}
-
-// MARK: - Toggles
-
-- (void)showDateChanged:(UISwitch *)sw {
-    self.config.showDate = sw.isOn;
-    [self.config save];
-}
-
-- (void)collapsibleChanged:(UISwitch *)sw {
-    NSInteger idx = sw.tag;
-    if (idx < 0 || idx >= (NSInteger)self.config.sections.count) return;
-    [self.config setSection:self.config.sections[idx] collapsible:sw.isOn];
-    [self.config save];
-}
-
-- (void)actionToggleChanged:(UISwitch *)sw {
-    NSString *aid = sw.accessibilityIdentifier;
-    if (!aid.length) return;
-    [self.config setAction:aid disabled:!sw.isOn];
-    [self.config save];
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.tableView.backgroundColor = self.view.backgroundColor;
+	self.tableView.dragInteractionEnabled = YES;
+	self.tableView.dragDelegate = self;
+	self.tableView.dropDelegate = self;
 }
 
 - (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    [self.tableView reloadData];
+	[super viewWillAppear:animated];
+	[self.tableView reloadData];
+}
+
+#pragma mark - Sections
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return 1 + (NSInteger)self.config.sections.count;
+}
+
+- (BOOL)isBehaviorSection:(NSInteger)section {
+	return section == 0;
+}
+
+- (SCIActionConfigSection *)configSectionForUISection:(NSInteger)section {
+	NSInteger index = section - 1;
+	if (index < 0 || index >= (NSInteger)self.config.sections.count) return nil;
+	return self.config.sections[index];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	if ([self isBehaviorSection:section]) {
+		NSInteger count = 3;
+		if ([SCIActionCatalog sourceSupportsDate:self.source]) count++;
+		return count;
+	}
+
+	SCIActionConfigSection *configSection = [self configSectionForUISection:section];
+	return 1 + (NSInteger)configSection.actionIDs.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+	if ([self isBehaviorSection:section]) return SCILocalized(@"Behavior");
+
+	SCIActionConfigSection *configSection = [self configSectionForUISection:section];
+	return configSection.title.length ? configSection.title : configSection.identifier;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+	if (section == 1) {
+		return SCILocalized(@"Drag the ≡ handle to reorder. Toggle a row off to hide it from the menu. Mark a section as a submenu to collapse its actions behind a single entry.");
+	}
+
+	return nil;
+}
+
+#pragma mark - Cells
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	if ([self isBehaviorSection:indexPath.section]) {
+		return [self behaviorCellForRow:indexPath.row];
+	}
+
+	SCIActionConfigSection *section = [self configSectionForUISection:indexPath.section];
+	return [self actionCellForRow:indexPath.row section:section];
+}
+
+- (UITableViewCell *)behaviorCellForRow:(NSInteger)row {
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+
+	NSInteger index = row;
+	BOOL hasDate = [SCIActionCatalog sourceSupportsDate:self.source];
+
+	if (hasDate && index == 0) {
+		UIListContentConfiguration *config = sciContentForCell(cell, SCILocalized(@"Show date"), nil);
+		sciApplyIcon(config, @"calendar", UIColor.labelColor);
+
+		cell.contentConfiguration = config;
+		cell.accessoryView = sciSwitch(self.config.showDate, self, @selector(showDateChanged:));
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+		return cell;
+	}
+
+	if (hasDate) index--;
+
+	if (index == 0) {
+		SCIActionDescriptor *descriptor = [SCIActionCatalog descriptorForActionID:self.config.defaultTap source:self.source];
+		NSString *detail = descriptor ? descriptor.title : SCILocalized(@"Open menu");
+
+		UIListContentConfiguration *config = sciContentForCell(cell, SCILocalized(@"Default tap action"), detail);
+		sciApplyIcon(config, @"hand.tap", UIColor.labelColor);
+
+		cell.contentConfiguration = config;
+		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+		return cell;
+	}
+
+	index--;
+
+	if (index == 0) {
+		UIListContentConfiguration *config = sciContentForCell(cell, SCILocalized(@"Reorder sections"), nil);
+		sciApplyIcon(config, @"arrow.up.arrow.down", UIColor.labelColor);
+
+		cell.contentConfiguration = config;
+		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+		return cell;
+	}
+
+	UIListContentConfiguration *config = sciContentForCell(cell, SCILocalized(@"Reset to defaults"), nil);
+	config.textProperties.color = UIColor.systemRedColor;
+
+	UIImage *resetIcon = [SCIIcon imageNamed:@"bcn_arrow-ccw_outline_24" pointSize:18 weight:UIImageSymbolWeightRegular];
+	if (!resetIcon) resetIcon = [UIImage systemImageNamed:@"arrow.counterclockwise"];
+
+	config.image = resetIcon;
+	config.imageProperties.tintColor = UIColor.systemRedColor;
+	config.imageToTextPadding = 14.0;
+
+	cell.contentConfiguration = config;
+
+	return cell;
+}
+
+- (UITableViewCell *)actionCellForRow:(NSInteger)row section:(SCIActionConfigSection *)section {
+	UITableViewCell *cell = sciCell(UITableViewCellStyleDefault);
+	if (!section) return cell;
+
+	if (row == 0) {
+		UIListContentConfiguration *config = sciContentForCell(cell,
+															   SCILocalized(@"Show as submenu"),
+															   SCILocalized(@"Collapse this section's actions behind a single entry"));
+		sciApplyIcon(config, section.iconSF.length ? section.iconSF : @"folder", UIColor.labelColor);
+
+		UISwitch *sw = sciSwitch(section.collapsible, self, @selector(collapsibleChanged:));
+		sw.tag = (NSInteger)[self.config.sections indexOfObject:section];
+
+		cell.contentConfiguration = config;
+		cell.accessoryView = sw;
+		cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
+		return cell;
+	}
+
+	NSInteger actionIndex = row - 1;
+	if (actionIndex < 0 || actionIndex >= (NSInteger)section.actionIDs.count) return cell;
+
+	NSString *actionID = section.actionIDs[actionIndex];
+	SCIActionDescriptor *descriptor = [SCIActionCatalog descriptorForActionID:actionID source:self.source];
+
+	UISwitch *sw = sciSwitch(![self.config isActionDisabled:actionID], self, @selector(actionToggleChanged:));
+	sw.accessibilityIdentifier = actionID;
+
+	sciInstallReorderRow(cell,
+						 descriptor.iconSF.length ? descriptor.iconSF : nil,
+						 descriptor ? descriptor.title : actionID,
+						 sw);
+
+	return cell;
+}
+
+#pragma mark - Selection
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+	[tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+	if (![self isBehaviorSection:indexPath.section]) return;
+
+	[self didSelectBehaviorRow:indexPath.row];
+}
+
+- (void)didSelectBehaviorRow:(NSInteger)row {
+	NSInteger index = row;
+	BOOL hasDate = [SCIActionCatalog sourceSupportsDate:self.source];
+
+	if (hasDate && index == 0) return;
+	if (hasDate) index--;
+
+	if (index == 0) {
+		SCIDefaultTapPickerViewController *vc = [[SCIDefaultTapPickerViewController alloc] initWithConfig:self.config];
+		[self.navigationController pushViewController:vc animated:YES];
+		return;
+	}
+
+	index--;
+
+	if (index == 0) {
+		SCISectionReorderViewController *vc = [[SCISectionReorderViewController alloc] initWithConfig:self.config];
+		[self.navigationController pushViewController:vc animated:YES];
+		return;
+	}
+
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@?", SCILocalized(@"Reset to defaults")]
+																   message:SCILocalized(@"This will restore the default sections, order, and toggles for this menu.")
+															preferredStyle:UIAlertControllerStyleAlert];
+
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+
+	__weak typeof(self) weakSelf = self;
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Reset") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
+		[self.config resetToDefaults];
+		[self.tableView reloadData];
+	}]];
+
+	[self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - Drag and drop
+
+- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView itemsForBeginningDragSession:(id<UIDragSession>)session atIndexPath:(NSIndexPath *)indexPath {
+	if ([self isBehaviorSection:indexPath.section] || indexPath.row == 0) return @[];
+
+	SCIActionConfigSection *section = [self configSectionForUISection:indexPath.section];
+	NSInteger actionIndex = indexPath.row - 1;
+
+	if (!section || actionIndex < 0 || actionIndex >= (NSInteger)section.actionIDs.count) return @[];
+
+	NSString *actionID = section.actionIDs[actionIndex] ?: @"";
+	NSItemProvider *provider = [[NSItemProvider alloc] initWithObject:actionID];
+	UIDragItem *item = [[UIDragItem alloc] initWithItemProvider:provider];
+
+	item.localObject = indexPath;
+
+	return @[item];
+}
+
+- (UITableViewDropProposal *)tableView:(UITableView *)tableView dropSessionDidUpdate:(id<UIDropSession>)session withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
+	if (!session.localDragSession || !destinationIndexPath || [self isBehaviorSection:destinationIndexPath.section]) {
+		return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel];
+	}
+
+	return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+}
+
+- (void)tableView:(UITableView *)tableView performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
+	NSIndexPath *dst = coordinator.destinationIndexPath;
+	if (!dst || [self isBehaviorSection:dst.section]) return;
+
+	SCIActionConfigSection *dstSection = [self configSectionForUISection:dst.section];
+	if (!dstSection) return;
+
+	NSInteger dstIndex = MAX(0, dst.row - 1);
+
+	for (id<UITableViewDropItem> dropItem in coordinator.items) {
+		NSIndexPath *src = (NSIndexPath *)dropItem.dragItem.localObject;
+		if (![src isKindOfClass:NSIndexPath.class]) continue;
+		if ([self isBehaviorSection:src.section] || src.row == 0) continue;
+
+		SCIActionConfigSection *srcSection = [self configSectionForUISection:src.section];
+		NSInteger srcIndex = src.row - 1;
+
+		if (!srcSection || srcIndex < 0 || srcIndex >= (NSInteger)srcSection.actionIDs.count) continue;
+
+		NSString *actionID = srcSection.actionIDs[srcIndex];
+
+		if (srcSection == dstSection) {
+			[self.config moveActionInSection:srcSection fromIndex:srcIndex toIndex:dstIndex];
+		} else {
+			[self.config moveActionID:actionID toSection:dstSection index:dstIndex];
+		}
+	}
+
+	[self.config save];
+	[tableView reloadData];
+}
+
+#pragma mark - Toggles
+
+- (void)showDateChanged:(UISwitch *)sender {
+	self.config.showDate = sender.isOn;
+	[self.config save];
+}
+
+- (void)collapsibleChanged:(UISwitch *)sender {
+	NSInteger index = sender.tag;
+	if (index < 0 || index >= (NSInteger)self.config.sections.count) return;
+
+	[self.config setSection:self.config.sections[index] collapsible:sender.isOn];
+	[self.config save];
+}
+
+- (void)actionToggleChanged:(UISwitch *)sender {
+	NSString *actionID = sender.accessibilityIdentifier;
+	if (!actionID.length) return;
+
+	[self.config setAction:actionID disabled:!sender.isOn];
+	[self.config save];
 }
 
 @end

@@ -8,10 +8,10 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, SCIFeedbackPillTone) {
-    SCIFeedbackPillToneSuccess = 0,
-    SCIFeedbackPillToneInfo,
-    SCIFeedbackPillToneWarning,
-    SCIFeedbackPillToneError
+	SCIFeedbackPillToneSuccess = 0,
+	SCIFeedbackPillToneInfo,
+	SCIFeedbackPillToneWarning,
+	SCIFeedbackPillToneError
 };
 
 extern NSString *const kSCIFeedbackActionGalleryDeleteFile;
@@ -22,16 +22,16 @@ extern NSString *const kSCIFeedbackActionGalleryOpenProfile;
 
 @interface SCIUtils (SCIGalleryShim)
 + (void)showToastForActionIdentifier:(nullable NSString *)actionIdentifier
-                            duration:(NSTimeInterval)duration
-                               title:(nullable NSString *)title
-                            subtitle:(nullable NSString *)subtitle
-                        iconResource:(nullable NSString *)iconResource;
+							duration:(NSTimeInterval)duration
+							   title:(nullable NSString *)title
+							subtitle:(nullable NSString *)subtitle
+						iconResource:(nullable NSString *)iconResource;
 + (void)showToastForActionIdentifier:(nullable NSString *)actionIdentifier
-                            duration:(NSTimeInterval)duration
-                               title:(nullable NSString *)title
-                            subtitle:(nullable NSString *)subtitle
-                        iconResource:(nullable NSString *)iconResource
-                                tone:(SCIFeedbackPillTone)tone;
+							duration:(NSTimeInterval)duration
+							   title:(nullable NSString *)title
+							subtitle:(nullable NSString *)subtitle
+						iconResource:(nullable NSString *)iconResource
+								tone:(SCIFeedbackPillTone)tone;
 @end
 
 NS_ASSUME_NONNULL_END

@@ -205,20 +205,16 @@ static void sciConfigureFeedActionButton(SCIChromeButton *button) {
 							 context:SCIActionContextFeed
 							 prefKey:@"feed_action_default"
 					   mediaProvider:^id (UIView *sourceView) {
-		id parentMedia = sciFeedMediaFromButton(sourceView);
-		if (!parentMedia) return nil;
+		id media = sciFeedMediaFromButton(sourceView);
+		if (!media) return nil;
 
-		if ([SCIMediaActions isCarouselMedia:parentMedia]) {
+		if ([SCIMediaActions isCarouselMedia:media]) {
 			NSInteger index = sciFeedCarouselPageIndex(sourceView);
-			NSArray *children = [SCIMediaActions carouselChildrenForMedia:parentMedia];
-
-			if (index >= 0 && (NSUInteger)index < children.count) {
+			if (index >= 0)
 				objc_setAssociatedObject(sourceView, kFeedPageIndexKey, @(index), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-				return children[index];
-			}
 		}
 
-		return parentMedia;
+		return media;
 	}];
 }
 

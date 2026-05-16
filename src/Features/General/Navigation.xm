@@ -102,17 +102,3 @@ NSArray *filterSurfacesArray(NSArray *surfaces) {
     return;
 }
 %end
-
-%hook IGHomeFeedHeaderView
-- (void)didMoveToWindow {
-    %orig;
-
-    if ([SCIUtils getBoolPref:@"hide_messages_tab"]) {
-        UIButton *rightButton = [self valueForKey:@"rightButton"];
-        if (rightButton) {
-
-            [rightButton removeFromSuperview];
-        }
-    }
-}
-%end

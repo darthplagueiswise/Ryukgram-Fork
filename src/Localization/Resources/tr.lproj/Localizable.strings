@@ -106,6 +106,8 @@
 "Enables experimental liquid glass buttons" = "Deneysel liquid glass butonlarını etkinleştirir";
 "Enables liquid glass tab bar, floating navigation, and other UI elements" = "Liquid glass sekme çubuğunu, kayan gezinmeyi ve diğer arayüz öğelerini etkinleştirir";
 "Experimental features" = "Deneysel özellikler";
+"Fixed" = "Sabit";
+"Fixed prevents shrinking. Hide makes it disappear when scrolling down" = "Sabit küçülmeyi önler. Gizle aşağı kaydırırken çubuğun kaybolmasını sağlar";
 "Focus/distractions" = "Odak/dikkat dağıtıcılar";
 "General" = "Genel";
 "Hide ads" = "Reklamları gizle";
@@ -114,6 +116,9 @@
 "Hide Meta AI" = "Meta AI'ı gizle";
 "Hide metrics" = "İstatistikleri gizle";
 "Hide notes tray" = "Notlar bölümünü gizle";
+"Hide on scroll" = "Kaydırırken gizle";
+"Hide TestFlight popup" = "TestFlight açılır penceresini gizle";
+"Suppresses the \"It's time to update Instagram Beta\" nag" = "\"It's time to update Instagram Beta\" bildirimini bastırır";
 "Hide trending searches" = "Trend aramaları gizle";
 "Hide UI on capture" = "Ekran kaydında arayüzü gizle";
 "Hides all suggested users for you to follow, outside your feed" = "Akışınız dışında takip etmeniz önerilen tüm kullanıcıları gizler";
@@ -125,6 +130,7 @@
 "Hides the suggested broadcast channels in direct messages" = "Direkt mesajlardaki önerilen yayın kanallarını gizler";
 "Hides the trending searches under the explore search bar" = "Keşfet arama çubuğunun altındaki trend aramaları gizler";
 "Hold down on the Instagram logo to change the app icon" = "Uygulama simgesini değiştirmek için Instagram logosuna basılı tutun";
+"Liquid glass tab bar" = "Liquid glass sekme çubuğu";
 "Live" = "Canlı";
 "Long press on the eyedropper tool in stories to customize the text color more precisely" = "Metin rengini daha hassas ayarlamak için hikayelerdeki damlalık aracına uzun basın";
 "Long-press the heart button in a live to hide or show the comments" = "Yorumları gizlemek veya göstermek için canlı yayındaki kalp butonuna uzun basın";
@@ -397,6 +403,10 @@
 "Sending a reply or emoji reaction automatically advances to the next story" = "Yanıt veya emoji tepkisi göndermek otomatik olarak sonraki hikayeye ilerletir";
 "Adds a 'View mentions' entry to the action button menu and story 3-dot menu" = "Eylem düğmesi menüsüne ve hikaye 3 nokta menüsüne 'Bahsetmeleri görüntüle' girişi ekler";
 "Mentions overlay button" = "Bahsetmeler katman düğmesi";
+"Shows the number of unique mentioned accounts as a red badge on the overlay button" = "Bindirme düğmesinde benzersiz bahsedilen hesap sayısını kırmızı bir rozetle gösterir";
+"Mentions count badge" = "Bahsetme sayısı rozeti";
+"Removes the Trending and Music promo cards from the stories tray" = "Hikâye tepsisindeki Trend ve Müzik tanıtım kartlarını kaldırır";
+"Hide stories midcards" = "Hikâye orta kartlarını gizle";
 "Adds a button next to the action/eye button on the story overlay. Only appears when the current story has mentions or shared posts/reels" = "Hikaye katmanındaki eylem/göz düğmesinin yanına bir düğme ekler. Yalnızca geçerli hikayede bahsetmeler veya paylaşılan gönderiler/Reels olduğunda görünür";
 "Shows an eye button on stories to add/remove users from the list. Off = use the 3-dot menu or long-press only" = "Kullanıcıları listeye eklemek/kaldırmak için hikayelerde göz butonu gösterir. Kapalı = yalnızca 3 nokta menüsünü veya uzun basmayı kullanın";
 "Stickers" = "Çıkartmalar";
@@ -925,6 +935,7 @@
 
 "Add location" = "Konum ekle";
 "Add preset" = "Hazır ayar ekle";
+"Background" = "Arka plan";
 "Background color" = "Arka plan rengi";
 "Change location" = "Konumu değiştir";
 "Clipboard is not an Instagram URL" = "Pano bir Instagram URL'si değil";
@@ -939,7 +950,9 @@
 "Disable" = "Kapat";
 "Download GIF" = "GIF indir";
 "Dropped pin" = "Bırakılan iğne";
+"Emoji" = "Emoji";
 "Enable" = "Etkinleştir";
+"Enter emoji" = "Emoji girin";
 "Enable Location Services for Instagram in Settings to use your current location." = "Geçerli konumunuzu kullanmak için Ayarlar'da Instagram için Konum Servisleri'ni etkinleştirin.";
 "Fake location" = "Sahte konum";
 "Location access denied" = "Konum erişimi reddedildi";
@@ -954,6 +967,7 @@
 "Select color" = "Renk seç";
 "Set location" = "Konumu ayarla";
 "Text color" = "Metin rengi";
+"Type an emoji to use as the note bubble icon." = "Not balonu simgesi olarak kullanılacak emojiyi yazın.";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Geçerli konumunuzu kullanmak için Ayarlar → Gizlilik içinde Konum Servisleri'ni açın.";
 
 "Theme" = "Tema";
@@ -1084,7 +1098,6 @@
 "Reset complete" = "Sıfırlama tamamlandı";
 "Reset selected data?" = "Seçili veriler sıfırlansın mı?";
 "Second scan onward: each scan compares against the last, so we can show gained/lost followers, your own follow/unfollow moves, and profile updates." = "İkinci taramadan itibaren her tarama bir öncekiyle karşılaştırılır; böylece kazanılan/kaybedilen takipçileri, kendi takip/takip bırakma hareketlerinizi ve profil güncellemelerini gösterebiliriz.";
-"Select all" = "Tümünü seç";
 "Selected data will be cleared. Tap any row to see what's stored." = "Seçili veriler temizlenecek. Nelerin saklandığını görmek için herhangi bir satıra dokunun.";
 "Settings" = "Ayarlar";
 "Sort" = "Sırala";
@@ -1146,7 +1159,6 @@
 "Follow default" = "Varsayılanı izle";
 "Force OFF (allow unsends)" = "Kapalıya zorla (geri almaya izin ver)";
 "Force ON (preserve unsends)" = "Açığa zorla (geri alınanları koru)";
-"Format" = "Biçim";
 "Import failed" = "İçe aktarma başarısız";
 "Included chats" = "Dahil edilen sohbetler";
 "Included users" = "Dahil edilen kullanıcılar";
@@ -1175,9 +1187,21 @@
 "Settings exported" = "Ayarlar dışa aktarıldı";
 "Show map button" = "Harita butonunu göster";
 "Show seconds" = "Saniyeleri göster";
+"Within 1 day" = "1 gün içinde";
+"Within %ld days" = "%ld gün içinde";
+"Time" = "Saat";
+"Show relative time for dates younger than this many days. 0 disables it." = "Belirtilen günden daha yeni tarihler için göreli zaman göster. 0 kapatır.";
+"Relative within" = "Göreli süre";
+"Relative time" = "Göreli zaman";
+"Pick how absolute dates are written. \"Default\" leaves IG's own format untouched." = "Mutlak tarihlerin nasıl yazılacağını seçin. \"Varsayılan\" IG'nin biçimini değiştirmez.";
+"Include seconds when the format already shows time." = "Biçim zaman içeriyorsa saniyeleri de göster.";
+"Each surface in IG goes through a different NSDate formatter. Toggle the ones you want this format to apply to." = "IG'deki her yüzey farklı bir NSDate biçimlendirici kullanır. Bu biçimin uygulanmasını istediğiniz yüzeyleri açın.";
+"Dates younger than the threshold show as relative time (e.g. \"2h\"). Older dates fall back to the absolute format. \"Append after absolute date\" shows both — \"Jan 5, 2026 (2h)\"." = "Eşikten daha yeni tarihler göreli süre olarak gösterilir (örn. \"2s\"). Daha eski tarihler mutlak biçimi kullanır. \"Mutlak tarihten sonra ekle\" her ikisini de gösterir — \"5 Oca 2026 (2s)\".";
+"Compact style (e.g. \"1h\" instead of \"1 hour ago\")" = "Kısa biçem (\"1 saat önce\" yerine \"1s\")";
+"Append after absolute date" = "Mutlak tarihten sonra ekle";
+"Absolute format" = "Mutlak biçim";
 "Sort by" = "Şuna göre sırala";
 "Story users" = "Hikaye kullanıcıları";
-"Toggle each NSDate formatter IG uses. Different surfaces (feed, comments, stories, DMs) go through different methods — enable the ones you want the custom format applied to." = "IG'nin kullandığı her NSDate biçimlendiricisini açıp kapatın. Farklı yüzeyler (akış, yorumlar, hikayeler, DM'ler) farklı yöntemlerden geçer — özel biçimin uygulanmasını istediklerinizi etkinleştirin.";
 "Use this location" = "Bu konumu kullan";
 "User '%@' not found" = "'%@' kullanıcısı bulunamadı";
 "Username (A–Z)" = "Kullanıcı adı (A–Z)";
@@ -1262,6 +1286,7 @@
 "Korean translation" = "Korece çeviri";
 "Portuguese (Brazil) translation" = "Portekizce (Brezilya) çevirisi";
 "Turkish translation" = "Türkçe çeviri";
+"Vietnamese translation" = "Vietnamca çeviri";
 "Code contributions" = "Kod katkıları";
 "Following feed mode (from InstaSane)" = "Takip Edilenler akış modu (InstaSane'den)";
 "latest" = "en son";
@@ -1719,3 +1744,13 @@
 "Colors" = "Renkler";
 "+ Add new language" = "+ Yeni dil ekle";
 "Each chat can override this in the list" = "Her sohbet bunu listede geçersiz kılabilir";
+"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map." = "Açıkken, Instagram konum istekleri seçilen sahte konumu döndürür. Harita düğmesi Arkadaşlar Haritası içine bir kısayol ekler.";
+"Tap a preset to make it active. Swipe left to delete." = "Etkinleştirmek için bir ön ayara dokunun. Silmek için sola kaydırın.";
+"Override Instagram location reads." = "Instagram'ın konum okumalarını geçersiz kılar.";
+"Show the quick button in Friends Map." = "Hızlı düğmeyi Arkadaşlar Haritası içinde göster.";
+"Pick how absolute dates are written. “Default” leaves IG's own format untouched." = "Mutlak tarihlerin nasıl yazılacağını seçin. “Varsayılan”, IG'nin kendi biçimine dokunmaz.";
+"Dates younger than the threshold show as relative time. Older dates fall back to the absolute format. Append mode shows both, like “Jan 5, 2026 (2h)”." = "Eşikten yeni tarihler göreli zaman olarak gösterilir. Eski tarihler mutlak biçime döner. Ekleme modu her ikisini birden gösterir, ör. “Jan 5, 2026 (2h)”.";
+"Compact style" = "Sıkışık stil";
+"Example: “1h” instead of “1 hour ago”" = "Örnek: “1 saat önce” yerine “1h”";
+"Example: “Jan 5, 2026 (2h)”" = "Örnek: “Jan 5, 2026 (2h)”";
+"iOS audio APIs couldn't process this file%@%@\n\nYou can try sending it to Instagram as-is, or open a support issue." = "iOS ses API'leri bu dosyayı işleyemedi%@%@\n\nDosyayı Instagram'a olduğu gibi göndermeyi deneyebilir veya bir destek bildirimi açabilirsiniz.";

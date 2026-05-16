@@ -8,8 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface SCIGalleryListCollectionCell : UICollectionViewCell
 
 - (void)configureWithGalleryFile:(SCIGalleryFile *)file
-                 selectionMode:(BOOL)selectionMode
-                      selected:(BOOL)selected;
+				 selectionMode:(BOOL)selectionMode
+					  selected:(BOOL)selected;
 
 - (void)setSelectionMode:(BOOL)selectionMode selected:(BOOL)selected animated:(BOOL)animated;
 

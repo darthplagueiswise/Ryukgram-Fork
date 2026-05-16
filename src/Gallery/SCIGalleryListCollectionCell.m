@@ -8,10 +8,14 @@
 // the cell self-sizes via auto-layout; we pin contentView height so the row
 // has a stable size even though no flow-layout sizeForItemAtIndexPath fires.
 static CGFloat const kSCIGalleryListRowHeight = 88.0;
+static CGFloat const kSCIGalleryThumbSize = 56.0;
+static CGFloat const kSCIGalleryThumbLeadingNormal = 8.0;
+static CGFloat const kSCIGalleryThumbLeadingSelection = 40.0;
 
 @interface SCIGalleryListCollectionCell ()
 
 @property (nonatomic, strong) SCIGalleryFile *file;
+@property (nonatomic, copy) NSString *reuseToken;
 
 @property (nonatomic, strong) UIImageView *thumbnailView;
 @property (nonatomic, strong) UIImageView *rowTypeIcon;
@@ -29,262 +33,284 @@ static CGFloat const kSCIGalleryListRowHeight = 88.0;
 
 @implementation SCIGalleryListCollectionCell
 
+#pragma mark - Init
+
 - (instancetype)initWithFrame:(CGRect)frame {
-    if ((self = [super initWithFrame:frame])) {
-        // Cell must clip so contentView's leftward translation doesn't bleed
-        // into adjacent cells when revealing the trailing delete action.
-        [self setupViews];
-    }
-    return self;
+	self = [super initWithFrame:frame];
+	if (!self) return nil;
+
+	self.clipsToBounds = YES;
+	self.contentView.backgroundColor = UIColor.clearColor;
+
+	[self setupViews];
+	[self setupConstraints];
+
+	return self;
+}
+
+#pragma mark - Setup
+
+- (UIImageView *)imageViewWithTint:(UIColor *)tint {
+	UIImageView *view = UIImageView.new;
+	view.translatesAutoresizingMaskIntoConstraints = NO;
+	view.contentMode = UIViewContentModeScaleAspectFit;
+	view.tintColor = tint;
+	return view;
+}
+
+- (UILabel *)labelWithFont:(UIFont *)font color:(UIColor *)color {
+	UILabel *label = UILabel.new;
+	label.translatesAutoresizingMaskIntoConstraints = NO;
+	label.font = font;
+	label.textColor = color;
+	label.numberOfLines = 1;
+	label.lineBreakMode = NSLineBreakByTruncatingTail;
+	return label;
 }
 
 - (void)setupViews {
-    self.contentView.backgroundColor = [UIColor clearColor];
+	self.thumbnailView = UIImageView.new;
+	self.thumbnailView.translatesAutoresizingMaskIntoConstraints = NO;
+	self.thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
+	self.thumbnailView.clipsToBounds = YES;
+	self.thumbnailView.layer.cornerRadius = 6.0;
+	self.thumbnailView.backgroundColor = UIColor.secondarySystemBackgroundColor;
+	[self.contentView addSubview:self.thumbnailView];
 
-    self.thumbnailView = [[UIImageView alloc] init];
-    self.thumbnailView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
-    self.thumbnailView.clipsToBounds = YES;
-    self.thumbnailView.layer.cornerRadius = 6;
-    self.thumbnailView.backgroundColor = [UIColor secondarySystemBackgroundColor];
-    [self.contentView addSubview:self.thumbnailView];
+	self.rowTypeIcon = [self imageViewWithTint:UIColor.secondaryLabelColor];
+	[self.contentView addSubview:self.rowTypeIcon];
 
-    self.rowTypeIcon = [[UIImageView alloc] init];
-    self.rowTypeIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    self.rowTypeIcon.contentMode = UIViewContentModeScaleAspectFit;
-    self.rowTypeIcon.tintColor = [UIColor secondaryLabelColor];
-    [self.contentView addSubview:self.rowTypeIcon];
+	self.titleLabel = [self labelWithFont:[UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold] color:UIColor.labelColor];
+	[self.contentView addSubview:self.titleLabel];
 
-    self.titleLabel = [[UILabel alloc] init];
-    self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    self.titleLabel.textColor = [UIColor labelColor];
-    self.titleLabel.numberOfLines = 1;
-    self.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-    [self.contentView addSubview:self.titleLabel];
+	self.technicalLabel = [self labelWithFont:[UIFont systemFontOfSize:12.0] color:UIColor.secondaryLabelColor];
+	[self.contentView addSubview:self.technicalLabel];
 
-    self.technicalLabel = [[UILabel alloc] init];
-    self.technicalLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.technicalLabel.font = [UIFont systemFontOfSize:12];
-    self.technicalLabel.textColor = [UIColor secondaryLabelColor];
-    self.technicalLabel.numberOfLines = 1;
-    self.technicalLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-    [self.contentView addSubview:self.technicalLabel];
+	self.pillBackground = UIView.new;
+	self.pillBackground.translatesAutoresizingMaskIntoConstraints = NO;
+	self.pillBackground.backgroundColor = UIColor.tertiarySystemBackgroundColor;
+	self.pillBackground.layer.cornerRadius = 5.0;
+	self.pillBackground.clipsToBounds = YES;
+	[self.contentView addSubview:self.pillBackground];
 
-    self.pillBackground = [[UIView alloc] init];
-    self.pillBackground.translatesAutoresizingMaskIntoConstraints = NO;
-    self.pillBackground.backgroundColor = [UIColor tertiarySystemBackgroundColor];
-    self.pillBackground.layer.cornerRadius = 5;
-    self.pillBackground.clipsToBounds = YES;
-    [self.contentView addSubview:self.pillBackground];
+	self.pillLabel = [self labelWithFont:[UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold] color:UIColor.secondaryLabelColor];
+	[self.pillBackground addSubview:self.pillLabel];
 
-    self.pillLabel = [[UILabel alloc] init];
-    self.pillLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.pillLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
-    self.pillLabel.textColor = [UIColor secondaryLabelColor];
-    self.pillLabel.numberOfLines = 1;
-    [self.pillBackground addSubview:self.pillLabel];
+	self.dateLabel = [self labelWithFont:[UIFont systemFontOfSize:11.0] color:UIColor.tertiaryLabelColor];
+	[self.contentView addSubview:self.dateLabel];
 
-    self.dateLabel = [[UILabel alloc] init];
-    self.dateLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.dateLabel.font = [UIFont systemFontOfSize:11];
-    self.dateLabel.textColor = [UIColor tertiaryLabelColor];
-    self.dateLabel.numberOfLines = 1;
-    self.dateLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-    [self.contentView addSubview:self.dateLabel];
+	self.favoriteIcon = [[UIImageView alloc] initWithImage:[SCIAssetUtils instagramIconNamed:@"heart_filled" pointSize:14.0]];
+	self.favoriteIcon.translatesAutoresizingMaskIntoConstraints = NO;
+	self.favoriteIcon.contentMode = UIViewContentModeScaleAspectFit;
+	self.favoriteIcon.tintColor = [SCIUtils SCIColor_InstagramFavorite];
+	self.favoriteIcon.hidden = YES;
+	[self.contentView addSubview:self.favoriteIcon];
 
-    UIImage *favImg = [SCIAssetUtils instagramIconNamed:@"heart_filled" pointSize:14.0];
-    self.favoriteIcon = [[UIImageView alloc] initWithImage:favImg];
-    self.favoriteIcon.contentMode = UIViewContentModeScaleAspectFit;
-    self.favoriteIcon.translatesAutoresizingMaskIntoConstraints = NO;
-    self.favoriteIcon.tintColor = [SCIUtils SCIColor_InstagramFavorite];
-    self.favoriteIcon.hidden = YES;
-    [self.contentView addSubview:self.favoriteIcon];
+	self.selectionIndicator = [self imageViewWithTint:UIColor.secondaryLabelColor];
+	self.selectionIndicator.hidden = YES;
+	[self.contentView addSubview:self.selectionIndicator];
 
-    self.selectionIndicator = [[UIImageView alloc] init];
-    self.selectionIndicator.translatesAutoresizingMaskIntoConstraints = NO;
-    self.selectionIndicator.contentMode = UIViewContentModeScaleAspectFit;
-    self.selectionIndicator.tintColor = [UIColor secondaryLabelColor];
-    self.selectionIndicator.hidden = YES;
-    [self.contentView addSubview:self.selectionIndicator];
-
-    UIImage *moreImg = [SCIAssetUtils instagramIconNamed:@"more" pointSize:22.0];
-    self.moreButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.moreButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.moreButton setImage:moreImg forState:UIControlStateNormal];
-    self.moreButton.tintColor = [UIColor secondaryLabelColor];
-    self.moreButton.accessibilityLabel = SCILocalized(@"More");
-    self.moreButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-    self.moreButton.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
-    [self.contentView addSubview:self.moreButton];
-
-    UILayoutGuide *margin = self.contentView.layoutMarginsGuide;
-    self.thumbnailLeadingConstraint = [self.thumbnailView.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor constant:8];
-
-    // Pin a fixed row height. Compositional layout self-sizes via auto-layout
-    // (sizeForItemAtIndexPath isn't queried), so the contentView must be able
-    // to derive its own height.
-    NSLayoutConstraint *heightC = [self.contentView.heightAnchor constraintEqualToConstant:kSCIGalleryListRowHeight];
-    heightC.priority = UILayoutPriorityRequired - 1;
-
-    [NSLayoutConstraint activateConstraints:@[
-        heightC,
-        [self.selectionIndicator.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor constant:8],
-        [self.selectionIndicator.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [self.selectionIndicator.widthAnchor constraintEqualToConstant:20],
-        [self.selectionIndicator.heightAnchor constraintEqualToConstant:20],
-
-        self.thumbnailLeadingConstraint,
-        [self.thumbnailView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [self.thumbnailView.widthAnchor constraintEqualToConstant:56],
-        [self.thumbnailView.heightAnchor constraintEqualToConstant:56],
-
-        [self.moreButton.trailingAnchor constraintEqualToAnchor:margin.trailingAnchor constant:-2],
-        [self.moreButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [self.moreButton.widthAnchor constraintEqualToConstant:40],
-        [self.moreButton.heightAnchor constraintEqualToConstant:40],
-
-        [self.titleLabel.leadingAnchor constraintEqualToAnchor:self.thumbnailView.trailingAnchor constant:12],
-        [self.titleLabel.topAnchor constraintEqualToAnchor:self.thumbnailView.topAnchor constant:-1],
-        [self.titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.favoriteIcon.leadingAnchor constant:-4],
-
-        [self.rowTypeIcon.leadingAnchor constraintEqualToAnchor:self.titleLabel.leadingAnchor],
-        [self.rowTypeIcon.centerYAnchor constraintEqualToAnchor:self.technicalLabel.centerYAnchor],
-        [self.rowTypeIcon.widthAnchor constraintEqualToConstant:14],
-        [self.rowTypeIcon.heightAnchor constraintEqualToConstant:14],
-
-        [self.technicalLabel.leadingAnchor constraintEqualToAnchor:self.rowTypeIcon.trailingAnchor constant:4],
-        [self.technicalLabel.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:3],
-        [self.technicalLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.moreButton.leadingAnchor constant:-8],
-
-        [self.pillBackground.leadingAnchor constraintEqualToAnchor:self.titleLabel.leadingAnchor],
-        [self.pillBackground.topAnchor constraintEqualToAnchor:self.technicalLabel.bottomAnchor constant:4],
-        [self.pillLabel.leadingAnchor constraintEqualToAnchor:self.pillBackground.leadingAnchor constant:8],
-        [self.pillLabel.trailingAnchor constraintEqualToAnchor:self.pillBackground.trailingAnchor constant:-8],
-        [self.pillLabel.topAnchor constraintEqualToAnchor:self.pillBackground.topAnchor constant:3],
-        [self.pillLabel.bottomAnchor constraintEqualToAnchor:self.pillBackground.bottomAnchor constant:-3],
-
-        [self.dateLabel.leadingAnchor constraintEqualToAnchor:self.pillBackground.trailingAnchor constant:8],
-        [self.dateLabel.centerYAnchor constraintEqualToAnchor:self.pillBackground.centerYAnchor],
-        [self.dateLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.moreButton.leadingAnchor constant:-8],
-
-        [self.favoriteIcon.trailingAnchor constraintEqualToAnchor:self.moreButton.leadingAnchor constant:-6],
-        [self.favoriteIcon.centerYAnchor constraintEqualToAnchor:self.titleLabel.centerYAnchor],
-        [self.favoriteIcon.widthAnchor constraintEqualToConstant:14],
-        [self.favoriteIcon.heightAnchor constraintEqualToConstant:14],
-    ]];
+	self.moreButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	self.moreButton.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.moreButton setImage:[SCIAssetUtils instagramIconNamed:@"more" pointSize:22.0] forState:UIControlStateNormal];
+	self.moreButton.tintColor = UIColor.secondaryLabelColor;
+	self.moreButton.accessibilityLabel = SCILocalized(@"More");
+	self.moreButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+	self.moreButton.contentVerticalAlignment = UIControlContentVerticalAlignmentCenter;
+	[self.contentView addSubview:self.moreButton];
 }
+
+- (void)setupConstraints {
+	UILayoutGuide *margin = self.contentView.layoutMarginsGuide;
+
+	self.thumbnailLeadingConstraint = [self.thumbnailView.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor constant:kSCIGalleryThumbLeadingNormal];
+
+	NSLayoutConstraint *height = [self.contentView.heightAnchor constraintEqualToConstant:kSCIGalleryListRowHeight];
+	height.priority = UILayoutPriorityRequired - 1;
+
+	[NSLayoutConstraint activateConstraints:@[
+		height,
+
+		[self.selectionIndicator.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor constant:8.0],
+		[self.selectionIndicator.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+		[self.selectionIndicator.widthAnchor constraintEqualToConstant:20.0],
+		[self.selectionIndicator.heightAnchor constraintEqualToConstant:20.0],
+
+		self.thumbnailLeadingConstraint,
+		[self.thumbnailView.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+		[self.thumbnailView.widthAnchor constraintEqualToConstant:kSCIGalleryThumbSize],
+		[self.thumbnailView.heightAnchor constraintEqualToConstant:kSCIGalleryThumbSize],
+
+		[self.moreButton.trailingAnchor constraintEqualToAnchor:margin.trailingAnchor constant:-2.0],
+		[self.moreButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+		[self.moreButton.widthAnchor constraintEqualToConstant:40.0],
+		[self.moreButton.heightAnchor constraintEqualToConstant:40.0],
+
+		[self.titleLabel.leadingAnchor constraintEqualToAnchor:self.thumbnailView.trailingAnchor constant:12.0],
+		[self.titleLabel.topAnchor constraintEqualToAnchor:self.thumbnailView.topAnchor constant:-1.0],
+		[self.titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.favoriteIcon.leadingAnchor constant:-4.0],
+
+		[self.rowTypeIcon.leadingAnchor constraintEqualToAnchor:self.titleLabel.leadingAnchor],
+		[self.rowTypeIcon.centerYAnchor constraintEqualToAnchor:self.technicalLabel.centerYAnchor],
+		[self.rowTypeIcon.widthAnchor constraintEqualToConstant:14.0],
+		[self.rowTypeIcon.heightAnchor constraintEqualToConstant:14.0],
+
+		[self.technicalLabel.leadingAnchor constraintEqualToAnchor:self.rowTypeIcon.trailingAnchor constant:4.0],
+		[self.technicalLabel.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:3.0],
+		[self.technicalLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.moreButton.leadingAnchor constant:-8.0],
+
+		[self.pillBackground.leadingAnchor constraintEqualToAnchor:self.titleLabel.leadingAnchor],
+		[self.pillBackground.topAnchor constraintEqualToAnchor:self.technicalLabel.bottomAnchor constant:4.0],
+
+		[self.pillLabel.leadingAnchor constraintEqualToAnchor:self.pillBackground.leadingAnchor constant:8.0],
+		[self.pillLabel.trailingAnchor constraintEqualToAnchor:self.pillBackground.trailingAnchor constant:-8.0],
+		[self.pillLabel.topAnchor constraintEqualToAnchor:self.pillBackground.topAnchor constant:3.0],
+		[self.pillLabel.bottomAnchor constraintEqualToAnchor:self.pillBackground.bottomAnchor constant:-3.0],
+
+		[self.dateLabel.leadingAnchor constraintEqualToAnchor:self.pillBackground.trailingAnchor constant:8.0],
+		[self.dateLabel.centerYAnchor constraintEqualToAnchor:self.pillBackground.centerYAnchor],
+		[self.dateLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.moreButton.leadingAnchor constant:-8.0],
+
+		[self.favoriteIcon.trailingAnchor constraintEqualToAnchor:self.moreButton.leadingAnchor constant:-6.0],
+		[self.favoriteIcon.centerYAnchor constraintEqualToAnchor:self.titleLabel.centerYAnchor],
+		[self.favoriteIcon.widthAnchor constraintEqualToConstant:14.0],
+		[self.favoriteIcon.heightAnchor constraintEqualToConstant:14.0],
+	]];
+}
+
+#pragma mark - Reuse
 
 - (void)prepareForReuse {
-    [super prepareForReuse];
-    self.thumbnailView.image = nil;
-    self.titleLabel.text = nil;
-    self.technicalLabel.text = nil;
-    self.pillLabel.text = nil;
-    self.dateLabel.text = nil;
-    self.favoriteIcon.hidden = YES;
-    self.file = nil;
-    self.moreButton.menu = nil;
-    self.moreButton.showsMenuAsPrimaryAction = NO;
-    self.selectionIndicator.hidden = YES;
-    self.selectionIndicator.image = nil;
-    self.selectionIndicator.alpha = 0.0;
-    self.thumbnailLeadingConstraint.constant = 8;
-    self.moreButton.hidden = NO;
-    self.moreButton.alpha = 1.0;
-    self.onLeftSwipe = nil;
+	[super prepareForReuse];
+
+	self.file = nil;
+	self.reuseToken = nil;
+	self.onLeftSwipe = nil;
+
+	self.thumbnailView.image = nil;
+	self.rowTypeIcon.image = nil;
+	self.titleLabel.text = nil;
+	self.technicalLabel.text = nil;
+	self.pillLabel.text = nil;
+	self.dateLabel.text = nil;
+
+	self.favoriteIcon.hidden = YES;
+
+	self.moreButton.menu = nil;
+	self.moreButton.showsMenuAsPrimaryAction = NO;
+	self.moreButton.hidden = NO;
+	self.moreButton.alpha = 1.0;
+
+	self.selectionIndicator.hidden = YES;
+	self.selectionIndicator.alpha = 0.0;
+	self.selectionIndicator.image = nil;
+
+	self.thumbnailLeadingConstraint.constant = kSCIGalleryThumbLeadingNormal;
 }
 
-- (UIImage *)selectionIndicatorImageSelected:(BOOL)selected {
-    NSString *resourceName = selected ? @"circle_check_filled" : @"circle";
-    return [SCIAssetUtils instagramIconNamed:resourceName pointSize:20.0];
-}
+#pragma mark - Configure
 
 - (void)configureWithGalleryFile:(SCIGalleryFile *)file
-                 selectionMode:(BOOL)selectionMode
-                      selected:(BOOL)selected {
-    self.file = file;
-    self.titleLabel.text = [file listPrimaryTitle];
-    self.technicalLabel.text = [file listTechnicalLine];
-    self.pillLabel.text = [file shortSourceLabel];
-    self.dateLabel.text = [file listDownloadDateString];
+				   selectionMode:(BOOL)selectionMode
+						selected:(BOOL)selected {
+	self.file = file;
+	self.reuseToken = file.identifier ?: file.relativePath ?: file.thumbnailPath ?: NSUUID.UUID.UUIDString;
 
-    UIImage *rowIcon = nil;
-    switch (file.mediaType) {
-        case SCIGalleryMediaTypeVideo:
-            rowIcon = [SCIAssetUtils instagramIconNamed:@"video_filled" pointSize:12];
-            break;
-        case SCIGalleryMediaTypeAudio:
-            rowIcon = [UIImage systemImageNamed:@"waveform"
-                              withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
-            break;
-        case SCIGalleryMediaTypeGIF:
-            rowIcon = [UIImage systemImageNamed:@"sparkles"
-                              withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12 weight:UIImageSymbolWeightSemibold]];
-            break;
-        case SCIGalleryMediaTypeImage:
-        default:
-            rowIcon = [SCIAssetUtils instagramIconNamed:@"photo_filled" pointSize:12];
-            break;
-    }
-    self.rowTypeIcon.image = rowIcon;
+	self.titleLabel.text = file.listPrimaryTitle;
+	self.technicalLabel.text = file.listTechnicalLine;
+	self.pillLabel.text = file.shortSourceLabel;
+	self.dateLabel.text = file.listDownloadDateString;
+	self.rowTypeIcon.image = [self iconForMediaType:file.mediaType];
+	self.favoriteIcon.hidden = !file.isFavorite;
 
-    self.favoriteIcon.hidden = !file.isFavorite;
+	[self updateThumbnailForFile:file token:self.reuseToken];
+	[self setSelectionMode:selectionMode selected:selected animated:NO];
+}
 
-    [self setSelectionMode:selectionMode selected:selected animated:NO];
+- (void)updateThumbnailForFile:(SCIGalleryFile *)file token:(NSString *)token {
+	UIImage *thumbnail = [SCIGalleryFile loadThumbnailForFile:file];
+	if (thumbnail) {
+		self.thumbnailView.image = thumbnail;
+		return;
+	}
 
-    UIImage *thumb = [SCIGalleryFile loadThumbnailForFile:file];
-    if (thumb) {
-        self.thumbnailView.image = thumb;
-    } else {
-        __weak typeof(self) weakSelf = self;
-        [SCIGalleryFile generateThumbnailForFile:file completion:^(BOOL ok) {
-            if (!ok) return;
-            if (weakSelf.file != file) return;
-            UIImage *img = [SCIGalleryFile loadThumbnailForFile:file];
-            if (img) weakSelf.thumbnailView.image = img;
-        }];
-    }
+	self.thumbnailView.image = nil;
+
+	__weak typeof(self) weakSelf = self;
+	[SCIGalleryFile generateThumbnailForFile:file completion:^(BOOL ok) {
+		if (!ok) return;
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			__strong typeof(weakSelf) self = weakSelf;
+			if (!self || ![self.reuseToken isEqualToString:token]) return;
+
+			UIImage *image = [SCIGalleryFile loadThumbnailForFile:file];
+			if (image) self.thumbnailView.image = image;
+		});
+	}];
+}
+
+- (UIImage *)iconForMediaType:(SCIGalleryMediaType)type {
+	switch (type) {
+		case SCIGalleryMediaTypeVideo:
+			return [SCIAssetUtils instagramIconNamed:@"video_filled" pointSize:12.0];
+
+		case SCIGalleryMediaTypeAudio:
+			return [UIImage systemImageNamed:@"waveform"
+						   withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12.0 weight:UIImageSymbolWeightSemibold]];
+
+		case SCIGalleryMediaTypeGIF:
+			return [UIImage systemImageNamed:@"sparkles"
+						   withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:12.0 weight:UIImageSymbolWeightSemibold]];
+
+		case SCIGalleryMediaTypeImage:
+		default:
+			return [SCIAssetUtils instagramIconNamed:@"photo_filled" pointSize:12.0];
+	}
+}
+
+#pragma mark - Selection
+
+- (UIImage *)selectionIndicatorImageSelected:(BOOL)selected {
+	return [SCIAssetUtils instagramIconNamed:(selected ? @"circle_check_filled" : @"circle") pointSize:20.0];
 }
 
 - (void)setSelectionMode:(BOOL)selectionMode selected:(BOOL)selected animated:(BOOL)animated {
-    self.selectionIndicator.image = selectionMode ? [self selectionIndicatorImageSelected:selected] : nil;
-    if (selectionMode) {
-        self.selectionIndicator.hidden = NO;
-    }
-    if (!selectionMode) {
-        self.moreButton.hidden = NO;
-    }
+	self.selectionIndicator.image = selectionMode ? [self selectionIndicatorImageSelected:selected] : nil;
+	self.selectionIndicator.hidden = !selectionMode && !animated;
+	self.moreButton.hidden = selectionMode && !animated;
+	self.thumbnailLeadingConstraint.constant = selectionMode ? kSCIGalleryThumbLeadingSelection : kSCIGalleryThumbLeadingNormal;
 
-    self.thumbnailLeadingConstraint.constant = selectionMode ? 40.0 : 8.0;
+	void (^changes)(void) = ^{
+		self.selectionIndicator.alpha = selectionMode ? 1.0 : 0.0;
+		self.moreButton.alpha = selectionMode ? 0.0 : 1.0;
+		[self.contentView layoutIfNeeded];
+	};
 
-    void (^applyState)(void) = ^{
-        self.selectionIndicator.alpha = selectionMode ? 1.0 : 0.0;
-        self.moreButton.alpha = selectionMode ? 0.0 : 1.0;
-        [self.contentView layoutIfNeeded];
-    };
-    void (^finishState)(void) = ^{
-        self.selectionIndicator.hidden = !selectionMode;
-        self.moreButton.hidden = selectionMode;
-    };
+	void (^completion)(BOOL) = ^(BOOL finished) {
+		(void)finished;
+		self.selectionIndicator.hidden = !selectionMode;
+		self.moreButton.hidden = selectionMode;
+	};
 
-    if (animated) {
-        [UIView animateWithDuration:0.22
-                              delay:0.0
-                            options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
-                         animations:applyState
-                         completion:^(__unused BOOL finished) {
-            finishState();
-        }];
-    } else {
-        applyState();
-        finishState();
-    }
+	if (!animated) {
+		changes();
+		completion(YES);
+		return;
+	}
+
+	[UIView animateWithDuration:0.20
+						  delay:0.0
+						options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
+					 animations:changes
+					 completion:completion];
 }
 
+#pragma mark - Menu
+
 - (void)setMoreActionsMenu:(UIMenu *)menu {
-    self.moreButton.menu = menu;
-    self.moreButton.showsMenuAsPrimaryAction = (menu != nil);
+	self.moreButton.menu = menu;
+	self.moreButton.showsMenuAsPrimaryAction = menu != nil;
 }
 
 @end

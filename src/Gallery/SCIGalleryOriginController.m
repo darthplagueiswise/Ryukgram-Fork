@@ -1,270 +1,325 @@
 #import "SCIGalleryOriginController.h"
-
-#import <objc/message.h>
-
 #import "SCIGalleryFile.h"
 #import "SCIGallerySaveMetadata.h"
 #import "../Utils.h"
 #import "../SCIURLOpener.h"
 #import "SCIGalleryShim.h"
-
+#import <objc/message.h>
 #import <objc/runtime.h>
 
-// Inlined replacements for upstream's ActionButtonLookupUtils helpers.
-static id SCIObjectForSelector(id target, NSString *selectorName) {
-    if (!target || selectorName.length == 0) return nil;
-    SEL selector = NSSelectorFromString(selectorName);
-    if (![target respondsToSelector:selector]) return nil;
-    @try { return ((id (*)(id, SEL))objc_msgSend)(target, selector); }
-    @catch (__unused id e) { return nil; }
+static NSArray<NSString *> *SCIUserKeys(void) {
+	static NSArray *keys;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		keys = @[@"user", @"owner", @"author", @"creator", @"actor", @"profileUser"];
+	});
+	return keys;
+}
+
+static NSArray<NSString *> *SCINestedKeys(void) {
+	static NSArray *keys;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		keys = @[@"media", @"item", @"storyItem", @"visualMessage", @"explorePostInFeed", @"rootItem", @"clipsItem", @"clipsMedia", @"post"];
+	});
+	return keys;
+}
+
+static id SCIObjectForSelector(id target, NSString *name) {
+	if (!target || !name.length) return nil;
+
+	SEL sel = NSSelectorFromString(name);
+	if (![target respondsToSelector:sel]) return nil;
+
+	@try {
+		return ((id (*)(id, SEL))objc_msgSend)(target, sel);
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
 static id SCIKVCObject(id target, NSString *key) {
-    if (!target || key.length == 0) return nil;
-    @try { return [target valueForKey:key]; }
-    @catch (__unused id e) { return nil; }
+	if (!target || !key.length) return nil;
+
+	@try {
+		return [target valueForKey:key];
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
-// fieldCache helpers consolidated on SCIUtils — see +fieldCacheForObject: /
-// +fieldCacheValue:forKey:.
-#define SCIFieldCacheDict(o) [SCIUtils fieldCacheForObject:(o)]
-
-static NSString *SCIFieldCacheString(id obj, NSString *key) {
-    id v = [SCIUtils fieldCacheValue:obj forKey:key];
-    return ([v isKindOfClass:[NSString class]] && [(NSString *)v length]) ? v : nil;
+static id SCIFieldValue(id obj, NSString *key) {
+	if (!obj || !key.length) return nil;
+	return [SCIUtils fieldCacheValue:obj forKey:key];
 }
 
-// Walks media→user→username across selectors + fieldCache + a couple of
-// fallback nested objects. IGMedia stores user inside its Pando _fieldCache —
-// KVC alone can't see it.
-static NSString *SCIUsernameFromMediaObject(id media) {
-    if (!media) return nil;
-    for (NSString *userKey in @[@"user", @"owner", @"author", @"creator", @"actor", @"profileUser"]) {
-        id user = SCIObjectForSelector(media, userKey);
-        if (!user) user = SCIKVCObject(media, userKey);
-        if (!user) {
-            NSDictionary *fc = SCIFieldCacheDict(media);
-            user = fc[userKey];
-        }
-        if (!user) continue;
-        id u = SCIObjectForSelector(user, @"username");
-        if (!u) u = SCIKVCObject(user, @"username");
-        if (![u isKindOfClass:[NSString class]] || !((NSString *)u).length) {
-            NSString *fcU = SCIFieldCacheString(user, @"username");
-            if (fcU.length) u = fcU;
-            else if ([user isKindOfClass:[NSDictionary class]]) {
-                id v = ((NSDictionary *)user)[@"username"];
-                if ([v isKindOfClass:[NSString class]]) u = v;
-            }
-        }
-        if ([u isKindOfClass:[NSString class]] && [(NSString *)u length]) return u;
-    }
-    for (NSString *nestedKey in @[@"media", @"item", @"storyItem", @"visualMessage", @"explorePostInFeed", @"rootItem", @"clipsItem", @"clipsMedia", @"post"]) {
-        id nested = SCIObjectForSelector(media, nestedKey);
-        if (!nested) nested = SCIKVCObject(media, nestedKey);
-        if (!nested || nested == media) continue;
-        NSString *u = SCIUsernameFromMediaObject(nested);
-        if (u.length) return u;
-    }
-    return nil;
+static id SCIValueForKeyPathLike(id target, NSString *key) {
+	if (!target || !key.length) return nil;
+
+	id value = SCIObjectForSelector(target, key);
+	if (!value) value = SCIKVCObject(target, key);
+	if (!value) value = SCIFieldValue(target, key);
+
+	return value;
 }
 
-static id SCIUserFromMediaWithFieldCache(id media) {
-    if (!media) return nil;
-    for (NSString *userKey in @[@"user", @"owner", @"author", @"creator", @"actor", @"profileUser"]) {
-        id user = SCIObjectForSelector(media, userKey);
-        if (!user) user = SCIKVCObject(media, userKey);
-        if (!user) {
-            NSDictionary *fc = SCIFieldCacheDict(media);
-            user = fc[userKey];
-        }
-        if (user) return user;
-    }
-    return nil;
+static NSString *SCIStringValue(id value) {
+	if (!value) return nil;
+
+	if ([value isKindOfClass:NSString.class]) {
+		return [(NSString *)value length] ? value : nil;
+	}
+
+	if ([value respondsToSelector:@selector(stringValue)]) {
+		NSString *string = [value stringValue];
+		return string.length ? string : nil;
+	}
+
+	if ([value respondsToSelector:@selector(description)]) {
+		NSString *string = [value description];
+		return string.length ? string : nil;
+	}
+
+	return nil;
 }
 
-static NSString *SCIGalleryStringValue(id value) {
-    if (!value) return nil;
-    if ([value isKindOfClass:[NSString class]]) return [(NSString *)value length] > 0 ? value : nil;
-    if ([value respondsToSelector:@selector(stringValue)]) {
-        NSString *string = [value stringValue];
-        return string.length > 0 ? string : nil;
-    }
-    if ([value respondsToSelector:@selector(description)]) {
-        NSString *string = [value description];
-        return string.length > 0 ? string : nil;
-    }
-    return nil;
+static NSString *SCIStringForKey(id target, NSString *key) {
+	return SCIStringValue(SCIValueForKeyPathLike(target, key));
 }
 
-static NSString *SCIGalleryStringForSelector(id target, NSString *selectorName) {
-    if (!target || selectorName.length == 0) return nil;
-    id value = SCIObjectForSelector(target, selectorName);
-    if (!value) value = SCIKVCObject(target, selectorName);
-    return SCIGalleryStringValue(value);
+static NSURL *SCIURLValue(id value) {
+	if ([value isKindOfClass:NSURL.class]) return value;
+
+	if ([value isKindOfClass:NSString.class] && [(NSString *)value length]) {
+		return [NSURL URLWithString:(NSString *)value];
+	}
+
+	return nil;
 }
 
-static NSURL *SCIGalleryURLForSelector(id target, NSString *selectorName) {
-    if (!target || selectorName.length == 0) return nil;
-    id value = SCIObjectForSelector(target, selectorName);
-    if (!value) value = SCIKVCObject(target, selectorName);
-    if ([value isKindOfClass:[NSURL class]]) return value;
-    if ([value isKindOfClass:[NSString class]] && [(NSString *)value length] > 0) {
-        return [NSURL URLWithString:(NSString *)value];
-    }
-    return nil;
+static NSURL *SCIURLForKey(id target, NSString *key) {
+	return SCIURLValue(SCIValueForKeyPathLike(target, key));
 }
 
-static id SCIGalleryNestedObjectForSelector(id target, NSString *selectorName) {
-    if (!target || selectorName.length == 0) return nil;
-    id value = SCIObjectForSelector(target, selectorName);
-    if (!value) value = SCIKVCObject(target, selectorName);
-    if ([value isKindOfClass:[NSArray class]]) {
-        return ((NSArray *)value).firstObject;
-    }
-    return value;
+static id SCIFirstObjectIfArray(id value) {
+	if ([value isKindOfClass:NSArray.class]) return [(NSArray *)value firstObject];
+	return value;
 }
 
-static NSString *SCIGalleryRecursiveStringForSelectors(id target, NSArray<NSString *> *selectorNames, NSInteger depth) {
-    if (!target || depth > 3) return nil;
-
-    for (NSString *selectorName in selectorNames) {
-        NSString *value = SCIGalleryStringForSelector(target, selectorName);
-        if (value.length > 0) return value;
-    }
-
-    for (NSString *selectorName in @[@"media", @"item", @"storyItem", @"visualMessage", @"explorePostInFeed", @"rootItem", @"clipsItem", @"clipsMedia", @"post"]) {
-        id nested = SCIGalleryNestedObjectForSelector(target, selectorName);
-        if (!nested || nested == target) continue;
-        NSString *value = SCIGalleryRecursiveStringForSelectors(nested, selectorNames, depth + 1);
-        if (value.length > 0) return value;
-    }
-
-    return nil;
+static id SCINestedObjectForKey(id target, NSString *key) {
+	return SCIFirstObjectIfArray(SCIValueForKeyPathLike(target, key));
 }
 
-static NSURL *SCIGalleryRecursiveURLForSelectors(id target, NSArray<NSString *> *selectorNames, NSInteger depth) {
-    if (!target || depth > 3) return nil;
-
-    for (NSString *selectorName in selectorNames) {
-        NSURL *value = SCIGalleryURLForSelector(target, selectorName);
-        if (value) return value;
-    }
-
-    for (NSString *selectorName in @[@"media", @"item", @"storyItem", @"visualMessage", @"explorePostInFeed", @"rootItem", @"clipsItem", @"clipsMedia", @"post"]) {
-        id nested = SCIGalleryNestedObjectForSelector(target, selectorName);
-        if (!nested || nested == target) continue;
-        NSURL *value = SCIGalleryRecursiveURLForSelectors(nested, selectorNames, depth + 1);
-        if (value) return value;
-    }
-
-    return nil;
+static NSString *SCIFieldString(id obj, NSString *key) {
+	return SCIStringValue(SCIFieldValue(obj, key));
 }
 
-static id SCIGalleryUserFromMedia(id media) {
-    if (!media) return nil;
-
-    for (NSString *selectorName in @[@"user", @"owner", @"author", @"creator", @"actor", @"profileUser"]) {
-        id user = SCIObjectForSelector(media, selectorName);
-        if (!user) user = SCIKVCObject(media, selectorName);
-        if (user) return user;
-    }
-
-    for (NSString *nestedSelector in @[@"media", @"item", @"storyItem", @"visualMessage"]) {
-        id nested = SCIObjectForSelector(media, nestedSelector);
-        if (!nested) nested = SCIKVCObject(media, nestedSelector);
-        if (nested && nested != media) {
-            id user = SCIGalleryUserFromMedia(nested);
-            if (user) return user;
-        }
-    }
-
-    return nil;
+static NSString *SCIStringFromDictionary(id obj, NSString *key) {
+	if (![obj isKindOfClass:NSDictionary.class]) return nil;
+	return SCIStringValue(((NSDictionary *)obj)[key]);
 }
 
-static NSString *SCIGalleryProfileURLStringForUsername(NSString *username) {
-    NSString *encodedUsername = [username stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    return encodedUsername.length > 0 ? [NSString stringWithFormat:@"instagram://user?username=%@", encodedUsername] : nil;
+static id SCIUserFromMedia(id media) {
+	if (!media) return nil;
+
+	for (NSString *key in SCIUserKeys()) {
+		id user = SCIValueForKeyPathLike(media, key);
+		if (user) return user;
+	}
+
+	for (NSString *key in SCINestedKeys()) {
+		id nested = SCINestedObjectForKey(media, key);
+		if (!nested || nested == media) continue;
+
+		id user = SCIUserFromMedia(nested);
+		if (user) return user;
+	}
+
+	return nil;
 }
 
-static NSString *SCIGalleryMediaURLStringFromMetadata(SCIGallerySaveMetadata *metadata) {
-    if (metadata.sourceMediaURLString.length > 0) return metadata.sourceMediaURLString;
-    if (metadata.sourceMediaCode.length > 0) {
-        NSString *pathComponent = (metadata.source == SCIGallerySourceReels) ? @"reel" : @"p";
-        return [NSString stringWithFormat:@"https://www.instagram.com/%@/%@/", pathComponent, metadata.sourceMediaCode];
-    }
-    return nil;
+static NSString *SCIUsernameFromUser(id user) {
+	if (!user) return nil;
+
+	NSString *username = SCIStringForKey(user, @"username");
+	if (username.length) return username;
+
+	username = SCIFieldString(user, @"username");
+	if (username.length) return username;
+
+	return SCIStringFromDictionary(user, @"username");
+}
+
+static NSString *SCIUsernameFromMedia(id media) {
+	if (!media) return nil;
+
+	id user = SCIUserFromMedia(media);
+	NSString *username = SCIUsernameFromUser(user);
+	if (username.length) return username;
+
+	for (NSString *key in SCINestedKeys()) {
+		id nested = SCINestedObjectForKey(media, key);
+		if (!nested || nested == media) continue;
+
+		username = SCIUsernameFromMedia(nested);
+		if (username.length) return username;
+	}
+
+	return nil;
+}
+
+static NSString *SCIRecursiveStringForKeys(id target, NSArray<NSString *> *keys, NSInteger depth) {
+	if (!target || depth > 3) return nil;
+
+	for (NSString *key in keys) {
+		NSString *value = SCIStringForKey(target, key);
+		if (value.length) return value;
+	}
+
+	for (NSString *key in SCINestedKeys()) {
+		id nested = SCINestedObjectForKey(target, key);
+		if (!nested || nested == target) continue;
+
+		NSString *value = SCIRecursiveStringForKeys(nested, keys, depth + 1);
+		if (value.length) return value;
+	}
+
+	return nil;
+}
+
+static NSURL *SCIRecursiveURLForKeys(id target, NSArray<NSString *> *keys, NSInteger depth) {
+	if (!target || depth > 3) return nil;
+
+	for (NSString *key in keys) {
+		NSURL *url = SCIURLForKey(target, key);
+		if (url) return url;
+	}
+
+	for (NSString *key in SCINestedKeys()) {
+		id nested = SCINestedObjectForKey(target, key);
+		if (!nested || nested == target) continue;
+
+		NSURL *url = SCIRecursiveURLForKeys(nested, keys, depth + 1);
+		if (url) return url;
+	}
+
+	return nil;
+}
+
+static NSString *SCIProfileURLStringForUsername(NSString *username) {
+	if (!username.length) return nil;
+
+	NSString *encoded = [username stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+	return encoded.length ? [NSString stringWithFormat:@"instagram://user?username=%@", encoded] : nil;
+}
+
+static NSString *SCIMediaURLStringFromMetadata(SCIGallerySaveMetadata *metadata) {
+	if (metadata.sourceMediaURLString.length) return metadata.sourceMediaURLString;
+
+	if (metadata.sourceMediaCode.length) {
+		NSString *type = metadata.source == SCIGallerySourceReels ? @"reel" : @"p";
+		return [NSString stringWithFormat:@"https://www.instagram.com/%@/%@/", type, metadata.sourceMediaCode];
+	}
+
+	return nil;
+}
+
+static NSString *SCIMediaPKFromMedia(id media) {
+	NSString *pk = SCIRecursiveStringForKeys(media, @[@"pk", @"id", @"mediaID", @"mediaId"], 0);
+	if (pk.length) return pk;
+
+	return SCIFieldString(media, @"pk") ?: SCIFieldString(media, @"id") ?: SCIFieldString(media, @"strong_id__");
+}
+
+static NSString *SCIMediaCodeFromMedia(id media) {
+	NSString *code = SCIRecursiveStringForKeys(media, @[@"code", @"shortCode", @"shortcode", @"mediaCode", @"mediaShortcode", @"shortCodeToken"], 0);
+	if (code.length) return code;
+
+	return SCIFieldString(media, @"code") ?: SCIFieldString(media, @"shortcode");
+}
+
+static NSString *SCIUserPKFromUser(id user) {
+	NSString *pk = SCIStringForKey(user, @"pk");
+	if (pk.length) return pk;
+
+	pk = SCIStringForKey(user, @"id");
+	if (pk.length) return pk;
+
+	return SCIFieldString(user, @"pk") ?: SCIFieldString(user, @"strong_id__") ?: SCIFieldString(user, @"id");
+}
+
+static NSURL *SCIProfileURLFromUser(id user, NSString *username) {
+	for (NSString *key in @[@"profileURL", @"profileUrl", @"url"]) {
+		NSURL *url = SCIURLForKey(user, key);
+		if (url) return url;
+	}
+
+	NSString *fallback = SCIProfileURLStringForUsername(username);
+	return fallback.length ? [NSURL URLWithString:fallback] : nil;
+}
+
+static NSURL *SCIMediaURLFromMedia(id media, SCIGallerySaveMetadata *metadata) {
+	NSURL *url = SCIRecursiveURLForKeys(media, @[
+		@"permalink", @"permaLink", @"shareURL", @"shareUrl",
+		@"canonicalURL", @"canonicalUrl", @"permalinkURL",
+		@"instagramURL", @"instagramUrl", @"webURL", @"webUrl"
+	], 0);
+
+	if (url) return url;
+
+	NSString *generated = SCIMediaURLStringFromMetadata(metadata);
+	return generated.length ? [NSURL URLWithString:generated] : nil;
 }
 
 @implementation SCIGalleryOriginController
 
 + (void)populateProfileMetadata:(SCIGallerySaveMetadata *)metadata username:(NSString *)username user:(id)user {
-    if (!metadata) return;
+	if (!metadata) return;
 
-    if (username.length > 0) {
-        metadata.sourceUsername = username;
-        if (metadata.sourceProfileURLString.length == 0) {
-            metadata.sourceProfileURLString = SCIGalleryProfileURLStringForUsername(username);
-        }
-    }
+	if (username.length) {
+		metadata.sourceUsername = username;
+		if (!metadata.sourceProfileURLString.length) {
+			metadata.sourceProfileURLString = SCIProfileURLStringForUsername(username);
+		}
+	}
 
-    NSString *userPK = SCIGalleryStringForSelector(user, @"pk");
-    if (userPK.length == 0) userPK = SCIGalleryStringForSelector(user, @"id");
-    if (userPK.length == 0) userPK = SCIFieldCacheString(user, @"pk") ?: SCIFieldCacheString(user, @"strong_id__") ?: SCIFieldCacheString(user, @"id");
-    if (userPK.length > 0) metadata.sourceUserPK = userPK;
+	NSString *userPK = SCIUserPKFromUser(user);
+	if (userPK.length) metadata.sourceUserPK = userPK;
 
-    NSURL *profileURL = nil;
-    for (NSString *selectorName in @[@"profileURL", @"profileUrl", @"url"]) {
-        profileURL = SCIGalleryURLForSelector(user, selectorName);
-        if (profileURL) break;
-    }
-    if (!profileURL && username.length > 0) {
-        profileURL = [NSURL URLWithString:SCIGalleryProfileURLStringForUsername(username)];
-    }
-    if (profileURL) metadata.sourceProfileURLString = profileURL.absoluteString;
+	NSURL *profileURL = SCIProfileURLFromUser(user, username);
+	if (profileURL) metadata.sourceProfileURLString = profileURL.absoluteString;
 }
 
 + (void)populateMetadata:(SCIGallerySaveMetadata *)metadata fromMedia:(id)media {
-    if (!metadata || !media) return;
+	if (!metadata || !media) return;
 
-    NSString *username = SCIUsernameFromMediaObject(media);
-    id user = SCIUserFromMediaWithFieldCache(media);
-    if (!user) user = SCIGalleryUserFromMedia(media);
-    [self populateProfileMetadata:metadata username:username user:user];
+	id user = SCIUserFromMedia(media);
+	NSString *username = SCIUsernameFromMedia(media);
 
-    NSString *mediaPK = SCIGalleryRecursiveStringForSelectors(media, @[@"pk", @"id", @"mediaID", @"mediaId"], 0);
-    if (mediaPK.length == 0) {
-        mediaPK = SCIFieldCacheString(media, @"pk") ?: SCIFieldCacheString(media, @"id") ?: SCIFieldCacheString(media, @"strong_id__");
-    }
-    if (mediaPK.length > 0) metadata.sourceMediaPK = mediaPK;
+	[self populateProfileMetadata:metadata username:username user:user];
 
-    NSString *mediaCode = SCIGalleryRecursiveStringForSelectors(media, @[@"code", @"shortCode", @"shortcode", @"mediaCode", @"mediaShortcode", @"shortCodeToken"], 0);
-    if (mediaCode.length == 0) {
-        mediaCode = SCIFieldCacheString(media, @"code") ?: SCIFieldCacheString(media, @"shortcode");
-    }
-    if (mediaCode.length > 0) metadata.sourceMediaCode = mediaCode;
+	NSString *mediaPK = SCIMediaPKFromMedia(media);
+	if (mediaPK.length) metadata.sourceMediaPK = mediaPK;
 
-    NSURL *mediaURL = SCIGalleryRecursiveURLForSelectors(media, @[@"permalink", @"permaLink", @"shareURL", @"shareUrl", @"canonicalURL", @"canonicalUrl", @"permalinkURL", @"instagramURL", @"instagramUrl", @"webURL", @"webUrl"], 0);
-    if (!mediaURL) {
-        NSString *generatedURLString = SCIGalleryMediaURLStringFromMetadata(metadata);
-        if (generatedURLString.length > 0) {
-            mediaURL = [NSURL URLWithString:generatedURLString];
-        }
-    }
-    if (mediaURL) metadata.sourceMediaURLString = mediaURL.absoluteString;
+	NSString *mediaCode = SCIMediaCodeFromMedia(media);
+	if (mediaCode.length) metadata.sourceMediaCode = mediaCode;
+
+	NSURL *mediaURL = SCIMediaURLFromMedia(media, metadata);
+	if (mediaURL) metadata.sourceMediaURLString = mediaURL.absoluteString;
 }
 
 + (BOOL)openOriginalPostForGalleryFile:(SCIGalleryFile *)file {
-    NSURL *url = [file preferredOriginalMediaURL];
-    return url ? [SCIURLOpener openURL:url] : NO;
+	NSURL *url = file.preferredOriginalMediaURL;
+	return url ? [SCIURLOpener openURL:url] : NO;
 }
 
 + (BOOL)openProfileForGalleryFile:(SCIGalleryFile *)file {
-    if (file.sourceUsername.length > 0) {
-        return [SCIURLOpener openInstagramProfileForUsername:file.sourceUsername];
-    }
-    NSURL *url = [file preferredProfileURL];
-    return url ? [SCIURLOpener openURL:url] : NO;
+	if (file.sourceUsername.length) {
+		return [SCIURLOpener openInstagramProfileForUsername:file.sourceUsername];
+	}
+
+	NSURL *url = file.preferredProfileURL;
+	return url ? [SCIURLOpener openURL:url] : NO;
 }
 
 @end
