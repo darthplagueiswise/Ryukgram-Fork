@@ -1,0 +1,12 @@
+CompileFlags:
+  Add: [
+    "-isysroot",
+    "${THEOS}/sdks/iPhoneOS26.0.sdk",
+    "-fmodules",
+    "-fcxx-modules",
+    "-fobjc-arc",
+    "-I${THEOS}/include",
+    "-I${THEOS}/vendor/include",
+    "-F${THEOS}/sdks/iPhoneOS26.0.sdk/System/Library/Frameworks",
+    "-F${THEOS}/sdks/iPhoneOS26.0.sdk/System/Library/SubFrameworks"
+  ]

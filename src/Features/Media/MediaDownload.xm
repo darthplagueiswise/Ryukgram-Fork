@@ -1,0 +1,359 @@
+// Legacy download gestures — off by default, kept for users who prefer the
+// old multi-finger long-press workflow over the action button menu.
+//
+// The modern flow lives in:
+//   src/ActionButton/                    — menu + handlers
+//   src/Features/ActionButton/           — per-context button injection
+//   src/Features/StoriesAndMessages/OverlayButtons.xm — stories action button
+//
+// This file only contains:
+//   1. Long-press gesture recognizers on feed/story/reel media views, gated
+//      by `dw_legacy_gesture`. When on, they reuse the old sciDownload* path
+//      and save via the user's `dw_save_action` preference.
+//   2. The profile-picture long-press gesture (always on when `save_profile`).
+
+#import "../../InstagramHeaders.h"
+#import "../../Utils.h"
+#import "../../Downloader/Download.h"
+#import "../../ActionButton/SCIMediaViewer.h"
+#import "../Profile/SCIProfileHelpers.h"
+#import <objc/runtime.h>
+
+static SCIDownloadDelegate *imageDownloadDelegate;
+static SCIDownloadDelegate *videoDownloadDelegate;
+
+static DownloadAction sciGetDownloadAction() {
+    NSString *method = [SCIUtils getStringPref:@"dw_save_action"];
+    if ([method isEqualToString:@"photos"]) return saveToPhotos;
+    if ([method isEqualToString:@"gallery"] && [SCIUtils getBoolPref:@"sci_gallery_enabled"]) return saveToGallery;
+    return share;
+}
+
+static void initDownloaders() {
+    DownloadAction action = sciGetDownloadAction();
+    DownloadAction imgAction;
+    if (action == saveToPhotos || action == saveToGallery) imgAction = action;
+    else imgAction = quickLook;
+    BOOL showImgProgress = (action == saveToGallery);
+    imageDownloadDelegate = [[SCIDownloadDelegate alloc] initWithAction:imgAction showProgress:showImgProgress];
+    videoDownloadDelegate = [[SCIDownloadDelegate alloc] initWithAction:action showProgress:YES];
+}
+
+static BOOL sciLegacyGestureEnabled() {
+    return [SCIUtils getBoolPref:@"dw_legacy_gesture"];
+}
+
+
+/* * Feed (legacy gesture) * */
+
+%hook IGFeedPhotoView
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender && sender.state != UIGestureRecognizerStateBegan) return;
+
+    IGPhoto *photo;
+    if ([self.delegate isKindOfClass:%c(IGFeedItemPhotoCell)]) {
+        IGFeedItemPhotoCellConfiguration *_configuration = MSHookIvar<IGFeedItemPhotoCellConfiguration *>(self.delegate, "_configuration");
+        if (!_configuration) return;
+        photo = MSHookIvar<IGPhoto *>(_configuration, "_photo");
+    } else if ([self.delegate isKindOfClass:%c(IGFeedItemPagePhotoCell)]) {
+        IGFeedItemPagePhotoCell *pagePhotoCell = self.delegate;
+        photo = pagePhotoCell.pagePhotoPost.photo;
+    }
+
+    NSURL *photoUrl = [SCIUtils getPhotoUrl:photo];
+    if (!photoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract photo URL")]; return; }
+
+    initDownloaders();
+    [imageDownloadDelegate downloadFileWithURL:photoUrl
+                                 fileExtension:[[photoUrl lastPathComponent] pathExtension]
+                                      hudLabel:nil];
+}
+%end
+
+%hook IGModernFeedVideoCell.IGModernFeedVideoCell
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender && sender.state != UIGestureRecognizerStateBegan) return;
+
+    NSURL *videoUrl = [SCIUtils getVideoUrlForMedia:[self mediaCellFeedItem]];
+    if (!videoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract video URL")]; return; }
+
+    initDownloaders();
+    [videoDownloadDelegate downloadFileWithURL:videoUrl
+                                 fileExtension:[[videoUrl lastPathComponent] pathExtension]
+                                      hudLabel:nil];
+}
+%end
+
+
+/* * Stories (legacy gesture) * */
+
+%hook IGStoryPhotoView
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+
+    NSURL *photoUrl = [SCIUtils getPhotoUrlForMedia:[self item]];
+    if (!photoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract photo URL")]; return; }
+
+    initDownloaders();
+    [imageDownloadDelegate downloadFileWithURL:photoUrl
+                                 fileExtension:[[photoUrl lastPathComponent] pathExtension]
+                                      hudLabel:nil];
+}
+%end
+
+%hook IGStoryModernVideoView
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+
+    NSURL *videoUrl = [SCIUtils getVideoUrlForMedia:self.item];
+    if (!videoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract video URL")]; return; }
+
+    initDownloaders();
+    [videoDownloadDelegate downloadFileWithURL:videoUrl
+                                 fileExtension:[[videoUrl lastPathComponent] pathExtension]
+                                      hudLabel:nil];
+}
+%end
+
+%hook IGStoryVideoView
+
+- (void)didMoveToSuperview {
+	%orig;
+	if (!sciLegacyGestureEnabled()) return;
+	[self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+	if (sender.state != UIGestureRecognizerStateBegan) return;
+	NSURL *videoUrl = nil;
+	id item = nil;
+	if ([self respondsToSelector:@selector(item)]) {
+		item = [self item];
+	}
+	if (item) {
+		videoUrl = [SCIUtils getVideoUrlForMedia:item];
+	}
+	if (!videoUrl) {
+		id provider = nil;
+		if ([self respondsToSelector:@selector(videoURLProvider)]) {
+			provider = [self videoURLProvider];
+		}
+		if (provider) {
+			videoUrl = [SCIUtils getVideoUrlForMedia:provider];
+		}
+	}
+	if (!videoUrl) {
+		id parentVC = [SCIUtils nearestViewControllerForView:self];
+		if (!parentVC || ![parentVC isKindOfClass:%c(IGDirectVisualMessageViewerController)]) return;
+		IGDirectVisualMessageViewerViewModeAwareDataSource *_dataSource = MSHookIvar<IGDirectVisualMessageViewerViewModeAwareDataSource *>(parentVC, "_dataSource");
+		if (!_dataSource) return;
+		IGDirectVisualMessage *_currentMessage = MSHookIvar<IGDirectVisualMessage *>(_dataSource, "_currentMessage");
+		if (!_currentMessage) return;
+		IGVideo *rawVideo = _currentMessage.rawVideo;
+		if (!rawVideo) return;
+		videoUrl = [SCIUtils getVideoUrl:rawVideo];
+	}
+	if (!videoUrl) {
+		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract video URL")];
+		return;
+	}
+	initDownloaders();
+	[videoDownloadDelegate downloadFileWithURL:videoUrl fileExtension:[[videoUrl lastPathComponent] pathExtension] hudLabel:nil];
+}
+%end
+
+
+/* * Reels (legacy gesture) * */
+
+%hook IGSundialViewerPhotoView
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+
+    @try {
+        IGPhoto *_photo = MSHookIvar<IGPhoto *>(self, "_photo");
+        if (!_photo) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not access reel photo")]; return; }
+
+        NSURL *photoUrl = [SCIUtils getPhotoUrl:_photo];
+        if (!photoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract photo URL")]; return; }
+
+        initDownloaders();
+        [imageDownloadDelegate downloadFileWithURL:photoUrl
+                                     fileExtension:[[photoUrl lastPathComponent] pathExtension]
+                                          hudLabel:nil];
+    } @catch (NSException *exception) {
+        NSLog(@"[RyukGram] Reel photo download error: %@", exception);
+    }
+}
+%end
+
+%hook IGSundialViewerVideoCell
+- (void)didMoveToSuperview {
+    %orig;
+    if (!sciLegacyGestureEnabled()) return;
+    [self addLongPressGestureRecognizer];
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    longPress.minimumPressDuration = [SCIUtils getDoublePref:@"dw_finger_duration"];
+    longPress.numberOfTouchesRequired = [SCIUtils getDoublePref:@"dw_finger_count"];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+
+    @try {
+        // Runtime ivar scan: the exact name varies across IG releases.
+        unsigned int ivarCount = 0;
+        Ivar *ivars = class_copyIvarList([self class], &ivarCount);
+        Class mediaClass = NSClassFromString(@"IGMedia");
+        IGMedia *media = nil;
+        for (unsigned int i = 0; i < ivarCount; i++) {
+            const char *name = ivar_getName(ivars[i]);
+            if (!name) continue;
+            NSString *lower = [[NSString stringWithUTF8String:name] lowercaseString];
+            if ([lower containsString:@"video"] || [lower containsString:@"media"] || [lower containsString:@"item"]) {
+                id val = object_getIvar(self, ivars[i]);
+                if (val && mediaClass && [val isKindOfClass:mediaClass]) { media = val; break; }
+            }
+        }
+        if (ivars) free(ivars);
+
+        if (!media) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not access reel media")]; return; }
+
+        NSURL *videoUrl = [SCIUtils getVideoUrlForMedia:media];
+        if (!videoUrl) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract video URL")]; return; }
+
+        initDownloaders();
+        [videoDownloadDelegate downloadFileWithURL:videoUrl
+                                     fileExtension:[[videoUrl lastPathComponent] pathExtension]
+                                          hudLabel:nil];
+    } @catch (NSException *exception) {
+        NSLog(@"[RyukGram] Reel download error: %@", exception);
+    }
+}
+%end
+
+
+/* * Profile pictures * */
+
+// Profile photo zoom — intercepts IG's profile pic long press. Routes through
+// SCIProfileHelpers so we get HD via /users/{pk}/info/ + retained download.
+%hook IGProfilePhotoCoinFlipUI.IGProfilePhotoCoinFlipView
+
+- (void)viewLongPressedWithGesture:(UILongPressGestureRecognizer *)gesture {
+    if (![SCIUtils getBoolPref:@"zoom_profile_photo"]) { %orig; return; }
+    if (gesture.state != UIGestureRecognizerStateBegan) { %orig; return; }
+
+    UIView *source = gesture.view;
+    id user = [SCIProfileHelpers userForView:source];
+    if (user) {
+        [SCIProfileHelpers viewPictureForUser:user];
+        return;
+    }
+
+    %orig;
+}
+
+%end
+
+
+%hook IGProfilePictureImageView
+- (void)didMoveToSuperview {
+    %orig;
+    if ([SCIUtils getBoolPref:@"save_profile"] || [SCIUtils getBoolPref:@"zoom_profile_photo"]) {
+        [self addLongPressGestureRecognizer];
+    }
+}
+%new - (void)addLongPressGestureRecognizer {
+    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+    [self addGestureRecognizer:longPress];
+}
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+
+    id user = [SCIProfileHelpers userForView:self];
+
+    if ([SCIUtils getBoolPref:@"zoom_profile_photo"]) {
+        if (user) { [SCIProfileHelpers viewPictureForUser:user]; return; }
+        // Fallback when not on a profile page (story tray, etc.) — use the
+        // image-view's own URL, no HD upgrade available.
+        IGImageView *_imageView = MSHookIvar<IGImageView *>(self, "_imageView");
+        IGImageSpecifier *spec = _imageView.imageSpecifier;
+        NSURL *url = spec ? spec.url : nil;
+        if (url) [SCIMediaViewer showWithVideoURL:nil photoURL:url caption:nil];
+        return;
+    }
+
+    if (user) { [SCIProfileHelpers savePictureForUser:user]; return; }
+
+    // Legacy fallback: direct download of low-res URL.
+    IGImageView *_imageView = MSHookIvar<IGImageView *>(self, "_imageView");
+    IGImageSpecifier *imageSpecifier = _imageView.imageSpecifier;
+    NSURL *imageUrl = imageSpecifier ? imageSpecifier.url : nil;
+    if (!imageUrl) return;
+    initDownloaders();
+    [imageDownloadDelegate downloadFileWithURL:imageUrl
+                                 fileExtension:[[imageUrl lastPathComponent] pathExtension]
+                                      hudLabel:SCILocalized(@"Loading")];
+}
+%end

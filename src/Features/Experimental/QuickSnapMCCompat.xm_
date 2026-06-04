@@ -1,0 +1,70 @@
+// MobileConfig override for any ig_boolForKey: naming QuickSnap. Gate: igt_quicksnap.
+// WIP — heavy NSLog on, strip when feature confirmed.
+
+#import "../../Utils.h"
+#import <objc/runtime.h>
+#import <substrate.h>
+
+#define MC_LOG(fmt, ...) NSLog((@"[SCInsta][QSMC] " fmt), ##__VA_ARGS__)
+
+static inline BOOL keyMatchesQuickSnap(id key) {
+    if (![key isKindOfClass:[NSString class]]) return NO;
+    NSString *s = ((NSString *)key).lowercaseString;
+    return [s containsString:@"quicksnap"]  ||
+           [s containsString:@"quick_snap"] ||
+           [s containsString:@"instants"]   ||
+           [s containsString:@"xma_quicksnap"];
+}
+
+static inline BOOL keyLooksInteresting(id key) {
+    if (![key isKindOfClass:[NSString class]]) return NO;
+    NSString *s = ((NSString *)key).lowercaseString;
+    return [s containsString:@"quick"]   ||
+           [s containsString:@"instant"] ||
+           [s containsString:@"snap"]    ||
+           [s containsString:@"xma"]     ||
+           [s containsString:@"recap"];
+}
+
+static BOOL (*orig_bool_key)(id, SEL, id) = NULL;
+static BOOL new_bool_key(id self, SEL _cmd, id key) {
+    BOOL match = keyMatchesQuickSnap(key);
+    BOOL orig  = orig_bool_key ? orig_bool_key(self, _cmd, key) : NO;
+    BOOL ret   = match ? YES : orig;
+    if (match || keyLooksInteresting(key)) {
+        MC_LOG(@"[%@] ig_boolForKey:%@ match=%d orig=%d -> %d",
+               NSStringFromClass(object_getClass(self)), key, match, orig, ret);
+    }
+    return ret;
+}
+
+static BOOL (*orig_bool_key_def)(id, SEL, id, BOOL) = NULL;
+static BOOL new_bool_key_def(id self, SEL _cmd, id key, BOOL def) {
+    BOOL match = keyMatchesQuickSnap(key);
+    BOOL orig  = orig_bool_key_def ? orig_bool_key_def(self, _cmd, key, def) : def;
+    BOOL ret   = match ? YES : orig;
+    if (match || keyLooksInteresting(key)) {
+        MC_LOG(@"[%@] ig_boolForKey:%@ def=%d match=%d orig=%d -> %d",
+               NSStringFromClass(object_getClass(self)), key, def, match, orig, ret);
+    }
+    return ret;
+}
+
+static void hookInstance(NSString *cn, NSString *sn, IMP impl, IMP *orig) {
+    Class cls = NSClassFromString(cn);
+    if (!cls) { MC_LOG(@"class %@ MISSING", cn); return; }
+    SEL sel = NSSelectorFromString(sn);
+    if (!class_getInstanceMethod(cls, sel)) { MC_LOG(@"-[%@ %@] MISSING", cn, sn); return; }
+    MSHookMessageEx(cls, sel, impl, orig);
+    MC_LOG(@"hook -[%@ %@] OK", cn, sn);
+}
+
+%ctor {
+    if (![SCIUtils getBoolPref:@"igt_quicksnap"]) return;
+    MC_LOG(@"ctor fired");
+
+    hookInstance(@"IGMobileConfigContextManager",            @"ig_boolForKey:",              (IMP)new_bool_key,     (IMP *)&orig_bool_key);
+    hookInstance(@"IGMobileConfigContextManager",            @"ig_boolForKey:defaultValue:", (IMP)new_bool_key_def, (IMP *)&orig_bool_key_def);
+    hookInstance(@"IGMobileConfigUserSessionContextManager", @"ig_boolForKey:",              (IMP)new_bool_key,     (IMP *)&orig_bool_key);
+    hookInstance(@"IGMobileConfigUserSessionContextManager", @"ig_boolForKey:defaultValue:", (IMP)new_bool_key_def, (IMP *)&orig_bool_key_def);
+}

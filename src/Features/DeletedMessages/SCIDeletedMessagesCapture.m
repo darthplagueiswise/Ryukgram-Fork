@@ -1,0 +1,1169 @@
+#import "SCIDeletedMessagesCapture.h"
+#import "SCIDeletedMessagesModels.h"
+#import "SCIDeletedMessagesStorage.h"
+#import "../StoriesAndMessages/SCIDirectUserResolver.h"
+#import "../../Utils.h"
+#import "../../SCIDashParser.h"
+#import "../../SCIFFmpeg.h"
+#import "../../SCITempFiles.h"
+#import <objc/runtime.h>
+#import <objc/message.h>
+
+#pragma mark - Shared state
+
+static NSMapTable *sciMessageRefs(void) {
+	static NSMapTable *t;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		t = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsStrongMemory | NSPointerFunctionsObjectPersonality
+								  valueOptions:NSPointerFunctionsWeakMemory   | NSPointerFunctionsObjectPersonality];
+	});
+	return t;
+}
+
+static NSObject *sciLock(void) {
+	static NSObject *o;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ o = [NSObject new]; });
+	return o;
+}
+
+static dispatch_queue_t sciCaptureQueue(void) {
+	static dispatch_queue_t q;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		q = dispatch_queue_create("com.ryukgram.deletedmessages.capture", DISPATCH_QUEUE_SERIAL);
+	});
+	return q;
+}
+
+static dispatch_queue_t sciDownloadQueue(void) {
+	static dispatch_queue_t q;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		q = dispatch_queue_create("com.ryukgram.deletedmessages.download", DISPATCH_QUEUE_CONCURRENT);
+	});
+	return q;
+}
+
+static NSURLSession *sciSession(void) {
+	static NSURLSession *s;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.defaultSessionConfiguration;
+		cfg.timeoutIntervalForRequest = 30;
+		cfg.timeoutIntervalForResource = 120;
+		cfg.HTTPMaximumConnectionsPerHost = 4;
+		s = [NSURLSession sessionWithConfiguration:cfg];
+	});
+	return s;
+}
+
+static BOOL sciCaptureEnabled(void) {
+	return [SCIUtils getBoolPref:@"deleted_messages_log_enabled"];
+}
+
+#pragma mark - Runtime helpers
+
+static BOOL sciSystemObject(id obj) {
+	if (!obj) return YES;
+	if ([obj isKindOfClass:NSString.class] || [obj isKindOfClass:NSNumber.class] ||
+		[obj isKindOfClass:NSDate.class] || [obj isKindOfClass:NSURL.class]) return YES;
+
+	NSString *cn = NSStringFromClass([obj class]);
+	return [cn hasPrefix:@"NS"] || [cn hasPrefix:@"_NS"] || [cn hasPrefix:@"OS"] || [cn hasPrefix:@"__"];
+}
+
+static id sciIvar(id obj, const char *name) {
+	if (!obj || !name) return nil;
+
+	for (Class c = [obj class]; c; c = class_getSuperclass(c)) {
+		Ivar iv = class_getInstanceVariable(c, name);
+		if (!iv) continue;
+		@try { return object_getIvar(obj, iv); }
+		@catch (__unused id e) { return nil; }
+	}
+	return nil;
+}
+
+static NSString *sciStrIvar(id obj, const char *name) {
+	id v = sciIvar(obj, name);
+	return [v isKindOfClass:NSString.class] ? v : nil;
+}
+
+static id sciKVC(id obj, NSString *key) {
+	if (!obj || !key.length) return nil;
+	@try {
+		id v = [obj valueForKey:key];
+		return (v && v != NSNull.null) ? v : nil;
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+static BOOL sciBadDesc(NSString *s) {
+	return s.length && [s hasPrefix:@"<"] && [s containsString:@": 0x"] && [s hasSuffix:@">"];
+}
+
+static NSString *sciStringValue(id v) {
+	if ([v isKindOfClass:NSAttributedString.class]) v = [(NSAttributedString *)v string];
+	if ([v isKindOfClass:NSString.class] && [(NSString *)v length] && !sciBadDesc(v)) return v;
+	if ([v isKindOfClass:NSNumber.class]) return [(NSNumber *)v stringValue];
+	return nil;
+}
+
+static NSString *sciURLValue(id v) {
+	if ([v isKindOfClass:NSURL.class]) return [(NSURL *)v absoluteString];
+	if ([v isKindOfClass:NSString.class] && [(NSString *)v length]) return v;
+	return nil;
+}
+
+static NSString *sciPickString(id obj, NSArray<NSString *> *keys) {
+	for (NSString *k in keys) {
+		NSString *s = sciStringValue(sciKVC(obj, k));
+		if (s.length) return s;
+	}
+	return nil;
+}
+
+static NSString *sciPickURL(id obj, NSArray<NSString *> *keys) {
+	for (NSString *k in keys) {
+		NSString *s = sciURLValue(sciKVC(obj, k));
+		if (s.length) return s;
+	}
+	return nil;
+}
+
+static double sciDouble(id obj, NSString *selName) {
+	if (!obj || !selName.length) return 0;
+
+	SEL sel = NSSelectorFromString(selName);
+	if (![obj respondsToSelector:sel]) return 0;
+
+	@try {
+		NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
+		if (!sig) return 0;
+
+		NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+		inv.target = obj;
+		inv.selector = sel;
+		[inv invoke];
+
+		const char *rt = sig.methodReturnType;
+		if (strcmp(rt, "d") == 0) { double r; [inv getReturnValue:&r]; return r; }
+		if (strcmp(rt, "f") == 0) { float r; [inv getReturnValue:&r]; return r; }
+		if (strcmp(rt, "q") == 0) { long long r; [inv getReturnValue:&r]; return r; }
+		if (strcmp(rt, "Q") == 0) { unsigned long long r; [inv getReturnValue:&r]; return r; }
+		if (strcmp(rt, "i") == 0) { int r; [inv getReturnValue:&r]; return r; }
+	} @catch (__unused id e) {}
+
+	return 0;
+}
+
+#pragma mark - Recursive scan helpers
+
+static BOOL sciURLish(NSString *s) {
+	return [s hasPrefix:@"http://"] || [s hasPrefix:@"https://"] ||
+		   [s hasPrefix:@"instagram://"] || [s hasPrefix:@"fb://"] ||
+		   [s hasPrefix:@"fbthreads://"] || [s hasPrefix:@"intent://"];
+}
+
+static BOOL sciAudioish(NSString *s) {
+	NSString *x = s.lowercaseString ?: @"";
+	return [x containsString:@"audio"] || [x containsString:@"voice"] ||
+		   [x containsString:@"music"] || [x containsString:@".m4a"] ||
+		   [x containsString:@".mp3"] || [x containsString:@".aac"] ||
+		   [x containsString:@".opus"] || [x containsString:@".oga"];
+}
+
+static void sciScoreURL(NSString *s, NSString *name, NSString **media, int *ms, NSString **thumb, int *ts) {
+	if (!sciURLish(s)) return;
+
+	NSString *n = name.lowercaseString ?: @"";
+	BOOL th = [n containsString:@"thumb"] || [n containsString:@"preview"] ||
+			  [n containsString:@"poster"] || [n containsString:@"cover"] ||
+			  [n containsString:@"image"];
+
+	BOOL audio = [n containsString:@"audio"] || [n containsString:@"voice"] || sciAudioish(s);
+	BOOL med = audio || [n containsString:@"playable"] || [n containsString:@"video"] ||
+			   [n containsString:@"asset"] || [n containsString:@"download"] ||
+			   [n containsString:@"src"] || [n containsString:@"url"];
+
+	int score = audio ? 10 : (med ? 5 : 1);
+
+	if (th && !audio) {
+		if (score > *ts) { *ts = score; *thumb = s; }
+	} else if (score > *ms) {
+		*ms = score;
+		*media = s;
+	}
+}
+
+static void sciScanURLs(id obj, int depth, NSString **media, int *ms, NSString **thumb, int *ts, NSString *name) {
+	if (!obj || depth < 0) return;
+
+	if ([obj isKindOfClass:NSString.class]) {
+		sciScoreURL(obj, name, media, ms, thumb, ts);
+		return;
+	}
+
+	if ([obj isKindOfClass:NSURL.class]) {
+		sciScoreURL([(NSURL *)obj absoluteString], name, media, ms, thumb, ts);
+		return;
+	}
+
+	if ([obj isKindOfClass:NSArray.class]) {
+		for (id e in (NSArray *)obj) sciScanURLs(e, depth - 1, media, ms, thumb, ts, name);
+		return;
+	}
+
+	if ([obj isKindOfClass:NSDictionary.class]) {
+		for (id k in (NSDictionary *)obj) {
+			NSString *kn = [k isKindOfClass:NSString.class] ? k : name;
+			sciScanURLs(((NSDictionary *)obj)[k], depth - 1, media, ms, thumb, ts, kn);
+		}
+		return;
+	}
+
+	if (sciSystemObject(obj)) return;
+
+	for (Class c = [obj class]; c && c != NSObject.class; c = class_getSuperclass(c)) {
+		unsigned int n = 0;
+		Ivar *list = class_copyIvarList(c, &n);
+
+		for (unsigned int i = 0; i < n; i++) {
+			const char *type = ivar_getTypeEncoding(list[i]);
+			if (!type || type[0] != '@') continue;
+
+			id v = nil;
+			@try { v = object_getIvar(obj, list[i]); }
+			@catch (__unused id e) {}
+
+			if (!v) continue;
+			const char *ivn = ivar_getName(list[i]);
+			sciScanURLs(v, depth - 1, media, ms, thumb, ts, ivn ? @(ivn) : name);
+		}
+
+		if (list) free(list);
+	}
+}
+
+static void sciCollectTokens(id obj, int depth, NSMutableSet *seen, NSMutableSet<NSString *> *out) {
+	if (!obj || depth < 0) return;
+
+	if ([obj isKindOfClass:NSArray.class]) {
+		for (id e in (NSArray *)obj) sciCollectTokens(e, depth - 1, seen, out);
+		return;
+	}
+
+	if ([obj isKindOfClass:NSDictionary.class]) {
+		for (id k in (NSDictionary *)obj) {
+			if ([k isKindOfClass:NSString.class]) [out addObject:[(NSString *)k lowercaseString]];
+			sciCollectTokens(((NSDictionary *)obj)[k], depth - 1, seen, out);
+		}
+		return;
+	}
+
+	if (sciSystemObject(obj)) return;
+
+	NSValue *box = [NSValue valueWithNonretainedObject:obj];
+	if ([seen containsObject:box]) return;
+	[seen addObject:box];
+
+	[out addObject:NSStringFromClass([obj class]).lowercaseString];
+
+	for (Class c = [obj class]; c && c != NSObject.class; c = class_getSuperclass(c)) {
+		unsigned int n = 0;
+		Ivar *list = class_copyIvarList(c, &n);
+
+		for (unsigned int i = 0; i < n; i++) {
+			const char *type = ivar_getTypeEncoding(list[i]);
+			if (!type || type[0] != '@') continue;
+
+			id v = nil;
+			@try { v = object_getIvar(obj, list[i]); }
+			@catch (__unused id e) {}
+
+			if (!v) continue;
+
+			const char *ivn = ivar_getName(list[i]);
+			if (ivn) [out addObject:[@(ivn) lowercaseString]];
+			sciCollectTokens(v, depth - 1, seen, out);
+		}
+
+		if (list) free(list);
+	}
+}
+
+static BOOL sciTokensContain(NSSet<NSString *> *tokens, NSArray<NSString *> *needles) {
+	for (NSString *t in tokens) {
+		for (NSString *n in needles) {
+			if ([t containsString:n]) return YES;
+		}
+	}
+	return NO;
+}
+
+#pragma mark - Metadata extraction
+
+static NSString *sciSidFromMessage(id m) {
+	id meta = sciIvar(m, "_metadata");
+	NSString *sid = sciStrIvar(meta, "_serverId") ?: sciStrIvar(meta, "_messageServerId");
+
+	if (!sid.length) {
+		id key = sciIvar(meta, "_key");
+		sid = sciStrIvar(key, "_serverId") ?: sciStrIvar(key, "_messageServerId");
+	}
+
+	return sid;
+}
+
+static NSString *sciSenderPkFromMessage(id m) {
+	return sciStrIvar(sciIvar(m, "_metadata"), "_senderPk");
+}
+
+static NSDate *sciSentAtFromMessage(id m) {
+	id meta = sciIvar(m, "_metadata");
+	if (!meta) return nil;
+
+	for (NSString *k in @[@"_serverTimestamp", @"_clientTimestamp", @"_timestamp"]) {
+		id v = sciIvar(meta, k.UTF8String);
+
+		if ([v isKindOfClass:NSDate.class]) return v;
+
+		if ([v isKindOfClass:NSNumber.class]) {
+			double d = [(NSNumber *)v doubleValue];
+			if (d > 1.0e12) d /= 1.0e9;
+			else if (d > 1.0e10) d /= 1.0e3;
+			if (d > 0) return [NSDate dateWithTimeIntervalSince1970:d];
+		}
+	}
+
+	return nil;
+}
+
+static void sciResolveSender(NSString *pk, NSString **outUser, NSString **outName, NSString **outPic) {
+	if (!pk.length) return;
+
+	NSString *u = sciDirectUserResolverUsernameForPK(pk);
+	NSString *p = sciDirectUserResolverProfilePicURLStringForPK(pk);
+	NSString *fn = nil;
+
+	id user = sciDirectUserResolverUserForPK(pk);
+	NSDictionary *fc = nil;
+
+	if (user) {
+		id raw = sciIvar(user, "_fieldCache");
+		if ([raw isKindOfClass:NSDictionary.class]) fc = raw;
+
+		NSString *(^fcStr)(NSString *) = ^NSString *(NSString *k) {
+			id v = fc[k];
+			return [v isKindOfClass:NSString.class] && [(NSString *)v length] ? v : nil;
+		};
+
+		if (!u.length) u = fcStr(@"username");
+		if (!p.length) p = fcStr(@"profile_pic_url");
+		fn = fcStr(@"full_name") ?: sciStringValue(sciKVC(user, @"fullName"));
+	}
+
+	if (outUser) *outUser = u;
+	if (outName) *outName = fn;
+	if (outPic) *outPic = p;
+}
+
+static NSString *sciReplyIdFromMessage(id message) {
+	id meta = sciIvar(message, "_metadata");
+
+	for (NSString *k in @[@"_replyToMessageId", @"_replyMessageId", @"_quotedMessageId", @"_repliedToMessageId", @"_parentMessageId"]) {
+		NSString *v = sciStrIvar(meta, k.UTF8String) ?: sciStrIvar(message, k.UTF8String);
+		if (v.length) return v;
+	}
+
+	for (NSString *k in @[@"replyToMessageId", @"replyMessageId", @"quotedMessageId", @"repliedToMessageId", @"reply_message_id"]) {
+		NSString *v = sciStringValue(sciKVC(message, k));
+		if (v.length) return v;
+	}
+
+	return nil;
+}
+
+#pragma mark - Share / XMA / voice
+
+static NSString *sciDeepTitle(id obj) {
+	if (!obj) return nil;
+
+	NSMutableArray *stack = [NSMutableArray arrayWithObject:obj];
+	NSMutableSet *seen = [NSMutableSet set];
+	NSString *best = nil;
+	NSArray *keys = @[@"title", @"caption", @"text", @"name", @"description", @"summary", @"label", @"username", @"headline"];
+
+	for (int hops = 0; stack.count && hops < 96; hops++) {
+		id cur = stack.lastObject;
+		[stack removeLastObject];
+
+		if ([cur isKindOfClass:NSArray.class]) {
+			for (id e in (NSArray *)cur) [stack addObject:e];
+			continue;
+		}
+
+		if (sciSystemObject(cur)) continue;
+
+		NSValue *box = [NSValue valueWithNonretainedObject:cur];
+		if ([seen containsObject:box]) continue;
+		[seen addObject:box];
+
+		for (Class c = [cur class]; c && c != NSObject.class; c = class_getSuperclass(c)) {
+			unsigned int n = 0;
+			Ivar *list = class_copyIvarList(c, &n);
+
+			for (unsigned int i = 0; i < n; i++) {
+				const char *type = ivar_getTypeEncoding(list[i]);
+				if (!type || type[0] != '@') continue;
+
+				id v = nil;
+				@try { v = object_getIvar(cur, list[i]); }
+				@catch (__unused id e) {}
+
+				if (!v) continue;
+
+				NSString *name = ivar_getName(list[i]) ? [@(ivar_getName(list[i])) lowercaseString] : @"";
+				if ([v isKindOfClass:NSString.class]) {
+					for (NSString *k in keys) {
+						if (![name containsString:k]) continue;
+						NSString *s = sciStringValue(v);
+						if (s.length && (!best || s.length > best.length)) best = s;
+					}
+				} else {
+					[stack addObject:v];
+				}
+			}
+
+			if (list) free(list);
+		}
+	}
+
+	return best;
+}
+
+static NSArray *sciXMATargets(id xma) {
+	NSMutableArray *a = [NSMutableArray array];
+	if (xma) [a addObject:xma];
+
+	id items = sciKVC(xma, @"xmaItems");
+	if ([items isKindOfClass:NSArray.class]) {
+		for (id it in (NSArray *)items) {
+			if (it) [a addObject:it];
+			id meta = sciKVC(it, @"metadata");
+			id preview = sciKVC(it, @"preview");
+			if (meta) [a addObject:meta];
+			if (preview) [a addObject:preview];
+		}
+	}
+
+	id meta = sciKVC(xma, @"metadata");
+	if (meta) [a addObject:meta];
+
+	return a;
+}
+
+static BOOL sciXMAIsAudio(id xma, NSArray *targets, NSString *contentType) {
+	NSString *ct = contentType.lowercaseString ?: @"";
+	if ([ct containsString:@"audio"] || [ct containsString:@"music"] || [ct containsString:@"reels_audio"]) return YES;
+
+	NSArray *audioKeys = @[@"playableAudioURL", @"accessoryPlayableURL", @"audioURL", @"audioUrl", @"musicAssetURL", @"voiceURL", @"voiceUrl"];
+	NSArray *targetKeys = @[@"targetURL", @"webURL", @"shareURL", @"deepLink", @"url", @"mediaURL", @"playableURL", @"fullSizeURL"];
+
+	for (id obj in targets) {
+		if (sciPickURL(obj, audioKeys).length) return YES;
+
+		NSString *u = sciPickURL(obj, targetKeys).lowercaseString;
+		if ([u containsString:@"reels_audio_page"] || [u containsString:@"audio_page"] ||
+			[u containsString:@"/audio/"] || [u containsString:@"music_canonical_id"] ||
+			[u containsString:@"original_audio"]) return YES;
+	}
+
+	NSString *m = nil, *t = nil;
+	int ms = 0, ts = 0;
+	sciScanURLs(xma, 4, &m, &ms, &t, &ts, @"xma");
+	return sciAudioish(m);
+}
+
+static void sciExtractXMA(id xma, SCIDeletedMessageKind *kind, NSString **text, NSString **media, int *ms, NSString **thumb, int *ts) {
+	if (!xma || !kind) return;
+
+	NSString *ct = sciStringValue(sciKVC(xma, @"contentType")).lowercaseString;
+	NSArray *targets = sciXMATargets(xma);
+	BOOL audio = sciXMAIsAudio(xma, targets, ct);
+
+	if (audio) *kind = SCIDeletedMessageKindAudioShare;
+	else if ([ct containsString:@"link"]) *kind = SCIDeletedMessageKindLink;
+	else *kind = SCIDeletedMessageKindShare;
+
+	NSArray *titles = @[@"headerTitleText", @"titleText", @"headerSubtitleText", @"subtitleText",
+						@"captionBodyText", @"footerBodyText", @"overlayTitle", @"overlayDescription",
+						@"quotedTitleText", @"quotedAttributionText", @"groupName", @"targetURLTitle",
+						@"artistName", @"audioTitle", @"musicTitle", @"title", @"caption", @"text",
+						@"summary", @"description"];
+
+	NSArray *mediaKeys = audio
+		? @[@"playableAudioURL", @"audioURL", @"audioUrl", @"accessoryPlayableURL", @"playableURL",
+			@"fullSizeURL", @"targetURL", @"webURL", @"shareURL", @"deepLink", @"url", @"mediaURL"]
+		: @[@"targetURL", @"webURL", @"shareURL", @"deepLink", @"url", @"mediaURL",
+			@"playableURL", @"playableAudioURL", @"accessoryPlayableURL", @"fullSizeURL"];
+
+	NSArray *thumbKeys = @[@"previewURL", @"accessoryPreviewURL", @"previewMaskURL", @"previewIgImageURL",
+						   @"thumbnailURL", @"posterURL", @"imageURL"];
+
+	NSMutableArray *parts = [NSMutableArray array];
+	for (id obj in targets) {
+		NSString *s = sciPickString(obj, titles);
+		if (s.length && ![parts containsObject:s]) [parts addObject:s];
+		if (parts.count >= 3) break;
+	}
+	if (!(*text).length && parts.count) *text = [parts componentsJoinedByString:@"\n"];
+
+	for (id obj in targets) {
+		if (!(*media).length) {
+			NSString *u = sciPickURL(obj, mediaKeys);
+			if (u.length) { *media = u; *ms = audio ? 120 : 70; }
+		}
+		if (!(*thumb).length) {
+			NSString *u = sciPickURL(obj, thumbKeys);
+			if (u.length) { *thumb = u; *ts = 70; }
+		}
+		if ((*media).length && (*thumb).length) break;
+	}
+
+	sciScanURLs(xma, 5, media, ms, thumb, ts, audio ? @"playableAudioURL" : @"xma");
+
+	if (*kind == SCIDeletedMessageKindLink && (*media).length) {
+		NSURL *u = [NSURL URLWithString:*media];
+		NSString *host = u.host.lowercaseString;
+		if ([host isEqualToString:@"l.instagram.com"] || [host isEqualToString:@"l.facebook.com"] || [host isEqualToString:@"lm.facebook.com"]) {
+			NSURLComponents *c = [NSURLComponents componentsWithURL:u resolvingAgainstBaseURL:NO];
+			for (NSURLQueryItem *q in c.queryItems) {
+				if ([q.name isEqualToString:@"u"] && q.value.length) {
+					*media = q.value;
+					break;
+				}
+			}
+		}
+	}
+}
+
+static void sciVoiceMeta(id media, double *dur, NSArray **wave) {
+	if (!media) return;
+
+	NSMutableArray *stack = [NSMutableArray arrayWithObject:media];
+	NSMutableSet *seen = [NSMutableSet set];
+
+	while (stack.count) {
+		id cur = stack.lastObject;
+		[stack removeLastObject];
+
+		if ([cur isKindOfClass:NSArray.class]) {
+			for (id e in (NSArray *)cur) [stack addObject:e];
+			continue;
+		}
+
+		if (sciSystemObject(cur)) continue;
+
+		NSValue *box = [NSValue valueWithNonretainedObject:cur];
+		if ([seen containsObject:box]) continue;
+		[seen addObject:box];
+
+		if (!*dur) {
+			double d = sciDouble(cur, @"durationInSeconds");
+			if (d <= 0) d = sciDouble(cur, @"duration");
+			if (d <= 0) d = sciDouble(cur, @"audioDuration");
+			if (d <= 0) d = sciDouble(cur, @"playbackDuration");
+
+			if (d <= 0) {
+				for (Class c = [cur class]; c && c != NSObject.class; c = class_getSuperclass(c)) {
+					Ivar iv = class_getInstanceVariable(c, "_durationMs") ?: class_getInstanceVariable(c, "_instamadillo_durationMs");
+					if (!iv) continue;
+
+					const char *t = ivar_getTypeEncoding(iv);
+					ptrdiff_t off = ivar_getOffset(iv);
+					if (t[0] == 'q' || t[0] == 'Q') {
+						long long ms = *(long long *)((char *)(__bridge void *)cur + off);
+						if (ms > 0) d = ms / 1000.0;
+					}
+					break;
+				}
+			}
+
+			if (d > 0) *dur = d;
+		}
+
+		if (!*wave) {
+			id w = sciIvar(cur, "_averageVolume") ?: sciIvar(cur, "_waveformData") ?:
+				   sciIvar(cur, "_waveform") ?: sciIvar(cur, "_amplitudes") ?:
+				   sciKVC(cur, @"waveform") ?: sciKVC(cur, @"waveformData") ?: sciKVC(cur, @"averageVolume");
+			if ([w isKindOfClass:NSArray.class]) *wave = w;
+		}
+
+		for (Class c = [cur class]; c && c != NSObject.class; c = class_getSuperclass(c)) {
+			unsigned int n = 0;
+			Ivar *list = class_copyIvarList(c, &n);
+
+			for (unsigned int i = 0; i < n; i++) {
+				const char *type = ivar_getTypeEncoding(list[i]);
+				if (!type || type[0] != '@') continue;
+
+				id v = nil;
+				@try { v = object_getIvar(cur, list[i]); }
+				@catch (__unused id e) {}
+
+				if (v) [stack addObject:v];
+			}
+
+			if (list) free(list);
+		}
+	}
+}
+
+#pragma mark - Snapshot
+
+static NSDictionary *sciBuildSnapshot(id message, NSString *ownerHint) {
+	NSString *sid = sciSidFromMessage(message);
+	if (!sid.length) return nil;
+
+	NSMutableDictionary *snap = [NSMutableDictionary dictionary];
+	snap[@"sid"] = sid;
+	if (ownerHint.length) snap[@"owner_pk"] = ownerHint;
+
+	NSString *threadId = sciStringValue(sciKVC(message, @"threadId"));
+	id meta = sciIvar(message, "_metadata");
+	if (!threadId.length) threadId = sciStrIvar(meta, "_threadId") ?: sciStrIvar(meta, "_threadID");
+	if (threadId.length) snap[@"thread_id"] = threadId;
+
+	NSString *senderPk = sciSenderPkFromMessage(message);
+	if (senderPk.length) {
+		NSString *u = nil, *fn = nil, *pic = nil;
+		sciResolveSender(senderPk, &u, &fn, &pic);
+
+		snap[@"sender_pk"] = senderPk;
+		if (u.length) snap[@"sender_username"] = u;
+		if (fn.length) snap[@"sender_full_name"] = fn;
+		if (pic.length) snap[@"sender_profile_pic_url"] = pic;
+	}
+
+	NSDate *sentAt = sciSentAtFromMessage(message);
+	if (sentAt) snap[@"sent_at"] = sentAt;
+
+	NSString *replyId = sciReplyIdFromMessage(message);
+	if (replyId.length) snap[@"reply_to_id"] = replyId;
+
+	id content = sciIvar(message, "_content") ?: sciIvar(message, "_messageContent") ?: sciIvar(message, "_payload") ?: sciKVC(message, @"content");
+	if (!content) {
+		snap[@"kind"] = @(SCIDeletedMessageKindUnknown);
+		return snap;
+	}
+
+	if (sciIvar(content, "_threadActivity") ||
+		sciIvar(content, "_messageTypeNotLocallyAvailable_placeholderTitle") ||
+		sciIvar(content, "_messageTypeNotLocallyAvailable_placeholderMessage") ||
+		sciIvar(content, "_expiredPlaceholder_messageContent")) return nil;
+
+	SCIDeletedMessageKind kind = SCIDeletedMessageKindUnknown;
+	NSString *text = nil, *mediaURL = nil, *thumbURL = nil;
+	int mediaScore = 0, thumbScore = 0;
+
+	NSString *txt = sciStrIvar(content, "_text_string");
+	if (txt.length) {
+		kind = SCIDeletedMessageKindText;
+		text = txt;
+	}
+
+	id media = sciIvar(content, "_media");
+	if (media) {
+		NSMutableSet *seen = [NSMutableSet set];
+		NSMutableSet *tokens = [NSMutableSet set];
+		sciCollectTokens(media, 5, seen, tokens);
+
+		if (sciTokensContain(tokens, @[@"voice", @"voicemedia", @"audio", @"audiomedia", @"audioclip"])) kind = SCIDeletedMessageKindVoice;
+		else if (sciTokensContain(tokens, @[@"sticker"])) kind = SCIDeletedMessageKindSticker;
+		else if (sciTokensContain(tokens, @[@"giphy", @"gif", @"animated"])) kind = SCIDeletedMessageKindGif;
+		else if (sciTokensContain(tokens, @[@"video", @"dashmanifest", @"playableurl"])) kind = SCIDeletedMessageKindVideo;
+		else kind = SCIDeletedMessageKindPhoto;
+
+		if (kind == SCIDeletedMessageKindVoice) {
+			double dur = 0;
+			NSArray *wf = nil;
+			sciVoiceMeta(media, &dur, &wf);
+
+			if (dur > 0) snap[@"duration"] = @(dur);
+			if (wf.count) snap[@"waveform"] = wf;
+
+			NSString *u = sciPickURL(media, @[@"playableAudioURL", @"audioURL", @"voiceURL", @"playableURL", @"url", @"mediaURL"]);
+			if (u.length) {
+				mediaURL = u;
+				mediaScore = 120;
+			}
+		}
+
+		if (kind == SCIDeletedMessageKindVideo) {
+			id permanent = sciIvar(media, "_permanentMedia_permanentMedia");
+			id visual = sciIvar(media, "_visualMedia");
+			id video = nil, overlay = nil;
+
+			if (permanent) {
+				video = sciIvar(permanent, "_video_video") ?: sciIvar(permanent, "_videoMemo_memoVideo");
+				overlay = sciIvar(permanent, "_video_overlayPhoto") ?: sciIvar(permanent, "_videoMemo_videoMemoPhoto");
+			}
+
+			if (!video && visual) {
+				video = sciIvar(visual, "_video_video") ?: sciIvar(visual, "_video");
+				overlay = overlay ?: sciIvar(visual, "_video_overlayPhoto") ?: sciIvar(visual, "_overlayPhoto");
+			}
+
+			NSData *manifest = video ? sciIvar(video, "_dashManifestData") : nil;
+			if ([manifest isKindOfClass:NSData.class] && manifest.length) {
+				NSString *xml = [[NSString alloc] initWithData:manifest encoding:NSUTF8StringEncoding];
+				NSArray<SCIDashRepresentation *> *reps = [SCIDashParser parseManifest:xml];
+				SCIDashRepresentation *bestV = [SCIDashParser bestVideoFromRepresentations:reps];
+				SCIDashRepresentation *bestA = [SCIDashParser bestAudioFromRepresentations:reps];
+
+				if (bestV.url.absoluteString.length) {
+					mediaURL = bestV.url.absoluteString;
+					mediaScore = 100;
+				}
+				if (bestA.url.absoluteString.length) snap[@"audio_url"] = bestA.url.absoluteString;
+			}
+
+			if (!mediaURL.length && video) {
+				for (NSString *iv in @[@"_broadcastURL", @"_subtitleURL", @"_playableURL"]) {
+					id v = sciIvar(video, iv.UTF8String);
+					if ([v isKindOfClass:NSURL.class]) {
+						mediaURL = [(NSURL *)v absoluteString];
+						mediaScore = 90;
+						break;
+					}
+				}
+			}
+
+			if (overlay) {
+				NSString *m = nil, *t = nil;
+				int ms = 0, ts = 0;
+				sciScanURLs(overlay, 4, &m, &ms, &t, &ts, @"thumbnail");
+				if ((t ?: m).length) {
+					thumbURL = t ?: m;
+					thumbScore = MAX(ts, ms);
+				}
+			}
+		}
+
+		sciScanURLs(media, 5, &mediaURL, &mediaScore, &thumbURL, &thumbScore, kind == SCIDeletedMessageKindVoice ? @"playableAudioURL" : @"media");
+	}
+
+	id reshare = sciIvar(content, "_reshare_attachment");
+	if (reshare && kind == SCIDeletedMessageKindUnknown) {
+		kind = SCIDeletedMessageKindShare;
+		sciScanURLs(reshare, 5, &mediaURL, &mediaScore, &thumbURL, &thumbScore, @"reshare");
+
+		text = sciStrIvar(content, "_reshare_comment") ?: sciDeepTitle(reshare);
+		if (!text.length) text = sciPickString(reshare, @[@"caption", @"captionText", @"title", @"headline", @"summary", @"name", @"username", @"text"]);
+		if (!mediaURL.length) mediaURL = sciPickURL(reshare, @[@"webURL", @"shareURL", @"deepLink", @"url", @"mediaURL", @"playableURL"]);
+	}
+
+	id link = sciIvar(content, "_link_linkContext");
+	if (link && kind == SCIDeletedMessageKindUnknown) {
+		kind = SCIDeletedMessageKindLink;
+
+		mediaURL = sciURLValue(sciIvar(link, "_url"));
+		thumbURL = sciURLValue(sciIvar(link, "_imageURL"));
+
+		NSMutableArray *parts = [NSMutableArray array];
+		for (NSString *s in @[sciStrIvar(content, "_link_commentText") ?: @"",
+							   sciStrIvar(link, "_title") ?: @"",
+							   sciStrIvar(link, "_summary") ?: @""]) {
+			if (s.length) [parts addObject:s];
+		}
+		if (!parts.count && mediaURL.length) [parts addObject:mediaURL];
+		if (parts.count) text = [parts componentsJoinedByString:@"\n"];
+	}
+
+	id xma = sciIvar(content, "_xma") ?: sciIvar(content, "_bloksXMA") ?: sciIvar(content, "_pollMessage") ?: sciIvar(content, "_progressiveImage");
+	if (xma && (kind == SCIDeletedMessageKindUnknown || kind == SCIDeletedMessageKindShare || kind == SCIDeletedMessageKindLink)) {
+		SCIDeletedMessageKind xk = SCIDeletedMessageKindUnknown;
+		NSString *xt = text, *xm = nil, *xh = nil;
+		int xms = 0, xts = 0;
+
+		sciExtractXMA(xma, &xk, &xt, &xm, &xms, &xh, &xts);
+
+		if (xk != SCIDeletedMessageKindUnknown) {
+			kind = xk;
+			if (xt.length) text = xt;
+			if (xm.length && xms >= mediaScore) {
+				mediaURL = xm;
+				mediaScore = xms;
+			}
+			if (xh.length && xts >= thumbScore) {
+				thumbURL = xh;
+				thumbScore = xts;
+			}
+		}
+	}
+
+	if (kind == SCIDeletedMessageKindUnknown && text.length) kind = SCIDeletedMessageKindText;
+
+	snap[@"kind"] = @(kind);
+	if (text.length) snap[@"text"] = text;
+	if (mediaURL.length) snap[@"media_url"] = mediaURL;
+	if (thumbURL.length) snap[@"thumb_url"] = thumbURL;
+
+	return snap;
+}
+
+#pragma mark - Download
+
+static NSString *sciExt(NSURL *url, NSURLResponse *resp, BOOL thumb) {
+	NSString *e = url.pathExtension.lowercaseString;
+	if (e.length) return e;
+
+	NSString *m = resp.MIMEType.lowercaseString ?: @"";
+	if ([m containsString:@"jpeg"] || [m containsString:@"jpg"]) return @"jpg";
+	if ([m containsString:@"png"]) return @"png";
+	if ([m containsString:@"gif"]) return @"gif";
+	if ([m containsString:@"webp"]) return @"webp";
+	if ([m containsString:@"mp4"]) return @"mp4";
+	if ([m containsString:@"mpeg"] || [m containsString:@"mp3"]) return @"mp3";
+	if ([m containsString:@"aac"]) return @"aac";
+	if ([m containsString:@"m4a"]) return @"m4a";
+	if ([m containsString:@"ogg"] || [m containsString:@"opus"]) return @"ogg";
+	return thumb ? @"jpg" : @"mp4";
+}
+
+static void sciDownloadTemp(NSURL *url, void (^done)(NSURL *file, NSError *err)) {
+	if (!url) {
+		done(nil, [NSError errorWithDomain:@"SCIDM" code:0 userInfo:nil]);
+		return;
+	}
+
+	[[sciSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+		if (err || !data.length) {
+			done(nil, err);
+			return;
+		}
+
+		NSURL *file = [SCITempFiles claimWithExt:sciExt(url, resp, NO) ttl:300 tag:@"dm"];
+		if (![data writeToFile:file.path atomically:YES]) {
+			[SCITempFiles releaseURL:file];
+			done(nil, [NSError errorWithDomain:@"SCIDM" code:1 userInfo:nil]);
+			return;
+		}
+
+		done(file, nil);
+	}] resume];
+}
+
+static void sciDownloadAndMuxVideo(NSString *videoURL, NSString *audioURL, NSString *messageId, NSString *ownerPk) {
+	if (!videoURL.length || !audioURL.length || !messageId.length || ![SCIFFmpeg isAvailable]) return;
+
+	NSURL *vURL = [NSURL URLWithString:videoURL];
+	NSURL *aURL = [NSURL URLWithString:audioURL];
+	if (!vURL || !aURL) return;
+
+	dispatch_async(sciDownloadQueue(), ^{
+		__block NSURL *vFile = nil, *aFile = nil;
+		dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+
+		sciDownloadTemp(vURL, ^(NSURL *f, NSError *e) {
+			if (!e) vFile = f;
+			dispatch_semaphore_signal(sema);
+		});
+		dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+		sciDownloadTemp(aURL, ^(NSURL *f, NSError *e) {
+			if (!e) aFile = f;
+			dispatch_semaphore_signal(sema);
+		});
+		dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
+		if (!vFile || !aFile) {
+			if (vFile) [NSFileManager.defaultManager removeItemAtURL:vFile error:nil];
+			if (aFile) [NSFileManager.defaultManager removeItemAtURL:aFile error:nil];
+			return;
+		}
+
+		[SCIFFmpeg muxVideoURL:vFile audioURL:aFile preset:nil progress:nil completion:^(NSURL *outURL, NSError *err) {
+			[NSFileManager.defaultManager removeItemAtURL:vFile error:nil];
+			[NSFileManager.defaultManager removeItemAtURL:aFile error:nil];
+
+			if (err || !outURL) return;
+
+			NSString *rel = [SCIDeletedMessagesStorage reserveRelativeMediaPathForMessageId:messageId extension:@"mp4" ownerPK:ownerPk];
+			NSString *abs = [SCIDeletedMessagesStorage absolutePathForRelativePath:rel ownerPK:ownerPk];
+			if (!abs.length) return;
+
+			[NSFileManager.defaultManager removeItemAtPath:abs error:nil];
+			if (![NSFileManager.defaultManager moveItemAtURL:outURL toURL:[NSURL fileURLWithPath:abs] error:nil]) return;
+
+			[SCIDeletedMessagesStorage updateMessageWithId:messageId ownerPK:ownerPk mutator:^BOOL(SCIDeletedMessage *m) {
+				m.mediaPath = rel;
+				return YES;
+			}];
+		}];
+	});
+}
+
+static void sciDownloadMedia(NSString *urlString, NSString *messageId, NSString *ownerPk, BOOL thumb) {
+	if (!urlString.length || !messageId.length) return;
+
+	NSURL *url = [NSURL URLWithString:urlString];
+	if (!url) return;
+
+	dispatch_async(sciDownloadQueue(), ^{
+		[[sciSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+			if (err || !data.length) return;
+
+			NSString *ext = sciExt(url, resp, thumb);
+			NSString *rel = thumb
+				? [NSString stringWithFormat:@"thumb_%@.%@", messageId, ext]
+				: [SCIDeletedMessagesStorage reserveRelativeMediaPathForMessageId:messageId extension:ext ownerPK:ownerPk];
+
+			NSString *abs = [SCIDeletedMessagesStorage absolutePathForRelativePath:rel ownerPK:ownerPk];
+			if (!abs.length || ![data writeToFile:abs atomically:YES]) return;
+
+			[SCIDeletedMessagesStorage updateMessageWithId:messageId ownerPK:ownerPk mutator:^BOOL(SCIDeletedMessage *m) {
+				if (thumb) m.thumbnailPath = rel;
+				else m.mediaPath = rel;
+				return YES;
+			}];
+		}] resume];
+	});
+}
+
+#pragma mark - Fallback lookup
+
+static id sciFallbackLookupMessage(id applicator, NSString *sid, NSString *threadId) {
+	if (!applicator || !sid.length || !threadId.length) return nil;
+
+	@try {
+		id cache = sciIvar(applicator, "_cache");
+		SEL sel = NSSelectorFromString(@"threadClientStateForThreadId:");
+		if (!cache || ![cache respondsToSelector:sel]) return nil;
+
+		id state = ((id (*)(id, SEL, id))objc_msgSend)(cache, sel, threadId);
+		id dict = sciIvar(state, "_messagesByServerId");
+		return [dict isKindOfClass:NSDictionary.class] ? dict[sid] : nil;
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+#pragma mark - Edit state
+
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *sciEditStates(void) {
+	static NSMutableDictionary *d;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ d = [NSMutableDictionary new]; });
+	return d;
+}
+
+static NSMutableDictionary *sciEditState(NSString *sid, BOOL create) {
+	if (!sid.length) return nil;
+
+	@synchronized (sciLock()) {
+		NSMutableDictionary *state = sciEditStates()[sid];
+		if (state || !create) return state;
+
+		if (sciEditStates().count >= 4000) {
+			NSArray *keys = sciEditStates().allKeys;
+			NSUInteger drop = MIN((NSUInteger)400, keys.count);
+			for (NSUInteger i = 0; i < drop; i++) [sciEditStates() removeObjectForKey:keys[i]];
+		}
+
+		state = [NSMutableDictionary dictionary];
+		sciEditStates()[sid] = state;
+		return state;
+	}
+}
+
+#pragma mark - Public hooks
+
+void sciDMCaptureNoteInsert(id message) {
+	if (!sciCaptureEnabled() || !message) return;
+
+	@try {
+		NSString *sid = sciSidFromMessage(message);
+		if (!sid.length) return;
+
+		@synchronized (sciLock()) {
+			[sciMessageRefs() setObject:message forKey:sid];
+		}
+
+		id content = sciIvar(message, "_content") ?: sciIvar(message, "_messageContent") ?: sciIvar(message, "_payload");
+		NSString *txt = sciStrIvar(content, "_text_string");
+		if (!txt.length) return;
+
+		NSMutableDictionary *st = sciEditState(sid, YES);
+		if (!st[@"original"]) st[@"original"] = txt.copy;
+	} @catch (__unused id e) {}
+}
+
+void sciDMCaptureNoteEdit(NSString *messageId, id contentMutation, NSString *ownerPk, NSString *threadId) {
+	if (!sciCaptureEnabled() || !messageId.length || !contentMutation) return;
+
+	NSString *newText = sciStrIvar(contentMutation, "_editText_newContent");
+	if (!newText.length) return;
+
+	long long editCount = 0;
+	@try {
+		Ivar iv = class_getInstanceVariable([contentMutation class], "_editText_editCount");
+		if (iv) editCount = *(long long *)((char *)(__bridge void *)contentMutation + ivar_getOffset(iv));
+	} @catch (__unused id e) {}
+
+	NSDate *editAt = NSDate.date;
+	id hist = sciIvar(contentMutation, "_editText_editHistory");
+	if ([hist isKindOfClass:NSArray.class] && [(NSArray *)hist count]) {
+		id ts = sciKVC([(NSArray *)hist lastObject], @"timestamp");
+		if ([ts isKindOfClass:NSDate.class]) editAt = ts;
+	}
+
+	@synchronized (sciLock()) {
+		NSMutableDictionary *st = sciEditState(messageId, YES);
+		NSMutableArray *edits = st[@"edits"];
+
+		if (![edits isKindOfClass:NSMutableArray.class]) {
+			edits = [NSMutableArray array];
+			st[@"edits"] = edits;
+		}
+
+		BOOL dup = NO;
+		for (NSDictionary *e in edits) {
+			if ([e[@"count"] integerValue] == (NSInteger)editCount && [e[@"text"] isEqual:newText]) {
+				dup = YES;
+				break;
+			}
+		}
+
+		if (!dup) {
+			[edits addObject:@{@"text": newText.copy,
+								@"at": @(editAt.timeIntervalSince1970),
+								@"count": @(editCount)}];
+		}
+
+		st[@"latest"] = newText.copy;
+		st[@"editCount"] = @(editCount);
+	}
+}
+
+static NSString *sciKeySid(id key) {
+	if (!key) return nil;
+
+	@try {
+		NSString *sid = sciStrIvar(key, "_serverId") ?: sciStrIvar(key, "_messageServerId");
+		return sid.length ? sid : nil;
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+void sciDMCaptureNoteRemoveKeys(NSArray *keys, id applicator, NSString *ownerPk, NSString *threadId) {
+	if (!sciCaptureEnabled() || !keys.count) return;
+
+	NSString *owner = ownerPk.length ? ownerPk.copy : @"";
+	NSString *thread = threadId.length ? threadId.copy : nil;
+	NSMutableDictionary<NSString *, id> *refs = [NSMutableDictionary dictionary];
+
+	@synchronized (sciLock()) {
+		for (id key in keys) {
+			NSString *sid = sciKeySid(key);
+			if (!sid.length) continue;
+
+			id m = [sciMessageRefs() objectForKey:sid];
+			if (m) {
+				refs[sid] = m;
+				[sciMessageRefs() removeObjectForKey:sid];
+			}
+		}
+	}
+
+	for (id key in keys) {
+		NSString *sid = sciKeySid(key);
+		if (!sid.length || refs[sid]) continue;
+
+		id m = sciFallbackLookupMessage(applicator, sid, thread);
+		if (m) refs[sid] = m;
+	}
+
+	if (!refs.count) return;
+
+	dispatch_async(sciCaptureQueue(), ^{
+		NSDate *now = NSDate.date;
+
+		for (NSString *sid in refs) {
+			NSDictionary *snap = sciBuildSnapshot(refs[sid], owner);
+			if (!snap) continue;
+
+			NSString *senderPk = snap[@"sender_pk"];
+			if (senderPk.length && [senderPk isEqualToString:owner]) continue;
+
+			SCIDeletedMessageKind kind = (SCIDeletedMessageKind)[snap[@"kind"] integerValue];
+			NSString *txt = snap[@"text"];
+			NSString *media = snap[@"media_url"];
+			NSString *thumb = snap[@"thumb_url"];
+
+			if ((kind == SCIDeletedMessageKindUnknown || kind == SCIDeletedMessageKindOther) &&
+				!txt.length && !media.length && !thumb.length) continue;
+
+			SCIDeletedMessage *m = [SCIDeletedMessage new];
+			m.messageId = sid;
+			m.threadId = snap[@"thread_id"] ?: thread;
+			m.senderPk = senderPk ?: @"";
+			m.senderUsername = snap[@"sender_username"];
+			m.senderFullName = snap[@"sender_full_name"];
+			m.senderProfilePicURL = snap[@"sender_profile_pic_url"];
+			m.sentAt = snap[@"sent_at"];
+			m.capturedAt = now;
+			m.deletedAt = now;
+			m.kind = kind;
+			m.text = txt;
+			m.previewText = txt;
+			m.mediaURL = media;
+			m.thumbnailURL = thumb;
+			m.durationSeconds = [snap[@"duration"] doubleValue];
+			m.replyToMessageId = snap[@"reply_to_id"];
+
+			id wf = snap[@"waveform"];
+			if ([wf isKindOfClass:NSArray.class]) m.waveform = wf;
+
+			@synchronized (sciLock()) {
+				NSMutableDictionary *st = sciEditStates()[sid];
+				NSString *orig = [st[@"original"] isKindOfClass:NSString.class] ? st[@"original"] : nil;
+				m.originalText = orig.length ? orig : m.text;
+
+				NSArray *edits = st[@"edits"];
+				if ([edits isKindOfClass:NSArray.class] && edits.count) {
+					m.edits = edits.copy;
+					m.editCount = [st[@"editCount"] unsignedIntegerValue];
+
+					NSString *latest = st[@"latest"];
+					if ([latest isKindOfClass:NSString.class] && latest.length) {
+						m.text = latest;
+						m.previewText = latest;
+					}
+				}
+
+				[sciEditStates() removeObjectForKey:sid];
+			}
+
+			[SCIDeletedMessagesStorage saveMessage:m forOwnerPK:owner];
+
+			NSString *audioURL = snap[@"audio_url"];
+			BOOL deeplinkOnly = m.kind == SCIDeletedMessageKindShare || m.kind == SCIDeletedMessageKindLink;
+
+			if (m.kind == SCIDeletedMessageKindVideo && audioURL.length && m.mediaURL.length) {
+				sciDownloadAndMuxVideo(m.mediaURL, audioURL, sid, owner);
+			} else if (!deeplinkOnly && m.mediaURL.length) {
+				sciDownloadMedia(m.mediaURL, sid, owner, NO);
+			}
+
+			if (m.thumbnailURL.length) {
+				sciDownloadMedia(m.thumbnailURL, sid, owner, YES);
+			}
+		}
+	});
+}

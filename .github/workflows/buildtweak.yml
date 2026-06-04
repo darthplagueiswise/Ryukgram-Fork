@@ -1,0 +1,68 @@
+name: Build RyukGram Tweak
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experimental
+  pull_request:
+    branches:
+      - experimental
+
+permissions:
+  contents: read
+
+jobs:
+  build-rootless-deb:
+    name: Build rootless deb with SDK 26.0
+    runs-on: ubuntu-latest
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      SDK_NAME: iPhoneOS26.0.sdk
+      THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
+      THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: '9'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bash build-essential clang lld llvm make perl git curl unzip zip xz-utils \
+            dpkg-dev fakeroot file python3 rsync
+
+      - name: Install Theos
+        run: |
+          rm -rf "$THEOS"
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+
+      - name: Install iPhoneOS 26.0 SDK
+        run: |
+          rm -rf /tmp/iOS-SDKs
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/xybp888/iOS-SDKs.git /tmp/iOS-SDKs
+          cd /tmp/iOS-SDKs
+          git sparse-checkout set --no-cone "$SDK_NAME"
+          mkdir -p "$THEOS/sdks"
+          rm -rf "$THEOS/sdks/$SDK_NAME"
+          cp -a "$SDK_NAME" "$THEOS/sdks/"
+          test -d "$THEOS/sdks/$SDK_NAME/System/Library/Frameworks/UIKit.framework/Headers"
+
+      - name: Validate SDK 26 LiquidGlass headers
+        run: |
+          chmod +x scripts/validate-sdk26-liquidglass.sh
+          scripts/validate-sdk26-liquidglass.sh
+
+      - name: Build rootless package
+        run: |
+          chmod +x build.sh scripts/*.sh modules/build-dev.sh || true
+          ./build.sh rootless
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RyukGram-rootless-deb-sdk26
+          path: packages/*.deb
+          if-no-files-found: error
