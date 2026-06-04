@@ -31,13 +31,44 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bash build-essential clang lld llvm make perl git curl unzip zip xz-utils \
+            bash build-essential clang clang++ lld llvm make perl git curl unzip zip xz-utils \
             dpkg-dev fakeroot file python3 rsync
 
       - name: Install Theos
         run: |
           rm -rf "$THEOS"
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
+
+      - name: Bootstrap Linux iPhone toolchain shim
+        run: |
+          set -euo pipefail
+          TOOLCHAIN_BIN="$THEOS/toolchain/linux/iphone/bin"
+          mkdir -p "$TOOLCHAIN_BIN"
+          cat > "$TOOLCHAIN_BIN/clang" <<'SH'
+          #!/usr/bin/env bash
+          set -e
+          if printf '%s\n' "$@" | grep -qx -- '-c'; then
+            exec /usr/bin/clang "$@"
+          fi
+          exec /usr/bin/clang -fuse-ld=lld "$@"
+          SH
+          cat > "$TOOLCHAIN_BIN/clang++" <<'SH'
+          #!/usr/bin/env bash
+          set -e
+          if printf '%s\n' "$@" | grep -qx -- '-c'; then
+            exec /usr/bin/clang++ "$@"
+          fi
+          exec /usr/bin/clang++ -fuse-ld=lld "$@"
+          SH
+          chmod +x "$TOOLCHAIN_BIN/clang" "$TOOLCHAIN_BIN/clang++"
+          ln -sf clang "$TOOLCHAIN_BIN/cc"
+          ln -sf clang++ "$TOOLCHAIN_BIN/c++"
+          if command -v ld64.lld >/dev/null 2>&1; then
+            ln -sf "$(command -v ld64.lld)" "$TOOLCHAIN_BIN/ld"
+          elif command -v ld.lld >/dev/null 2>&1; then
+            ln -sf "$(command -v ld.lld)" "$TOOLCHAIN_BIN/ld"
+          fi
+          "$TOOLCHAIN_BIN/clang" --version
 
       - name: Install iPhoneOS 26.0 SDK
         run: |
