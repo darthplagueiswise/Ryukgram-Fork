@@ -1,99 +1,72 @@
-name: Build RyukGram Tweak
+name: Build RyukGram tweak
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - experimental
+    branches: [experimental]
   pull_request:
-    branches:
-      - experimental
+    branches: [experimental]
+  workflow_dispatch:
 
-permissions:
-  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-rootless-deb:
-    name: Build rootless deb with SDK 26.0
-    runs-on: ubuntu-latest
-    env:
-      THEOS: ${{ github.workspace }}/theos
-      SDK_NAME: iPhoneOS26.0.sdk
-      THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
-      THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: '9'
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
+          path: main
+
+      - run: brew install ldid dpkg make
+
+      - run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          path: ${{ github.workspace }}/theos
           submodules: recursive
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            bash build-essential clang clang++ lld llvm make perl git curl unzip zip xz-utils \
-            dpkg-dev fakeroot file python3 rsync
-
-      - name: Install Theos
-        run: |
-          rm -rf "$THEOS"
-          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
-
-      - name: Bootstrap Linux iPhone toolchain shim
-        run: |
-          set -euo pipefail
-          TOOLCHAIN_BIN="$THEOS/toolchain/linux/iphone/bin"
-          mkdir -p "$TOOLCHAIN_BIN"
-          cat > "$TOOLCHAIN_BIN/clang" <<'SH'
-          #!/usr/bin/env bash
-          set -e
-          if printf '%s\n' "$@" | grep -qx -- '-c'; then
-            exec /usr/bin/clang "$@"
-          fi
-          exec /usr/bin/clang -fuse-ld=lld "$@"
-          SH
-          cat > "$TOOLCHAIN_BIN/clang++" <<'SH'
-          #!/usr/bin/env bash
-          set -e
-          if printf '%s\n' "$@" | grep -qx -- '-c'; then
-            exec /usr/bin/clang++ "$@"
-          fi
-          exec /usr/bin/clang++ -fuse-ld=lld "$@"
-          SH
-          chmod +x "$TOOLCHAIN_BIN/clang" "$TOOLCHAIN_BIN/clang++"
-          ln -sf clang "$TOOLCHAIN_BIN/cc"
-          ln -sf clang++ "$TOOLCHAIN_BIN/c++"
-          if command -v ld64.lld >/dev/null 2>&1; then
-            ln -sf "$(command -v ld64.lld)" "$TOOLCHAIN_BIN/ld"
-          elif command -v ld.lld >/dev/null 2>&1; then
-            ln -sf "$(command -v ld.lld)" "$TOOLCHAIN_BIN/ld"
-          fi
-          "$TOOLCHAIN_BIN/clang" --version
-
-      - name: Install iPhoneOS 26.0 SDK
-        run: |
-          rm -rf /tmp/iOS-SDKs
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/xybp888/iOS-SDKs.git /tmp/iOS-SDKs
-          cd /tmp/iOS-SDKs
-          git sparse-checkout set --no-cone "$SDK_NAME"
-          mkdir -p "$THEOS/sdks"
-          rm -rf "$THEOS/sdks/$SDK_NAME"
-          cp -a "$SDK_NAME" "$THEOS/sdks/"
-          test -d "$THEOS/sdks/$SDK_NAME/System/Library/Frameworks/UIKit.framework/Headers"
-
-      - name: Validate SDK 26 LiquidGlass headers
-        run: |
-          chmod +x scripts/validate-sdk26-liquidglass.sh
-          scripts/validate-sdk26-liquidglass.sh
-
-      - name: Build rootless package
-        run: |
-          chmod +x build.sh scripts/*.sh modules/build-dev.sh || true
-          ./build.sh rootless
-
-      - name: Upload deb artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/cache@v4
+        id: SDK
+        env:
+          cache-name: iPhoneOS26.2.sdk
         with:
-          name: RyukGram-rootless-deb-sdk26
-          path: packages/*.deb
+          path: ${{ github.workspace }}/theos/sdks/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - if: steps.SDK.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
+          cd iOS-SDKs
+          git sparse-checkout set --no-cone iPhoneOS26.2.sdk
+          git checkout
+          mkdir -p "$THEOS/sdks"
+          mv *.sdk "$THEOS/sdks"
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - run: |
+          cd main
+          chmod +x scripts/*.sh build.sh modules/build-dev.sh || true
+          scripts/validate-sdk26-liquidglass.sh
+          ./scripts/setup-ffmpegkit.sh
+          ./build.sh rootless
+          ./build.sh rootful
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
+          THEOS_PLATFORM_DEB_COMPRESSION_LEVEL: 9
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RyukGram-debs
+          path: main/packages/*.deb
           if-no-files-found: error

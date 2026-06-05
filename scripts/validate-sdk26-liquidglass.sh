@@ -2,12 +2,12 @@
 set -euo pipefail
 
 : "${THEOS:?THEOS must be set}"
-SDK="$THEOS/sdks/iPhoneOS26.0.sdk"
+SDK="$THEOS/sdks/iPhoneOS26.2.sdk"
 UIKIT_HEADERS="$SDK/System/Library/Frameworks/UIKit.framework/Headers"
 
 printf 'Validating SDK: %s\n' "$SDK"
-[ -d "$SDK" ] || { echo "::error::Missing iPhoneOS26.0.sdk in $THEOS/sdks"; exit 1; }
-[ -d "$UIKIT_HEADERS" ] || { echo "::error::Missing UIKit headers in iPhoneOS26.0.sdk"; exit 1; }
+[ -d "$SDK" ] || { echo "::error::Missing iPhoneOS26.2.sdk in $THEOS/sdks"; exit 1; }
+[ -d "$UIKIT_HEADERS" ] || { echo "::error::Missing UIKit headers in iPhoneOS26.2.sdk"; exit 1; }
 
 printf 'UIKit Glass/Liquid header candidates, if exported by this SDK:\n'
 { grep -R "Glass\|Liquid" "$UIKIT_HEADERS" 2>/dev/null || true; } | head -100
