@@ -27,20 +27,22 @@
         [self.contentView addSubview:_panel];
 
         _titleLabel = [UILabel new];
-        _titleLabel.font = [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
+        _titleLabel.font = [UIFont monospacedSystemFontOfSize:12.5 weight:UIFontWeightMedium];
+        _titleLabel.adjustsFontSizeToFitWidth = YES;
+        _titleLabel.minimumScaleFactor = 0.82;
         _titleLabel.textColor = UIColor.labelColor;
         _titleLabel.numberOfLines = 2;
         _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
         _subtitleLabel = [UILabel new];
-        _subtitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
+        _subtitleLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightRegular];
         _subtitleLabel.textColor = UIColor.secondaryLabelColor;
-        _subtitleLabel.numberOfLines = 1;
+        _subtitleLabel.numberOfLines = 2;
         _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
         UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_titleLabel, _subtitleLabel]];
         stack.axis = UILayoutConstraintAxisVertical;
-        stack.spacing = 2.0;
+        stack.spacing = 1.5;
         stack.translatesAutoresizingMaskIntoConstraints = NO;
         [_panel.contentView addSubview:stack];
 
@@ -55,16 +57,16 @@
 
         [NSLayoutConstraint activateConstraints:@[
             [_panel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6.0],
-            [_panel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:16.0],
-            [_panel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-16.0],
+            [_panel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:10.0],
+            [_panel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10.0],
             [_panel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6.0],
 
-            [stack.topAnchor constraintEqualToAnchor:_panel.contentView.topAnchor constant:10.0],
-            [stack.leadingAnchor constraintEqualToAnchor:_panel.contentView.leadingAnchor constant:14.0],
-            [stack.bottomAnchor constraintEqualToAnchor:_panel.contentView.bottomAnchor constant:-10.0],
+            [stack.topAnchor constraintEqualToAnchor:_panel.contentView.topAnchor constant:8.0],
+            [stack.leadingAnchor constraintEqualToAnchor:_panel.contentView.leadingAnchor constant:10.0],
+            [stack.bottomAnchor constraintEqualToAnchor:_panel.contentView.bottomAnchor constant:-8.0],
 
-            [_toggle.leadingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:12.0],
-            [_toggle.trailingAnchor constraintEqualToAnchor:_panel.contentView.trailingAnchor constant:-14.0],
+            [_toggle.leadingAnchor constraintEqualToAnchor:stack.trailingAnchor constant:8.0],
+            [_toggle.trailingAnchor constraintEqualToAnchor:_panel.contentView.trailingAnchor constant:-10.0],
             [_toggle.centerYAnchor constraintEqualToAnchor:_panel.contentView.centerYAnchor],
         ]];
     }
@@ -146,13 +148,13 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
 
 - (NSString *)subtitleForRow:(SCIGatingRow *)r override:(NSNumber *)ov {
     if (ov != nil) return ov.boolValue ? @"forced ON via getter hook" : @"forced OFF via getter hook";
-    if (r.classMethod) return @"class getter · ready to force";
+    if (r.classMethod) return @"class BOOL · patchable";
     if (r.blacklisted) return @"live read blocked after prior crash";
     switch (r.liveState) {
         case SCIGatingLiveStateLoaded: return r.value.boolValue ? @"live value: ON" : @"live value: OFF";
-        case SCIGatingLiveStateReady: return @"live source available · tap to read";
-        case SCIGatingLiveStateUnavailable: return @"catalog only · no live receiver";
-        default: return @"catalog entry";
+        case SCIGatingLiveStateReady: return @"live instance · tap row to read";
+        case SCIGatingLiveStateUnavailable: return @"runtime stub · patchable";
+        default: return @"runtime stub · not read";
     }
 }
 
@@ -185,7 +187,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     self.glassSearchBar = [[SCIGlassSearchBar alloc] initWithRadius:22.0];
     self.glassSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
     self.searchBar = self.glassSearchBar.searchBar;
-    self.searchBar.placeholder = @"Filter class or flag name";
+    self.searchBar.placeholder = @"Search class / BOOL selector";
     self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
     self.searchBar.delegate = self;
@@ -196,7 +198,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     self.scopePanel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.scopePanel];
 
-    self.scopeControl = [[UISegmentedControl alloc] initWithItems:@[@"Instagram", @"FBShared"]];
+    self.scopeControl = [[UISegmentedControl alloc] initWithItems:@[@"Instagram exec", @"FBSharedFramework"]];
     self.scopeControl.selectedSegmentIndex = UISegmentedControlNoSegment;
     self.scopeControl.translatesAutoresizingMaskIntoConstraints = NO;
     [self.scopeControl addTarget:self action:@selector(scopeChanged:) forControlEvents:UIControlEventValueChanged];
@@ -209,9 +211,9 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     SCIStyleTableViewForGlass(self.tableView);
     self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.estimatedRowHeight = 64.0;
+    self.tableView.estimatedRowHeight = 56.0;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.contentInset = UIEdgeInsetsMake(126.0, 0.0, 24.0, 0.0);
+    self.tableView.contentInset = UIEdgeInsetsMake(118.0, 0.0, 24.0, 0.0);
     self.tableView.scrollIndicatorInsets = self.tableView.contentInset;
     [self.tableView registerClass:SCIGlassToggleCell.class forCellReuseIdentifier:@"gate"];
     [self.tableView registerClass:SCIGlassParamCell.class forCellReuseIdentifier:@"status"];
@@ -299,7 +301,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     if (c.selectedSegmentIndex == UISegmentedControlNoSegment) return;
     self.scopeSelected = YES;
     self.runtimeScope = c.selectedSegmentIndex == 0 ? SCIGatingRuntimeScopeInstagramMain : SCIGatingRuntimeScopeFBSharedFramework;
-    self.title = [NSString stringWithFormat:@"Feature Gatings · %@", c.selectedSegmentIndex == 0 ? @"Instagram" : @"FBShared"];
+    self.title = [NSString stringWithFormat:@"Runtime BOOL · %@", c.selectedSegmentIndex == 0 ? @"Instagram" : @"FBShared"];
     [self.searchBar resignFirstResponder];
     [self buildModel];
 }
@@ -363,7 +365,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     if (self.sections.count == 0) return nil;
     SCIGlassSectionHeaderView *h = [tableView dequeueReusableHeaderFooterViewWithIdentifier:@"hdr"];
     NSDictionary *sec = self.sections[section];
-    [h configureWithTitle:sec[@"class"] subtitle:[NSString stringWithFormat:@"%lu flags", (unsigned long)[sec[@"rows"] count]]];
+    [h configureWithTitle:sec[@"class"] subtitle:[NSString stringWithFormat:@"%lu BOOL methods", (unsigned long)[sec[@"rows"] count]]];
     return h;
 }
 
@@ -371,7 +373,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     if (self.sections.count == 0) {
         SCIGlassParamCell *cell = [tableView dequeueReusableCellWithIdentifier:@"status" forIndexPath:indexPath];
         NSString *title = self.scopeSelected ? @"No gating accessors found" : @"Choose a runtime scope";
-        NSString *subtitle = self.scopeSelected ? @"Try another search or switch runtime scope." : @"Pick Instagram executable or FBSharedFramework above. The catalog is built only after choosing.";
+        NSString *subtitle = self.scopeSelected ? @"Every row is a no-argument BOOL declared in the selected image. Search to narrow it." : @"Choose Instagram executable or FBSharedFramework. Runtime scan starts only after selecting.";
         [cell configureWithTitle:title
                         subtitle:subtitle
                            badge:nil emphasized:NO];
@@ -380,8 +382,8 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     SCIGlassToggleCell *cell = [tableView dequeueReusableCellWithIdentifier:@"gate" forIndexPath:indexPath];
     SCIGatingRow *r = self.sections[indexPath.section][@"rows"][indexPath.row];
     NSNumber *ov = [SCIGatingCatalog runtimeBoolOverrideStateForClass:r.rawClass selector:r.selector classMethod:r.classMethod];
-    [self refreshLiveStateForRow:r];
-
+    // Do not probe live receivers while cells are being displayed. This screen is
+    // a stubbable runtime browser; live reads happen only when the row is tapped.
     BOOL on = ov ? ov.boolValue : (r.value ? r.value.boolValue : NO);
     NSString *sub = [self subtitleForRow:r override:ov];
     BOOL interactive = !r.blacklisted;

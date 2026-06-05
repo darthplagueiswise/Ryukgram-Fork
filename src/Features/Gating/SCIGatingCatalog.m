@@ -46,42 +46,41 @@ static NSString *SCIDemangle(NSString *raw) {
 static BOOL SCINameLooksLikeFlag(const char *sel) {
     if (!sel) return NO;
     NSString *n = [NSString stringWithUTF8String:sel];
-    if (n.length < 3) return NO;
-    if ([n hasSuffix:@"Enabled"] || [n hasSuffix:@"Disabled"]) return YES;
-    static NSArray *prefixes;
-    static dispatch_once_t once; dispatch_once(&once, ^{
-        prefixes = @[@"is", @"should", @"has", @"are", @"can", @"use", @"allow", @"will", @"did", @"enable"];
+    if (n.length < 2 || n.length > 120) return NO;
+    if ([n containsString:@":"]) return NO;
+
+    // Runtime mode means "all patchable no-argument BOOL methods" from the selected
+    // image, not only nice-looking *Gating/*Config names. Keep only universal
+    // NSObject/UIView noise out of the browser so it remains usable.
+    static NSSet<NSString *> *deny;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        deny = [NSSet setWithArray:@[
+            @"isAccessibilityElement", @"isProxy", @"isMemberOfClass", @"isKindOfClass",
+            @"isEqual", @"isHidden", @"isOpaque", @"isFirstResponder", @"isMultipleTouchEnabled",
+            @"isUserInteractionEnabled", @"isExclusiveTouch", @"isTracking", @"isTouchInside",
+            @"isHighlighted", @"isSelected", @"isEnabled", @"canBecomeFirstResponder",
+            @"canResignFirstResponder", @"hasAmbiguousLayout", @"translatesAutoresizingMaskIntoConstraints",
+        ]];
     });
-    for (NSString *p in prefixes) {
-        if (n.length > p.length && [n hasPrefix:p]) {
-            unichar c = [n characterAtIndex:p.length];
-            if (c >= 'A' && c <= 'Z') return YES;
-        }
-    }
-    return NO;
+    return ![deny containsObject:n];
 }
+
 
 static BOOL SCIClassNameInteresting(const char *name) {
     if (!name) return NO;
-    if (strstr(name, "FCNews") || strstr(name, "FCIAd")) return NO;
-    if (strncmp(name, "FC", 2) == 0 || strncmp(name, "_TtC2FC", 7) == 0) return NO;
+    NSString *s = [NSString stringWithUTF8String:name] ?: @"";
+    if (!s.length) return NO;
 
-    BOOL ownedName =
-        strstr(name, "IG") || strstr(name, "Instagram") ||
-        strstr(name, "FB") || strstr(name, "Meta") ||
-        strstr(name, "MobileConfig") || strstr(name, "Launcher") ||
-        strstr(name, "Dogfood") || strstr(name, "Internal");
-    if (!ownedName) return NO;
-
-    BOOL featureName =
-        strstr(name, "Gating") || strstr(name, "Experiment") ||
-        strstr(name, "Rollout") || strstr(name, "FeatureGate") ||
-        strstr(name, "InternalOnly") || strstr(name, "Dogfood");
-    BOOL settingsName =
-        strstr(name, "Config") || strstr(name, "Configuration") ||
-        strstr(name, "Settings") || strstr(name, "Helper");
-    return featureName || settingsName;
+    // Do not pre-filter to Gating/Config/Dogfood. This screen is the real runtime
+    // browser now: once the user chooses Instagram or FBSharedFramework, we list
+    // every class in that image that declares at least one no-argument BOOL method.
+    // The image scope is the safety boundary.
+    if ([s hasPrefix:@"NS"] || [s hasPrefix:@"UI"] || [s hasPrefix:@"CA"] || [s hasPrefix:@"_UI"]) return NO;
+    if ([s containsString:@"FLEX"] || [s containsString:@"Ryuk"] || [s containsString:@"SCI"]) return NO;
+    return YES;
 }
+
 
 static BOOL SCIMethodLooksLikeNoArgumentBool(Method m) {
     if (!m || method_getNumberOfArguments(m) != 2) return NO;
@@ -169,7 +168,9 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
                 return [as caseInsensitiveCompare:bs];
             }];
             NSString *raw = [NSString stringWithUTF8String:cname];
-            [out addObject:@{ @"class": SCIDemangle(raw), @"raw": raw, @"getters": getters }];
+            const char *img = class_getImageName(cls);
+            NSString *imageName = img ? [NSString stringWithUTF8String:img] : @"";
+            [out addObject:@{ @"class": SCIDemangle(raw), @"raw": raw, @"getters": getters, @"image": imageName ?: @"" }];
         }
         free(all);
     }

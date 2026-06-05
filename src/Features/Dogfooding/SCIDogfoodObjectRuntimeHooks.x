@@ -1,4 +1,5 @@
 #import "SCIDogfoodObjectRuntime.h"
+#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -12,21 +13,6 @@ static void SCIHookDF(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     if ([sSCIDFInstalled containsObject:key]) return;
     [sSCIDFInstalled addObject:key];
     MSHookMessageEx(cls, sel, newImp, origOut);
-}
-
-static BOOL SCIClassNameInterestingForDogfoodRuntime(NSString *cn) {
-    NSString *s = cn.lowercaseString ?: @"";
-    return [s containsString:@"dogfood"] ||
-           [s containsString:@"mobileconfig"] ||
-           [s containsString:@"settings2"] ||
-           [s containsString:@"settingscreen"] ||
-           [s containsString:@"settingdatamodel"] ||
-           [s containsString:@"settingsviewcontroller"] ||
-           [s containsString:@"permissionsgating"] ||
-           [s containsString:@"upperfunnelgating"] ||
-           [s containsString:@"facebookuserinfo"] ||
-           [s containsString:@"baseuser"] ||
-           [s containsString:@"userlauncherset"];
 }
 
 static id (*orig_df_dog_init)(id, SEL, id, id, id);
@@ -50,31 +36,11 @@ static void new_df_dog_build(id self, SEL _cmd, id build, BOOL useCache, id comp
     [SCIDogfoodObjectRuntime noteObject:self role:@"IGDogfooderProd" source:NSStringFromSelector(_cmd)];
     if (orig_df_dog_build) orig_df_dog_build(self, _cmd, build, useCache, completion);
 }
+
 static void (*orig_df_dog_trigger)(id, SEL, NSInteger, id);
 static void new_df_dog_trigger(id self, SEL _cmd, NSInteger mode, id completion) {
     [SCIDogfoodObjectRuntime noteObject:self role:@"IGDogfooderProd" source:NSStringFromSelector(_cmd)];
     if (orig_df_dog_trigger) orig_df_dog_trigger(self, _cmd, mode, completion);
-}
-
-static void (*orig_uivc_viewDidLoad)(id, SEL);
-static void new_uivc_viewDidLoad(id self, SEL _cmd) {
-    if (SCIClassNameInterestingForDogfoodRuntime(NSStringFromClass(object_getClass(self)))) {
-        [SCIDogfoodObjectRuntime noteObject:self role:@"viewController" source:NSStringFromSelector(_cmd)];
-    }
-    if (orig_uivc_viewDidLoad) orig_uivc_viewDidLoad(self, _cmd);
-}
-
-static void (*orig_uivc_viewDidAppear)(id, SEL, BOOL);
-static void new_uivc_viewDidAppear(id self, SEL _cmd, BOOL animated) {
-    NSString *cn = NSStringFromClass(object_getClass(self));
-    if (SCIClassNameInterestingForDogfoodRuntime(cn)) {
-        [SCIDogfoodObjectRuntime noteObject:self role:@"visibleViewController" source:NSStringFromSelector(_cmd)];
-    }
-    if ([cn.lowercaseString containsString:@"settings"]) {
-        [SCIDogfoodObjectRuntime noteSettingsObject:self role:@"settingsVC" source:@"UIViewController.viewDidAppear:"];
-        if ([self isKindOfClass:UIViewController.class]) [SCIDogfoodObjectRuntime injectRowsIntoSettingsIfPossibleFromViewController:(UIViewController *)self];
-    }
-    if (orig_uivc_viewDidAppear) orig_uivc_viewDidAppear(self, _cmd, animated);
 }
 
 static id (*orig_ctx_user_init)(id, SEL, id, id);
@@ -83,6 +49,14 @@ static id new_ctx_user_init(id self, SEL _cmd, id sessionID, id manager) {
     [SCIDogfoodObjectRuntime noteObject:obj role:@"IGMobileConfigUserSessionContextManager" source:NSStringFromSelector(_cmd)];
     return obj;
 }
+
+static id (*orig_ctx_sessionless_init)(id, SEL, id, id);
+static id new_ctx_sessionless_init(id self, SEL _cmd, id sessionID, id manager) {
+    id obj = orig_ctx_sessionless_init ? orig_ctx_sessionless_init(self, _cmd, sessionID, manager) : self;
+    [SCIDogfoodObjectRuntime noteObject:obj role:@"IGMobileConfigSessionlessContextManager" source:NSStringFromSelector(_cmd)];
+    return obj;
+}
+
 static void (*orig_dogfirst_begin)(id, SEL, id, id, id);
 static void new_dogfirst_begin(id self, SEL _cmd, id mainAppVC, id pandoGraphQLService, id dogfooder) {
     [SCIDogfoodObjectRuntime noteObject:self role:@"DogfoodingFirstCoordinator" source:NSStringFromSelector(_cmd)];
@@ -100,29 +74,21 @@ static id new_autofill_init(id self, SEL _cmd, id userSession) {
     return obj;
 }
 
-static id (*orig_ctx_sessionless_init)(id, SEL, id, id);
-static id new_ctx_sessionless_init(id self, SEL _cmd, id sessionID, id manager) {
-    id obj = orig_ctx_sessionless_init ? orig_ctx_sessionless_init(self, _cmd, sessionID, manager) : self;
-    [SCIDogfoodObjectRuntime noteObject:obj role:@"IGMobileConfigSessionlessContextManager" source:NSStringFromSelector(_cmd)];
-    return obj;
-}
-
 static void SCIInstallDogfoodObjectHooks(void) {
     [SCIDogfoodObjectRuntime installIfNeeded];
+
     Class dog = NSClassFromString(@"IGDogfooderProd");
     SCIHookDF(dog, @"initWithLauncherSet:networker:logger:", (IMP)new_df_dog_init, (IMP *)&orig_df_dog_init);
     SCIHookDF(dog, @"checkAvailableAppUpdatesWithCompletion:", (IMP)new_df_dog_updates, (IMP *)&orig_df_dog_updates);
     SCIHookDF(dog, @"checkBuildStatusForBuild:useCacheResultIfAvailable:completion:", (IMP)new_df_dog_build, (IMP *)&orig_df_dog_build);
     SCIHookDF(dog, @"triggerUpdateWithMode:completion:", (IMP)new_df_dog_trigger, (IMP *)&orig_df_dog_trigger);
 
-    // Do not hook UIViewController globally. That made the runtime browser lag and
-    // polluted unrelated screens. Settings/VC discovery is now stub-first and
-    // on-demand; named classes below still get captured safely.
-
     SCIHookDF(NSClassFromString(@"IGMobileConfigUserSessionContextManager"), @"initWithSessionID:manager:", (IMP)new_ctx_user_init, (IMP *)&orig_ctx_user_init);
     SCIHookDF(NSClassFromString(@"IGMobileConfigSessionlessContextManager"), @"initWithSessionID:manager:", (IMP)new_ctx_sessionless_init, (IMP *)&orig_ctx_sessionless_init);
 
-    Class dfc = NSClassFromString(@"IGDogfoodingFirst.DogfoodingFirstCoordinator") ?: NSClassFromString(@"_TtC18IGDogfoodingFirst27DogfoodingFirstCoordinator");
+    // Correct Swift 5 mangled name validated in Instagram(30):
+    // _TtC17IGDogfoodingFirst26DogfoodingFirstCoordinator
+    Class dfc = NSClassFromString(@"IGDogfoodingFirst.DogfoodingFirstCoordinator") ?: NSClassFromString(@"_TtC17IGDogfoodingFirst26DogfoodingFirstCoordinator");
     SCIHookDF(dfc, @"didBeginSessionWithMainAppViewController:pandoGraphQLService:dogfooder:", (IMP)new_dogfirst_begin, (IMP *)&orig_dogfirst_begin);
 
     Class autofill = NSClassFromString(@"AutofillInternalSettingsInstagram.IGAutofillInternalSettings") ?: NSClassFromString(@"_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings");

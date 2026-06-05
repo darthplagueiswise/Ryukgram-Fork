@@ -722,7 +722,8 @@ static void sciInstallLiquidGlassHooks(void) {
 	sLG_TabBarStyleGlass       = nativeLiquidGlass || SCI_PREF(@"lg_tab_bar_style_glass");
 
 	%init(SCIAppLifecycleGroup);
-	%init(SCIDebugBlockGroup);
+	// Do not block Instagram debug/bug-report menus by default.
+	// SCIDebugBlockGroup intentionally left uninitialized.
 	%init(SCIScreenshotBlockGroup);
 	%init(SCIHideItemsGroup);
 	%init(SCIConfirmActionsGroup);

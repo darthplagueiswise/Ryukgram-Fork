@@ -537,21 +537,39 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 + (BOOL)tryOpenMetaLocalExperimentBrowser { [self noteAction:@"Open MetaLocalExperiment" status:@"attempt" detail:[self runtimeState]]; @try { [SCIDogfooding presentMetaLocalExperimentBrowser]; [self noteAction:@"Open MetaLocalExperiment" status:@"sent" detail:nil]; return YES; } @catch (id e) { [self noteAction:@"Open MetaLocalExperiment" status:@"exception" detail:e]; return NO; } }
 
 + (BOOL)tryOpenNativeDogfoodSettings {
-    UIViewController *top = [self topViewController]; id session = [self activeUserSession];
-    if (!top || !session) { [self noteAction:@"Open Native Dogfood Settings" status:@"missing top/session" detail:[self runtimeState]]; return NO; }
-    NSArray *classes = @[@"IGDogfoodingSettings.IGDogfoodingSettings", @"_TtC20IGDogfoodingSettings20IGDogfoodingSettings"];
-    SEL openSel = @selector(openWithConfig:onViewController:userSession:);
-    for (NSString *name in classes) {
-        Class c = NSClassFromString(name); if (!c || ![c respondsToSelector:openSel]) continue;
-        id cfg = nil; Class cfgCls = NSClassFromString(@"IGDogfoodingSettingsConfig"); if (cfgCls) { @try { cfg = [[cfgCls alloc] init]; } @catch (__unused id e) {} }
-        @try { ((void(*)(id,SEL,id,id,id))objc_msgSend)(c, openSel, cfg, top, session); [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:name]; return YES; } @catch (id e) { [self noteAction:@"Open Native Dogfood Settings" status:@"exception" detail:e]; }
+    UIViewController *top = [self topViewController];
+    id session = [self activeUserSession];
+    if (!top || !session) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"missing top/session" detail:[self runtimeState]];
+        return NO;
     }
-    Class vcCls = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettingsViewController") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController");
-    if (vcCls && [vcCls isSubclassOfClass:UIViewController.class]) {
-        @try { UIViewController *vc = [[vcCls alloc] init]; UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc]; nav.modalPresentationStyle = UIModalPresentationFullScreen; [top presentViewController:nav animated:YES completion:nil]; [self noteAction:@"Open Native Dogfood Settings" status:@"presented bare VC fallback" detail:NSStringFromClass(vcCls)]; return YES; } @catch (id e) { [self noteAction:@"Open Native Dogfood Settings" status:@"fallback exception" detail:e]; }
+
+    // Do not allocate IGDogfoodingSettingsViewController directly. In Instagram 431
+    // that Swift VC requires an internal config/analytics stack and a bare init can
+    // trap before ObjC @catch can help. Use only the validated static opener.
+    Class settings = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettings") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
+    SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
+    if (!settings || ![settings respondsToSelector:openSel]) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"opener unavailable" detail:NSStringFromClass(settings) ?: @"nil"];
+        return NO;
     }
-    [self noteAction:@"Open Native Dogfood Settings" status:@"unavailable" detail:[self runtimeState]]; return NO;
+
+    id config = [self liveInstanceOfClassNameContaining:@"IGDogfoodingSettingsConfig"];
+    if (!config) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"needs live IGDogfoodingSettingsConfig" detail:@"Open a native dogfood surface first; refusing bare Swift init to avoid crash."];
+        return NO;
+    }
+
+    @try {
+        ((void(*)(id,SEL,id,id,id))objc_msgSend)(settings, openSel, config, top, session);
+        [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:NSStringFromClass(settings)];
+        return YES;
+    } @catch (id e) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"exception" detail:e];
+        return NO;
+    }
 }
+
 
 + (void)injectRowsIntoSettingsIfPossibleFromViewController:(UIViewController *)vc {
     if (!vc) return;
