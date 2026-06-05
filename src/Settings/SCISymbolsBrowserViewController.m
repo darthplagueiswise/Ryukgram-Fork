@@ -65,7 +65,7 @@
 // ---- Symbol scanner ----
 static NSArray<SCISymEntry *> *SCIScanSymbols(BOOL wantFBShared) {
     NSMutableArray<SCISymEntry *> *out = [NSMutableArray array];
-    uint32_t count = _dyld_get_image_count();
+    uint32_t count = _dyld_image_count();
     for (uint32_t idx = 0; idx < count; idx++) {
         const char *imgName = _dyld_get_image_name(idx);
         if (!imgName) continue;
