@@ -4,6 +4,7 @@
 #import "SCIAssetUtils.h"
 #import "../Utils.h"
 #import "SCIGalleryShim.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 typedef NS_ENUM(NSInteger, SCIGalleryDeleteSection) {
 	SCIGalleryDeleteSectionGlobal = 0,
@@ -57,8 +58,8 @@ typedef NS_ENUM(NSInteger, SCIGalleryDeleteSection) {
 	self.title = self.mode == SCIGalleryDeletePageModeRoot
 		? SCILocalized(@"Delete files")
 		: SCILocalized(@"Delete by user");
-	self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-	self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
+	SCIStyleTableViewForGlass(self.tableView);
 	[self reloadDataModel];
 }
 

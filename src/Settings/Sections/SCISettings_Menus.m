@@ -385,6 +385,15 @@
 			]
 		]],
 
+		@"auto_scroll_reels_mode": [UIMenu menuWithChildren:@[
+			[UICommand commandWithTitle:SCILocalized(@"Off") image:nil action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"auto_scroll_reels_mode", @"value": @"off"}],
+			[UICommand commandWithTitle:SCILocalized(@"IG default") image:nil action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"auto_scroll_reels_mode", @"value": @"ig"}],
+			[UICommand commandWithTitle:SCILocalized(@"RyukGram") image:nil action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"auto_scroll_reels_mode", @"value": @"custom"}],
+		]],
+
 		@"launch_tab": [UIMenu menuWithChildren:@[
 			[UICommand commandWithTitle:SCILocalized(@"Default") image:nil action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"launch_tab", @"value": @"default"}],

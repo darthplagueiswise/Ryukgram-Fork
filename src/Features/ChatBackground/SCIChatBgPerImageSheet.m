@@ -1,20 +1,14 @@
 #import "SCIChatBgPerImageSheet.h"
 #import "SCIChatBackgroundManager.h"
 #import "../../UI/SCIPopupChrome.h"
-#import "../../UI/SCIColorPickerSheet.h"
 #import "../../Utils.h"
 
 typedef NS_ENUM(NSInteger, SCIRow) {
 	SCIRowOpacity,
 	SCIRowBlur,
 	SCIRowDim,
-	SCIRowAutoBubble,
-	SCIRowBubbleSides,
-	SCIRowGradient,
-	SCIRowGradientDir,
-	SCIRowBubbleColor,
-	SCIRowTextColor,
 	SCIRowReset,
+	SCIRowCount
 };
 
 static NSString *const kCell = @"cell";
@@ -24,7 +18,6 @@ static NSString *const kCell = @"cell";
 @property (nonatomic, strong) UIImageView *preview;
 @property (nonatomic, strong) UIView *dimView;
 @property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, strong) NSArray<NSNumber *> *rows;
 @end
 
 @implementation SCIChatBgPerImageSheet
@@ -40,7 +33,7 @@ static NSString *const kCell = @"cell";
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:SCILocalized(@"Done") style:UIBarButtonItemStyleDone target:self action:@selector(done)];
 
 	_preview = [UIImageView new];
@@ -60,7 +53,7 @@ static NSString *const kCell = @"cell";
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
 	_tableView.delegate = self;
-	SCIStyleTableViewForGlass(_tableView);
+	_tableView.backgroundColor = self.view.backgroundColor;
 	_tableView.contentInset = UIEdgeInsetsMake(-6, 0, 0, 0);
 	_tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_tableView registerClass:UITableViewCell.class forCellReuseIdentifier:kCell];
@@ -83,20 +76,7 @@ static NSString *const kCell = @"cell";
 		[_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 	]];
 
-	[self rebuildRows];
 	[self renderPreview];
-}
-
-- (void)rebuildRows {
-	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
-	NSMutableArray *rows = [@[@(SCIRowOpacity), @(SCIRowBlur), @(SCIRowDim), @(SCIRowAutoBubble)] mutableCopy];
-	if ([m autoBubbleEnabledForAsset:self.asset]) {
-		[rows addObjectsFromArray:@[@(SCIRowBubbleSides), @(SCIRowGradient)]];
-		if ([m bubbleGradientForAsset:self.asset]) [rows addObject:@(SCIRowGradientDir)];
-		[rows addObjectsFromArray:@[@(SCIRowBubbleColor), @(SCIRowTextColor)]];
-	}
-	[rows addObject:@(SCIRowReset)];
-	self.rows = rows;
 }
 
 - (void)dealloc {
@@ -140,7 +120,7 @@ static NSString *const kCell = @"cell";
 #pragma mark - Table
 
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
-	return self.rows.count;
+	return SCIRowCount;
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)section {
@@ -152,112 +132,28 @@ static NSString *const kCell = @"cell";
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.selectionStyle = UITableViewCellSelectionStyleNone;
-	cell.imageView.image = nil;
 
-	NSInteger tag = self.rows[ip.row].integerValue;
-	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
-
-	if (tag == SCIRowReset) {
+	if (ip.row == SCIRowReset) {
 		cell.textLabel.text = SCILocalized(@"Reset");
 		cell.textLabel.textColor = UIColor.systemRedColor;
 		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 		return cell;
 	}
 
-	if (tag == SCIRowAutoBubble) {
-		cell.textLabel.text = SCILocalized(@"Auto bubble color");
-		cell.textLabel.textColor = UIColor.labelColor;
-
-		UISwitch *sw = [UISwitch new];
-		sw.on = [m autoBubbleEnabledForAsset:self.asset];
-		sw.onTintColor = [SCIUtils SCIColor_Primary];
-		[sw addTarget:self action:@selector(autoBubbleToggled:) forControlEvents:UIControlEventValueChanged];
-		cell.accessoryView = sw;
-		return cell;
-	}
-
-	if (tag == SCIRowBubbleSides) {
-		cell.textLabel.text = SCILocalized(@"Apply to");
-
-		UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[
-			SCILocalized(@"Other"), SCILocalized(@"Me"), SCILocalized(@"Both")
-		]];
-		seg.selectedSegmentIndex = [m bubbleSidesForAsset:self.asset];
-		seg.selectedSegmentTintColor = [SCIUtils SCIColor_Primary];
-		[seg addTarget:self action:@selector(sidesChanged:) forControlEvents:UIControlEventValueChanged];
-		cell.accessoryView = seg;
-		cell.textLabel.textColor = UIColor.labelColor;
-		return cell;
-	}
-
-	if (tag == SCIRowGradient) {
-		cell.textLabel.text = SCILocalized(@"Gradient");
-		cell.textLabel.textColor = UIColor.labelColor;
-
-		UISwitch *sw = [UISwitch new];
-		sw.on = [m bubbleGradientForAsset:self.asset];
-		sw.onTintColor = [SCIUtils SCIColor_Primary];
-		[sw addTarget:self action:@selector(gradientToggled:) forControlEvents:UIControlEventValueChanged];
-		cell.accessoryView = sw;
-		return cell;
-	}
-
-	if (tag == SCIRowGradientDir) {
-		cell.textLabel.text = SCILocalized(@"Direction");
-
-		UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[
-			SCILocalized(@"Vertical"), SCILocalized(@"Horizontal"), SCILocalized(@"Diagonal")
-		]];
-		seg.selectedSegmentIndex = [m bubbleGradientDirectionForAsset:self.asset];
-		seg.selectedSegmentTintColor = [SCIUtils SCIColor_Primary];
-		[seg addTarget:self action:@selector(gradientDirChanged:) forControlEvents:UIControlEventValueChanged];
-		cell.accessoryView = seg;
-		cell.textLabel.textColor = UIColor.labelColor;
-		return cell;
-	}
-
-	if (tag == SCIRowBubbleColor) {
-		cell.textLabel.text = SCILocalized(@"Bubble color");
-		cell.textLabel.textColor = UIColor.labelColor;
-		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-
-		NSArray<UIColor *> *colors = [m bubbleColorsForAsset:self.asset];
-		if (colors.count) {
-			cell.imageView.image = [self swatchForColors:colors];
-			cell.imageView.layer.cornerRadius = 5;
-			cell.imageView.clipsToBounds = YES;
-		}
-		return cell;
-	}
-
-	if (tag == SCIRowTextColor) {
-		cell.textLabel.text = SCILocalized(@"Text color");
-		cell.textLabel.textColor = UIColor.labelColor;
-		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-
-		UIColor *textColor = [m autoBubbleTextColorForAsset:self.asset];
-		if (textColor) {
-			cell.imageView.image = [self swatchForColors:@[textColor]];
-			cell.imageView.layer.cornerRadius = 5;
-			cell.imageView.clipsToBounds = YES;
-		}
-		return cell;
-	}
-
 	UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 170, 31)];
 	slider.tintColor = [SCIUtils SCIColor_Primary];
-	slider.tag = tag;
+	slider.tag = ip.row;
 	[slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
 	[slider addTarget:self action:@selector(sliderDone:) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
 
-	if (tag == SCIRowOpacity) {
+	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
+
+	if (ip.row == SCIRowOpacity) {
 		cell.textLabel.text = SCILocalized(@"Opacity");
 		slider.minimumValue = 0.1;
 		slider.maximumValue = 1.0;
 		slider.value = [m effectiveOpacityForAsset:self.asset];
-	} else if (tag == SCIRowBlur) {
+	} else if (ip.row == SCIRowBlur) {
 		cell.textLabel.text = SCILocalized(@"Blur");
 		slider.minimumValue = 0;
 		slider.maximumValue = 30;
@@ -276,18 +172,11 @@ static NSString *const kCell = @"cell";
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
 	[tv deselectRowAtIndexPath:ip animated:YES];
-	NSInteger tag = self.rows[ip.row].integerValue;
+	if (ip.row != SCIRowReset) return;
 
-	if (tag == SCIRowReset) {
-		[[SCIChatBackgroundManager shared] resetSettingsForAsset:self.asset];
-		[self rebuildRows];
-		[self renderPreview];
-		[self.tableView reloadData];
-	} else if (tag == SCIRowBubbleColor) {
-		[self editBubbleColor];
-	} else if (tag == SCIRowTextColor) {
-		[self editTextColor];
-	}
+	[[SCIChatBackgroundManager shared] resetSettingsForAsset:self.asset];
+	[self renderPreview];
+	[self.tableView reloadData];
 }
 
 #pragma mark - Slider
@@ -309,97 +198,6 @@ static NSString *const kCell = @"cell";
 
 - (void)sliderDone:(UISlider *)s {
 	if (s.tag == SCIRowBlur) [self renderPreview];
-}
-
-- (void)autoBubbleToggled:(UISwitch *)sw {
-	[[SCIChatBackgroundManager shared] setAutoBubble:sw.on forAsset:self.asset];
-	[self rebuildRows];
-	[self.tableView reloadData];
-}
-
-- (void)sidesChanged:(UISegmentedControl *)seg {
-	[[SCIChatBackgroundManager shared] setBubbleSides:(SCIBubbleSides)seg.selectedSegmentIndex forAsset:self.asset];
-}
-
-- (void)gradientToggled:(UISwitch *)sw {
-	[[SCIChatBackgroundManager shared] setBubbleGradient:sw.on forAsset:self.asset];
-	[self rebuildRows];
-	[self.tableView reloadData];
-}
-
-- (void)gradientDirChanged:(UISegmentedControl *)seg {
-	[[SCIChatBackgroundManager shared] setBubbleGradientDirection:(SCIBubbleGradientDirection)seg.selectedSegmentIndex forAsset:self.asset];
-}
-
-- (void)editBubbleColor {
-	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
-	NSString *capturedAsset = self.asset;
-	NSArray<UIColor *> *colors = [m bubbleColorsForAsset:capturedAsset];
-	BOOL gradient = [m bubbleGradientForAsset:capturedAsset];
-
-	SCIColorPickerSheet *picker = [SCIColorPickerSheet sheetWithMode:gradient ? SCIColorPickerSheetModeGradient : SCIColorPickerSheetModeSolid
-														 startColor:colors.firstObject ?: UIColor.systemBlueColor
-														   endColor:gradient ? (colors.count > 1 ? colors.lastObject : nil) : nil
-													   applyHandler:^(SCIColorPickerSheetMode mode, UIColor *primary, UIColor *secondary) {
-		NSArray<UIColor *> *picked = (mode == SCIColorPickerSheetModeGradient && secondary) ? @[primary, secondary] : @[primary];
-		[m setBubbleColorOverride:picked forAsset:capturedAsset];
-		[self.tableView reloadData];
-	}];
-	[picker presentFromViewController:self];
-}
-
-- (void)editTextColor {
-	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
-	NSString *capturedAsset = self.asset;
-
-	UIAlertController *sheet = [UIAlertController alertControllerWithTitle:SCILocalized(@"Text color") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-
-	[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Automatic (contrast)") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
-		[m setBubbleTextColorOverride:nil forAsset:capturedAsset];
-		[self.tableView reloadData];
-	}]];
-
-	[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Choose color…") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
-		UIColor *start = [m bubbleTextColorOverrideForAsset:capturedAsset] ?: [m autoBubbleTextColorForAsset:capturedAsset] ?: UIColor.whiteColor;
-		SCIColorPickerSheet *picker = [SCIColorPickerSheet sheetWithMode:SCIColorPickerSheetModeSolid
-															 startColor:start
-															   endColor:nil
-														   applyHandler:^(__unused SCIColorPickerSheetMode mode, UIColor *primary, __unused UIColor *secondary) {
-			[m setBubbleTextColorOverride:primary forAsset:capturedAsset];
-			[self.tableView reloadData];
-		}];
-		[picker presentFromViewController:self];
-	}]];
-
-	[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-
-	UITableViewCell *cell = nil;
-	NSInteger idx = [self.rows indexOfObject:@(SCIRowTextColor)];
-	if (idx != NSNotFound) cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:idx inSection:0]];
-	sheet.popoverPresentationController.sourceView = cell ?: self.view;
-	sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
-
-	[self presentViewController:sheet animated:YES completion:nil];
-}
-
-- (UIImage *)swatchForColors:(NSArray<UIColor *> *)colors {
-	CGSize size = CGSizeMake(26, 26);
-	UIGraphicsImageRendererFormat *fmt = UIGraphicsImageRendererFormat.preferredFormat;
-	fmt.opaque = NO;
-	return [[[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt] imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-		UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:(CGRect){CGPointZero, size} cornerRadius:5];
-		[path addClip];
-		if (colors.count >= 2) {
-			CGFloat locs[2] = {0, 1};
-			NSArray *cgs = @[(id)[colors[0] CGColor], (id)[colors[1] CGColor]];
-			CGGradientRef grad = CGGradientCreateWithColors(CGColorSpaceCreateDeviceRGB(), (__bridge CFArrayRef)cgs, locs);
-			CGContextDrawLinearGradient(ctx.CGContext, grad, CGPointMake(0, 0), CGPointMake(0, size.height), 0);
-			CGGradientRelease(grad);
-		} else {
-			[colors.firstObject ?: UIColor.clearColor setFill];
-			[path fill];
-		}
-	}];
 }
 
 @end

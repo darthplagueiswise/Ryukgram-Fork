@@ -1,6 +1,7 @@
 #import "SCIIconPicker.h"
 #import "../ActionButton/SCIActionIcon.h"
 #import "../Localization/SCILocalization.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 static NSString *const kCellID = @"SCIIconCell";
 
@@ -21,7 +22,7 @@ static NSString *const kCellID = @"SCIIconCell";
     self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
     self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
     self.contentView.layer.borderColor = [UIColor separatorColor].CGColor;
-    self.contentView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    self.contentView.backgroundColor = UIColor.clearColor;
 
     _iconView = [UIImageView new];
     _iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -62,7 +63,7 @@ static NSString *const kCellID = @"SCIIconCell";
         self.contentView.layer.borderWidth = 2.0;
         self.iconView.tintColor = [UIColor systemBlueColor];
     } else {
-        self.contentView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+        self.contentView.backgroundColor = UIColor.clearColor;
         self.contentView.layer.borderColor = [UIColor separatorColor].CGColor;
         self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
         self.iconView.tintColor = [UIColor labelColor];
@@ -114,7 +115,7 @@ static NSString *const kCellID = @"SCIIconCell";
     [super viewDidLoad];
     self.title = self.hasSource ? [SCIActionCatalog displayNameForSource:self.source]
                                 : SCILocalized(@"Action button icon");
-    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+    SCIApplyGlassBackdropToViewController(self);
 
     if (self.hasSource) {
         self.navigationItem.rightBarButtonItem =
@@ -139,7 +140,7 @@ static NSString *const kCellID = @"SCIIconCell";
     self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero
                                              collectionViewLayout:layout];
     self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.collectionView.backgroundColor = [UIColor clearColor];
+    SCIStyleCollectionViewForGlass(self.collectionView);
     self.collectionView.delegate = self;
     self.collectionView.dataSource = self;
     self.collectionView.alwaysBounceVertical = YES;

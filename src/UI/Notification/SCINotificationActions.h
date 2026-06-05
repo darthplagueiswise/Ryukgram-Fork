@@ -36,7 +36,6 @@ extern NSString *const SCI_NOTIF_PIN_THREAD;
 
 // ───── Stories & messages ─────
 extern NSString *const SCI_NOTIF_UNSENT_MESSAGE;
-extern NSString *const SCI_NOTIF_REACTION_REMOVED;
 extern NSString *const SCI_NOTIF_LIVE_TOGGLE;
 extern NSString *const SCI_NOTIF_GIF_SENT;
 
@@ -46,7 +45,6 @@ extern NSString *const SCI_NOTIF_AUDIO_EXTRACT;
 
 // ───── Profile ─────
 extern NSString *const SCI_NOTIF_ANALYZER_DONE;
-extern NSString *const SCI_NOTIF_ANALYZER_RUN;       // progress: profile-analyzer scan
 
 // ───── Errors ─────
 extern NSString *const SCI_NOTIF_MEDIA_ERROR;

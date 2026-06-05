@@ -5,50 +5,27 @@
 #import "../../Utils.h"
 #import "SCITheme.h"
 
-static inline void SCIApplyKeyboardOLEDView(UIView *view) {
-	view.backgroundColor = UIColor.blackColor;
-
-	for (UIView *sub in view.subviews) {
-		sub.backgroundColor = UIColor.blackColor;
-	}
-}
-
 %group KeyboardThemeDarkGroup
 
 %hook UITextField
-
 - (BOOL)becomeFirstResponder {
-	if ([SCITheme keyboardShouldApplyDark]) {
-		self.keyboardAppearance = UIKeyboardAppearanceDark;
-	}
-
-	return %orig;
+    if ([SCITheme keyboardShouldApplyDark]) self.keyboardAppearance = UIKeyboardAppearanceDark;
+    return %orig;
 }
-
 %end
 
 %hook UITextView
-
 - (BOOL)becomeFirstResponder {
-	if ([SCITheme keyboardShouldApplyDark]) {
-		self.keyboardAppearance = UIKeyboardAppearanceDark;
-	}
-
-	return %orig;
+    if ([SCITheme keyboardShouldApplyDark]) self.keyboardAppearance = UIKeyboardAppearanceDark;
+    return %orig;
 }
-
 %end
 
 %hook UISearchBar
-
 - (BOOL)becomeFirstResponder {
-	if ([SCITheme keyboardShouldApplyDark]) {
-		self.keyboardAppearance = UIKeyboardAppearanceDark;
-	}
-
-	return %orig;
+    if ([SCITheme keyboardShouldApplyDark]) self.keyboardAppearance = UIKeyboardAppearanceDark;
+    return %orig;
 }
-
 %end
 
 %end
@@ -56,57 +33,46 @@ static inline void SCIApplyKeyboardOLEDView(UIView *view) {
 %group KeyboardThemeOLEDGroup
 
 %hook UIKBBackdropView
-
 - (void)layoutSubviews {
-	%orig;
-
-	if ([SCITheme keyboardShouldApplyOLED]) {
-		SCIApplyKeyboardOLEDView(self);
-	}
+    %orig;
+    if (![SCITheme keyboardShouldApplyOLED]) return;
+    self.backgroundColor = [UIColor blackColor];
+    for (UIView *sub in self.subviews) sub.backgroundColor = [UIColor blackColor];
 }
-
 - (void)setBackgroundColor:(UIColor *)color {
-	if ([SCITheme keyboardShouldApplyOLED] && ![color isEqual:UIColor.blackColor]) {
-		%orig(UIColor.blackColor);
-		return;
-	}
-
-	%orig;
+    if (![SCITheme keyboardShouldApplyOLED]) { %orig; return; }
+    if (![color isEqual:[UIColor blackColor]]) {
+        %orig([UIColor blackColor]);
+        return;
+    }
+    %orig;
 }
-
 - (void)didMoveToWindow {
-	%orig;
-
-	if ([SCITheme keyboardShouldApplyOLED]) {
-		SCIApplyKeyboardOLEDView(self);
-	}
+    %orig;
+    if (![SCITheme keyboardShouldApplyOLED]) return;
+    self.backgroundColor = [UIColor blackColor];
+    for (UIView *sub in self.subviews) sub.backgroundColor = [UIColor blackColor];
 }
-
 %end
 
 %hook UIKBKeyplaneChargedView
-
 - (void)layoutSubviews {
-	%orig;
-
-	if ([SCITheme keyboardShouldApplyOLED]) {
-		self.backgroundColor = UIColor.blackColor;
-	}
+    %orig;
+    if (![SCITheme keyboardShouldApplyOLED]) return;
+    self.backgroundColor = [UIColor blackColor];
 }
-
 %end
 
 %end
 
 %ctor {
-	[SCITheme migrateLegacyPrefs];
+    [SCITheme migrateLegacyPrefs];
+    NSString *raw = [[NSUserDefaults standardUserDefaults] stringForKey:SCIThemePrefKeyboard];
+    NSString *mode = raw.length ? raw : @"off";
+    if ([mode isEqualToString:@"off"]) return;
 
-	NSString *mode = [SCITheme keyboardModeKey];
-	if ([mode isEqualToString:@"off"]) return;
-
-	%init(KeyboardThemeDarkGroup);
-
-	if ([mode isEqualToString:@"oled"]) {
-		%init(KeyboardThemeOLEDGroup);
-	}
+    %init(KeyboardThemeDarkGroup);
+    if ([mode isEqualToString:@"oled"]) {
+        %init(KeyboardThemeOLEDGroup);
+    }
 }

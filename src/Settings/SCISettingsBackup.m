@@ -167,6 +167,9 @@ static NSString *sciHumanSize(unsigned long long bytes) {
 		@"SCInstaFirstRun",
 		@"sci_changelog_last_seen_version",
 		@"sci_exp_warning_seen",
+		@"sci_internal_gate_crash_pending_keys",
+		@"sci_internal_gate_crash_disabled_keys",
+		@"sci_internal_gate_crash_last_source",
 		@"deleted_messages_seen",
 	]];
 	return s;
@@ -560,7 +563,7 @@ static NSString *sciHumanSize(unsigned long long bytes) {
 	for (NSString *f in analyzer) { NSArray *p = [f componentsSeparatedByString:@"."]; if (p.count) [aPks addObject:p[0]]; }
 	add(SCIBackupCatAnalyzer, SCILocalized(@"Profile Analyzer data"),
 		[NSString stringWithFormat:SCILocalized(@"%lu account(s)"), (unsigned long)aPks.count],
-		@"person.fill.viewfinder", UIColor.systemPurpleColor, [self analyzerDetailSections:analyzer]);
+		@"person.fill.viewfinder", ([SCIUtils SCIColor_Primary] ?: UIColor.systemBlueColor), [self analyzerDetailSections:analyzer]);
 
 	// File stats from the envelope (manifest on import) — describe the backup, not the device.
 	NSDictionary *(^fileDict)(NSString *) = ^NSDictionary *(NSString *key) {

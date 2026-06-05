@@ -3,6 +3,7 @@
 #import "../Networking/SCIInstagramAPI.h"
 #import "../Utils.h"
 #import "../SCIURLOpener.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 
 static NSString *const kAvatarLoadedNotif = @"SCIExcludedChatsAvatarLoaded";
 
@@ -390,6 +391,7 @@ static NSDictionary *SCINormalizedEntry(NSDictionary *e) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
+	SCIApplyGlassBackdropToViewController(self);
 	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:kAvatarLoadedNotif object:nil];
 }
 

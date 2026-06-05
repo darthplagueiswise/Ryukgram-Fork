@@ -1,4 +1,5 @@
 #import "SCILinksSheet.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Localization/SCILocalization.h"
 #import "../Tweak.h"
 #import "../Utils.h"
@@ -19,11 +20,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.11 alpha:1.0]
-            : [UIColor systemBackgroundColor];
-    }];
+    SCIApplyGlassBackdropToViewController(self);
 
     UIImageView *logo = [[UIImageView alloc] initWithImage:
         [UIImage imageNamed:@"ryukgram"
@@ -89,7 +86,9 @@
 - (UIButton *)makeButtonWithTitle:(NSString *)title
                          sfSymbol:(NSString *)symbol
                         iconColor:(UIColor *)iconColor {
-    UIButtonConfiguration *cfg = [UIButtonConfiguration filledButtonConfiguration];
+    UIButtonConfiguration *cfg;
+    if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration prominentGlassButtonConfiguration];
+    else cfg = [UIButtonConfiguration filledButtonConfiguration];
 
     NSDictionary *attrs = @{
         NSFontAttributeName: [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold],

@@ -171,19 +171,12 @@ static SCIDownloadDelegate *sciMakeDownloader(DownloadAction action, BOOL progre
 	return d;
 }
 
-static SCIGallerySaveMetadata *sciMakeGalleryMetadata(SCIGallerySource source, id media, BOOL skipDedup) {
-	SCIGallerySaveMetadata *m = SCIGallerySaveMetadata.new;
-	m.source = (int16_t)source;
-	m.skipDedup = skipDedup;
-	if (media) {
-		@try { [SCIGalleryOriginController populateMetadata:m fromMedia:media]; }
-		@catch (__unused id e) {}
-	}
-	return m;
-}
-
 static void sciStampGalleryMetadataForMedia(id media, SCIActionContext ctx) {
-	sciSetPendingMetadata(sciMakeGalleryMetadata(sciGallerySourceFromContext(ctx), media, NO));
+	SCIGallerySaveMetadata *m = SCIGallerySaveMetadata.new;
+	m.source = (int16_t)sciGallerySourceFromContext(ctx);
+	@try { [SCIGalleryOriginController populateMetadata:m fromMedia:media]; }
+	@catch (__unused id e) {}
+	sciSetPendingMetadata(m);
 }
 
 static NSTimeInterval sciCoerceTimestamp(id value) {
@@ -269,58 +262,7 @@ static SCIGalleryFile *sciSaveFileToGalleryURL(NSURL *url, SCIGalleryMediaType t
 	return [SCIGalleryFile saveFileToGallery:url source:source mediaType:type folderPath:nil metadata:m error:error];
 }
 
-#pragma mark - Shared helpers (refactor)
-
-static NSString *sciExt(NSURL *url, NSString *fallback) {
-	return url.pathExtension.length ? url.pathExtension : fallback;
-}
-
-static NSArray<NSString *> *sciURLStringsForMedias(NSArray *medias) {
-	NSMutableArray<NSString *> *out = NSMutableArray.array;
-	for (NSURL *u in sciURLsForMedias(medias)) [out addObject:u.absoluteString];
-	return out.copy;
-}
-
-static void sciCopyURLStrings(NSArray<NSString *> *urls) {
-	if (!urls.count) {
-		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"No URLs found")];
-		return;
-	}
-	UIPasteboard.generalPasteboard.string = [urls componentsJoinedByString:@"\n"];
-	SCINotifySuccess(SCI_NOTIF_COPY_URL, [NSString stringWithFormat:SCILocalized(@"Copied %lu URLs"), (unsigned long)urls.count], nil);
-}
-
-static void sciSavePhotosAsset(NSURL *url, PHAssetResourceType type, void(^completion)(BOOL success, NSError *error)) {
-	[PHPhotoLibrary.sharedPhotoLibrary performChanges:^{
-		PHAssetCreationRequest *req = PHAssetCreationRequest.creationRequestForAsset;
-		PHAssetResourceCreationOptions *opts = PHAssetResourceCreationOptions.new;
-		opts.shouldMoveFile = YES;
-		[req addResourceWithType:type fileURL:url options:opts];
-	} completionHandler:completion];
-}
-
-static void sciFinishJobWithGallerySave(SCIDownloadJob *job, NSURL *url, SCIGalleryMediaType type) {
-	SCIDownloadCenter *center = [SCIDownloadCenter shared];
-	NSError *error = nil;
-	SCIGalleryFile *file = sciSaveFileToGalleryURL(url, type, &error);
-	if (file && !error) {
-		job.successText = SCILocalized(@"Saved to Gallery");
-		[center markJobFinished:job];
-	} else {
-		[center markJob:job failedWithError:error];
-	}
-}
-
-static NSArray<SCIMediaViewerItem *> *sciViewerItemsForChildren(NSArray *children, NSString *caption) {
-	NSMutableArray<SCIMediaViewerItem *> *items = NSMutableArray.array;
-	for (id child in children) {
-		NSURL *v = [SCIUtils getVideoUrlForMedia:(IGMedia *)child];
-		NSURL *p = [SCIUtils getPhotoUrlForMedia:(IGMedia *)child] ?: (!v ? [SCIMediaActions bestURLForMedia:child] : nil);
-		if (v || p) [items addObject:[SCIMediaViewerItem itemWithVideoURL:v photoURL:p caption:caption]];
-	}
-	return items;
-}
-
+// Same as sciSaveVideoToPhotosURL but reports into a download-center job.
 static void sciSaveVideoToPhotosURLForJob(NSURL *url, SCIDownloadJob *job) {
 	SCIDownloadCenter *center = [SCIDownloadCenter shared];
 	[PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
@@ -352,7 +294,12 @@ static void sciSaveVideoToPhotosURLForJob(NSURL *url, SCIDownloadJob *job) {
 			return;
 		}
 
-		sciSavePhotosAsset(url, PHAssetResourceTypeVideo, done);
+		[PHPhotoLibrary.sharedPhotoLibrary performChanges:^{
+			PHAssetCreationRequest *req = PHAssetCreationRequest.creationRequestForAsset;
+			PHAssetResourceCreationOptions *opts = PHAssetResourceCreationOptions.new;
+			opts.shouldMoveFile = YES;
+			[req addResourceWithType:PHAssetResourceTypeVideo fileURL:url options:opts];
+		} completionHandler:done];
 	}];
 }
 
@@ -603,7 +550,7 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 		return;
 	}
 
-	NSString *ext = sciExt(url, @"jpg");
+	NSString *ext = url.pathExtension.length ? url.pathExtension : @"jpg";
 	[sciMakeDownloader(action, NO) downloadFileWithURL:url fileExtension:ext hudLabel:nil];
 }
 
@@ -646,7 +593,14 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 				job.resultFileURL = fileURL;
 
 				if (action == saveToGallery) {
-					sciFinishJobWithGallerySave(job, fileURL, SCIGalleryMediaTypeAudio);
+					NSError *error = nil;
+					SCIGalleryFile *file = sciSaveFileToGalleryURL(fileURL, SCIGalleryMediaTypeAudio, &error);
+					if (file && !error) {
+						job.successText = SCILocalized(@"Saved to Gallery");
+						[center markJobFinished:job];
+					} else {
+						[center markJob:job failedWithError:error];
+					}
 					return;
 				}
 
@@ -681,7 +635,7 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 			return;
 		}
 
-		[sciMakeDownloader(action, NO) downloadFileWithURL:url fileExtension:sciExt(url, @"jpg") hudLabel:nil];
+		[sciMakeDownloader(action, NO) downloadFileWithURL:url fileExtension:(url.pathExtension.length ? url.pathExtension : @"jpg") hudLabel:nil];
 		return;
 	}
 
@@ -697,7 +651,7 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 			return;
 		}
 
-		[sciMakeDownloader(action, YES) downloadFileWithURL:url fileExtension:sciExt(url, @"mp4") hudLabel:nil];
+		[sciMakeDownloader(action, YES) downloadFileWithURL:url fileExtension:(url.pathExtension.length ? url.pathExtension : @"mp4") hudLabel:nil];
 	}];
 
 	(void)handled;
@@ -752,23 +706,20 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 					[center markJobFinished:job];
 					[SCIUtils showQuickLookVC:@[outputURL]];
 					break;
-				case saveToGallery:
-					sciFinishJobWithGallerySave(job, outputURL, SCIGalleryMediaTypeVideo);
-					break;
-				case saveToPhotos: {
-					NSString *galleryMode = [SCIUtils getStringPref:@"gallery_save_mode"];
-					if ([galleryMode isEqualToString:@"gallery_only"]) {
-						sciFinishJobWithGallerySave(job, outputURL, SCIGalleryMediaTypeVideo);
+				case saveToGallery: {
+					NSError *err = nil;
+					SCIGalleryFile *file = sciSaveFileToGalleryURL(outputURL, SCIGalleryMediaTypeVideo, &err);
+					if (file && !err) {
+						job.successText = SCILocalized(@"Saved to Gallery");
+						[center markJobFinished:job];
 					} else {
-						// Mirror: copy to gallery before the Photos save moves the file.
-						if ([galleryMode isEqualToString:@"mirror"]) {
-							NSError *e = nil;
-							sciSaveFileToGalleryURL(outputURL, SCIGalleryMediaTypeVideo, &e);
-						}
-						sciSaveVideoToPhotosURLForJob(outputURL, job);
+						[center markJob:job failedWithError:err];
 					}
 					break;
 				}
+				case saveToPhotos:
+					sciSaveVideoToPhotosURLForJob(outputURL, job);
+					break;
 			}
 		} cancelOut:^(void (^cb)(void)) {
 			muxCancel = [cb copy];
@@ -800,7 +751,15 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 	NSString *cap = caption ?: [self captionForMedia:media];
 
 	if ([self isCarouselMedia:media]) {
-		NSArray<SCIMediaViewerItem *> *items = sciViewerItemsForChildren([self carouselChildrenForMedia:media], cap);
+		NSArray *children = [self carouselChildrenForMedia:media];
+		NSMutableArray<SCIMediaViewerItem *> *items = NSMutableArray.array;
+
+		for (id child in children) {
+			NSURL *v = [SCIUtils getVideoUrlForMedia:(IGMedia *)child];
+			NSURL *p = [SCIUtils getPhotoUrlForMedia:(IGMedia *)child] ?: (!v ? [self bestURLForMedia:child] : nil);
+			if (v || p) [items addObject:[SCIMediaViewerItem itemWithVideoURL:v photoURL:p caption:cap]];
+		}
+
 		if (items.count) {
 			[SCIMediaViewer showItems:items startIndex:0];
 			return;
@@ -895,7 +854,7 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 
 				dispatch_group_enter(group);
 
-				NSString *ext = sciExt(url, @"jpg");
+				NSString *ext = url.pathExtension.length ? url.pathExtension : @"jpg";
 				NSString *name = stem.length ? [NSString stringWithFormat:@"%@_%lu", stem, (unsigned long)(idx + 1)] : NSUUID.UUID.UUIDString;
 				NSURL *dst = [SCITempFiles claimWithExt:ext ttl:900 tag:name];
 
@@ -967,14 +926,6 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 		return;
 	}
 
-	NSString *galleryMode = [SCIUtils getStringPref:@"gallery_save_mode"];
-	if ([galleryMode isEqualToString:@"gallery_only"]) {
-		SCIGallerySaveMetadata *md = sciMakeGalleryMetadata(SCIGallerySourceOther, nil, YES);
-		[self bulkSaveFilesToGallery:files perFileMetadata:nil defaultMetadata:md];
-		return;
-	}
-	BOOL mirror = [galleryMode isEqualToString:@"mirror"];
-
 	SCIDownloadCenter *center = [SCIDownloadCenter shared];
 	NSUInteger total = files.count;
 	__block SCIDownloadJob *job = nil;
@@ -1013,24 +964,17 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 					if (saveNext) saveNext();
 				};
 
-				// Mirror: copy to gallery before the Photos save moves the file.
-				if (mirror) {
-					SCIGallerySaveMetadata *md = sciMakeGalleryMetadata(SCIGallerySourceOther, nil, YES);
-					NSError *ge = nil;
-					[SCIGalleryFile saveFileToGallery:file
-											   source:SCIGallerySourceOther
-											mediaType:(sciIsVideoURL(file) ? SCIGalleryMediaTypeVideo : SCIGalleryMediaTypeImage)
-										   folderPath:nil
-											 metadata:md
-												error:&ge];
-				}
-
 				if (useAlbum) {
 					[SCIPhotoAlbum saveFileToAlbum:file completion:step];
 					return;
 				}
 
-				sciSavePhotosAsset(file, (sciIsVideoURL(file) ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto), step);
+				[PHPhotoLibrary.sharedPhotoLibrary performChanges:^{
+					PHAssetCreationRequest *req = PHAssetCreationRequest.creationRequestForAsset;
+					PHAssetResourceCreationOptions *opts = PHAssetResourceCreationOptions.new;
+					opts.shouldMoveFile = YES;
+					[req addResourceWithType:(sciIsVideoURL(file) ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto) fileURL:file options:opts];
+				} completionHandler:step];
 			};
 
 			saveNext();
@@ -1111,7 +1055,13 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 			return;
 		}
 
-		SCIGallerySaveMetadata *metadata = sciMakeGalleryMetadata(sciGallerySourceFromContext(ctx), carouselMedia, YES);
+		SCIGallerySaveMetadata *metadata = SCIGallerySaveMetadata.new;
+		metadata.source = (int16_t)sciGallerySourceFromContext(ctx);
+		metadata.skipDedup = YES;
+
+		@try { [SCIGalleryOriginController populateMetadata:metadata fromMedia:carouselMedia]; }
+		@catch (__unused id e) {}
+
 		[self bulkSaveFilesToGallery:files perFileMetadata:nil defaultMetadata:metadata];
 	}];
 }
@@ -1123,7 +1073,16 @@ static const void *kSCICarouselParentMediaKey = &kSCICarouselParentMediaKey;
 		return;
 	}
 
-	sciCopyURLStrings(sciURLStringsForMedias(children));
+	NSMutableArray<NSString *> *urls = NSMutableArray.array;
+	for (NSURL *url in sciURLsForMedias(children)) [urls addObject:url.absoluteString];
+
+	if (!urls.count) {
+		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"No URLs found")];
+		return;
+	}
+
+	UIPasteboard.generalPasteboard.string = [urls componentsJoinedByString:@"\n"];
+	SCINotifySuccess(SCI_NOTIF_COPY_URL, [NSString stringWithFormat:SCILocalized(@"Copied %lu URLs"), (unsigned long)urls.count], nil);
 }
 
 #pragma mark - Discovery helpers
@@ -1354,11 +1313,15 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 	void (^stamp)(id) = ^(id targetMedia) {
 		[SCIMediaActions setCurrentFilenameStem:[SCIMediaActions filenameStemForMedia:targetMedia contextLabel:ctxLabel]];
 
+		SCIGallerySaveMetadata *m = SCIGallerySaveMetadata.new;
+		m.source = (int16_t)sciGallerySourceFromContext(ctx);
 		// Carousel children carry no user info — populate from the parent
 		// first, then layer the child's media-specific identifiers on top.
 		id parent = weakParent;
-		SCIGallerySaveMetadata *m = sciMakeGalleryMetadata(sciGallerySourceFromContext(ctx),
-		                                                   (parent && parent != targetMedia) ? parent : nil, NO);
+		if (parent && parent != targetMedia) {
+			@try { [SCIGalleryOriginController populateMetadata:m fromMedia:parent]; }
+			@catch (__unused id e) {}
+		}
 		@try { [SCIGalleryOriginController populateMetadata:m fromMedia:targetMedia]; }
 		@catch (__unused id e) {}
 		sciSetPendingMetadata(m);
@@ -1369,7 +1332,13 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 			return [SCIAction actionWithTitle:SCILocalized(@"Expand") icon:@"arrow.up.left.and.arrow.down.right" handler:^{
 				if (isCarousel) {
 					NSArray *children = [SCIMediaActions carouselChildrenForMedia:parentMedia];
-					NSArray<SCIMediaViewerItem *> *items = sciViewerItemsForChildren(children, caption);
+					NSMutableArray *items = NSMutableArray.array;
+
+					for (id child in children) {
+						NSURL *v = [SCIUtils getVideoUrlForMedia:(IGMedia *)child];
+						NSURL *p = [SCIUtils getPhotoUrlForMedia:(IGMedia *)child] ?: (!v ? [SCIMediaActions bestURLForMedia:child] : nil);
+						if (v || p) [items addObject:[SCIMediaViewerItem itemWithVideoURL:v photoURL:p caption:caption]];
+					}
 
 					NSUInteger start = 0;
 					if (media != parentMedia) {
@@ -1495,8 +1464,23 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 			if (!hasBulk) return nil;
 
 			return [SCIAction actionWithTitle:SCILocalized(@"Copy all URLs") icon:@"doc.on.doc" handler:^{
-				NSArray<NSString *> *urls = sciURLStringsForMedias(isCarousel ? [SCIMediaActions carouselChildrenForMedia:parentMedia] : storyMedias);
-				sciCopyURLStrings(urls);
+				NSArray *urls = isCarousel ? ({
+					NSMutableArray *arr = NSMutableArray.array;
+					for (NSURL *u in sciURLsForMedias([SCIMediaActions carouselChildrenForMedia:parentMedia])) [arr addObject:u.absoluteString];
+					arr.copy;
+				}) : ({
+					NSMutableArray *arr = NSMutableArray.array;
+					for (NSURL *u in sciURLsForMedias(storyMedias)) [arr addObject:u.absoluteString];
+					arr.copy;
+				});
+
+				if (!urls.count) {
+					[SCIUtils showErrorHUDWithDescription:SCILocalized(@"No URLs found")];
+					return;
+				}
+
+				UIPasteboard.generalPasteboard.string = [urls componentsJoinedByString:@"\n"];
+				SCINotifySuccess(SCI_NOTIF_COPY_URL, [NSString stringWithFormat:SCILocalized(@"Copied %lu URLs"), (unsigned long)urls.count], nil);
 			}];
 		}
 
@@ -1551,8 +1535,13 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 
 					NSMutableArray<SCIGallerySaveMetadata *> *metadata = [NSMutableArray arrayWithCapacity:files.count];
 					for (NSUInteger i = 0; i < files.count; i++) {
-						SCIGallerySaveMetadata *m = sciMakeGalleryMetadata(sciGallerySourceFromContext(ctx),
-						                                       (i < medias.count ? medias[i] : nil), YES);
+						SCIGallerySaveMetadata *m = SCIGallerySaveMetadata.new;
+						m.source = (int16_t)sciGallerySourceFromContext(ctx);
+						m.skipDedup = YES;
+						if (i < medias.count) {
+							@try { [SCIGalleryOriginController populateMetadata:m fromMedia:medias[i]]; }
+							@catch (__unused id e) {}
+						}
 						[metadata addObject:m];
 					}
 

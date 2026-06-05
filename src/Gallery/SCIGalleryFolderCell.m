@@ -154,7 +154,6 @@
 @property (nonatomic, strong) UIView *gridOverlay;
 @property (nonatomic, strong) UILabel *gridTitle;
 @property (nonatomic, strong) UILabel *gridSubtitle;
-@property (nonatomic, strong) CAGradientLayer *gridGradient;
 
 @end
 
@@ -252,12 +251,7 @@
 	_gridOverlay.userInteractionEnabled = NO;
 	[_gridContainer addSubview:_gridOverlay];
 
-	_gridGradient = [CAGradientLayer layer];
-	_gridGradient.colors = @[(id)[UIColor colorWithWhite:0 alpha:0].CGColor,
-							 (id)[UIColor colorWithWhite:0 alpha:0.75].CGColor];
-	_gridGradient.startPoint = CGPointMake(0.5, 0.4);
-	_gridGradient.endPoint = CGPointMake(0.5, 1.0);
-	[_gridOverlay.layer addSublayer:_gridGradient];
+	_gridOverlay.backgroundColor = [UIColor colorWithWhite:0 alpha:0.56];
 
 	_gridTitle = [UILabel new];
 	_gridTitle.translatesAutoresizingMaskIntoConstraints = NO;
@@ -324,7 +318,6 @@
 
 - (void)layoutSubviews {
 	[super layoutSubviews];
-	self.gridGradient.frame = self.gridOverlay.bounds;
 }
 
 - (void)prepareForReuse {

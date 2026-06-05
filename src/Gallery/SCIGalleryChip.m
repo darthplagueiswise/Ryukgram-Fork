@@ -31,7 +31,9 @@ static UIImage *SCIGalleryChipGlyph(NSString *name, CGFloat pointSize) {
 	chip.layer.cornerRadius = cornerRadius;
 	chip.layer.cornerCurve = kCACornerCurveContinuous;
 	if (@available(iOS 15.0, *)) {
-		UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
+		UIButtonConfiguration *cfg;
+		if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration clearGlassButtonConfiguration];
+		else cfg = [UIButtonConfiguration plainButtonConfiguration];
 		cfg.title = title ?: @"";
 		if (sfSymbol.length) cfg.image = SCIGalleryChipGlyph(sfSymbol, ceil(fontSize * 1.7));
 		cfg.imagePadding = MAX(4.0, fontSize * 0.4);

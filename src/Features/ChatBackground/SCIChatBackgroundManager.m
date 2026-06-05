@@ -1,7 +1,6 @@
 #import "SCIChatBackgroundManager.h"
 #import "../../Utils.h"
 #import "../../SCIAccountScopedDefaults.h"
-#import "../Theme/SCITheme.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <CoreImage/CoreImage.h>
 
@@ -19,11 +18,6 @@ static NSString *const kAssetsDirName = @"ChatBackgrounds";
 static NSString *const kOpacity = @"opacity";
 static NSString *const kBlur = @"blur";
 static NSString *const kDim = @"dim";
-static NSString *const kAutoBubble = @"auto_bubble";
-static NSString *const kBubbleColors = @"bubble_colors";
-static NSString *const kBubbleSides = @"bubble_sides";
-static NSString *const kBubbleTextColor = @"bubble_text_color";
-static NSString *const kBubbleGradientDir = @"bubble_gradient_dir";
 
 static double SCIClamp(double v, double min, double max) {
 	if (isnan(v)) return min;
@@ -42,99 +36,7 @@ static CIContext *SCISharedCIContext(void) {
 @interface SCIChatBackgroundManager ()
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *imageCache;
 @property (nonatomic, strong) NSCache<NSString *, UIImage *> *processedCache;
-@property (nonatomic, strong) NSCache<NSString *, UIColor *> *bubbleColorCache;
 @end
-
-// Most vibrant color in the image (skips near-gray and extremes), or the average as fallback.
-static UIColor *SCIVibrantColor(UIImage *image) {
-	if (!image.CGImage) return nil;
-
-	const int N = 24;
-	unsigned char *buf = calloc(N * N * 4, 1);
-	if (!buf) return nil;
-
-	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(buf, N, N, 8, N * 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-	CGColorSpaceRelease(cs);
-	if (!ctx) { free(buf); return nil; }
-	CGContextDrawImage(ctx, CGRectMake(0, 0, N, N), image.CGImage);
-	CGContextRelease(ctx);
-
-	double bestScore = -1, bR = 0, bG = 0, bB = 0;
-	double sumR = 0, sumG = 0, sumB = 0; int sumN = 0;
-
-	for (int i = 0; i < N * N; i++) {
-		double r = buf[i * 4] / 255.0, g = buf[i * 4 + 1] / 255.0, b = buf[i * 4 + 2] / 255.0;
-		double a = buf[i * 4 + 3] / 255.0;
-		if (a < 0.5) continue;
-		sumR += r; sumG += g; sumB += b; sumN++;
-
-		double mx = MAX(r, MAX(g, b)), mn = MIN(r, MIN(g, b));
-		double sat = mx <= 0.001 ? 0 : (mx - mn) / mx;
-		if (sat < 0.18 || mx < 0.15 || mx > 0.97) continue;
-
-		double score = sat * (0.55 + 0.45 * mx);
-		if (score > bestScore) { bestScore = score; bR = r; bG = g; bB = b; }
-	}
-	free(buf);
-
-	if (bestScore < 0) {
-		if (!sumN) return nil;
-		return [UIColor colorWithRed:sumR / sumN green:sumG / sumN blue:sumB / sumN alpha:1.0];
-	}
-
-	UIColor *c = [UIColor colorWithRed:bR green:bG blue:bB alpha:1.0];
-	CGFloat h, s, v, a;
-	if ([c getHue:&h saturation:&s brightness:&v alpha:&a]) {
-		s = MIN(s * 1.1, 1.0);
-		v = SCIClamp(v, 0.30, 0.85);
-		c = [UIColor colorWithHue:h saturation:s brightness:v alpha:1.0];
-	}
-	return c;
-}
-
-static double SCILinearChannel(double c) {
-	return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
-}
-
-static double SCIRelativeLuminance(UIColor *c) {
-	CGFloat r, g, b, a, w;
-	if ([c getRed:&r green:&g blue:&b alpha:&a]) {
-		return 0.2126 * SCILinearChannel(r) + 0.7152 * SCILinearChannel(g) + 0.0722 * SCILinearChannel(b);
-	}
-	if ([c getWhite:&w alpha:&a]) return SCILinearChannel(w);
-	return 1.0;
-}
-
-static double SCIContrastRatio(double l1, double l2) {
-	double hi = MAX(l1, l2), lo = MIN(l1, l2);
-	return (hi + 0.05) / (lo + 0.05);
-}
-
-// Pure white vs near-black, whichever keeps the worst endpoint readable. Worst-case
-// across both gradient stops so text doesn't wash out at one end.
-static UIColor *SCIContrastColorForColors(NSArray<UIColor *> *colors) {
-	if (!colors.count) return UIColor.whiteColor;
-
-	UIColor *black = [UIColor colorWithWhite:0.10 alpha:1.0];
-	double whiteWorst = INFINITY, blackWorst = INFINITY;
-
-	for (UIColor *c in colors) {
-		double l = SCIRelativeLuminance(c);
-		whiteWorst = MIN(whiteWorst, SCIContrastRatio(1.0, l));
-		blackWorst = MIN(blackWorst, SCIContrastRatio(SCIRelativeLuminance(black), l));
-	}
-
-	return whiteWorst >= blackWorst ? UIColor.whiteColor : black;
-}
-
-static UIColor *SCIDarkerVariant(UIColor *c) {
-	CGFloat h, s, v, a;
-	if ([c getHue:&h saturation:&s brightness:&v alpha:&a]) {
-		return [UIColor colorWithHue:h saturation:MIN(s * 1.05, 1.0) brightness:SCIClamp(v * 0.62, 0.10, 1.0) alpha:a];
-	}
-	return c;
-}
 
 @implementation SCIChatBackgroundManager
 
@@ -152,9 +54,6 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 
 		_processedCache = [NSCache new];
 		_processedCache.countLimit = 24;
-
-		_bubbleColorCache = [NSCache new];
-		_bubbleColorCache.countLimit = 32;
 	}
 	return self;
 }
@@ -189,7 +88,6 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 - (void)postChange {
 	[self.imageCache removeAllObjects];
 	[self.processedCache removeAllObjects];
-	[self.bubbleColorCache removeAllObjects];
 	[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundDidChangeNotification object:nil];
 	[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundRenderDirtyNotification object:nil];
 }
@@ -508,159 +406,6 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 	[map removeObjectForKey:asset];
 	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
 	[self postRenderDirty];
-}
-
-#pragma mark - Auto bubble color
-
-- (BOOL)autoBubbleEnabledForAsset:(NSString *)asset {
-	return [[self settingsForAsset:asset][kAutoBubble] boolValue];
-}
-
-- (void)setAutoBubble:(BOOL)on forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSMutableDictionary *map = [[self perImageDict] mutableCopy];
-	NSMutableDictionary *entry = [([self settingsForAsset:asset] ?: @{}) mutableCopy];
-	entry[kAutoBubble] = @(on);
-	map[asset] = entry;
-
-	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
-	[self postChange];
-}
-
-- (UIColor *)autoBubbleColorForAsset:(NSString *)asset {
-	if (!asset.length) return nil;
-
-	UIColor *cached = [self.bubbleColorCache objectForKey:asset];
-	if (cached) return cached;
-
-	NSURL *url = [self urlForRelativeAsset:asset];
-	UIImage *img = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
-	UIColor *color = SCIVibrantColor(img);
-	if (color) [self.bubbleColorCache setObject:color forKey:asset];
-	return color;
-}
-
-- (NSArray<UIColor *> *)bubbleColorOverrideForAsset:(NSString *)asset {
-	id raw = [self settingsForAsset:asset][kBubbleColors];
-	if (![raw isKindOfClass:NSArray.class] || ![(NSArray *)raw count]) return nil;
-
-	NSMutableArray *out = [NSMutableArray new];
-	for (id hex in (NSArray *)raw) {
-		UIColor *c = [SCITheme colorFromHex:hex];
-		if (c) [out addObject:c];
-	}
-	return out.count ? out : nil;
-}
-
-- (void)setBubbleColorOverride:(NSArray<UIColor *> *)colors forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSMutableDictionary *map = [[self perImageDict] mutableCopy];
-	NSMutableDictionary *entry = [([self settingsForAsset:asset] ?: @{}) mutableCopy];
-
-	if (colors.count) {
-		NSMutableArray *hexes = [NSMutableArray new];
-		for (UIColor *c in colors) [hexes addObject:[SCITheme hexFromColor:c]];
-		entry[kBubbleColors] = hexes;
-	} else {
-		[entry removeObjectForKey:kBubbleColors];
-	}
-
-	map[asset] = entry;
-	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
-	[self postChange];
-}
-
-- (NSArray<UIColor *> *)bubbleColorsForAsset:(NSString *)asset {
-	NSArray<UIColor *> *override = [self bubbleColorOverrideForAsset:asset];
-	if (override.count) return override;
-
-	UIColor *derived = [self autoBubbleColorForAsset:asset];
-	return derived ? @[derived] : @[];
-}
-
-- (UIColor *)autoBubbleTextColorForAsset:(NSString *)asset {
-	UIColor *override = [self bubbleTextColorOverrideForAsset:asset];
-	if (override) return override;
-
-	NSArray<UIColor *> *colors = [self bubbleColorsForAsset:asset];
-	return colors.count ? SCIContrastColorForColors(colors) : nil;
-}
-
-- (SCIBubbleSides)bubbleSidesForAsset:(NSString *)asset {
-	NSNumber *v = [self settingsForAsset:asset][kBubbleSides];
-	NSInteger raw = v ? v.integerValue : SCIBubbleSidesIncoming;
-	if (raw < SCIBubbleSidesIncoming || raw > SCIBubbleSidesBoth) raw = SCIBubbleSidesIncoming;
-	return (SCIBubbleSides)raw;
-}
-
-- (void)setBubbleSides:(SCIBubbleSides)sides forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSMutableDictionary *map = [[self perImageDict] mutableCopy];
-	NSMutableDictionary *entry = [([self settingsForAsset:asset] ?: @{}) mutableCopy];
-	entry[kBubbleSides] = @(sides);
-	map[asset] = entry;
-
-	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
-	[self postChange];
-}
-
-- (BOOL)bubbleGradientForAsset:(NSString *)asset {
-	return [self bubbleColorsForAsset:asset].count > 1;
-}
-
-- (void)setBubbleGradient:(BOOL)on forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSArray<UIColor *> *cur = [self bubbleColorsForAsset:asset];
-	UIColor *base = cur.firstObject ?: [self autoBubbleColorForAsset:asset] ?: UIColor.systemBlueColor;
-
-	if (on) {
-		UIColor *second = cur.count > 1 ? cur[1] : SCIDarkerVariant(base);
-		[self setBubbleColorOverride:@[base, second] forAsset:asset];
-	} else {
-		[self setBubbleColorOverride:@[base] forAsset:asset];
-	}
-}
-
-- (SCIBubbleGradientDirection)bubbleGradientDirectionForAsset:(NSString *)asset {
-	NSNumber *v = [self settingsForAsset:asset][kBubbleGradientDir];
-	NSInteger raw = v ? v.integerValue : SCIBubbleGradientDirectionDiagonal;
-	if (raw < SCIBubbleGradientDirectionVertical || raw > SCIBubbleGradientDirectionDiagonal) raw = SCIBubbleGradientDirectionDiagonal;
-	return (SCIBubbleGradientDirection)raw;
-}
-
-- (void)setBubbleGradientDirection:(SCIBubbleGradientDirection)direction forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSMutableDictionary *map = [[self perImageDict] mutableCopy];
-	NSMutableDictionary *entry = [([self settingsForAsset:asset] ?: @{}) mutableCopy];
-	entry[kBubbleGradientDir] = @(direction);
-	map[asset] = entry;
-
-	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
-	[self postChange];
-}
-
-- (UIColor *)bubbleTextColorOverrideForAsset:(NSString *)asset {
-	id hex = [self settingsForAsset:asset][kBubbleTextColor];
-	return [hex isKindOfClass:NSString.class] ? [SCITheme colorFromHex:hex] : nil;
-}
-
-- (void)setBubbleTextColorOverride:(UIColor *)color forAsset:(NSString *)asset {
-	if (!asset.length) return;
-
-	NSMutableDictionary *map = [[self perImageDict] mutableCopy];
-	NSMutableDictionary *entry = [([self settingsForAsset:asset] ?: @{}) mutableCopy];
-
-	if (color) entry[kBubbleTextColor] = [SCITheme hexFromColor:color];
-	else [entry removeObjectForKey:kBubbleTextColor];
-
-	map[asset] = entry;
-	[NSUserDefaults.standardUserDefaults setObject:map forKey:SCIPrefChatBackgroundPerImage];
-	[self postChange];
 }
 
 #pragma mark - Import

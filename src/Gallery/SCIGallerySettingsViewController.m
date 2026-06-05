@@ -83,44 +83,50 @@ static NSString *const kPrefsChanged = @"SCIGalleryFavoritesSortPreferenceChange
 - (void)rebuildSections {
 	__weak typeof(self) weak = self;
 
-	SCISetting *total = [SCISetting staticCellWithTitle:SCILocalized(@"Total files") subtitle:@"" icon:nil];
+	SCIBaseSettingsRow *total = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Total files") subtitle:nil action:nil];
 	total.dynamicSubtitle = ^{ return [NSString stringWithFormat:@"%ld", (long)weak.stats.totalFiles]; };
 
-	SCISetting *images = [SCISetting staticCellWithTitle:SCILocalized(@"Images") subtitle:@"" icon:nil];
+	SCIBaseSettingsRow *images = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Images") subtitle:nil action:nil];
 	images.dynamicSubtitle = ^{ return [NSString stringWithFormat:@"%ld", (long)weak.stats.imageCount]; };
 
-	SCISetting *videos = [SCISetting staticCellWithTitle:SCILocalized(@"Videos") subtitle:@"" icon:nil];
+	SCIBaseSettingsRow *videos = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Videos") subtitle:nil action:nil];
 	videos.dynamicSubtitle = ^{ return [NSString stringWithFormat:@"%ld", (long)weak.stats.videoCount]; };
 
-	SCISetting *size = [SCISetting staticCellWithTitle:SCILocalized(@"Total size") subtitle:@"" icon:nil];
+	SCIBaseSettingsRow *size = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Total size") subtitle:nil action:nil];
 	size.dynamicSubtitle = ^{ return [weak sizeText]; };
 
-	SCISetting *favorites = [SCISetting switchCellWithTitle:SCILocalized(@"Show favorites at top")
-												   subtitle:nil
-													  value:^BOOL{
+	SCIBaseSettingsRow *favorites = [SCIBaseSettingsRow switchRowWithTitle:SCILocalized(@"Show favorites at top")
+																   subtitle:nil
+																	  value:^BOOL{
 		return [SCIUtils getBoolPref:kFavoritesAtTopKey];
-	} action:^(BOOL on) {
+	} action:^(BOOL on, __unused UIViewController *vc) {
 		[SCIUtils setPref:@(on) forKey:kFavoritesAtTopKey];
 		[NSNotificationCenter.defaultCenter postNotificationName:kPrefsChanged object:nil];
 	}];
 
-	SCISetting *group = [SCISetting buttonCellWithTitle:SCILocalized(@"Group by user") subtitle:@"" icon:nil action:^{
-		[weak presentGroupModeSheet];
+	SCIBaseSettingsRow *group = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Group by user")
+														subtitle:nil
+														  action:^(UIViewController *vc) {
+		[(SCIGallerySettingsViewController *)vc presentGroupModeSheet];
 	}];
 	group.dynamicSubtitle = ^{ return [weak groupModeLabel]; };
 
-	SCISetting *delete = [SCISetting buttonCellWithTitle:SCILocalized(@"Delete files") subtitle:@"" icon:nil action:^{
-		[weak openDeletePage];
+	SCIBaseSettingsRow *delete = [SCIBaseSettingsRow destructiveRowWithTitle:SCILocalized(@"Delete files")
+																	subtitle:nil
+																	  action:^(UIViewController *vc) {
+		[(SCIGallerySettingsViewController *)vc openDeletePage];
 	}];
-	delete.titleColor = UIColor.systemRedColor;
+	delete.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
 
-	[self applySettingSections:@[
-		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Storage") footer:nil rows:@[total, images, videos, size]],
-		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Browsing")
-											 footer:SCILocalized(@"When enabled, favorites are pinned above other files inside the current sort and folder context.")
-											   rows:@[favorites, group]],
-		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Manage") footer:nil rows:@[delete]]
-	]];
+	self.sections = @[
+		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Storage") footer:nil rows:@[total, images, videos, size]],
+		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Browsing")
+										   footer:SCILocalized(@"When enabled, favorites are pinned above other files inside the current sort and folder context.")
+											 rows:@[favorites, group]],
+		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Manage") footer:nil rows:@[delete]]
+	];
+
+	[self reloadSettings];
 }
 
 #pragma mark - Actions

@@ -1,6 +1,7 @@
 #import "SCIIDListViewController.h"
 #import "../Localization/SCILocalization.h"
 #import "../Settings/GlassUI/SCIAdaptiveGlass.h"
+#import "../Settings/SCISearchBarStyler.h"
 
 @implementation SCIIDListConfig
 - (instancetype)init {
@@ -42,7 +43,7 @@
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = UIColor.systemBackgroundColor;
+	SCIApplyGlassBackdropToViewController(self);
 	self.navigationItem.title = @"";
 
 	_headerView = [UIView new];
@@ -67,12 +68,13 @@
 	_searchBar.searchBarStyle = UISearchBarStyleMinimal;
 	_searchBar.placeholder = self.config.searchPlaceholder ?: SCILocalized(@"Search");
 	_searchBar.translatesAutoresizingMaskIntoConstraints = NO;
+	[SCISearchBarStyler styleSearchBar:_searchBar];
 	[_headerView addSubview:_searchBar];
 
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
 	_tableView.delegate = self;
-	_tableView.backgroundColor = UIColor.systemBackgroundColor;
+	SCIStyleTableViewForGlass(_tableView);
 	_tableView.separatorInset = UIEdgeInsetsMake(0, 76, 0, 16);
 	_tableView.contentInset = UIEdgeInsetsMake(4, 0, 12, 0);
 	_tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;

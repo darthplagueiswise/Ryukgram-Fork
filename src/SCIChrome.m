@@ -121,8 +121,6 @@ static UIView *sciFindCanvasDeep(UIView *root, NSInteger depth) {
 
 	[canvas removeFromSuperview];
 	canvas.translatesAutoresizingMaskIntoConstraints = NO;
-	// We own the canvas now — let corner badges overflow without being clipped.
-	canvas.clipsToBounds = NO;
 	[self insertSubview:canvas atIndex:0];
 	sciPinEdges(canvas, self);
 
@@ -198,10 +196,6 @@ static UIView *sciFindCanvasDeep(UIView *root, NSInteger depth) {
 
 - (CGSize)intrinsicContentSize {
 	return CGSizeMake(_diameter, _diameter);
-}
-
-- (UIView *)captureContentView {
-	return _chromeCanvas.contentContainer;
 }
 
 - (void)setSymbolName:(NSString *)symbolName {

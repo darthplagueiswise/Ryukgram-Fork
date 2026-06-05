@@ -237,22 +237,9 @@ void sciDMMarkCurrentAsViewed(UIViewController *dmVC) {
         }
     }
 
-    BOOL advanced = NO;
-    if ([SCIUtils getBoolPref:@"dm_visual_advance_on_mark_seen"] && dmVC.isViewLoaded) {
-        UIView *overlay = sciFindOverlayInView(dmVC.view);
-        SEL tapSel = @selector(fullscreenOverlay:didTapInRegion:);
-        if (overlay && [dmVC respondsToSelector:tapSel]) {
-            // region 3 = forward tap; advances to next stacked media, auto-dismisses on the last.
-            ((void(*)(id, SEL, id, NSInteger))objc_msgSend)(dmVC, tapSel, overlay, 3);
-            advanced = YES;
-        }
-    }
-
-    if (!advanced) {
-        SEL dismissSel = NSSelectorFromString(@"_didTapHeaderViewDismissButton:");
-        if ([dmVC respondsToSelector:dismissSel]) {
-            ((void(*)(id,SEL,id))objc_msgSend)(dmVC, dismissSel, nil);
-        }
+    SEL dismissSel = NSSelectorFromString(@"_didTapHeaderViewDismissButton:");
+    if ([dmVC respondsToSelector:dismissSel]) {
+        ((void(*)(id,SEL,id))objc_msgSend)(dmVC, dismissSel, nil);
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{

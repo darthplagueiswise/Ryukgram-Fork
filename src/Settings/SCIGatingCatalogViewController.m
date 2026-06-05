@@ -1,4 +1,5 @@
 #import "SCIGatingCatalogViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/Gating/SCIGatingCatalog.h"
 
 #pragma mark - Glass toggle cell

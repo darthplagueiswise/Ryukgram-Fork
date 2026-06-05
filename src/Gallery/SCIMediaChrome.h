@@ -5,7 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 FOUNDATION_EXPORT CGFloat const SCIMediaChromeTopBarContentHeight;
 FOUNDATION_EXPORT CGFloat const SCIMediaChromeBottomBarHeight;
 
-UIBlurEffect *SCIMediaChromeBlurEffect(void);
+UIVisualEffect *SCIMediaChromeGlassEffect(void);
 void SCIApplyMediaChromeNavigationBar(UINavigationBar *bar);
 
 UILabel *SCIMediaChromeTitleLabel(NSString *text);

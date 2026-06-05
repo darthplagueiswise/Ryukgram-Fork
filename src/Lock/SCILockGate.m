@@ -96,7 +96,11 @@ static BOOL sciGroupInheritsSettingsLock(NSString *gid) {
     [self runGated:groupID from:presenter then:^{
         SCILockedSurfaceNavigationController *nav = [[SCILockedSurfaceNavigationController alloc] initWithRootViewController:contentVC];
         nav.lockGroupID = groupID;
-        nav.modalPresentationStyle = UIModalPresentationFullScreen;
+        nav.modalPresentationStyle = UIModalPresentationOverFullScreen;
+        nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+        nav.view.backgroundColor = UIColor.clearColor;
+        nav.navigationBar.backgroundColor = UIColor.clearColor;
+        nav.navigationBar.translucent = YES;
         [SCIPopupChrome applyBackdropTo:contentVC];
         if (!contentVC.navigationItem.leftBarButtonItem
             && !contentVC.navigationItem.leftBarButtonItems.count) {

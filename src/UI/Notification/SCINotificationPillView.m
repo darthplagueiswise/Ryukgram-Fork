@@ -1,4 +1,5 @@
 #import "SCINotificationPillView.h"
+#import "../../Settings/GlassUI/SCIAdaptiveGlass.h"
 #import <math.h>
 
 static CGFloat const kPillCorner = 30.0;
@@ -37,6 +38,10 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 	return MIN(maxValue, MAX(minValue, value));
 }
 
+static CGColorRef SCINotifSolidToneColor(NSArray *colors) {
+	return colors.count ? (__bridge CGColorRef)colors.lastObject : UIColor.clearColor.CGColor;
+}
+
 static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	if (!text.length || !font) return 0.0;
 	CGRect r = [text boundingRectWithSize:CGSizeMake(CGFLOAT_MAX, font.lineHeight)
@@ -49,8 +54,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 #pragma mark - SCIPillSpinnerView
 
 @implementation SCIPillSpinnerView {
-	CAGradientLayer *_gradient;
-	CAShapeLayer *_ringMask;
+	CAShapeLayer *_ringLayer;
 	BOOL _animating;
 }
 
@@ -61,17 +65,13 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	self.backgroundColor = UIColor.clearColor;
 	self.userInteractionEnabled = NO;
 
-	_gradient = [CAGradientLayer layer];
-	_gradient.type = kCAGradientLayerConic;
-	_gradient.startPoint = CGPointMake(0.5, 0.5);
-	_gradient.endPoint = CGPointMake(0.5, 0.0);
-	[self.layer addSublayer:_gradient];
-
-	_ringMask = [CAShapeLayer layer];
-	_ringMask.fillColor = UIColor.clearColor.CGColor;
-	_ringMask.strokeColor = UIColor.blackColor.CGColor;
-	_ringMask.lineCap = kCALineCapRound;
-	_gradient.mask = _ringMask;
+	_ringLayer = [CAShapeLayer layer];
+	_ringLayer.fillColor = UIColor.clearColor.CGColor;
+	_ringLayer.strokeColor = UIColor.whiteColor.CGColor;
+	_ringLayer.lineCap = kCALineCapRound;
+	_ringLayer.strokeStart = 0.08;
+	_ringLayer.strokeEnd = 0.78;
+	[self.layer addSublayer:_ringLayer];
 
 	_color = UIColor.whiteColor;
 	[self sciApplyColors];
@@ -89,13 +89,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 
 - (void)sciApplyColors {
 	UIColor *c = _color ?: UIColor.whiteColor;
-	_gradient.colors = @[
-		(id)[c colorWithAlphaComponent:0.0].CGColor,
-		(id)[c colorWithAlphaComponent:0.10].CGColor,
-		(id)[c colorWithAlphaComponent:0.55].CGColor,
-		(id)c.CGColor,
-	];
-	_gradient.locations = @[@0.0, @0.35, @0.75, @1.0];
+	_ringLayer.strokeColor = c.CGColor;
 }
 
 - (void)layoutSubviews {
@@ -108,10 +102,9 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	CGFloat lw = MAX(2.5, dim * 0.18);
 	CGRect r = CGRectInset(b, lw / 2.0 + 0.5, lw / 2.0 + 0.5);
 
-	_gradient.frame = b;
-	_ringMask.frame = b;
-	_ringMask.lineWidth = lw;
-	_ringMask.path = [UIBezierPath bezierPathWithOvalInRect:r].CGPath;
+	_ringLayer.frame = b;
+	_ringLayer.lineWidth = lw;
+	_ringLayer.path = [UIBezierPath bezierPathWithOvalInRect:r].CGPath;
 
 	if (_animating) [self sciInstallRotation];
 }
@@ -125,12 +118,12 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 
 - (void)stopAnimating {
 	_animating = NO;
-	[_gradient removeAnimationForKey:@"sciSpinRotate"];
+	[_ringLayer removeAnimationForKey:@"sciSpinRotate"];
 	self.hidden = YES;
 }
 
 - (void)sciInstallRotation {
-	[_gradient removeAnimationForKey:@"sciSpinRotate"];
+	[_ringLayer removeAnimationForKey:@"sciSpinRotate"];
 
 	CABasicAnimation *rot = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
 	rot.fromValue = @0.0;
@@ -138,7 +131,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	rot.duration = 0.85;
 	rot.repeatCount = HUGE_VALF;
 	rot.removedOnCompletion = NO;
-	[_gradient addAnimation:rot forKey:@"sciSpinRotate"];
+	[_ringLayer addAnimation:rot forKey:@"sciSpinRotate"];
 }
 
 - (void)didMoveToWindow {
@@ -160,7 +153,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 
 @property (nonatomic, strong) UIVisualEffectView *blurView;
 @property (nonatomic, strong) UIView *chromeOverlayView;
-@property (nonatomic, strong) CAGradientLayer *chromeGradientLayer;
+@property (nonatomic, strong) CALayer *chromeToneLayer;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *subtitleLabel;
 @property (nonatomic, strong) UIStackView *textStack;
@@ -169,7 +162,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) SCIPillSpinnerView *spinnerView;
 @property (nonatomic, strong) UIView *iconBadgeView;
-@property (nonatomic, strong) CAGradientLayer *iconBadgeGradientLayer;
+@property (nonatomic, strong) CALayer *iconBadgeToneLayer;
 @property (nonatomic, strong) UIButton *closeButton;
 @property (nonatomic, strong) NSLayoutConstraint *widthConstraint;
 @property (nonatomic, strong) NSLayoutConstraint *heightConstraint;
@@ -233,8 +226,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 }
 
 - (void)sciBuildBackground {
-	UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-	self.blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
+	self.blurView = [[UIVisualEffectView alloc] initWithEffect:SCIRealLiquidGlassEffect(NO, YES, nil)];
 	self.blurView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.blurView.layer.cornerRadius = kPillCorner;
 	self.blurView.layer.cornerCurve = kCACornerCurveContinuous;
@@ -245,7 +237,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	self.chromeOverlayView = [UIView new];
 	self.chromeOverlayView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.chromeOverlayView.userInteractionEnabled = NO;
-	// Dark base for HDR-content visibility. Tone gradient stacks on top.
+	// Dark base for HDR-content visibility. Tone layer stacks on top.
 	self.chromeOverlayView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.22];
 	self.chromeOverlayView.layer.cornerRadius = kPillCorner;
 	self.chromeOverlayView.layer.cornerCurve = kCACornerCurveContinuous;
@@ -253,11 +245,9 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	[self addSubview:self.chromeOverlayView];
 	[self sciPinView:self.chromeOverlayView toView:self];
 
-	self.chromeGradientLayer = [CAGradientLayer layer];
-	self.chromeGradientLayer.startPoint = CGPointMake(0.0, 0.0);
-	self.chromeGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-	self.chromeGradientLayer.opacity = 0.9;
-	[self.chromeOverlayView.layer addSublayer:self.chromeGradientLayer];
+	self.chromeToneLayer = [CALayer layer];
+	self.chromeToneLayer.opacity = 0.9;
+	[self.chromeOverlayView.layer addSublayer:self.chromeToneLayer];
 }
 
 - (void)sciBuildIcon {
@@ -270,10 +260,8 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	self.iconBadgeView.clipsToBounds = YES;
 	[self addSubview:self.iconBadgeView];
 
-	self.iconBadgeGradientLayer = [CAGradientLayer layer];
-	self.iconBadgeGradientLayer.startPoint = CGPointMake(0.0, 0.2);
-	self.iconBadgeGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-	[self.iconBadgeView.layer insertSublayer:self.iconBadgeGradientLayer atIndex:0];
+	self.iconBadgeToneLayer = [CALayer layer];
+	[self.iconBadgeView.layer insertSublayer:self.iconBadgeToneLayer atIndex:0];
 
 	self.iconView = [UIImageView new];
 	self.iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -434,8 +422,8 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 - (void)layoutSubviews {
 	[super layoutSubviews];
 
-	self.chromeGradientLayer.frame = self.chromeOverlayView.bounds;
-	self.iconBadgeGradientLayer.frame = self.iconBadgeView.bounds;
+	self.chromeToneLayer.frame = self.chromeOverlayView.bounds;
+	self.iconBadgeToneLayer.frame = self.iconBadgeView.bounds;
 
 	if (!self.progressView.hidden) {
 		CGFloat h = CGRectGetHeight(self.progressView.bounds);
@@ -629,8 +617,8 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	BOOL glow = _style == SCINotificationStyleGlow;
 
 	void (^apply)(void) = ^{
-		self.chromeGradientLayer.colors = [self sciChromeColorsForTone:self->_tone];
-		self.iconBadgeGradientLayer.colors = [self sciBadgeColorsForTone:self->_tone];
+		self.chromeToneLayer.backgroundColor = SCINotifSolidToneColor([self sciChromeColorsForTone:self->_tone]);
+		self.iconBadgeToneLayer.backgroundColor = SCINotifSolidToneColor([self sciBadgeColorsForTone:self->_tone]);
 
 		NSArray *progressColors = [self sciProgressColorsForTone:self->_tone];
 		if (progressColors.count) {
@@ -645,7 +633,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 		[self sciApplyCornerRadius:radius];
 
 		if (island) {
-			self.chromeGradientLayer.opacity = 0.0;
+			self.chromeToneLayer.opacity = 0.0;
 			self.layer.shadowColor = UIColor.blackColor.CGColor;
 			self.layer.shadowOpacity = 0.28;
 			self.layer.shadowRadius = 14.0;
@@ -653,7 +641,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
 		} else if (glow) {
-			self.chromeGradientLayer.opacity = 0.9;
+			self.chromeToneLayer.opacity = 0.9;
 			self.layer.shadowColor = [self sciGlowColorForTone:self->_tone].CGColor;
 			self.layer.shadowOpacity = 0.55;
 			self.layer.shadowRadius = 22.0;
@@ -661,7 +649,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.24].CGColor;
 		} else if (self->_style == SCINotificationStyleColorful) {
-			self.chromeGradientLayer.opacity = 0.9;
+			self.chromeToneLayer.opacity = 0.9;
 			self.layer.shadowColor = UIColor.blackColor.CGColor;
 			self.layer.shadowOpacity = 0.22;
 			self.layer.shadowRadius = 12.0;
@@ -669,7 +657,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.24].CGColor;
 		} else {
-			self.chromeGradientLayer.opacity = 0.0;
+			self.chromeToneLayer.opacity = 0.0;
 			self.layer.shadowColor = UIColor.clearColor.CGColor;
 			self.layer.shadowOpacity = 0.0;
 			self.layer.shadowRadius = 0.0;
@@ -733,7 +721,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	BOOL determinate = _showsProgress && !_indeterminate;
 
 	self.iconView.hidden = spinning;
-	self.iconBadgeGradientLayer.hidden = spinning;
+	self.iconBadgeToneLayer.hidden = spinning;
 	self.iconBadgeView.backgroundColor = spinning ? [UIColor colorWithWhite:1.0 alpha:0.10] : UIColor.clearColor;
 
 	if (spinning) {

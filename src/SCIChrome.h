@@ -43,10 +43,6 @@ BOOL SCIChromeCanvasOwnsSecureField(UITextField *field);
 /// IG-styled glyph via `+[SCIIcon imageNamed:]`. Clears `symbolName`.
 - (void)setIconResource:(NSString *)resourceName pointSize:(CGFloat)pointSize;
 
-/// Capture-redacted host. Add overlay subviews (badges, counters) here instead
-/// of as direct button subviews so Hide UI on Capture redacts them too.
-@property (nonatomic, strong, readonly) UIView *captureContentView;
-
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;

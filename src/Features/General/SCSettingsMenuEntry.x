@@ -1,29 +1,33 @@
 #import "../../InstagramHeaders.h"
 #import "../../Settings/SCISettingsViewController.h"
-#import <objc/runtime.h>
-#import <substrate.h>
 
-// Hold the profile "more" button to open tweak settings. IG 432 moved
-// IGBadgedNavigationButton into a Swift module, so hook it at runtime.
-static void (*orig_badgedNav_didMoveToWindow)(UIView *, SEL);
+// Show SCInsta tweak settings by holding on the settings/more icon under profile for ~1 second
+%hook IGBadgedNavigationButton
+- (void)didMoveToWindow {
+    %orig;
 
-static void sci_badgedNavSettingsLongPress(UIView *self, SEL _cmd, UILongPressGestureRecognizer *sender) {
-    if (sender.state != UIGestureRecognizerStateBegan) return;
-    [SCIUtils showSettingsVC:[self window]];
+    if ([self.accessibilityIdentifier isEqualToString:@"profile-more-button"]) {
+        [self addLongPressGestureRecognizer];
+    }
+
+    return;
 }
 
-static void new_badgedNav_didMoveToWindow(UIView *self, SEL _cmd) {
-    orig_badgedNav_didMoveToWindow(self, _cmd);
+%new - (void)addLongPressGestureRecognizer {
+    if ([self.gestureRecognizers count] == 0) {
 
-    if ([self.accessibilityIdentifier isEqualToString:@"profile-more-button"] &&
-        self.gestureRecognizers.count == 0) {
-        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc]
-            initWithTarget:self action:@selector(sci_badgedNavSettingsLongPress:)];
+        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
         [self addGestureRecognizer:longPress];
     }
 }
+%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+    if (sender.state != UIGestureRecognizerStateBegan) return;
+    [SCIUtils showSettingsVC:[self window]];
+}
+%end
 
-// Hold the home tab (inbox tab in messages-only mode) to open tweak settings.
+// Quick access to tweak settings by holding on the home tab button.
+// In messages-only mode the home tab is gone — fall back to the inbox tab.
 %hook IGTabBarButton
 - (void)didMoveToSuperview {
     %orig;
@@ -35,28 +39,18 @@ static void new_badgedNav_didMoveToWindow(UIView *self, SEL _cmd) {
     if ([SCIUtils getBoolPref:@"settings_shortcut"]) {
         UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
         longPress.minimumPressDuration = 0.3;
+        
+        // Take precidence over existing gesture recognizers
         for (UIGestureRecognizer *existing in self.gestureRecognizers) {
             [existing requireGestureRecognizerToFail:longPress];
         }
+        
         [self addGestureRecognizer:longPress];
     }
 }
 %new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
     if (sender.state != UIGestureRecognizerStateBegan) return;
+
     [SCIUtils showSettingsVC:[self window]];
 }
 %end
-
-%ctor {
-    %init;
-
-    Class cls = NSClassFromString(@"_TtC19IGProfileNavigation24IGBadgedNavigationButton");
-    if (!cls) cls = objc_getClass("IGBadgedNavigationButton");
-    if (!cls) return;
-
-    class_addMethod(cls, @selector(sci_badgedNavSettingsLongPress:),
-                    (IMP)sci_badgedNavSettingsLongPress, "v@:@");
-    MSHookMessageEx(cls, @selector(didMoveToWindow),
-                    (IMP)new_badgedNav_didMoveToWindow,
-                    (IMP *)&orig_badgedNav_didMoveToWindow);
-}

@@ -22,11 +22,6 @@ extern NSNotificationName const SCIDeletedMessagesDidChangeNotification;
 + (NSArray<SCIDeletedMessage *> *)messagesForSenderPK:(NSString *)senderPK
                                             ownerPK:(NSString *)ownerPK;
 
-// One entry per DM thread; threadless legacy records fall back to a per-sender bucket.
-+ (NSArray<SCIDeletedMessageGroup *> *)groupedByThreadForOwnerPK:(NSString *)ownerPK;
-+ (NSArray<SCIDeletedMessage *> *)messagesForThreadId:(NSString *)threadId
-                                              ownerPK:(NSString *)ownerPK;
-
 #pragma mark - Write
 
 // Insert / replace by message_id. Newest-first ordering preserved on disk.
@@ -50,23 +45,8 @@ extern NSNotificationName const SCIDeletedMessagesDidChangeNotification;
             forSenderPK:(NSString *)senderPK
                 ownerPK:(NSString *)ownerPK;
 
-// overwrite:YES replaces existing values (renames); NO only fills blanks.
-+ (BOOL)applySenderInfo:(NSDictionary *)info
-            forSenderPK:(NSString *)senderPK
-                ownerPK:(NSString *)ownerPK
-              overwrite:(BOOL)overwrite;
-
-// Drop every record for one sender. threadlessOnly:YES limits to the legacy no-threadId bucket.
+// Drop every record for one sender.
 + (void)deleteMessagesForSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK;
-+ (void)deleteMessagesForSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK threadlessOnly:(BOOL)threadlessOnly;
-
-// Drop every record in one thread.
-+ (void)deleteMessagesForThreadId:(NSString *)threadId ownerPK:(NSString *)ownerPK;
-
-// Stamp thread metadata (is_group, thread_title, thread_avatar_url) onto every record in `threadId`.
-+ (BOOL)applyThreadInfo:(NSDictionary *)info
-            forThreadId:(NSString *)threadId
-                ownerPK:(NSString *)ownerPK;
 
 // Wipe entire log + media for one account.
 + (void)resetForOwnerPK:(NSString *)ownerPK;

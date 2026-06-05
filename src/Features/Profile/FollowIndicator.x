@@ -3,148 +3,136 @@
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import "../../SCIChrome.h"
 #import "../../Networking/SCIInstagramAPI.h"
 #import <objc/runtime.h>
 
 static const NSInteger kFollowBadgeTag = 99788;
 
+static const char kFollowStatusKey;
 static const char kFollowProfilePKKey;
-static const char kFollowFetchPKKey;
-static const char kFollowContainerKey;
+static const char kFollowFetchInFlightKey;
 
-static NSCache *sciFollowCache(void) {
-	static NSCache *c;
+static NSMutableDictionary<NSString *, NSNumber *> *sciFollowCache(void) {
+	static NSMutableDictionary *cache;
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
-		c = [NSCache new];
-		c.countLimit = 100;
+		cache = [NSMutableDictionary dictionary];
 	});
-	return c;
+	return cache;
 }
 
 static inline NSString *sciFollowMode(void) {
-	NSString *mode = [SCIUtils getStringPref:@"follow_indicator"];
-	return mode.length ? mode : @"off";
+	return [SCIUtils getStringPref:@"follow_indicator"];
 }
 
-static inline BOOL sciFollowEnabled(void) {
-	return ![sciFollowMode() isEqualToString:@"off"];
+static inline BOOL sciFollowIndicatorEnabled(void) {
+	NSString *mode = sciFollowMode();
+	return mode.length && ![mode isEqualToString:@"off"];
 }
 
-static inline BOOL sciFollowColored(void) {
+static inline BOOL sciFollowIndicatorColored(void) {
 	return [sciFollowMode() isEqualToString:@"colored"];
 }
 
-static inline NSString *sciFollowProfilePK(id vc) {
+static NSNumber *sciFollowStatus(id vc) {
+	return objc_getAssociatedObject(vc, &kFollowStatusKey);
+}
+
+static void sciSetFollowStatus(id vc, NSNumber *status) {
+	objc_setAssociatedObject(vc, &kFollowStatusKey, status, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static NSString *sciFollowProfilePK(id vc) {
 	return objc_getAssociatedObject(vc, &kFollowProfilePKKey);
 }
 
-static inline void sciSetFollowProfilePK(id vc, NSString *pk) {
+static void sciSetFollowProfilePK(id vc, NSString *pk) {
 	objc_setAssociatedObject(vc, &kFollowProfilePKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
 
-static inline NSString *sciFollowFetchPK(id vc) {
-	return objc_getAssociatedObject(vc, &kFollowFetchPKKey);
+static NSString *sciFollowFetchPK(id vc) {
+	return objc_getAssociatedObject(vc, &kFollowFetchInFlightKey);
 }
 
-static inline void sciSetFollowFetchPK(id vc, NSString *pk) {
-	objc_setAssociatedObject(vc, &kFollowFetchPKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
-}
-
-static inline UIView *sciFollowContainer(id vc) {
-	return objc_getAssociatedObject(vc, &kFollowContainerKey);
-}
-
-static inline void sciSetFollowContainer(id vc, UIView *view) {
-	objc_setAssociatedObject(vc, &kFollowContainerKey, view, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-static NSString *sciProfilePK(UIViewController *vc) {
-	@try {
-		return [SCIUtils pkFromIGUser:[vc valueForKey:@"user"]];
-	} @catch (__unused id e) {
-		return nil;
-	}
+static void sciSetFollowFetchPK(id vc, NSString *pk) {
+	objc_setAssociatedObject(vc, &kFollowFetchInFlightKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
 
 static void sciRemoveFollowBadge(UIView *root) {
 	[[root viewWithTag:kFollowBadgeTag] removeFromSuperview];
 }
 
-static void sciRenderFollowBadge(UIViewController *vc, UIView *container) {
-	if (!vc || !container) return;
-
-	NSString *pk = sciFollowProfilePK(vc);
-	NSNumber *status = pk.length ? [sciFollowCache() objectForKey:pk] : nil;
-
-	if (!sciFollowEnabled() || !status) {
-		sciRemoveFollowBadge(container);
-		return;
+// Paint the badge the moment fetch / cache lands instead of waiting for the next layoutSubviews tick.
+static UIView *sciFindStatContainer(UIView *root) {
+	if (!root) return nil;
+	NSString *name = NSStringFromClass([root class]);
+	if ([name containsString:@"IGProfileHeaderStatButtonContainerView"]) return root;
+	for (UIView *sub in root.subviews) {
+		UIView *match = sciFindStatContainer(sub);
+		if (match) return match;
 	}
-
-	BOOL followedBy = status.boolValue;
-	BOOL colored = sciFollowColored();
-
-	NSString *text = followedBy
-		? SCILocalized(@"Follows you")
-		: SCILocalized(@"Doesn't follow you");
-
-	UIButton *badge = (UIButton *)[container viewWithTag:kFollowBadgeTag];
-
-	if (![badge isKindOfClass:UIButton.class]) {
-		[badge removeFromSuperview];
-
-		badge = [UIButton buttonWithType:UIButtonTypeCustom];
-		badge.tag = kFollowBadgeTag;
-		badge.translatesAutoresizingMaskIntoConstraints = NO;
-		badge.userInteractionEnabled = NO;
-		badge.clipsToBounds = YES;
-		badge.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold];
-		badge.titleLabel.adjustsFontSizeToFitWidth = YES;
-		badge.titleLabel.minimumScaleFactor = 0.78;
-		badge.titleLabel.lineBreakMode = NSLineBreakByClipping;
-		badge.contentEdgeInsets = UIEdgeInsetsMake(2.0, 7.0, 2.0, 7.0);
-
-		[container addSubview:badge];
-
-		[NSLayoutConstraint activateConstraints:@[
-			[badge.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
-			[badge.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-2.0],
-			[badge.heightAnchor constraintEqualToConstant:21.0],
-			[badge.widthAnchor constraintGreaterThanOrEqualToConstant:112.0],
-			[badge.widthAnchor constraintLessThanOrEqualToConstant:138.0]
-		]];
-	}
-
-	UIColor *color = followedBy
-		? [UIColor colorWithRed:0.22 green:0.68 blue:0.36 alpha:1.0]
-		: [UIColor colorWithRed:0.86 green:0.28 blue:0.28 alpha:1.0];
-
-	[badge setTitle:text forState:UIControlStateNormal];
-	[badge setTitleColor:(colored ? color : UIColor.secondaryLabelColor) forState:UIControlStateNormal];
-
-	badge.backgroundColor = colored ? [color colorWithAlphaComponent:0.13] : UIColor.clearColor;
-	badge.layer.borderWidth = colored ? 1.0 : 0.0;
-	badge.layer.borderColor = colored ? [color colorWithAlphaComponent:0.50].CGColor : nil;
-	badge.layer.cornerRadius = 10.0;
+	return nil;
 }
 
 static void sciResetFollowState(UIViewController *vc) {
 	sciRemoveFollowBadge(vc.view);
+	sciSetFollowStatus(vc, nil);
 	sciSetFollowProfilePK(vc, nil);
 	sciSetFollowFetchPK(vc, nil);
 }
 
-static void sciRenderFollowBadgeNow(UIViewController *vc) {
-	UIView *container = sciFollowContainer(vc);
-	if (container.window) sciRenderFollowBadge(vc, container);
+static id sciProfileUser(UIViewController *vc) {
+	@try {
+		return [vc valueForKey:@"user"];
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
-static void sciFetchFollowStatus(UIViewController *vc, NSString *pk) {
-	sciSetFollowFetchPK(vc, pk);
+static NSString *sciProfilePK(UIViewController *vc) {
+	return [SCIUtils pkFromIGUser:sciProfileUser(vc)];
+}
+
+static void sciRenderFollowBadge(UIViewController *vc, UIView *statContainer) {
+	NSNumber *status = sciFollowStatus(vc);
+
+	if (!sciFollowIndicatorEnabled() || !status) {
+		sciRemoveFollowBadge(statContainer);
+		return;
+	}
+
+	BOOL followedBy = status.boolValue;
+	NSString *text = followedBy ? SCILocalized(@"Follows you") : SCILocalized(@"Doesn't follow you");
+
+	SCIChromeLabel *badge = (SCIChromeLabel *)[statContainer viewWithTag:kFollowBadgeTag];
+
+	if (!badge) {
+		badge = [[SCIChromeLabel alloc] initWithText:text];
+		badge.tag = kFollowBadgeTag;
+		badge.translatesAutoresizingMaskIntoConstraints = NO;
+		badge.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
+
+		[statContainer addSubview:badge];
+
+		[NSLayoutConstraint activateConstraints:@[
+			[badge.leadingAnchor constraintEqualToAnchor:statContainer.leadingAnchor],
+			[badge.bottomAnchor constraintEqualToAnchor:statContainer.bottomAnchor constant:-8.0]
+		]];
+	} else {
+		badge.text = text;
+	}
+
+	badge.textColor = sciFollowIndicatorColored()
+		? (followedBy ? [UIColor colorWithRed:0.3 green:0.75 blue:0.4 alpha:1.0] : [UIColor colorWithRed:0.85 green:0.3 blue:0.3 alpha:1.0])
+		: UIColor.secondaryLabelColor;
+}
+
+static void sciFetchFollowStatus(UIViewController *vc, NSString *profilePK) {
+	sciSetFollowFetchPK(vc, profilePK);
 
 	__weak UIViewController *weakVC = vc;
-	NSString *requestedPK = pk.copy;
+	NSString *requestedPK = profilePK.copy;
 	NSString *path = [NSString stringWithFormat:@"friendships/show/%@/", requestedPK];
 
 	[SCIInstagramAPI sendRequestWithMethod:@"GET" path:path body:nil completion:^(NSDictionary *response, NSError *error) {
@@ -155,41 +143,48 @@ static void sciFetchFollowStatus(UIViewController *vc, NSString *pk) {
 			if (![sciFollowFetchPK(strongVC) isEqualToString:requestedPK]) return;
 			sciSetFollowFetchPK(strongVC, nil);
 
-			if (error || ![response isKindOfClass:NSDictionary.class]) return;
-			if (![sciFollowProfilePK(strongVC) isEqualToString:requestedPK]) return;
+			if (error || !response || ![sciFollowProfilePK(strongVC) isEqualToString:requestedPK]) return;
 
-			[sciFollowCache() setObject:@([response[@"followed_by"] boolValue]) forKey:requestedPK];
-			sciRenderFollowBadgeNow(strongVC);
+			NSNumber *status = @([response[@"followed_by"] boolValue]);
+			sciFollowCache()[requestedPK] = status;
+			sciSetFollowStatus(strongVC, status);
+			UIView *statContainer = sciFindStatContainer(strongVC.view);
+			if (statContainer) sciRenderFollowBadge(strongVC, statContainer);
 		});
 	}];
 }
 
 static void sciRefreshFollowIndicator(UIViewController *vc) {
-	if (!sciFollowEnabled()) {
+	if (!sciFollowIndicatorEnabled()) {
 		sciResetFollowState(vc);
 		return;
 	}
 
-	NSString *pk = sciProfilePK(vc);
+	NSString *profilePK = sciProfilePK(vc);
 	NSString *myPK = [SCIUtils currentUserPK];
 
-	if (!pk.length || !myPK.length || [pk isEqualToString:myPK]) {
+	if (!profilePK.length || !myPK.length || [profilePK isEqualToString:myPK]) {
 		sciResetFollowState(vc);
 		return;
 	}
 
-	if (![sciFollowProfilePK(vc) isEqualToString:pk]) {
-		sciRemoveFollowBadge(vc.view);
-		sciSetFollowProfilePK(vc, pk);
-	}
+	if ([sciFollowProfilePK(vc) isEqualToString:profilePK] && sciFollowStatus(vc)) return;
 
-	if ([sciFollowCache() objectForKey:pk]) {
-		sciRenderFollowBadgeNow(vc);
+	sciRemoveFollowBadge(vc.view);
+	sciSetFollowProfilePK(vc, profilePK);
+	sciSetFollowStatus(vc, nil);
+
+	NSNumber *cached = sciFollowCache()[profilePK];
+
+	if (cached) {
+		sciSetFollowStatus(vc, cached);
+		UIView *statContainer = sciFindStatContainer(vc.view);
+		if (statContainer) sciRenderFollowBadge(vc, statContainer);
 		return;
 	}
 
-	if (![sciFollowFetchPK(vc) isEqualToString:pk]) {
-		sciFetchFollowStatus(vc, pk);
+	if (![sciFollowFetchPK(vc) isEqualToString:profilePK]) {
+		sciFetchFollowStatus(vc, profilePK);
 	}
 }
 
@@ -197,7 +192,6 @@ static void sciRefreshFollowIndicator(UIViewController *vc) {
 
 - (void)setUser:(id)user {
 	%orig;
-
 	dispatch_async(dispatch_get_main_queue(), ^{
 		sciRefreshFollowIndicator(self);
 	});
@@ -215,12 +209,10 @@ static void sciRefreshFollowIndicator(UIViewController *vc) {
 - (void)layoutSubviews {
 	%orig;
 
-	UIView *view = (UIView *)self;
-	UIViewController *vc = [SCIUtils nearestViewControllerForView:view];
+	UIViewController *vc = [SCIUtils nearestViewControllerForView:(UIView *)self];
 
 	if ([vc isKindOfClass:%c(IGProfileViewController)]) {
-		sciSetFollowContainer(vc, view);
-		sciRenderFollowBadge(vc, view);
+		sciRenderFollowBadge(vc, (UIView *)self);
 	}
 }
 

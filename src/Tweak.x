@@ -6,11 +6,9 @@
 #import "Features/General/SCICacheManager.h"
 #import "Features/General/SCIChangelog.h"
 #import "SCITempFiles.h"
-#import "SCIFileLog.h"
 #import "Lock/SCILockManager.h"
 #import "Lock/SCILockGroups.h"
 #import "Features/HiddenChats/SCIHiddenChats.h"
-#import "Features/DeletedMessages/SCIDeletedMessagesCapture.h"
 #include "../modules/fishhook/fishhook.h"
 
 #define SCI_PREF(key) [SCIUtils getBoolPref:key]
@@ -18,7 +16,7 @@
 #define VOID_HANDLESCREENSHOT(orig) do { if (!SCI_SCREENSHOT_BLOCKED) { orig; } } while (0)
 #define NONVOID_HANDLESCREENSHOT(orig) do { if (SCI_SCREENSHOT_BLOCKED) return nil; return orig; } while (0)
 
-NSString *SCIVersionString = @"v1.3.1";
+NSString *SCIVersionString = @"v1.3.0";
 BOOL dmVisualMsgsViewedButtonEnabled = false;
 
 // Liquid Glass — per-feature flags (iOS 26 visual API).
@@ -52,7 +50,6 @@ static inline BOOL sciAnyTabBarSurfaceFlag(void) {
 	       sLG_TabBarHomecomingFloating || sLG_TabBarStyleGlass;
 }
 
-
 static BOOL sciFlexEnabled(void) {return SCI_PREF(@"flex_app_launch") || SCI_PREF(@"flex_app_start") || SCI_PREF(@"flex_instagram");}
 
 static BOOL sciShouldHideMetaAIRecipient(id obj) {
@@ -77,21 +74,18 @@ static BOOL sDidShowSettings;
 
 %hook IGInstagramAppDelegate
 - (_Bool)application:(UIApplication *)application willFinishLaunchingWithOptions:(id)arg2 {
-	[[NSUserDefaults standardUserDefaults] setValue:@(sLGButtons) forKey:@"instagram.override.project.lucent.navigation"];
+	[[NSUserDefaults standardUserDefaults] setValue:@(sLG_NavEnabled) forKey:@"instagram.override.project.lucent.navigation"];
 	return %orig;
 }
 - (_Bool)application:(UIApplication *)application didFinishLaunchingWithOptions:(id)arg2 {
 	BOOL result = %orig;
 	[SCITempFiles sweepLeftovers];
-	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ SCIFileLogExportToDocuments(); });
-	sciDMUpdateKeepAlive();
 	return result;
 }
 - (void)applicationDidEnterBackground:(id)arg1 {
 	%orig;
 	[SCICacheManager runAutoClearIfDue];
 	[[SCILockManager shared] applyBackgroundInvalidation];
-	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ SCIFileLogExportToDocuments(); });
 }
 
 %end
@@ -176,38 +170,16 @@ static BOOL sDidShowSettings;
 %group SCILiquidGlassGroup
 
 %hook IGDSLauncherConfig
-- (_Bool)isLiquidGlassInAppNotificationEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassToastEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassToastPeekEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassIconBarButtonEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassNavigationContentStylePinningEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassEaseInOutBlurEnabled {return sLGButtons ? YES : %orig;}
-- (_Bool)isLiquidGlassCGContextBlurEnabled {return sLGButtons ? YES : %orig;}
+// IG 431: apenas estes 3 seletores existem no binario.
+- (_Bool)isLiquidGlassInAppNotificationEnabled {return sLG_InAppNotif ? YES : %orig;}
+- (_Bool)isLiquidGlassToastEnabled {return sLG_Toast ? YES : %orig;}
+- (_Bool)isLiquidGlassEaseInOutBlurEnabled {return sLG_EaseInOutBlur ? YES : %orig;}
 %end
 
-%end
-
-// MARK: - Progressive blur (iOS 26+ scroll-edge effect)
-
-%group SCIProgressiveBlurGroup
-%hook UIScrollEdgeEffect
-+ (void)hide {}
-- (BOOL)ig_isHidden {return NO;}
-- (void)ig_setIsHidden:(BOOL)hidden {%orig(NO);}
-%end
 %end
 
 // MARK: - Debug / bug report blocking
-
-%group SCIDebugBlockGroup
-%hook IGWindow
-- (void)showDebugMenu {}
-%end
-
-%hook IGBugReportUploader
-- (id)initWithNetworker:(id)arg1 pandoGraphQLService:(id)arg2 analyticsLogger:(id)arg3 userDefaults:(id)arg4 launcherSetProvider:(id)arg5 shouldPersistLastBugReportId:(id)arg6 {return nil;}
-%end
-%end
+// Removed: do not block Instagram debug/bug-report/internal menus.
 
 // MARK: - Screenshot blocking
 
@@ -393,6 +365,36 @@ static BOOL sDidShowSettings;
 
 %end
 
+%hook IGMainStoryTrayDataSource
+- (id)allItemsForTrayUsingCachedValue:(BOOL)cached {
+	NSArray *items = %orig(cached);
+	BOOL hideUsers = SCI_PREF(@"no_suggested_users");
+	BOOL hideAds = SCI_PREF(@"hide_ads") && SCI_PREF(@"hide_ads_stories");
+
+	if (!hideUsers && !hideAds) return items;
+
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
+	for (IGStoryTrayViewModel *obj in items) {
+		BOOL hide = NO;
+
+		if ([obj isKindOfClass:%c(IGStoryTrayViewModel)]) {
+			if (hideUsers) {
+				NSNumber *type = [obj valueForKey:@"type"];
+				hide = [type isEqual:@(8)] || [type isEqual:@(9)];
+			}
+			if (!hide && hideAds) { hide = obj.isUnseenNux || [obj.pk isEqualToString:@"3538572169"];}
+		}
+		if (!hide) [out addObject:obj];
+	}
+	return out.copy;
+}
+
+%end
+
+%hook IGStoryTraySectionController
+- (void)storyTrayControllerShowSUPOGEducationBump {if (!SCI_PREF(@"no_suggested_users")) %orig;}
+%end
+
 %hook IGDSMenu
 
 - (id)initWithMenuItems:(NSArray<IGDSMenuItem *> *)items edr:(BOOL)edr headerLabelText:(id)headerLabelText {
@@ -507,11 +509,113 @@ static BOOL sDidShowSettings;
 
 static BOOL (*orig_swizzleToggle_isEnabled)(id, SEL) = NULL;
 static BOOL (*orig_expHelper_isEnabled)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_enabled)(id, SEL) = NULL;
 static BOOL (*orig_expHelper_isHomeFeed)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_homeFeed)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_glassRendering)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_legibilityBlur)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_profileTabsDisabled)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_profileTabsDisabledProp)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_profileNavBar)(id, SEL) = NULL;
+static BOOL (*orig_expHelper_profileNavBarProp)(id, SEL) = NULL;
+static NSInteger (*orig_expHelper_glassBackgroundSteps)(id, SEL) = NULL;
+static id (*orig_expHelper_shared)(id, SEL) = NULL;
 
-static BOOL new_swizzleToggle_isEnabled(id self, SEL _cmd) {return YES;}
-static BOOL new_expHelper_isEnabled(id self, SEL _cmd) {return YES;}
-static BOOL new_expHelper_isHomeFeed(id self, SEL _cmd) {return YES;}
+static void sciHookObjCMethodIfPresent(Class cls, SEL sel, IMP imp, IMP *origOut) {
+	if (!cls || !sel || !imp || !origOut) return;
+	if (!class_getInstanceMethod(cls, sel)) return;
+	MSHookMessageEx(cls, sel, imp, origOut);
+}
+
+static void sciHookObjCClassMethodIfPresent(Class cls, SEL sel, IMP imp, IMP *origOut) {
+	if (!cls || !sel || !imp || !origOut) return;
+	Class meta = object_getClass(cls);
+	if (!class_getClassMethod(cls, sel)) return;
+	MSHookMessageEx(meta, sel, imp, origOut);
+}
+
+static BOOL new_swizzleToggle_isEnabled(id self, SEL _cmd) {
+	if (sLG_SwizzleButtons) return YES;
+	return orig_swizzleToggle_isEnabled ? orig_swizzleToggle_isEnabled(self, _cmd) : NO;
+}
+static BOOL new_expHelper_isEnabled(id self, SEL _cmd) {
+	if (sLG_NavEnabled) return YES;
+	return orig_expHelper_isEnabled ? orig_expHelper_isEnabled(self, _cmd) : NO;
+}
+static BOOL new_expHelper_enabled(id self, SEL _cmd) {
+	if (sLG_NavEnabled) return YES;
+	return orig_expHelper_enabled ? orig_expHelper_enabled(self, _cmd) : NO;
+}
+static BOOL new_expHelper_isHomeFeed(id self, SEL _cmd) {
+	if (sLG_HomeFeedHeader) return YES;
+	return orig_expHelper_isHomeFeed ? orig_expHelper_isHomeFeed(self, _cmd) : NO;
+}
+static BOOL new_expHelper_homeFeed(id self, SEL _cmd) {
+	if (sLG_HomeFeedHeader) return YES;
+	return orig_expHelper_homeFeed ? orig_expHelper_homeFeed(self, _cmd) : NO;
+}
+static BOOL new_expHelper_glassRendering(id self, SEL _cmd) {
+	if (sLG_GlassRendering) return YES;
+	return orig_expHelper_glassRendering ? orig_expHelper_glassRendering(self, _cmd) : NO;
+}
+static BOOL new_expHelper_legibilityBlur(id self, SEL _cmd) {
+	if (sLG_LegibilityBlur) return YES;
+	return orig_expHelper_legibilityBlur ? orig_expHelper_legibilityBlur(self, _cmd) : NO;
+}
+static BOOL new_expHelper_profileNavBar(id self, SEL _cmd) {
+	if (sLG_ProfileNavBarMatch) return YES;
+	return orig_expHelper_profileNavBar ? orig_expHelper_profileNavBar(self, _cmd) : NO;
+}
+static BOOL new_expHelper_profileNavBarProp(id self, SEL _cmd) {
+	if (sLG_ProfileNavBarMatch) return YES;
+	return orig_expHelper_profileNavBarProp ? orig_expHelper_profileNavBarProp(self, _cmd) : NO;
+}
+// User flag YES means "glass enabled on profile segmented tabs", so "isDisabled" returns NO.
+static BOOL new_expHelper_profileTabsNotDisabled(id self, SEL _cmd) {
+	if (sLG_ProfileSegmentedTabs) return NO;
+	return orig_expHelper_profileTabsDisabled ? orig_expHelper_profileTabsDisabled(self, _cmd) : NO;
+}
+static BOOL new_expHelper_profileTabsPropNotDisabled(id self, SEL _cmd) {
+	if (sLG_ProfileSegmentedTabs) return NO;
+	return orig_expHelper_profileTabsDisabledProp ? orig_expHelper_profileTabsDisabledProp(self, _cmd) : NO;
+}
+static NSInteger new_expHelper_glassBackgroundSteps(id self, SEL _cmd) {
+	if (sLG_GlassBackgroundSteps) return 3;
+	return orig_expHelper_glassBackgroundSteps ? orig_expHelper_glassBackgroundSteps(self, _cmd) : 0;
+}
+
+static void sciApplyLGOverrides(id helper);
+static id new_expHelper_shared(id self, SEL _cmd) {
+	id r = orig_expHelper_shared ? orig_expHelper_shared(self, _cmd) : nil;
+	if (r) sciApplyLGOverrides(r);
+	return r;
+}
+
+// Override API native (more reliable for getters registered at runtime).
+static void sciApplyLGOverrides(id helper) {
+	if (!helper) return;
+	typedef void (*SetBool)(id, SEL, BOOL);
+	SetBool send = (SetBool)objc_msgSend;
+	if (sLG_NavEnabled && [helper respondsToSelector:@selector(overrideIsEnabled:)])
+		send(helper, @selector(overrideIsEnabled:), YES);
+	if (sLG_GlassRendering && [helper respondsToSelector:@selector(overrideIsGlassRenderingOptimizationEnabled:)])
+		send(helper, @selector(overrideIsGlassRenderingOptimizationEnabled:), YES);
+	if (sLG_GlassBackgroundSteps && [helper respondsToSelector:@selector(overrideGlassBackgroundAlphaDiscreteSteps:)])
+		((void (*)(id, SEL, NSInteger))objc_msgSend)(helper, @selector(overrideGlassBackgroundAlphaDiscreteSteps:), 3);
+	if (sLG_LegibilityBlur && [helper respondsToSelector:@selector(overrideIsLegibilityBlurEnabled:)])
+		send(helper, @selector(overrideIsLegibilityBlurEnabled:), YES);
+	if (sLG_ProfileNavBarMatch && [helper respondsToSelector:@selector(overrideIsProfileOtherNavBarHeightMatchSelf:)])
+		send(helper, @selector(overrideIsProfileOtherNavBarHeightMatchSelf:), YES);
+	if (sLG_ProfileSegmentedTabs && [helper respondsToSelector:@selector(overrideIsProfileSegmentedTabsGlassDisabled:)])
+		send(helper, @selector(overrideIsProfileSegmentedTabsGlassDisabled:), NO);
+}
+
+static id (*orig_expHelper_init_id)(id, SEL) = NULL;
+static id new_expHelper_init_id(id self, SEL _cmd) {
+	id r = orig_expHelper_init_id(self, _cmd);
+	if (r) sciApplyLGOverrides(r);
+	return r;
+}
 
 static BOOL (*orig_IGFloatingTabBarEnabled)(void) = NULL;
 static BOOL (*orig_IGTabBarDynamicSizingEnabled)(void) = NULL;
@@ -519,19 +623,29 @@ static BOOL (*orig_IGTabBarEnhancedDynamicSizingEnabled)(void) = NULL;
 static BOOL (*orig_IGTabBarHomecomingWithFloatingTabEnabled)(void) = NULL;
 static NSInteger (*orig_IGTabBarStyleForLauncherSet)(NSInteger) = NULL;
 
-#define SCI_BOOL_FISHHOOK(name) static BOOL hook_##name(void) {return YES;}
-
-SCI_BOOL_FISHHOOK(IGFloatingTabBarEnabled)
-SCI_BOOL_FISHHOOK(IGTabBarDynamicSizingEnabled)
-SCI_BOOL_FISHHOOK(IGTabBarEnhancedDynamicSizingEnabled)
-SCI_BOOL_FISHHOOK(IGTabBarHomecomingWithFloatingTabEnabled)
-
+static BOOL hook_IGFloatingTabBarEnabled(void) {
+	if (sLG_FloatingTabBar) return YES;
+	return orig_IGFloatingTabBarEnabled ? orig_IGFloatingTabBarEnabled() : NO;
+}
+static BOOL hook_IGTabBarDynamicSizingEnabled(void) {
+	if (sLG_TabBarDynamicSizing) return YES;
+	return orig_IGTabBarDynamicSizingEnabled ? orig_IGTabBarDynamicSizingEnabled() : NO;
+}
+static BOOL hook_IGTabBarEnhancedDynamicSizingEnabled(void) {
+	if (sLG_TabBarEnhancedSizing) return YES;
+	return orig_IGTabBarEnhancedDynamicSizingEnabled ? orig_IGTabBarEnhancedDynamicSizingEnabled() : NO;
+}
+static BOOL hook_IGTabBarHomecomingWithFloatingTabEnabled(void) {
+	if (sLG_TabBarHomecomingFloating) return YES;
+	return orig_IGTabBarHomecomingWithFloatingTabEnabled ? orig_IGTabBarHomecomingWithFloatingTabEnabled() : NO;
+}
 static NSInteger hook_IGTabBarStyleForLauncherSet(NSInteger set) {
-	return 1;
+	if (sLG_TabBarStyleGlass) return 1;
+	return orig_IGTabBarStyleForLauncherSet ? orig_IGTabBarStyleForLauncherSet(set) : set;
 }
 
 static void sciInstallLiquidGlassHooks(void) {
-	if (sLGButtons) {
+	if (sciAnyButtonOrNavLGFlag()) {
 		Class swizzleToggle = objc_getClass("IGLiquidGlassSwizzle.IGLiquidGlassSwizzleToggle");
 
 		if (swizzleToggle) {
@@ -541,12 +655,27 @@ static void sciInstallLiquidGlassHooks(void) {
 		Class expHelper = objc_getClass("IGLiquidGlassExperimentHelper.IGLiquidGlassNavigationExperimentHelper");
 
 		if (expHelper) {
-			MSHookMessageEx(expHelper, @selector(isEnabled), (IMP)new_expHelper_isEnabled, (IMP *)&orig_expHelper_isEnabled);
-			MSHookMessageEx(expHelper, @selector(isHomeFeedHeaderEnabled), (IMP)new_expHelper_isHomeFeed, (IMP *)&orig_expHelper_isHomeFeed);
+			sciHookObjCMethodIfPresent(expHelper, @selector(isEnabled), (IMP)new_expHelper_isEnabled, (IMP *)&orig_expHelper_isEnabled);
+			sciHookObjCMethodIfPresent(expHelper, @selector(enabled), (IMP)new_expHelper_enabled, (IMP *)&orig_expHelper_enabled);
+			sciHookObjCMethodIfPresent(expHelper, @selector(isHomeFeedHeaderEnabled), (IMP)new_expHelper_isHomeFeed, (IMP *)&orig_expHelper_isHomeFeed);
+			sciHookObjCMethodIfPresent(expHelper, @selector(homeFeedHeaderEnabled), (IMP)new_expHelper_homeFeed, (IMP *)&orig_expHelper_homeFeed);
+			sciHookObjCMethodIfPresent(expHelper, @selector(glassRenderingOptimizationEnabled), (IMP)new_expHelper_glassRendering, (IMP *)&orig_expHelper_glassRendering);
+			sciHookObjCMethodIfPresent(expHelper, @selector(legibilityBlurEnabled), (IMP)new_expHelper_legibilityBlur, (IMP *)&orig_expHelper_legibilityBlur);
+			sciHookObjCMethodIfPresent(expHelper, @selector(isProfileSegmentedTabsGlassDisabled), (IMP)new_expHelper_profileTabsNotDisabled, (IMP *)&orig_expHelper_profileTabsDisabled);
+			sciHookObjCMethodIfPresent(expHelper, @selector(profileSegmentedTabsGlassDisabled), (IMP)new_expHelper_profileTabsPropNotDisabled, (IMP *)&orig_expHelper_profileTabsDisabledProp);
+			sciHookObjCMethodIfPresent(expHelper, @selector(isProfileOtherNavBarHeightMatchSelf), (IMP)new_expHelper_profileNavBar, (IMP *)&orig_expHelper_profileNavBar);
+			sciHookObjCMethodIfPresent(expHelper, @selector(profileOtherNavBarHeightMatchSelf), (IMP)new_expHelper_profileNavBarProp, (IMP *)&orig_expHelper_profileNavBarProp);
+			sciHookObjCMethodIfPresent(expHelper, @selector(glassBackgroundAlphaDiscreteSteps), (IMP)new_expHelper_glassBackgroundSteps, (IMP *)&orig_expHelper_glassBackgroundSteps);
+			sciHookObjCMethodIfPresent(expHelper, @selector(init), (IMP)new_expHelper_init_id, (IMP *)&orig_expHelper_init_id);
+			sciHookObjCClassMethodIfPresent(expHelper, @selector(shared), (IMP)new_expHelper_shared, (IMP *)&orig_expHelper_shared);
+			if ([expHelper respondsToSelector:@selector(shared)]) {
+				id shared = ((id (*)(id, SEL))objc_msgSend)(expHelper, @selector(shared));
+				sciApplyLGOverrides(shared);
+			}
 		}
 	}
 
-	if (sLGSurfaces) {
+	if (sciAnyTabBarSurfaceFlag()) {
 		rebind_symbols((struct rebinding[]){
 			{"IGFloatingTabBarEnabled", (void *)hook_IGFloatingTabBarEnabled, (void **)&orig_IGFloatingTabBarEnabled},
 			{"IGTabBarDynamicSizingEnabled", (void *)hook_IGTabBarDynamicSizingEnabled, (void **)&orig_IGTabBarDynamicSizingEnabled},
@@ -560,18 +689,30 @@ static void sciInstallLiquidGlassHooks(void) {
 %ctor {
 	SCIRegisterDefaultsOnce();
 
-	if (@available(iOS 19.0, *)) {
-		sLGButtons = SCI_PREF(@"liquid_glass_buttons");
-	}
+	BOOL nativeLiquidGlass = SCI_PREF(@"lg_native_enabled");
 
-	sLGSurfaces = SCI_PREF(@"liquid_glass_surfaces");
-
+	// Liquid Glass visual API requires iOS 26+.
 	if (@available(iOS 26.0, *)) {
-		sLGProgressiveBlur = SCI_PREF(@"liquid_glass_progressive_blur") && objc_getClass("UIScrollEdgeEffect") != nil;
+		sLG_InAppNotif         = nativeLiquidGlass || SCI_PREF(@"lg_inapp_notif");
+		sLG_Toast              = nativeLiquidGlass || SCI_PREF(@"lg_toast");
+		sLG_EaseInOutBlur      = nativeLiquidGlass || SCI_PREF(@"lg_ease_in_out_blur");
+		sLG_SwizzleButtons     = nativeLiquidGlass || SCI_PREF(@"lg_swizzle_buttons");
+		sLG_NavEnabled         = nativeLiquidGlass || SCI_PREF(@"lg_nav_enabled");
+		sLG_HomeFeedHeader     = nativeLiquidGlass || SCI_PREF(@"lg_home_feed_header");
+		sLG_GlassRendering     = nativeLiquidGlass || SCI_PREF(@"lg_glass_rendering");
+		sLG_GlassBackgroundSteps = nativeLiquidGlass || SCI_PREF(@"lg_glass_background_steps");
+		sLG_LegibilityBlur     = nativeLiquidGlass || SCI_PREF(@"lg_legibility_blur");
+		sLG_ProfileNavBarMatch = nativeLiquidGlass || SCI_PREF(@"lg_profile_navbar_match");
+		sLG_ProfileSegmentedTabs = nativeLiquidGlass || SCI_PREF(@"lg_profile_segmented_tabs_glass");
 	}
+	// Surface fishhook flags work pre-iOS 26 too.
+	sLG_FloatingTabBar         = nativeLiquidGlass || SCI_PREF(@"lg_floating_tab_bar");
+	sLG_TabBarDynamicSizing    = SCI_PREF(@"lg_tab_bar_dynamic_sizing");
+	sLG_TabBarEnhancedSizing   = SCI_PREF(@"lg_tab_bar_enhanced_sizing");
+	sLG_TabBarHomecomingFloating = SCI_PREF(@"lg_tab_bar_homecoming_floating");
+	sLG_TabBarStyleGlass       = nativeLiquidGlass || SCI_PREF(@"lg_tab_bar_style_glass");
 
 	%init(SCIAppLifecycleGroup);
-	%init(SCIDebugBlockGroup);
 	%init(SCIScreenshotBlockGroup);
 	%init(SCIHideItemsGroup);
 	%init(SCIConfirmActionsGroup);
@@ -579,12 +720,8 @@ static void sciInstallLiquidGlassHooks(void) {
 
 	if (sciFlexEnabled()) {%init(SCIFlexGroup);}
 
-	if (sLGButtons || sLGSurfaces) {
+	if (sciAnyButtonOrNavLGFlag() || sciAnyTabBarSurfaceFlag()) {
 		%init(SCILiquidGlassGroup);
 		sciInstallLiquidGlassHooks();
-	}
-
-	if (sLGProgressiveBlur) {
-		%init(SCIProgressiveBlurGroup);
 	}
 }

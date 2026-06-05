@@ -1,4 +1,5 @@
 #import "SCIMobileConfigBrowserViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/MobileConfig/SCIMobileConfigRuntime.h"
 #import "../Utils.h"
 #include <stdlib.h>

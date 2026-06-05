@@ -22,7 +22,6 @@
 											@"header": SCILocalized(@"Seen receipts"),
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable story seen receipt") subtitle:SCILocalized(@"Hides the notification for others when you view their story") defaultsKey:@"no_seen_receipt" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Show seen button") subtitle:SCILocalized(@"Adds the eye button to story overlays. Off keeps seen blocking on without the button") defaultsKey:@"show_story_seen_button" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Keep stories visually seen locally") subtitle:SCILocalized(@"Marks stories as seen locally (grey ring) while still blocking the seen receipt on the server") defaultsKey:@"keep_seen_visual_local"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Mark seen on story like") subtitle:SCILocalized(@"Marks a story as seen the moment you tap the heart, even with seen blocking on") defaultsKey:@"seen_on_story_like"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Mark seen on story reply") subtitle:SCILocalized(@"Marks a story as seen when you send a reply or emoji reaction, even with seen blocking on") defaultsKey:@"seen_on_story_reply"],

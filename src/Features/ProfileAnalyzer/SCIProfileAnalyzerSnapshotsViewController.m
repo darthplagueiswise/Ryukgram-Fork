@@ -25,14 +25,14 @@ static const unsigned long long kSCISnapWarnBytes = 50ULL * 1024 * 1024;
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Snapshots");
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.allowsMultipleSelectionDuringEditing = YES;
-	self.tableView.backgroundColor = SCIGlassBackdropColor();
+	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
 	[self.view addSubview:self.tableView];
 
 	[self reloadFromStore];

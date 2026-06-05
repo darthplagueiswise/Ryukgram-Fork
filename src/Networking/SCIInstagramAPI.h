@@ -20,17 +20,10 @@ typedef void(^SCIAPIStatusesCompletion)(NSDictionary * _Nullable statuses, NSErr
                          body:(nullable NSDictionary *)body
                    completion:(nullable SCIAPICompletion)completion;
 
-// Raw bytes from a URL with the account's auth headers; for authed endpoints like media_fallback.
-+ (void)downloadAuthorizedURL:(NSURL *)url
-                   completion:(void (^)(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error))completion;
-
 // ============ Friendships ============
 
 + (void)followUserPK:(NSString *)pk completion:(nullable SCIAPICompletion)completion;
 + (void)unfollowUserPK:(NSString *)pk completion:(nullable SCIAPICompletion)completion;
-
-// Remove a user from your followers (they stop following you). IG-native action.
-+ (void)removeFollowerPK:(NSString *)pk completion:(nullable SCIAPICompletion)completion;
 
 // Bulk-fetch friendship statuses for a set of user PKs in one round trip.
 // Statuses dict maps pk → {following, outgoing_request, is_private, ...}.

@@ -20,6 +20,7 @@
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm story emoji reaction") subtitle:SCILocalized(@"Shows an alert before sending an emoji reaction on a story") defaultsKey:@"emoji_reaction_confirm"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm note emoji reaction") subtitle:SCILocalized(@"Shows an alert before sending an emoji reaction on a note") defaultsKey:@"note_react_confirm"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants emoji reaction") subtitle:SCILocalized(@"Shows an alert before sending an emoji reaction on an Instant") defaultsKey:@"instants_emoji_reaction_confirm"],
 											]
 										},
 										@{
@@ -34,7 +35,6 @@
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants capture") subtitle:SCILocalized(@"Shows an alert before taking a photo with the Instants camera") defaultsKey:@"instants_capture_confirm"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm switching Instant") subtitle:SCILocalized(@"Shows an alert before tapping to switch to the next/previous Instant") defaultsKey:@"instants_advance_confirm"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants emoji reaction") subtitle:SCILocalized(@"Shows an alert before sending an emoji reaction on an Instant") defaultsKey:@"instants_emoji_reaction_confirm"],
 											]
 										},
 										@{
@@ -50,14 +50,6 @@
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm voice call") subtitle:SCILocalized(@"Shows an alert when you click the voice call button to confirm before calling") defaultsKey:@"voice_call_confirm"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm video call") subtitle:SCILocalized(@"Shows an alert when you click the video call button to confirm before calling") defaultsKey:@"video_call_confirm"],
-											]
-										},
-										@{
-											@"header": SCILocalized(@"Read receipts"),
-											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm DM mark as seen") subtitle:SCILocalized(@"Shows an alert before sending a read receipt from the DM seen button or menu") defaultsKey:@"confirm_mark_seen_dm"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm story mark as seen") subtitle:SCILocalized(@"Shows an alert before sending a story view receipt from the eye button or menu") defaultsKey:@"confirm_mark_seen_story"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm disappearing media mark as viewed") subtitle:SCILocalized(@"Shows an alert before marking a disappearing message as viewed") defaultsKey:@"confirm_mark_seen_dm_visual"],
 											]
 										},
 										@{

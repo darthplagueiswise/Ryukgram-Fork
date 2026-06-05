@@ -226,7 +226,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Download settings");
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 3; }
@@ -317,8 +317,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 + (void)load {
 	[[SCINotificationCenter shared] setDefaultTapProvider:^{
 		return ^{ [SCIDownloadManagerViewController present]; };
-	} ownerVCClass:[SCIDownloadManagerViewController class]
-	  forAction:SCI_NOTIF_DOWNLOAD];
+	} forAction:SCI_NOTIF_DOWNLOAD];
 }
 
 + (void)present {
@@ -341,7 +340,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Downloads");
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.selected = [NSMutableSet set];
 
 	[self setupCollectionView];

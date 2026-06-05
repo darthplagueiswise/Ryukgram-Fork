@@ -3,8 +3,6 @@
 #import "../../UI/SCIIcon.h"
 #import "SCIDeletedMessagesStorage.h"
 #import "SCIDeletedMessagesFilter.h"
-#import "SCIDeletedMessagesCapture.h"
-#import "../../Networking/SCIInstagramAPI.h"
 #import "../../Utils.h"
 #import "../../SCIURLOpener.h"
 #import "../../UI/SCIScrollToTopButton.h"
@@ -15,15 +13,9 @@
 #import "../../Gallery/SCIGallerySaveMetadata.h"
 #import "../../Gallery/SCIGalleryFile.h"
 #import "../../Localization/SCILocalization.h"
+#import "../../Settings/SCISearchBarStyler.h"
 #import "SCIDeletedMessagesDate.h"
-#import "../Theme/SCITheme.h"
 #import <AVFoundation/AVFoundation.h>
-
-// Lit tone so received bubbles stay visible on OLED black; sub-0.9 alpha dodges the recolor.
-static UIColor *SCIDMReceivedBubbleColor(void) {
-	if ([SCITheme shouldRecolor]) return [UIColor colorWithWhite:0.17 alpha:0.88];
-	return UIColor.secondarySystemBackgroundColor;
-}
 
 #pragma mark - Adaptive message cell
 
@@ -40,12 +32,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 @property (nonatomic, strong) UIView *bubbleContent;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleMaxWidth;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleLeading;
-
-@property (nonatomic, strong) UIView *senderRow;
-@property (nonatomic, strong) UIImageView *senderAvatar;
-@property (nonatomic, strong) UILabel *senderLabel;
-@property (nonatomic, strong) NSLayoutConstraint *senderRowHeight;
-@property (nonatomic, copy) NSString *senderAvatarURL;
 
 @property (nonatomic, copy) void (^onBubbleTap)(void);
 @property (nonatomic, copy) void (^onVoicePlayTap)(void);
@@ -66,7 +52,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 @property (nonatomic, strong) UIImageView *checkbox;
 - (void)applySelectionMode:(BOOL)on selected:(BOOL)selected selectable:(BOOL)selectable;
 - (void)applyMessage:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK playing:(BOOL)playing;
-- (void)applySenderHeaderVisible:(BOOL)visible message:(SCIDeletedMessage *)m;
 - (void)setVoiceProgressSeconds:(double)seconds;
 
 + (NSString *)shareTypeLabelForURL:(NSString *)urlString fallbackKind:(SCIDeletedMessageKind)kind;
@@ -110,54 +95,13 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 		_metaLabel.textColor = UIColor.tertiaryLabelColor;
 		[self.contentView addSubview:_metaLabel];
 
-		// Group-only sender row; collapses to 6pt when hidden (acts as bubble top padding).
-		_senderRow = [UIView new];
-		_senderRow.translatesAutoresizingMaskIntoConstraints = NO;
-		_senderRow.hidden = YES;
-		[self.contentView addSubview:_senderRow];
-
-		_senderAvatar = [UIImageView new];
-		_senderAvatar.translatesAutoresizingMaskIntoConstraints = NO;
-		_senderAvatar.contentMode = UIViewContentModeScaleAspectFill;
-		_senderAvatar.layer.cornerRadius = 9;
-		_senderAvatar.layer.masksToBounds = YES;
-		_senderAvatar.tintColor = UIColor.systemGray3Color;
-		[_senderRow addSubview:_senderAvatar];
-
-		_senderLabel = [UILabel new];
-		_senderLabel.translatesAutoresizingMaskIntoConstraints = NO;
-		_senderLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
-		_senderLabel.textColor = UIColor.secondaryLabelColor;
-		[_senderRow addSubview:_senderLabel];
-
 		UILayoutGuide *m = self.contentView.layoutMarginsGuide;
 		_bubbleMaxWidth = [_bubble.widthAnchor constraintLessThanOrEqualToConstant:kSCIDMBubbleMaxWidth];
 		_bubbleLeading = [_bubble.leadingAnchor constraintEqualToAnchor:m.leadingAnchor];
-		_senderRowHeight = [_senderRow.heightAnchor constraintEqualToConstant:6];
-
-		// Sub-required so the avatar yields to the 6pt collapse without log spam.
-		NSLayoutConstraint *avatarBottom = [_senderAvatar.bottomAnchor constraintEqualToAnchor:_senderRow.bottomAnchor constant:-1];
-		NSLayoutConstraint *avatarH = [_senderAvatar.heightAnchor constraintEqualToConstant:18];
-		avatarBottom.priority = UILayoutPriorityDefaultHigh;
-		avatarH.priority = UILayoutPriorityDefaultHigh;
 
 		[NSLayoutConstraint activateConstraints:@[
-			_senderRowHeight,
-			[_senderRow.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
-			[_senderRow.leadingAnchor constraintEqualToAnchor:_bubble.leadingAnchor constant:2],
-			[_senderRow.trailingAnchor constraintLessThanOrEqualToAnchor:m.trailingAnchor],
-
-			[_senderAvatar.leadingAnchor constraintEqualToAnchor:_senderRow.leadingAnchor],
-			avatarBottom,
-			[_senderAvatar.widthAnchor constraintEqualToConstant:18],
-			avatarH,
-
-			[_senderLabel.leadingAnchor constraintEqualToAnchor:_senderAvatar.trailingAnchor constant:5],
-			[_senderLabel.centerYAnchor constraintEqualToAnchor:_senderAvatar.centerYAnchor],
-			[_senderLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_senderRow.trailingAnchor],
-
 			_bubbleLeading,
-			[_bubble.topAnchor constraintEqualToAnchor:_senderRow.bottomAnchor],
+			[_bubble.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6],
 			[_bubble.trailingAnchor constraintLessThanOrEqualToAnchor:m.trailingAnchor constant:-32],
 			_bubbleMaxWidth,
 
@@ -174,37 +118,9 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	return self;
 }
 
-- (void)applySenderHeaderVisible:(BOOL)visible message:(SCIDeletedMessage *)m {
-	self.senderRow.hidden = !visible;
-	self.senderRowHeight.constant = visible ? 24 : 6;
-	if (!visible) return;
-
-	NSString *who = m.senderUsername.length ? [@"@" stringByAppendingString:m.senderUsername]
-										   : (m.senderFullName.length ? m.senderFullName : SCILocalized(@"Unknown user"));
-	self.senderLabel.text = who;
-
-	self.senderAvatar.image = [UIImage systemImageNamed:@"person.circle.fill"];
-	self.senderAvatar.tintColor = UIColor.systemGray3Color;
-	self.senderAvatarURL = m.senderProfilePicURL;
-	if (!m.senderProfilePicURL.length) return;
-
-	NSURL *url = [NSURL URLWithString:m.senderProfilePicURL];
-	if (!url) return;
-	__weak typeof(self) ws = self;
-	[SCIImageCache loadImageFromURL:url completion:^(UIImage *img) {
-		if (!img || ![ws.senderAvatarURL isEqualToString:m.senderProfilePicURL]) return;
-		ws.senderAvatar.image = img;
-	}];
-}
-
 - (void)prepareForReuse {
 	[super prepareForReuse];
 	[self resetBubble];
-	self.senderRow.hidden = YES;
-	self.senderRowHeight.constant = 6;
-	self.senderLabel.text = nil;
-	self.senderAvatar.image = nil;
-	self.senderAvatarURL = nil;
 	self.metaLabel.text = nil;
 	self.metaLabel.attributedText = nil;
 	self.onBubbleTap = nil;
@@ -315,8 +231,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 		self.metaLabel.text = baseMeta;
 	}
 
-	if (m.kind == SCIDeletedMessageKindReactionRemoved) [self installReactionBubble:m];
-	else if (m.kind == SCIDeletedMessageKindText && m.text.length) [self installTextBubble:m.text];
+	if (m.kind == SCIDeletedMessageKindText && m.text.length) [self installTextBubble:m.text];
 	else if (m.kind == SCIDeletedMessageKindVoice) [self installVoiceBubble:m];
 	else if (m.kind == SCIDeletedMessageKindPhoto || m.kind == SCIDeletedMessageKindVideo || m.kind == SCIDeletedMessageKindGif) [self installMediaBubble:m ownerPK:ownerPK];
 	else if (m.kind == SCIDeletedMessageKindSticker) [self installStickerBubble:m ownerPK:ownerPK];
@@ -327,7 +242,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 #pragma mark - Variants
 
 - (void)installTextBubble:(NSString *)text {
-	self.bubble.backgroundColor = SCIDMReceivedBubbleColor();
+	self.bubble.backgroundColor = UIColor.secondarySystemBackgroundColor;
 
 	UILabel *l = [UILabel new];
 	l.translatesAutoresizingMaskIntoConstraints = NO;
@@ -366,25 +281,10 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 	NSString *rel = m.thumbnailPath ?: m.mediaPath;
 	NSString *url = m.thumbnailURL ?: m.mediaURL;
-	NSString *note = SCIDeletedMessageMediaStatusNote(m);
+	[self loadImageView:iv local:rel url:url ownerPK:ownerPK];
+	if (!rel.length && !url.length) [self addCenteredGlyph:SCIDeletedMessageKindSymbol(m.kind) toView:iv pointSize:48];
 
-	BOOL hasPreview = rel.length > 0;
-	BOOL canOpen = hasPreview || (url.length && !note);
-
-	if (hasPreview) {
-		[self loadImageView:iv local:rel url:nil ownerPK:ownerPK];
-	} else if (note) {
-		// No local preview and we know why — state it instead of trying a dead URL.
-		[self addMediaStatusGlyph:m toView:iv];
-	} else if (url.length) {
-		[self loadImageView:iv local:nil url:url ownerPK:ownerPK];
-	} else {
-		[self addCenteredGlyph:SCIDeletedMessageKindSymbol(m.kind) toView:iv pointSize:48];
-	}
-
-	if (m.isEphemeral) [self addEphemeralBadgeToView:iv];
-
-	if (m.kind == SCIDeletedMessageKindVideo && canOpen) {
+	if (m.kind == SCIDeletedMessageKindVideo) {
 		UIImageView *play = [self glyphViewWithSymbol:@"play.circle.fill" pointSize:48 weight:UIImageSymbolWeightSemibold];
 		play.tintColor = UIColor.whiteColor;
 		play.layer.shadowOpacity = 0.4;
@@ -396,47 +296,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 			[play.centerYAnchor constraintEqualToAnchor:iv.centerYAnchor],
 		]];
 	}
-}
-
-- (void)addMediaStatusGlyph:(SCIDeletedMessage *)m toView:(UIView *)view {
-	NSString *symbol = m.isEphemeral ? @"eye.slash" : @"exclamationmark.triangle";
-	if (m.mediaStatus == SCIDeletedMessageMediaStatusPending) symbol = @"arrow.down.circle";
-
-	UIImageView *glyph = [self glyphViewWithSymbol:symbol pointSize:34 weight:UIImageSymbolWeightLight];
-
-	UILabel *caption = [UILabel new];
-	caption.translatesAutoresizingMaskIntoConstraints = NO;
-	caption.text = SCIDeletedMessageMediaStatusNote(m);
-	caption.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
-	caption.textColor = UIColor.tertiaryLabelColor;
-	caption.textAlignment = NSTextAlignmentCenter;
-	caption.numberOfLines = 0;
-
-	[view addSubview:glyph];
-	[view addSubview:caption];
-	[NSLayoutConstraint activateConstraints:@[
-		[glyph.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],
-		[glyph.centerYAnchor constraintEqualToAnchor:view.centerYAnchor constant:-16],
-		[caption.topAnchor constraintEqualToAnchor:glyph.bottomAnchor constant:8],
-		[caption.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:12],
-		[caption.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-12],
-	]];
-}
-
-- (void)addEphemeralBadgeToView:(UIView *)view {
-	UIImageView *badge = [self glyphViewWithSymbol:@"timer" pointSize:11 weight:UIImageSymbolWeightBold];
-	badge.tintColor = UIColor.whiteColor;
-	badge.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.45];
-	badge.contentMode = UIViewContentModeCenter;
-	badge.layer.cornerRadius = 11;
-	badge.layer.masksToBounds = YES;
-	[view addSubview:badge];
-	[NSLayoutConstraint activateConstraints:@[
-		[badge.topAnchor constraintEqualToAnchor:view.topAnchor constant:6],
-		[badge.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:6],
-		[badge.widthAnchor constraintEqualToConstant:22],
-		[badge.heightAnchor constraintEqualToConstant:22],
-	]];
 }
 
 - (void)installStickerBubble:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK {
@@ -704,7 +563,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 }
 
 - (void)installShareBubble:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK {
-	self.bubble.backgroundColor = SCIDMReceivedBubbleColor();
+	self.bubble.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	self.bubbleMaxWidth.constant = kSCIDMMediaSize;
 
 	UIStackView *col = [UIStackView new];
@@ -779,55 +638,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	}
 }
 
-- (void)installReactionBubble:(SCIDeletedMessage *)m {
-	self.bubble.backgroundColor = SCIDMReceivedBubbleColor();
-
-	UIStackView *row = [UIStackView new];
-	row.translatesAutoresizingMaskIntoConstraints = NO;
-	row.axis = UILayoutConstraintAxisHorizontal;
-	row.spacing = 10;
-	row.alignment = UIStackViewAlignmentCenter;
-	[self.bubble addSubview:row];
-	self.bubbleContent = row;
-
-	UILabel *emoji = [UILabel new];
-	emoji.font = [UIFont systemFontOfSize:26];
-	emoji.text = m.reactionEmoji.length ? m.reactionEmoji : @"♡";
-	[emoji setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-	[row addArrangedSubview:emoji];
-
-	UIStackView *col = [UIStackView new];
-	col.axis = UILayoutConstraintAxisVertical;
-	col.spacing = 1;
-	[row addArrangedSubview:col];
-
-	UILabel *title = [UILabel new];
-	title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-	title.textColor = UIColor.labelColor;
-	title.text = SCILocalized(@"Removed a reaction");
-	[col addArrangedSubview:title];
-
-	NSString *ctx = m.text.length ? m.text : SCILocalized(@"a message");
-	UILabel *sub = [UILabel new];
-	sub.font = [UIFont systemFontOfSize:12.5];
-	sub.textColor = UIColor.secondaryLabelColor;
-	sub.numberOfLines = 2;
-	sub.lineBreakMode = NSLineBreakByTruncatingTail;
-	sub.text = m.reactionTargetUsername.length
-		? [NSString stringWithFormat:SCILocalized(@"on @%@: %@"), m.reactionTargetUsername, ctx]
-		: [NSString stringWithFormat:SCILocalized(@"on: %@"), ctx];
-	[col addArrangedSubview:sub];
-
-	[NSLayoutConstraint activateConstraints:@[
-		[row.topAnchor constraintEqualToAnchor:self.bubble.topAnchor constant:9],
-		[row.bottomAnchor constraintEqualToAnchor:self.bubble.bottomAnchor constant:-9],
-		[row.leadingAnchor constraintEqualToAnchor:self.bubble.leadingAnchor constant:13],
-		[row.trailingAnchor constraintEqualToAnchor:self.bubble.trailingAnchor constant:-13],
-	]];
-}
-
 - (void)installPlaceholderBubble:(SCIDeletedMessage *)m {
-	self.bubble.backgroundColor = SCIDMReceivedBubbleColor();
+	self.bubble.backgroundColor = UIColor.secondarySystemBackgroundColor;
 
 	UIStackView *row = [UIStackView new];
 	row.translatesAutoresizingMaskIntoConstraints = NO;
@@ -931,8 +743,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIApplyGlassBackdropToViewController(self);
-	self.tableView.backgroundColor = SCIGlassBackdropColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.tableView.estimatedRowHeight = 80;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	self.tableView.estimatedSectionHeaderHeight = 32;
@@ -978,7 +790,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 @interface SCIDeletedMessagesUserDetailViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property (nonatomic, copy) NSString *senderPk;
-@property (nonatomic, copy) NSString *threadId;
 @property (nonatomic, copy) NSString *ownerPK;
 @property (nonatomic, strong) SCIDeletedMessageGroup *group;
 @property (nonatomic, strong) NSArray<SCIDeletedMessage *> *visibleMessages;
@@ -1013,7 +824,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	if ((self = [super init])) {
 		_group = group;
 		_senderPk = group.senderPk.copy;
-		_threadId = group.threadId.copy;
 		_ownerPK = ownerPK.copy;
 		_filter = [SCIDeletedMessagesFilter new];
 	}
@@ -1022,7 +832,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.title = self.group.senderUsername.length ? [@"@" stringByAppendingString:self.group.senderUsername] : SCILocalized(@"Deleted messages");
 
 	[self installSearchController];
@@ -1039,30 +849,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	self.navigationItem.rightBarButtonItems = @[menu, filter];
 
 	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(storeChanged:) name:SCIDeletedMessagesDidChangeNotification object:nil];
-	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(retryRecoverableMedia) name:UIApplicationDidBecomeActiveNotification object:nil];
 	[self refreshHeader];
 	[self reload];
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-	[super viewDidAppear:animated];
-	[self retryRecoverableMedia];
-}
-
-// Re-attempt blob-less records (failed / stuck Pending). Fires on open + foreground.
-- (void)retryRecoverableMedia {
-	if (!self.isViewLoaded || !self.view.window) return;
-	NSString *ownerPK = self.ownerPK;
-	if (!ownerPK.length) return;
-
-	for (SCIDeletedMessage *m in self.group.messages) {
-		BOOL stuck = m.mediaStatus == SCIDeletedMessageMediaStatusPending ||
-					 m.mediaStatus == SCIDeletedMessageMediaStatusFailed;
-		if (!stuck) continue;
-		if (!m.mediaCandidates.count && !m.mediaURL.length && !m.mediaPk.length) continue;
-		if ([self localFileURLForMessage:m]) continue;
-		sciDMRetryMediaDownload(m.messageId, ownerPK);
-	}
 }
 
 - (void)dealloc {
@@ -1129,43 +917,24 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	}];
 	if (!self.group.messages.count) select.attributes = UIMenuElementAttributesDisabled;
 
-	BOOL isGroup = self.group.isGroup;
-	UIAction *clear = [UIAction actionWithTitle:(isGroup ? SCILocalized(@"Clear this chat") : SCILocalized(@"Clear from this user"))
+	UIAction *clear = [UIAction actionWithTitle:SCILocalized(@"Clear from this user")
 										  image:[UIImage systemImageNamed:@"trash"]
 									 identifier:nil
 										handler:^(__kindof UIAction *_) {
-		UIAlertController *a = [UIAlertController alertControllerWithTitle:(isGroup ? SCILocalized(@"Clear log for this chat?") : SCILocalized(@"Clear log for this user?"))
-																  message:(isGroup ? SCILocalized(@"Removes every preserved deleted message from this group chat.") : SCILocalized(@"Removes every preserved deleted message from this sender."))
+		UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"Clear log for this user?")
+																  message:SCILocalized(@"Removes every preserved deleted message from this sender.")
 														   preferredStyle:UIAlertControllerStyleAlert];
 		[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
 		[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Clear") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
-			if (ws.threadId.length) [SCIDeletedMessagesStorage deleteMessagesForThreadId:ws.threadId ownerPK:ws.ownerPK];
-			else [SCIDeletedMessagesStorage deleteMessagesForSenderPK:ws.senderPk ownerPK:ws.ownerPK threadlessOnly:YES];
+			[SCIDeletedMessagesStorage deleteMessagesForSenderPK:ws.senderPk ownerPK:ws.ownerPK];
 			[ws.navigationController popViewControllerAnimated:YES];
 		}]];
 		[ws presentViewController:a animated:YES completion:nil];
 	}];
 	clear.attributes = UIMenuElementAttributesDestructive;
 
-	UIAction *refresh = [UIAction actionWithTitle:SCILocalized(@"Refresh names & photos")
-											image:[UIImage systemImageNamed:@"arrow.clockwise"]
-									   identifier:nil
-										  handler:^(__kindof UIAction *_) {
-		if (ws.threadId.length) sciDMRefreshThreadInfo(ws.threadId, ws.ownerPK);
-		else if (ws.senderPk.length) {
-			[SCIInstagramAPI sendRequestWithMethod:@"GET"
-											  path:[NSString stringWithFormat:@"users/%@/info/", ws.senderPk]
-											  body:nil
-										completion:^(NSDictionary *resp, NSError *error) {
-				NSDictionary *user = [resp[@"user"] isKindOfClass:NSDictionary.class] ? resp[@"user"] : nil;
-				if (user.count) [SCIDeletedMessagesStorage applySenderInfo:user forSenderPK:ws.senderPk ownerPK:ws.ownerPK overwrite:YES];
-			}];
-		}
-		SCINotifyInfo(SCI_NOTIF_GENERIC, SCILocalized(@"Refreshing names & photos"), nil);
-	}];
-
 	return [UIMenu menuWithTitle:@"" children:@[
-		[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[select, refresh]],
+		[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[select]],
 		clear
 	]];
 }
@@ -1246,9 +1015,9 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (SCIGallerySaveMetadata *)gallerySaveMetadataForMessage:(SCIDeletedMessage *)m {
 	SCIGallerySaveMetadata *md = [SCIGallerySaveMetadata new];
-	md.sourceUsername = m.senderUsername.length ? m.senderUsername : self.group.senderUsername;
-	md.sourceUserPK = m.senderPk.length ? m.senderPk : self.group.senderPk;
-	md.sourceProfileURLString = m.senderProfilePicURL.length ? m.senderProfilePicURL : self.group.senderProfilePicURL;
+	md.sourceUsername = self.group.senderUsername;
+	md.sourceUserPK = self.group.senderPk;
+	md.sourceProfileURLString = self.group.senderProfilePicURL;
 	md.source = SCIGallerySourceDMs;
 	md.skipDedup = YES;
 	if (m.durationSeconds > 0) md.durationSeconds = m.durationSeconds;
@@ -1316,6 +1085,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	sc.hidesNavigationBarDuringPresentation = NO;
 	sc.searchBar.placeholder = SCILocalized(@"Search messages");
 	sc.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+	[SCISearchBarStyler styleSearchBar:sc.searchBar];
 	self.searchCtl = sc;
 	self.navigationItem.searchController = sc;
 	self.navigationItem.hidesSearchBarWhenScrolling = YES;
@@ -1335,7 +1105,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 - (UIView *)buildBannerHeader {
 	UIView *banner = [UIView new];
 	banner.frame = CGRectMake(0, 0, self.view.bounds.size.width, 64);
-	banner.backgroundColor = SCIGlassBackdropColor();
+	banner.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	UIImageView *avatar = [UIImageView new];
 	avatar.contentMode = UIViewContentModeScaleAspectFill;
@@ -1418,7 +1188,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
 	self.tableView.estimatedRowHeight = 80;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
-	SCIStyleTableViewForGlass(self.tableView);
+	self.tableView.backgroundColor = self.view.backgroundColor;
 	[self.tableView registerClass:SCIDMMessageCell.class forCellReuseIdentifier:@"msg"];
 	[self.view addSubview:self.tableView];
 
@@ -1447,24 +1217,9 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 #pragma mark - Data
 
 - (void)reload {
-	NSArray<SCIDeletedMessage *> *all = self.threadId.length
-		? [SCIDeletedMessagesStorage messagesForThreadId:self.threadId ownerPK:self.ownerPK]
-		: [SCIDeletedMessagesStorage messagesForSenderPK:self.senderPk ownerPK:self.ownerPK];
-
+	NSArray<SCIDeletedMessage *> *all = [SCIDeletedMessagesStorage messagesForSenderPK:self.senderPk ownerPK:self.ownerPK];
 	if (all.count) {
-		BOOL isGroup = self.group.isGroup;
-		NSString *title = self.group.threadTitle, *avatar = self.group.threadAvatarURL;
-		for (SCIDeletedMessage *m in all) {
-			if (m.isGroup) isGroup = YES;
-			if (!title.length && m.threadTitle.length) title = m.threadTitle;
-			if (!avatar.length && m.threadAvatarURL.length) avatar = m.threadAvatarURL;
-		}
-
 		SCIDeletedMessageGroup *g = [SCIDeletedMessageGroup new];
-		g.threadId = self.threadId;
-		g.isGroup = isGroup;
-		g.threadTitle = title;
-		g.threadAvatarURL = avatar;
 		g.senderPk = self.senderPk;
 		g.senderUsername = all.firstObject.senderUsername;
 		g.senderFullName = all.firstObject.senderFullName;
@@ -1482,27 +1237,6 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 }
 
 - (void)refreshHeader {
-	if (self.group.isGroup) {
-		NSString *title = self.group.threadTitle.length ? self.group.threadTitle : SCILocalized(@"Group chat");
-		self.title = title;
-		self.bannerNameLabel.text = title;
-
-		NSUInteger people = self.group.distinctSenders.count;
-		self.bannerSubLabel.text = [NSString stringWithFormat:SCILocalized(@"%lu people · %lu deleted"),
-									(unsigned long)people, (unsigned long)self.group.count];
-
-		self.bannerAvatar.image = [UIImage systemImageNamed:@"person.2.circle.fill"];
-		self.bannerAvatar.tintColor = UIColor.systemGray3Color;
-		if (self.group.threadAvatarURL.length) {
-			__weak UIImageView *iv = self.bannerAvatar;
-			[SCIImageCache loadImageFromURL:[NSURL URLWithString:self.group.threadAvatarURL] completion:^(UIImage *img) {
-				if (img) iv.image = img;
-			}];
-		}
-		self.bannerOpenButton.hidden = YES;
-		return;
-	}
-
 	NSString *fn = self.group.senderFullName.length ? self.group.senderFullName : (self.group.senderUsername.length ? self.group.senderUsername : SCILocalized(@"Unknown user"));
 	self.title = self.group.senderUsername.length ? [@"@" stringByAppendingString:self.group.senderUsername] : fn;
 	self.bannerNameLabel.text = fn;
@@ -1538,7 +1272,6 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 		@[@[SCILocalized(@"Share"), @(SCIDeletedMessageKindShare), SCIDeletedMessageKindSymbol(SCIDeletedMessageKindShare)],
 		  @[SCILocalized(@"Link"), @(SCIDeletedMessageKindLink), SCIDeletedMessageKindSymbol(SCIDeletedMessageKindLink)]],
 		@[@[SCILocalized(@"Text"), @(SCIDeletedMessageKindText), SCIDeletedMessageKindSymbol(SCIDeletedMessageKindText)],
-		  @[SCILocalized(@"Reaction removed"), @(SCIDeletedMessageKindReactionRemoved), SCIDeletedMessageKindSymbol(SCIDeletedMessageKindReactionRemoved)],
 		  @[SCILocalized(@"Other"), @(SCIDeletedMessageKindOther), SCIDeletedMessageKindSymbol(SCIDeletedMessageKindOther)]],
 	];
 }
@@ -1565,31 +1298,21 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 		[sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:actions]];
 	}
 
-	UIAction *ephemeral = [UIAction actionWithTitle:SCILocalized(@"Disappearing only") image:[UIImage systemImageNamed:@"timer"] identifier:nil handler:^(__kindof UIAction *_) {
-		ws.filter.ephemeralOnly = !ws.filter.ephemeralOnly;
-		[ws refilter];
-		[ws refreshFilterButton];
-	}];
-	ephemeral.state = self.filter.ephemeralOnly ? UIMenuElementStateOn : UIMenuElementStateOff;
-	if (@available(iOS 17.0, *)) ephemeral.attributes |= UIMenuElementAttributesKeepsMenuPresented;
-	[sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[ephemeral]]];
-
 	UIAction *reset = [UIAction actionWithTitle:SCILocalized(@"Reset") image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__kindof UIAction *_) {
 		[ws.filter clearKinds];
-		ws.filter.ephemeralOnly = NO;
 		[ws refilter];
 		[ws refreshFilterButton];
 	}];
 	reset.attributes = UIMenuElementAttributesDestructive;
 	[sections addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[reset]]];
 
-	NSUInteger n = self.filter.kinds.count + (self.filter.ephemeralOnly ? 1 : 0);
+	NSUInteger n = self.filter.kinds.count;
 	NSString *menuTitle = n > 0 ? [NSString stringWithFormat:SCILocalized(@"Filter · %lu"), (unsigned long)n] : SCILocalized(@"Filter");
 	return [UIMenu menuWithTitle:menuTitle children:sections];
 }
 
 - (void)refreshFilterButton {
-	BOOL active = self.filter.hasKindFilter || self.filter.ephemeralOnly;
+	BOOL active = self.filter.hasKindFilter;
 	self.filterButton.image = [UIImage systemImageNamed:active ? @"line.3.horizontal.decrease.circle.fill" : @"line.3.horizontal.decrease.circle"];
 	self.filterButton.menu = [self buildFilterMenu];
 }
@@ -1606,7 +1329,6 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 	BOOL playing = m.kind == SCIDeletedMessageKindVoice && [self.playingMessageId isEqualToString:m.messageId] && self.audioIsPlaying;
 
 	[cell applyMessage:m ownerPK:self.ownerPK playing:playing];
-	[cell applySenderHeaderVisible:self.group.isGroup message:m];
 
 	__weak typeof(self) ws = self;
 	cell.onCellTap = self.inSelectionMode ? ^{ [ws toggleSelectionForMessage:m]; } : nil;
@@ -1730,10 +1452,6 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 #pragma mark - Open message
 
 - (void)openMessage:(SCIDeletedMessage *)m {
-	if (m.kind == SCIDeletedMessageKindReactionRemoved) {
-		[self presentReactionDetails:m];
-		return;
-	}
 	if (m.kind == SCIDeletedMessageKindText) {
 		m.text.length ? [self presentTextMessage:m] : [self presentInfoSheet:m];
 		return;
@@ -1751,31 +1469,6 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 		return;
 	}
 	[self openMediaMessage:m];
-}
-
-- (void)presentReactionDetails:(SCIDeletedMessage *)m {
-	NSString *reactor = m.senderUsername.length ? [@"@" stringByAppendingString:m.senderUsername] : (m.senderFullName.length ? m.senderFullName : SCILocalized(@"Someone"));
-	NSString *emoji = m.reactionEmoji.length ? m.reactionEmoji : @"♡";
-	NSString *content = m.text.length ? m.text : SCILocalized(@"a message");
-	NSString *when = [SCIDeletedMessagesDate stringForDate:(m.deletedAt ?: m.capturedAt)];
-
-	NSMutableString *body = [NSMutableString string];
-	[body appendFormat:SCILocalized(@"%@ removed the %@ reaction."), reactor, emoji];
-	NSString *on = m.reactionTargetUsername.length
-		? [NSString stringWithFormat:SCILocalized(@"on @%@: %@"), m.reactionTargetUsername, content]
-		: [NSString stringWithFormat:SCILocalized(@"on: %@"), content];
-	[body appendFormat:@"\n\n%@", on];
-	if (when.length) [body appendFormat:@"\n\n%@", [NSString stringWithFormat:SCILocalized(@"Removed %@"), when]];
-
-	UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"Reaction removed")
-															  message:body
-													   preferredStyle:UIAlertControllerStyleAlert];
-	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copy") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-		UIPasteboard.generalPasteboard.string = content;
-		SCINotifySuccess(SCI_NOTIF_COPY_URL, SCILocalized(@"Copied"), nil);
-	}]];
-	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Done") style:UIAlertActionStyleCancel handler:nil]];
-	[self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)openAudioShare:(SCIDeletedMessage *)m {
@@ -1825,13 +1518,6 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 }
 
 - (void)openMediaMessage:(SCIDeletedMessage *)m {
-	// No blob and the link is known-dead — show the info sheet instead of a doomed load.
-	if (![self localFileURLForMessage:m] &&
-		(m.mediaStatus == SCIDeletedMessageMediaStatusFailed || m.mediaStatus == SCIDeletedMessageMediaStatusUnavailable)) {
-		[self presentInfoSheet:m];
-		return;
-	}
-
 	NSURL *url = [self bestMediaURLForMessage:m];
 	if (!url) {
 		[self presentInfoSheet:m];
@@ -1982,30 +1668,12 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 	NSMutableString *body = [NSMutableString string];
 	if (m.previewText.length) [body appendFormat:@"%@\n\n", m.previewText];
 	[body appendFormat:SCILocalized(@"Kind: %@\n"), SCIDeletedMessageKindLocalizedName(m.kind)];
-	if (m.isEphemeral) [body appendFormat:@"%@\n", SCILocalized(@"Disappearing (view-once) media")];
 	if (m.deletedAt) [body appendFormat:SCILocalized(@"Deleted: %@\n"), m.deletedAt];
-
-	NSString *note = SCIDeletedMessageMediaStatusNote(m);
-	if (note.length) [body appendFormat:@"%@\n", note];
-	else if (m.mediaURL.length) [body appendString:SCILocalized(@"Source URL recorded but media not stored.\n")];
+	if (m.mediaURL.length) [body appendString:SCILocalized(@"Source URL recorded but media not stored.\n")];
 
 	UIAlertController *a = [UIAlertController alertControllerWithTitle:SCIDeletedMessageKindLocalizedName(m.kind)
 															  message:body
 													   preferredStyle:UIAlertControllerStyleAlert];
-
-	BOOL canRetry = ![self localFileURLForMessage:m] &&
-		(m.mediaURL.length || m.mediaPk.length) &&
-		(m.mediaStatus == SCIDeletedMessageMediaStatusFailed || m.mediaStatus == SCIDeletedMessageMediaStatusUnavailable);
-
-	if (canRetry) {
-		NSString *ownerPK = self.ownerPK;
-		NSString *mid = m.messageId;
-		[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Try to download again") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-			sciDMRetryMediaDownload(mid, ownerPK);
-			SCINotifyInfo(SCI_NOTIF_GENERIC, SCILocalized(@"Retrying download…"), nil);
-		}]];
-	}
-
 	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Close") style:UIAlertActionStyleCancel handler:nil]];
 	[self presentViewController:a animated:YES completion:nil];
 }

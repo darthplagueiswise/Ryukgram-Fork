@@ -1,4 +1,5 @@
-// View story mentions — direct @mentions + shared post/reel sticker users.
+// View story mentions — list mentioned users for the current story item.
+// Covers direct story/reel @mentions and shared post/reel sticker users.
 
 #import "../../Utils.h"
 #import "../../SCIURLOpener.h"
@@ -11,70 +12,209 @@
 
 extern __weak UIViewController *sciActiveStoryViewerVC;
 
-static char kPKCacheKey;
-static char kMediaKey;
-static char kAvatarURLKey;
-static char kFollowUserKey;
-static char kFollowPKKey;
+static char kStoryMentionPKCacheKey;
+static char kStoryMentionMediaKey;
 
-#define kAvatarSize 52.0
-#define kRowHeight  72.0
+static id sciFieldCacheValue(id obj, NSString *key);
 
-#define sciField(obj, key) [SCIUtils fieldCacheValue:(obj) forKey:(key)]
-
-static id sciSend0(id obj, SEL sel) {
-	if (!obj || !sel || ![obj respondsToSelector:sel]) return nil;
+static id sciCallSafe(id obj, SEL sel) {
+	if (!obj || !sel) return nil;
 
 	@try {
+		if (![obj respondsToSelector:sel] && ![obj methodSignatureForSelector:sel]) return nil;
 		return ((id (*)(id, SEL))objc_msgSend)(obj, sel);
 	} @catch (__unused id e) {
 		return nil;
 	}
 }
 
-static id sciSend1(id obj, SEL sel, id arg) {
-	if (!obj || !sel || ![obj respondsToSelector:sel]) return nil;
+static id sciCallSafe1(id obj, SEL sel, id arg) {
+	if (!obj || !sel) return nil;
 
 	@try {
+		if (![obj respondsToSelector:sel] && ![obj methodSignatureForSelector:sel]) return nil;
 		return ((id (*)(id, SEL, id))objc_msgSend)(obj, sel, arg);
 	} @catch (__unused id e) {
 		return nil;
 	}
 }
 
-static NSString *sciString(id value) {
+static id sciSafeObjectIvar(id obj, const char *name) {
+	if (!obj || !name) return nil;
+
+	Ivar ivar = class_getInstanceVariable([obj class], name);
+	if (!ivar) return nil;
+
+	const char *type = ivar_getTypeEncoding(ivar);
+	if (!type || type[0] != '@') return nil;
+
+	@try {
+		return object_getIvar(obj, ivar);
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+static NSString *sciStringFromAny(id value) {
 	if ([value isKindOfClass:NSString.class]) return [(NSString *)value length] ? value : nil;
 	if ([value isKindOfClass:NSNumber.class]) return [(NSNumber *)value stringValue];
 	return nil;
 }
 
-static NSString *sciUserPK(id user) {
-	return sciString(sciField(user, @"strong_id__") ?: sciField(user, @"pk") ?: sciSend0(user, @selector(pk)) ?: [SCIUtils pkFromIGUser:user]);
+static NSString *sciUserPK(id userObj) {
+	if (!userObj) return nil;
+
+	id pk = sciFieldCacheValue(userObj, @"strong_id__") ?: sciFieldCacheValue(userObj, @"pk") ?: sciCallSafe(userObj, @selector(pk));
+	if (!pk) pk = sciSafeObjectIvar(userObj, "_pk");
+
+	return sciStringFromAny(pk);
 }
 
-static NSDictionary *sciInfoFromUser(id user) {
+static void sciStyleFollowBtn(UIButton *btn, BOOL following) {
+	[btn setTitle:following ? SCILocalized(@"Following") : SCILocalized(@"Follow") forState:UIControlStateNormal];
+	btn.backgroundColor = following ? UIColor.tertiarySystemFillColor : UIColor.systemBlueColor;
+	[btn setTitleColor:following ? UIColor.labelColor : UIColor.whiteColor forState:UIControlStateNormal];
+}
+
+// MARK: - Media lookup
+
+static UIViewController *sciStoryVCForAnchor(UIView *anchor) {
+	UIViewController *storyVC = anchor ? sciFindVC(anchor, @"IGStoryViewerViewController") : nil;
+	return storyVC ?: sciActiveStoryViewerVC;
+}
+
+static IGMedia *sciMediaFromStoryItem(id item) {
+	if (!item) return nil;
+
+	Class mediaClass = NSClassFromString(@"IGMedia");
+	if (mediaClass && [item isKindOfClass:mediaClass]) return (IGMedia *)item;
+
+	return sciExtractMediaFromItem(item);
+}
+
+static IGMedia *sciStoryMediaForOverlay(UIView *overlay) {
+	if (!overlay || !overlay.window) return nil;
+
+	Class cellClass = NSClassFromString(@"IGStoryFullscreenCell");
+	if (!cellClass) return nil;
+
+	UIView *cell = overlay;
+
+	while (cell && ![cell isKindOfClass:cellClass]) {
+		cell = cell.superview;
+	}
+
+	if (!cell) return nil;
+
+	id itemContext = sciCallSafe(cell, @selector(currentStoryItemContext));
+	id item = sciCallSafe(itemContext, @selector(storyItem));
+	IGMedia *media = sciMediaFromStoryItem(item);
+	if (media) return media;
+
+	id sectionContext = sciCallSafe(cell, @selector(currentSectionContext));
+	itemContext = sciCallSafe(sectionContext, @selector(storyItemContext));
+	item = sciCallSafe(itemContext, @selector(storyItem));
+	media = sciMediaFromStoryItem(item);
+	if (media) return media;
+
+	id directSectionContext = sciCallSafe(cell, @selector(sectionContext));
+	itemContext = sciCallSafe(directSectionContext, @selector(storyItemContext));
+	item = sciCallSafe(itemContext, @selector(storyItem));
+
+	return sciMediaFromStoryItem(item);
+}
+
+static IGMedia *sciCurrentStoryMedia(UIView *anchor) {
+	IGMedia *media = sciStoryMediaForOverlay(anchor);
+	if (media) return media;
+
+	UIViewController *storyVC = sciStoryVCForAnchor(anchor);
+	if (!storyVC) return nil;
+
+	id item = sciCallSafe(storyVC, @selector(currentStoryItem));
+	media = sciMediaFromStoryItem(item);
+	if (media) return media;
+
+	id sectionController = sciCallSafe(storyVC, @selector(currentlyDisplayedSectionController));
+	item = sciCallSafe(sectionController, @selector(currentStoryItem));
+	media = sciMediaFromStoryItem(item);
+	if (media) return media;
+
+	id viewModel = sciCallSafe(storyVC, @selector(currentViewModel));
+	item = sciCallSafe1(storyVC, @selector(currentStoryItemForViewModel:), viewModel);
+
+	return sciMediaFromStoryItem(item);
+}
+
+static NSString *sciMediaCacheKey(IGMedia *media) {
+	if (!media) return nil;
+
+	id pk = sciCallSafe(media, @selector(pk));
+	if (!pk) pk = sciFieldCacheValue(media, @"pk");
+	if (!pk) pk = sciFieldCacheValue(media, @"id");
+
+	return sciStringFromAny(pk);
+}
+
+// MARK: - Field cache
+
+static id sciFieldCacheValue(id obj, NSString *key) {
+	if (!obj || !key) return nil;
+
+	static Class storableClass = Nil;
+	static Ivar fieldCacheIvar = NULL;
+	static dispatch_once_t once;
+
+	dispatch_once(&once, ^{
+		storableClass = NSClassFromString(@"IGAPIStorableObject");
+		if (storableClass) fieldCacheIvar = class_getInstanceVariable(storableClass, "_fieldCache");
+	});
+
+	if (!storableClass || !fieldCacheIvar || ![obj isKindOfClass:storableClass]) return nil;
+
+	const char *type = ivar_getTypeEncoding(fieldCacheIvar);
+	if (!type || type[0] != '@') return nil;
+
+	NSDictionary *fieldCache = nil;
+
+	@try {
+		fieldCache = object_getIvar(obj, fieldCacheIvar);
+	} @catch (__unused id e) {
+		return nil;
+	}
+
+	if (![fieldCache isKindOfClass:NSDictionary.class]) return nil;
+
+	id value = fieldCache[key];
+	return (!value || [value isKindOfClass:NSNull.class]) ? nil : value;
+}
+
+// MARK: - User info
+
+static NSDictionary *sciInfoFromUserObject(id user) {
 	if (!user) return nil;
 
+	NSMutableDictionary *info = NSMutableDictionary.dictionary;
+	info[@"userObj"] = user;
+
 	NSString *pk = sciUserPK(user);
-	NSString *username = sciString(sciField(user, @"username") ?: sciSend0(user, @selector(username)));
-	NSString *fullName = sciString(sciField(user, @"full_name") ?: sciSend0(user, @selector(fullName)));
-	NSString *pic = sciString(sciField(user, @"profile_pic_url") ?: sciSend0(user, @selector(profilePicURL)));
-
-	if (!pk.length && !username.length) return nil;
-
-	NSMutableDictionary *info = [@{ @"userObj": user } mutableCopy];
+	NSString *username = sciStringFromAny(sciFieldCacheValue(user, @"username") ?: sciCallSafe(user, @selector(username)));
+	NSString *fullName = sciStringFromAny(sciFieldCacheValue(user, @"full_name") ?: sciCallSafe(user, @selector(fullName)));
+	NSString *picStr = sciStringFromAny(sciFieldCacheValue(user, @"profile_pic_url") ?: sciCallSafe(user, @selector(profilePicURL)));
 
 	if (pk.length) info[@"pk"] = pk;
 	if (username.length) info[@"username"] = username;
 	if (fullName.length) info[@"fullName"] = fullName;
 
-	NSURL *url = pic.length ? [NSURL URLWithString:pic] : nil;
-	if (url) info[@"picURL"] = url;
+	if (picStr.length) {
+		NSURL *picURL = [NSURL URLWithString:picStr];
+		if (picURL) info[@"picURL"] = picURL;
+	}
 
-	return info.copy;
+	return info.count > 1 ? info.copy : nil;
 }
 
-static NSDictionary *sciInfoFromMention(id mention) {
+static NSDictionary *sciMentionUserInfo(id mention) {
 	if (!mention) return nil;
 
 	id user = nil;
@@ -83,153 +223,126 @@ static NSDictionary *sciInfoFromMention(id mention) {
 		user = [mention valueForKey:@"user"];
 	} @catch (__unused id e) {}
 
-	return sciInfoFromUser(user ?: sciSend0(mention, @selector(user)));
+	if (!user) user = sciCallSafe(mention, @selector(user));
+
+	return sciInfoFromUserObject(user);
 }
 
 static NSString *sciPKFromAPIUser(NSDictionary *user) {
 	if (![user isKindOfClass:NSDictionary.class]) return nil;
-	return sciString(user[@"pk"] ?: user[@"pk_id"] ?: user[@"id"]);
+	return sciStringFromAny(user[@"pk"] ?: user[@"pk_id"] ?: user[@"id"]);
 }
 
 static NSDictionary *sciInfoFromAPIUser(NSDictionary *user) {
+	if (![user isKindOfClass:NSDictionary.class]) return nil;
+
 	NSString *pk = sciPKFromAPIUser(user);
 	if (!pk.length) return nil;
 
-	NSMutableDictionary *info = [@{ @"pk": pk } mutableCopy];
+	NSMutableDictionary *info = NSMutableDictionary.dictionary;
+	info[@"pk"] = pk;
 
 	NSString *username = user[@"username"];
 	NSString *fullName = user[@"full_name"];
-	NSString *pic = user[@"profile_pic_url"];
+	NSString *picStr = user[@"profile_pic_url"];
 
 	info[@"username"] = username.length ? username : pk;
 	if (fullName.length) info[@"fullName"] = fullName;
 
-	NSURL *url = pic.length ? [NSURL URLWithString:pic] : nil;
-	if (url) info[@"picURL"] = url;
+	if (picStr.length) {
+		NSURL *url = [NSURL URLWithString:picStr];
+		if (url) info[@"picURL"] = url;
+	}
 
 	return info.copy;
 }
 
-static void sciStyleFollow(UIButton *btn, BOOL following) {
-	[btn setTitle:following ? SCILocalized(@"Following") : SCILocalized(@"Follow") forState:UIControlStateNormal];
-	btn.backgroundColor = following ? UIColor.tertiarySystemFillColor : UIColor.systemBlueColor;
-	[btn setTitleColor:following ? UIColor.labelColor : UIColor.whiteColor forState:UIControlStateNormal];
-}
+// MARK: - Direct mentions / shared media
 
-// MARK: - Story media
+static NSArray *sciCurrentStoryMentions(UIView *anchor) {
+	IGMedia *media = sciCurrentStoryMedia(anchor);
+	if (!media) return nil;
 
-static IGMedia *sciMediaFromItem(id item) {
-	Class cls = NSClassFromString(@"IGMedia");
-	return (cls && [item isKindOfClass:cls]) ? item : sciExtractMediaFromItem(item);
-}
-
-static IGMedia *sciMediaFromContext(id ctx) {
-	id itemContext = sciSend0(ctx, @selector(storyItemContext));
-	id item = sciSend0(itemContext, @selector(storyItem));
-	return sciMediaFromItem(item);
-}
-
-static IGMedia *sciMediaFromStoryCell(UIView *view) {
-	Class cls = NSClassFromString(@"IGStoryFullscreenCell");
-	if (!cls) return nil;
-
-	while (view && ![view isKindOfClass:cls]) {
-		view = view.superview;
+	for (NSString *selName in @[@"storyMentions", @"reelMentions"]) {
+		id value = sciCallSafe(media, NSSelectorFromString(selName));
+		if ([value isKindOfClass:NSArray.class]) return value;
 	}
 
-	if (!view) return nil;
+	for (NSString *key in @[@"story_mentions", @"reel_mentions"]) {
+		id value = sciFieldCacheValue(media, key);
+		if ([value isKindOfClass:NSArray.class]) return value;
+	}
 
-	id itemContext = sciSend0(view, @selector(currentStoryItemContext));
-	IGMedia *media = sciMediaFromItem(sciSend0(itemContext, @selector(storyItem)));
-	if (media) return media;
-
-	media = sciMediaFromContext(sciSend0(view, @selector(currentSectionContext)));
-	if (media) return media;
-
-	return sciMediaFromContext(sciSend0(view, @selector(sectionContext)));
+	return nil;
 }
 
-static IGMedia *sciCurrentStoryMedia(UIView *anchor) {
-	IGMedia *media = anchor.window ? sciMediaFromStoryCell(anchor) : nil;
-	if (media) return media;
+static NSArray *sciStoryFeedMediaForMedia(IGMedia *media) {
+	if (!media) return nil;
 
-	UIViewController *vc = anchor ? sciFindVC(anchor, @"IGStoryViewerViewController") : nil;
-	vc = vc ?: sciActiveStoryViewerVC;
-	if (!vc) return nil;
+	NSArray *items = sciCallSafe(media, NSSelectorFromString(@"storyFeedMedia"));
 
-	media = sciMediaFromItem(sciSend0(vc, @selector(currentStoryItem)));
-	if (media) return media;
+	if (![items isKindOfClass:NSArray.class]) {
+		items = sciFieldCacheValue(media, @"story_feed_media");
+	}
 
-	id section = sciSend0(vc, @selector(currentlyDisplayedSectionController));
-	media = sciMediaFromItem(sciSend0(section, @selector(currentStoryItem)));
-	if (media) return media;
-
-	id vm = sciSend0(vc, @selector(currentViewModel));
-	return sciMediaFromItem(sciSend1(vc, @selector(currentStoryItemForViewModel:), vm));
+	return [items isKindOfClass:NSArray.class] ? items : nil;
 }
 
-static NSString *sciMediaKey(IGMedia *media) {
-	return sciString(sciSend0(media, @selector(pk)) ?: sciField(media, @"pk") ?: sciField(media, @"id"));
+static NSArray<NSString *> *sciCurrentStorySharedPostMediaIDs(UIView *anchor) {
+	NSArray *items = sciStoryFeedMediaForMedia(sciCurrentStoryMedia(anchor));
+	if (!items.count) return nil;
+
+	NSMutableArray<NSString *> *ids = NSMutableArray.array;
+	SEL mediaIdSel = NSSelectorFromString(@"mediaId");
+
+	for (id item in items) {
+		NSString *mediaId = sciStringFromAny(sciCallSafe(item, mediaIdSel));
+		if (mediaId.length && ![ids containsObject:mediaId]) [ids addObject:mediaId];
+	}
+
+	return ids.count ? ids.copy : nil;
 }
 
 static NSString *sciStoryOwnerPK(IGMedia *media) {
-	return sciUserPK(sciField(media, @"user") ?: sciSend0(media, @selector(user)));
-}
-
-// MARK: - Mentions + shared media
-
-static NSArray *sciDirectMentions(IGMedia *media) {
 	if (!media) return nil;
 
-	id value = sciSend0(media, @selector(storyMentions)) ?: sciSend0(media, @selector(reelMentions));
-	if ([value isKindOfClass:NSArray.class]) return value;
-
-	value = sciField(media, @"story_mentions") ?: sciField(media, @"reel_mentions");
-	return [value isKindOfClass:NSArray.class] ? value : nil;
+	id userObj = sciFieldCacheValue(media, @"user") ?: sciCallSafe(media, @selector(user));
+	return sciUserPK(userObj);
 }
 
-static NSArray *sciStoryFeedMedia(IGMedia *media) {
-	if (!media) return nil;
-
-	id value = sciSend0(media, NSSelectorFromString(@"storyFeedMedia")) ?: sciField(media, @"story_feed_media");
-	return [value isKindOfClass:NSArray.class] ? value : nil;
-}
-
-static void sciAddPK(NSMutableSet<NSString *> *set, NSString *pk, NSString *ownerPK) {
+static void sciAddPKIfAllowed(NSMutableSet<NSString *> *set, NSString *pk, NSString *storyOwnerPK) {
 	if (!pk.length) return;
-	if (ownerPK.length && [pk isEqualToString:ownerPK]) return;
-
+	if (storyOwnerPK.length && [pk isEqualToString:storyOwnerPK]) return;
 	[set addObject:pk];
 }
 
-static void sciCollectAPIItemPKs(NSDictionary *item, NSString *ownerPK, NSMutableSet<NSString *> *out) {
-	if (![item isKindOfClass:NSDictionary.class] || !out) return;
+static void sciCollectDirectMentionPKs(IGMedia *media, NSMutableSet<NSString *> *out) {
+	if (!media || !out) return;
 
-	sciAddPK(out, sciPKFromAPIUser(item[@"user"]), ownerPK);
+	for (NSString *selName in @[@"storyMentions", @"reelMentions"]) {
+		id mentions = sciCallSafe(media, NSSelectorFromString(selName));
+		if (![mentions isKindOfClass:NSArray.class]) continue;
 
-	NSDictionary *userTags = item[@"usertags"];
-	NSArray *tagged = [userTags isKindOfClass:NSDictionary.class] ? userTags[@"in"] : nil;
-
-	for (NSDictionary *tag in tagged) {
-		if ([tag isKindOfClass:NSDictionary.class]) {
-			sciAddPK(out, sciPKFromAPIUser(tag[@"user"]), ownerPK);
+		for (id mention in (NSArray *)mentions) {
+			NSDictionary *info = sciMentionUserInfo(mention);
+			NSString *pk = sciUserPK(info[@"userObj"]) ?: info[@"pk"];
+			if (pk.length) [out addObject:pk];
 		}
 	}
 
-	for (NSString *key in @[@"coauthor_producers", @"invited_coauthor_producers"]) {
-		for (NSDictionary *user in item[key]) {
-			if ([user isKindOfClass:NSDictionary.class]) {
-				sciAddPK(out, sciPKFromAPIUser(user), ownerPK);
-			}
-		}
-	}
+	for (NSString *key in @[@"story_mentions", @"reel_mentions"]) {
+		id mentions = sciFieldCacheValue(media, key);
+		if (![mentions isKindOfClass:NSArray.class]) continue;
 
-	for (NSDictionary *child in item[@"carousel_media"]) {
-		sciCollectAPIItemPKs(child, ownerPK, out);
+		for (id mention in (NSArray *)mentions) {
+			NSDictionary *info = sciMentionUserInfo(mention);
+			NSString *pk = sciUserPK(info[@"userObj"]) ?: info[@"pk"];
+			if (pk.length) [out addObject:pk];
+		}
 	}
 }
 
-static NSMutableDictionary<NSString *, NSSet<NSString *> *> *sciSharedCache(void) {
+static NSMutableDictionary<NSString *, NSSet<NSString *> *> *sciSharedMediaPKsCache(void) {
 	static NSMutableDictionary *cache;
 	static dispatch_once_t once;
 
@@ -240,7 +353,7 @@ static NSMutableDictionary<NSString *, NSSet<NSString *> *> *sciSharedCache(void
 	return cache;
 }
 
-static NSMutableSet<NSString *> *sciSharedInFlight(void) {
+static NSMutableSet<NSString *> *sciSharedMediaInFlight(void) {
 	static NSMutableSet *set;
 	static dispatch_once_t once;
 
@@ -251,44 +364,76 @@ static NSMutableSet<NSString *> *sciSharedInFlight(void) {
 	return set;
 }
 
-static void sciClearVisibleMentionCaches(void) {
-	UIView *root = sciActiveStoryViewerVC.view;
-	if (!root) return;
+static void sciCollectAPIItemPKs(NSDictionary *item, NSString *storyOwnerPK, NSMutableSet<NSString *> *out) {
+	if (![item isKindOfClass:NSDictionary.class] || !out) return;
 
-	Class cls = NSClassFromString(@"IGStoryFullscreenOverlayView") ?: NSClassFromString(@"IGStoryFullscreenOverlayMetalLayerView");
-	if (!cls) return;
+	sciAddPKIfAllowed(out, sciPKFromAPIUser(item[@"user"]), storyOwnerPK);
+
+	NSDictionary *userTags = item[@"usertags"];
+	NSArray *tagged = [userTags isKindOfClass:NSDictionary.class] ? userTags[@"in"] : nil;
+
+	if ([tagged isKindOfClass:NSArray.class]) {
+		for (NSDictionary *tag in tagged) {
+			if ([tag isKindOfClass:NSDictionary.class]) {
+				sciAddPKIfAllowed(out, sciPKFromAPIUser(tag[@"user"]), storyOwnerPK);
+			}
+		}
+	}
+
+	for (NSString *key in @[@"coauthor_producers", @"invited_coauthor_producers"]) {
+		NSArray *users = item[key];
+		if (![users isKindOfClass:NSArray.class]) continue;
+
+		for (NSDictionary *user in users) {
+			sciAddPKIfAllowed(out, sciPKFromAPIUser(user), storyOwnerPK);
+		}
+	}
+
+	NSArray *carousel = item[@"carousel_media"];
+
+	if ([carousel isKindOfClass:NSArray.class]) {
+		for (NSDictionary *child in carousel) {
+			sciCollectAPIItemPKs(child, storyOwnerPK, out);
+		}
+	}
+}
+
+static void sciClearMentionCacheForVisibleOverlays(void) {
+	UIViewController *vc = sciActiveStoryViewerVC;
+	if (!vc.view) return;
+
+	Class overlayClass = NSClassFromString(@"IGStoryFullscreenOverlayView");
+	if (!overlayClass) overlayClass = NSClassFromString(@"IGStoryFullscreenOverlayMetalLayerView");
+	if (!overlayClass) return;
 
 	SEL refresh = NSSelectorFromString(@"sciRefreshStoryMentionsButton");
 	SEL kick = NSSelectorFromString(@"sciKickMentionsRetryChain");
 
-	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:vc.view];
 
 	while (stack.count) {
 		UIView *view = stack.lastObject;
 		[stack removeLastObject];
 
-		if ([view isKindOfClass:cls]) {
-			objc_setAssociatedObject(view, &kMediaKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
-			objc_setAssociatedObject(view, &kPKCacheKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		if ([view isKindOfClass:overlayClass]) {
+			objc_setAssociatedObject(view, &kStoryMentionMediaKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+			objc_setAssociatedObject(view, &kStoryMentionPKCacheKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-			if ([view respondsToSelector:refresh]) {
-				((void (*)(id, SEL))objc_msgSend)(view, refresh);
-			}
-
-			if ([view respondsToSelector:kick]) {
-				((void (*)(id, SEL))objc_msgSend)(view, kick);
-			}
+			if ([view respondsToSelector:refresh]) ((void (*)(id, SEL))objc_msgSend)(view, refresh);
+			if ([view respondsToSelector:kick]) ((void (*)(id, SEL))objc_msgSend)(view, kick);
 		}
 
-		[stack addObjectsFromArray:view.subviews];
+		for (UIView *subview in view.subviews) {
+			[stack addObject:subview];
+		}
 	}
 }
 
-static void sciFetchSharedTags(NSString *mediaId, NSString *ownerPK) {
-	if (!mediaId.length || !ownerPK.length) return;
+static void sciFetchSharedMediaTags(NSString *mediaId, NSString *storyOwnerPK) {
+	if (!mediaId.length || !storyOwnerPK.length) return;
 
-	NSMutableSet *inFlight = sciSharedInFlight();
-	NSMutableDictionary *cache = sciSharedCache();
+	NSMutableSet *inFlight = sciSharedMediaInFlight();
+	NSMutableDictionary *cache = sciSharedMediaPKsCache();
 
 	@synchronized(inFlight) {
 		if (cache[mediaId] || [inFlight containsObject:mediaId]) return;
@@ -296,11 +441,11 @@ static void sciFetchSharedTags(NSString *mediaId, NSString *ownerPK) {
 	}
 
 	[SCIInstagramAPI fetchMediaInfoForMediaId:mediaId completion:^(NSDictionary *response, NSError *error) {
-		NSMutableSet *set = NSMutableSet.set;
+		NSMutableSet<NSString *> *set = NSMutableSet.set;
 		NSArray *items = response[@"items"];
 
 		if ([items isKindOfClass:NSArray.class] && items.count) {
-			sciCollectAPIItemPKs(items.firstObject, ownerPK, set);
+			sciCollectAPIItemPKs(items.firstObject, storyOwnerPK, set);
 		}
 
 		@synchronized(inFlight) {
@@ -310,53 +455,53 @@ static void sciFetchSharedTags(NSString *mediaId, NSString *ownerPK) {
 
 		if (set.count) {
 			dispatch_async(dispatch_get_main_queue(), ^{
-				sciClearVisibleMentionCaches();
+				sciClearMentionCacheForVisibleOverlays();
 			});
 		}
 	}];
 }
 
-static NSArray<NSString *> *sciSharedMediaIDs(IGMedia *media) {
-	NSMutableArray *ids = NSMutableArray.array;
-
-	for (id item in sciStoryFeedMedia(media)) {
-		NSString *mediaId = sciString(sciSend0(item, NSSelectorFromString(@"mediaId")));
-
-		if (mediaId.length && ![ids containsObject:mediaId]) {
-			[ids addObject:mediaId];
-		}
-	}
-
-	return ids.count ? ids.copy : nil;
-}
-
-static void sciCollectSharedPKs(IGMedia *media, NSMutableSet<NSString *> *out) {
+static void sciCollectSharedMediaPKs(IGMedia *media, NSMutableSet<NSString *> *out) {
 	if (!media || !out) return;
 
-	NSString *ownerPK = sciStoryOwnerPK(media);
-	if (!ownerPK.length) return;
+	NSArray *items = sciStoryFeedMediaForMedia(media);
+	if (!items.count) return;
 
-	for (id item in sciStoryFeedMedia(media)) {
-		NSString *owner = sciString(sciSend0(item, NSSelectorFromString(@"mediaOwnerId")));
-		NSString *mediaId = sciString(sciSend0(item, NSSelectorFromString(@"mediaId")));
+	NSString *storyOwnerPK = sciStoryOwnerPK(media);
+	if (!storyOwnerPK.length) return;
 
-		if (!owner.length) {
-			NSString *compound = sciString(sciSend0(item, NSSelectorFromString(@"mediaCompoundStr")));
-			NSRange r = [compound rangeOfString:@"_" options:NSBackwardsSearch];
+	SEL ownerSel = NSSelectorFromString(@"mediaOwnerId");
+	SEL compoundSel = NSSelectorFromString(@"mediaCompoundStr");
+	SEL mediaIdSel = NSSelectorFromString(@"mediaId");
 
-			if (r.location != NSNotFound && r.location + 1 < compound.length) {
-				owner = [compound substringFromIndex:r.location + 1];
+	NSMutableDictionary *cache = sciSharedMediaPKsCache();
+
+	for (id item in items) {
+		NSString *ownerPK = sciStringFromAny(sciCallSafe(item, ownerSel));
+		NSString *mediaId = sciStringFromAny(sciCallSafe(item, mediaIdSel));
+
+		if (!ownerPK.length) {
+			NSString *compound = sciStringFromAny(sciCallSafe(item, compoundSel));
+
+			if (compound.length) {
+				NSRange range = [compound rangeOfString:@"_" options:NSBackwardsSearch];
+
+				if (range.location != NSNotFound && range.location + 1 < compound.length) {
+					ownerPK = [compound substringFromIndex:range.location + 1];
+				}
 			}
 		}
 
-		sciAddPK(out, owner, ownerPK);
+		sciAddPKIfAllowed(out, ownerPK, storyOwnerPK);
 
-		NSSet *cached = mediaId.length ? sciSharedCache()[mediaId] : nil;
+		if (!mediaId.length) continue;
 
-		if ([cached isKindOfClass:NSSet.class]) {
-			[out unionSet:cached];
+		NSSet *cachedPKs = cache[mediaId];
+
+		if ([cachedPKs isKindOfClass:NSSet.class]) {
+			[out unionSet:cachedPKs];
 		} else {
-			sciFetchSharedTags(mediaId, ownerPK);
+			sciFetchSharedMediaTags(mediaId, storyOwnerPK);
 		}
 	}
 }
@@ -364,18 +509,9 @@ static void sciCollectSharedPKs(IGMedia *media, NSMutableSet<NSString *> *out) {
 static NSSet<NSString *> *sciMentionPKSetForMedia(IGMedia *media) {
 	if (!media) return NSSet.set;
 
-	NSMutableSet *set = NSMutableSet.set;
-
-	for (id mention in sciDirectMentions(media)) {
-		NSDictionary *info = sciInfoFromMention(mention);
-		NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
-
-		if (pk.length) {
-			[set addObject:pk];
-		}
-	}
-
-	sciCollectSharedPKs(media, set);
+	NSMutableSet<NSString *> *set = NSMutableSet.set;
+	sciCollectDirectMentionPKs(media, set);
+	sciCollectSharedMediaPKs(media, set);
 
 	return set.copy;
 }
@@ -384,20 +520,23 @@ static NSSet<NSString *> *sciStoryMentionPKSet(UIView *anchor) {
 	if (!anchor || !anchor.window) return NSSet.set;
 
 	@try {
-		IGMedia *media = sciCurrentStoryMedia(anchor);
-		NSString *key = sciMediaKey(media);
-		NSString *oldKey = objc_getAssociatedObject(anchor, &kMediaKey);
-		NSSet *cached = objc_getAssociatedObject(anchor, &kPKCacheKey);
+		IGMedia *media = sciStoryMediaForOverlay(anchor);
+		if (!media) media = sciCurrentStoryMedia(anchor);
+		if (!media) return NSSet.set;
 
-		if (key.length && cached && [oldKey isEqualToString:key]) {
+		NSString *mediaKey = sciMediaCacheKey(media);
+		NSString *oldKey = objc_getAssociatedObject(anchor, &kStoryMentionMediaKey);
+		NSSet *cached = objc_getAssociatedObject(anchor, &kStoryMentionPKCacheKey);
+
+		if (mediaKey.length && cached && [oldKey isEqualToString:mediaKey]) {
 			return cached;
 		}
 
 		NSSet *set = sciMentionPKSetForMedia(media);
 
-		if (key.length) {
-			objc_setAssociatedObject(anchor, &kMediaKey, key, OBJC_ASSOCIATION_COPY_NONATOMIC);
-			objc_setAssociatedObject(anchor, &kPKCacheKey, set, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		if (mediaKey.length) {
+			objc_setAssociatedObject(anchor, &kStoryMentionMediaKey, mediaKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
+			objc_setAssociatedObject(anchor, &kStoryMentionPKCacheKey, set, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		}
 
 		return set;
@@ -414,15 +553,18 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	return sciStoryMentionPKSet(anchor).count > 0;
 }
 
-// MARK: - Sheet
+// MARK: - Bottom sheet
+
+#define kAvatarSize 52.0
+#define kRowHeight  72.0
 
 @interface SCIStoryMentionsVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
-@property (nonatomic, copy) NSArray<NSDictionary *> *userInfos;
-@property (nonatomic, copy) NSArray<NSString *> *sharedMediaIDs;
+@property (nonatomic, strong) NSArray<NSDictionary *> *userInfos;
+@property (nonatomic, strong) NSArray<NSString *> *sharedMediaIDs;
 @property (nonatomic, copy) NSString *storyAuthorPK;
-@property (nonatomic, copy) NSString *currentUsername;
-@property (nonatomic, copy) NSString *currentUserPK;
 @property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSString *currentUsername;
+@property (nonatomic, copy) NSString *currentUserPK;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSDictionary *> *friendshipStatuses;
 @property (nonatomic, strong) NSMutableSet<NSString *> *seenPKs;
 @property (nonatomic, strong) UIActivityIndicatorView *loader;
@@ -436,8 +578,10 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	[super viewDidLoad];
 
 	@try {
-		id session = [SCIUtils activeUserSession];
-		self.currentUsername = sciString(sciSend0(sciSend0(session, @selector(user)), @selector(username)));
+		UIWindow *window = UIApplication.sharedApplication.keyWindow;
+		if ([window respondsToSelector:@selector(userSession)]) {
+			self.currentUsername = ((IGUserSession *)[window valueForKey:@"userSession"]).user.username;
+		}
 	} @catch (__unused id e) {}
 
 	self.currentUserPK = [SCIUtils currentUserPK];
@@ -445,33 +589,31 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	self.friendshipStatuses = NSMutableDictionary.dictionary;
 
 	for (NSDictionary *info in self.userInfos) {
-		NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
-
-		if (pk.length) {
-			[self.seenPKs addObject:pk];
-		}
+		NSString *pk = sciUserPK(info[@"userObj"]) ?: info[@"pk"];
+		if (pk.length) [self.seenPKs addObject:pk];
 	}
 
 	UIColor *bg = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
 		return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-			? [UIColor colorWithWhite:0.09 alpha:1.0]
-			: [UIColor colorWithWhite:0.98 alpha:1.0];
+			? [UIColor colorWithRed:0.09 green:0.09 blue:0.09 alpha:1.0]
+			: [UIColor colorWithRed:0.98 green:0.98 blue:0.98 alpha:1.0];
 	}];
 
 	self.view.backgroundColor = bg;
 
-	UILabel *title = [[UILabel alloc] init];
-	title.text = SCILocalized(@"Mentions");
-	title.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-	title.textColor = UIColor.labelColor;
-	title.textAlignment = NSTextAlignmentCenter;
-	title.translatesAutoresizingMaskIntoConstraints = NO;
+	UILabel *titleLabel = [[UILabel alloc] init];
+	titleLabel.text = SCILocalized(@"Mentions");
+	titleLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+	titleLabel.textColor = UIColor.labelColor;
+	titleLabel.textAlignment = NSTextAlignmentCenter;
+	titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
-	UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
-	[close setImage:[UIImage systemImageNamed:@"xmark" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold]] forState:UIControlStateNormal];
-	close.tintColor = UIColor.secondaryLabelColor;
-	close.translatesAutoresizingMaskIntoConstraints = NO;
-	[close addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
+	UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+	UIImage *closeImg = [UIImage systemImageNamed:@"xmark" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold]];
+	[closeBtn setImage:closeImg forState:UIControlStateNormal];
+	closeBtn.tintColor = UIColor.secondaryLabelColor;
+	closeBtn.translatesAutoresizingMaskIntoConstraints = NO;
+	[closeBtn addTarget:self action:@selector(closeTapped) forControlEvents:UIControlEventTouchUpInside];
 
 	UIView *sep = [[UIView alloc] init];
 	sep.backgroundColor = UIColor.separatorColor;
@@ -480,77 +622,78 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
-	self.tableView.rowHeight = kRowHeight;
-	self.tableView.backgroundColor = bg;
-	self.tableView.separatorColor = UIColor.separatorColor;
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 82.0, 0.0, 0.0);
 	self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+	self.tableView.backgroundColor = bg;
+	self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+	self.tableView.separatorColor = UIColor.separatorColor;
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0 + kAvatarSize + 14.0, 0.0, 0.0);
+	self.tableView.rowHeight = kRowHeight;
+
+	[self.view addSubview:titleLabel];
+	[self.view addSubview:closeBtn];
+	[self.view addSubview:sep];
+	[self.view addSubview:self.tableView];
+
+	[NSLayoutConstraint activateConstraints:@[
+		[titleLabel.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:22.0],
+		[titleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+		[closeBtn.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
+		[closeBtn.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16.0],
+		[closeBtn.widthAnchor constraintEqualToConstant:30.0],
+		[closeBtn.heightAnchor constraintEqualToConstant:30.0],
+		[sep.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:14.0],
+		[sep.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+		[sep.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+		[sep.heightAnchor constraintEqualToConstant:1.0 / UIScreen.mainScreen.scale],
+		[self.tableView.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
+		[self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+		[self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+		[self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+	]];
 
 	UIImageView *emptyIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"at" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:36.0 weight:UIImageSymbolWeightLight]]];
 	emptyIcon.tintColor = UIColor.tertiaryLabelColor;
+	emptyIcon.translatesAutoresizingMaskIntoConstraints = NO;
 
 	UILabel *emptyLabel = [[UILabel alloc] init];
 	emptyLabel.text = SCILocalized(@"No mentions in this story");
 	emptyLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
 	emptyLabel.textColor = UIColor.secondaryLabelColor;
+	emptyLabel.textAlignment = NSTextAlignmentCenter;
+	emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
 	self.emptyStack = [[UIStackView alloc] initWithArrangedSubviews:@[emptyIcon, emptyLabel]];
 	self.emptyStack.axis = UILayoutConstraintAxisVertical;
 	self.emptyStack.spacing = 12.0;
 	self.emptyStack.alignment = UIStackViewAlignmentCenter;
-	self.emptyStack.hidden = YES;
 	self.emptyStack.translatesAutoresizingMaskIntoConstraints = NO;
+	self.emptyStack.hidden = YES;
 
 	self.loader = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
 	self.loader.color = UIColor.secondaryLabelColor;
 	self.loader.hidesWhenStopped = YES;
 	self.loader.translatesAutoresizingMaskIntoConstraints = NO;
 
-	[self.view addSubview:title];
-	[self.view addSubview:close];
-	[self.view addSubview:sep];
-	[self.view addSubview:self.tableView];
 	[self.view addSubview:self.emptyStack];
 	[self.view addSubview:self.loader];
 
 	[NSLayoutConstraint activateConstraints:@[
-		[title.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:22.0],
-		[title.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-		[close.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-		[close.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16.0],
-		[close.widthAnchor constraintEqualToConstant:30.0],
-		[close.heightAnchor constraintEqualToConstant:30.0],
-
-		[sep.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:14.0],
-		[sep.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-		[sep.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-		[sep.heightAnchor constraintEqualToConstant:1.0 / UIScreen.mainScreen.scale],
-
-		[self.tableView.topAnchor constraintEqualToAnchor:sep.bottomAnchor],
-		[self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-		[self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-		[self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-
 		[self.emptyStack.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
 		[self.emptyStack.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
-
-		[self.loader.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+		[self.loader.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor],
 		[self.loader.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16.0],
 	]];
 
 	[self fetchSharedPostUsers];
-	[self fetchFriendshipStatuses:self.userInfos];
-	[self refreshState];
+	[self fetchFriendshipStatusesForInfos:self.userInfos];
+	[self refreshEmptyAndLoaderState];
 }
 
-- (void)refreshState {
+- (void)refreshEmptyAndLoaderState {
 	BOOL pending = self.inFlightFetches > 0;
 
-	if (pending) {
-		[self.loader startAnimating];
-	} else {
-		[self.loader stopAnimating];
-	}
+	if (pending) [self.loader startAnimating];
+	else [self.loader stopAnimating];
 
 	self.emptyStack.hidden = self.userInfos.count > 0 || pending;
 }
@@ -559,25 +702,27 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	[self dismissViewControllerAnimated:YES completion:nil];
 }
 
-- (BOOL)appendInfo:(NSDictionary *)info {
-	NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
+- (BOOL)appendUserInfoIfNew:(NSDictionary *)info {
+	if (!info) return NO;
 
+	NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
 	if (!pk.length || [self.seenPKs containsObject:pk]) return NO;
-	if ([pk isEqualToString:self.currentUserPK] || [pk isEqualToString:self.storyAuthorPK]) return NO;
+	if (self.currentUserPK.length && [pk isEqualToString:self.currentUserPK]) return NO;
+	if (self.storyAuthorPK.length && [pk isEqualToString:self.storyAuthorPK]) return NO;
 
 	[self.seenPKs addObject:pk];
 
-	NSMutableArray *all = self.userInfos.mutableCopy ?: NSMutableArray.array;
+	NSMutableArray *all = self.userInfos ? self.userInfos.mutableCopy : NSMutableArray.array;
 	[all addObject:info];
 	self.userInfos = all.copy;
 
-	[self.tableView insertRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:all.count - 1 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
+	[self.tableView insertRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:(NSInteger)all.count - 1 inSection:0]] withRowAnimation:UITableViewRowAnimationNone];
 
 	return YES;
 }
 
-- (void)collectInfosFromAPIItem:(NSDictionary *)item into:(NSMutableArray *)out {
-	if (![item isKindOfClass:NSDictionary.class] || !out) return;
+- (void)collectInfosFromAPIItem:(NSDictionary *)item into:(NSMutableArray<NSDictionary *> *)out {
+	if (![item isKindOfClass:NSDictionary.class]) return;
 
 	NSDictionary *owner = sciInfoFromAPIUser(item[@"user"]);
 	if (owner) [out addObject:owner];
@@ -585,38 +730,42 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	NSDictionary *userTags = item[@"usertags"];
 	NSArray *tagged = [userTags isKindOfClass:NSDictionary.class] ? userTags[@"in"] : nil;
 
-	for (NSDictionary *tag in tagged) {
-		NSDictionary *info = [tag isKindOfClass:NSDictionary.class] ? sciInfoFromAPIUser(tag[@"user"]) : nil;
+	if ([tagged isKindOfClass:NSArray.class]) {
+		for (NSDictionary *tag in tagged) {
+			if (![tag isKindOfClass:NSDictionary.class]) continue;
 
-		if (info) {
-			[out addObject:info];
+			NSDictionary *info = sciInfoFromAPIUser(tag[@"user"]);
+			if (info) [out addObject:info];
 		}
 	}
 
 	for (NSString *key in @[@"coauthor_producers", @"invited_coauthor_producers"]) {
-		for (NSDictionary *user in item[key]) {
-			NSDictionary *info = sciInfoFromAPIUser(user);
+		NSArray *users = item[key];
+		if (![users isKindOfClass:NSArray.class]) continue;
 
-			if (info) {
-				[out addObject:info];
-			}
+		for (NSDictionary *user in users) {
+			NSDictionary *info = sciInfoFromAPIUser(user);
+			if (info) [out addObject:info];
 		}
 	}
 
-	for (NSDictionary *child in item[@"carousel_media"]) {
-		[self collectInfosFromAPIItem:child into:out];
+	NSArray *carousel = item[@"carousel_media"];
+
+	if ([carousel isKindOfClass:NSArray.class]) {
+		for (NSDictionary *child in carousel) {
+			[self collectInfosFromAPIItem:child into:out];
+		}
 	}
 }
 
-- (void)fetchFriendshipStatuses:(NSArray<NSDictionary *> *)infos {
-	NSMutableArray *pks = NSMutableArray.array;
+- (void)fetchFriendshipStatusesForInfos:(NSArray<NSDictionary *> *)infos {
+	if (!infos.count) return;
+
+	NSMutableArray<NSString *> *pks = NSMutableArray.array;
 
 	for (NSDictionary *info in infos) {
 		NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
-
-		if (pk.length) {
-			[pks addObject:pk];
-		}
+		if (pk.length) [pks addObject:pk];
 	}
 
 	if (!pks.count) return;
@@ -624,11 +773,11 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 	__weak typeof(self) weakSelf = self;
 
 	[SCIInstagramAPI fetchFriendshipStatusesForPKs:pks completion:^(NSDictionary *statuses, NSError *error) {
-		__strong typeof(weakSelf) self = weakSelf;
-		if (!self || !statuses.count) return;
+		__strong typeof(weakSelf) self_ = weakSelf;
+		if (!self_ || !statuses.count) return;
 
-		[self.friendshipStatuses addEntriesFromDictionary:statuses];
-		[self.tableView reloadData];
+		[self_.friendshipStatuses addEntriesFromDictionary:statuses];
+		[self_.tableView reloadData];
 	}];
 }
 
@@ -640,31 +789,29 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 		__weak typeof(self) weakSelf = self;
 
 		[SCIInstagramAPI fetchMediaInfoForMediaId:mediaId completion:^(NSDictionary *response, NSError *error) {
-			__strong typeof(weakSelf) self = weakSelf;
-			if (!self) return;
+			__strong typeof(weakSelf) self_ = weakSelf;
+			if (!self_) return;
 
-			self.inFlightFetches--;
+			self_.inFlightFetches--;
 
-			NSMutableArray *collected = NSMutableArray.array;
-			NSMutableArray *newInfos = NSMutableArray.array;
 			NSArray *items = response[@"items"];
+			NSMutableArray<NSDictionary *> *collected = NSMutableArray.array;
+			NSMutableArray<NSDictionary *> *newInfos = NSMutableArray.array;
 
 			if ([items isKindOfClass:NSArray.class] && items.count) {
-				[self collectInfosFromAPIItem:items.firstObject into:collected];
+				[self_ collectInfosFromAPIItem:items.firstObject into:collected];
 			}
 
 			for (NSDictionary *info in collected) {
-				if ([self appendInfo:info]) {
-					[newInfos addObject:info];
-				}
+				if ([self_ appendUserInfoIfNew:info]) [newInfos addObject:info];
 			}
 
-			[self refreshState];
-			[self fetchFriendshipStatuses:newInfos];
+			[self_ refreshEmptyAndLoaderState];
+			[self_ fetchFriendshipStatusesForInfos:newInfos];
 		}];
 	}
 
-	[self refreshState];
+	[self refreshEmptyAndLoaderState];
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -681,15 +828,15 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	static NSString *reuseID = @"mention";
-	static NSInteger avTag = 101, nameTag = 102, subTag = 103, followTag = 104, spinTag = 105;
+	static const NSInteger kAvTag = 101, kNmTag = 102, kSbTag = 103, kFlTag = 104, kSpTag = 105;
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseID];
 
 	UIImageView *avatar = nil;
-	UILabel *name = nil;
-	UILabel *sub = nil;
-	UIButton *follow = nil;
-	UIActivityIndicatorView *spin = nil;
+	UILabel *nameLabel = nil;
+	UILabel *subLabel = nil;
+	UIButton *followBtn = nil;
+	UIActivityIndicatorView *spinner = nil;
 
 	if (!cell) {
 		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseID];
@@ -697,95 +844,92 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 		cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
 		avatar = [[UIImageView alloc] init];
-		avatar.tag = avTag;
+		avatar.tag = kAvTag;
 		avatar.layer.cornerRadius = kAvatarSize / 2.0;
 		avatar.clipsToBounds = YES;
 		avatar.contentMode = UIViewContentModeScaleAspectFill;
 		avatar.backgroundColor = UIColor.secondarySystemBackgroundColor;
 		avatar.translatesAutoresizingMaskIntoConstraints = NO;
 
-		name = [[UILabel alloc] init];
-		name.tag = nameTag;
-		name.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
-		name.textColor = UIColor.labelColor;
+		nameLabel = [[UILabel alloc] init];
+		nameLabel.tag = kNmTag;
+		nameLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+		nameLabel.textColor = UIColor.labelColor;
+		nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
-		sub = [[UILabel alloc] init];
-		sub.tag = subTag;
-		sub.font = [UIFont systemFontOfSize:14.0];
-		sub.textColor = UIColor.secondaryLabelColor;
+		subLabel = [[UILabel alloc] init];
+		subLabel.tag = kSbTag;
+		subLabel.font = [UIFont systemFontOfSize:14.0];
+		subLabel.textColor = UIColor.secondaryLabelColor;
+		subLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
-		UIStackView *text = [[UIStackView alloc] initWithArrangedSubviews:@[name, sub]];
-		text.axis = UILayoutConstraintAxisVertical;
-		text.spacing = 2.0;
-		text.translatesAutoresizingMaskIntoConstraints = NO;
+		followBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+		followBtn.tag = kFlTag;
+		followBtn.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
+		followBtn.layer.cornerRadius = 8.0;
+		followBtn.clipsToBounds = YES;
+		followBtn.translatesAutoresizingMaskIntoConstraints = NO;
 
-		follow = [UIButton buttonWithType:UIButtonTypeSystem];
-		follow.tag = followTag;
-		follow.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
-		follow.layer.cornerRadius = 8.0;
-		follow.clipsToBounds = YES;
-		follow.translatesAutoresizingMaskIntoConstraints = NO;
+		spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+		spinner.tag = kSpTag;
+		spinner.hidesWhenStopped = YES;
+		spinner.translatesAutoresizingMaskIntoConstraints = NO;
 
-		spin = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-		spin.tag = spinTag;
-		spin.color = UIColor.whiteColor;
-		spin.hidesWhenStopped = YES;
-		spin.translatesAutoresizingMaskIntoConstraints = NO;
+		UIStackView *textStack = [[UIStackView alloc] initWithArrangedSubviews:@[nameLabel, subLabel]];
+		textStack.axis = UILayoutConstraintAxisVertical;
+		textStack.spacing = 2.0;
+		textStack.translatesAutoresizingMaskIntoConstraints = NO;
 
 		[cell.contentView addSubview:avatar];
-		[cell.contentView addSubview:text];
-		[cell.contentView addSubview:follow];
-		[follow addSubview:spin];
+		[cell.contentView addSubview:textStack];
+		[cell.contentView addSubview:followBtn];
+		[followBtn addSubview:spinner];
 
 		[NSLayoutConstraint activateConstraints:@[
 			[avatar.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:16.0],
 			[avatar.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
 			[avatar.widthAnchor constraintEqualToConstant:kAvatarSize],
 			[avatar.heightAnchor constraintEqualToConstant:kAvatarSize],
-
-			[text.leadingAnchor constraintEqualToAnchor:avatar.trailingAnchor constant:14.0],
-			[text.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-			[text.trailingAnchor constraintLessThanOrEqualToAnchor:follow.leadingAnchor constant:-10.0],
-
-			[follow.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16.0],
-			[follow.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-			[follow.widthAnchor constraintGreaterThanOrEqualToConstant:90.0],
-			[follow.heightAnchor constraintEqualToConstant:32.0],
-
-			[spin.centerXAnchor constraintEqualToAnchor:follow.centerXAnchor],
-			[spin.centerYAnchor constraintEqualToAnchor:follow.centerYAnchor],
+			[textStack.leadingAnchor constraintEqualToAnchor:avatar.trailingAnchor constant:14.0],
+			[textStack.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+			[textStack.trailingAnchor constraintLessThanOrEqualToAnchor:followBtn.leadingAnchor constant:-10.0],
+			[followBtn.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-16.0],
+			[followBtn.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+			[followBtn.widthAnchor constraintGreaterThanOrEqualToConstant:90.0],
+			[followBtn.heightAnchor constraintEqualToConstant:32.0],
+			[spinner.centerXAnchor constraintEqualToAnchor:followBtn.centerXAnchor],
+			[spinner.centerYAnchor constraintEqualToAnchor:followBtn.centerYAnchor],
 		]];
 	} else {
-		avatar = [cell.contentView viewWithTag:avTag];
-		name = [cell.contentView viewWithTag:nameTag];
-		sub = [cell.contentView viewWithTag:subTag];
-		follow = [cell.contentView viewWithTag:followTag];
-		spin = [follow viewWithTag:spinTag];
+		avatar = [cell.contentView viewWithTag:kAvTag];
+		nameLabel = [cell.contentView viewWithTag:kNmTag];
+		subLabel = [cell.contentView viewWithTag:kSbTag];
+		followBtn = [cell.contentView viewWithTag:kFlTag];
+		spinner = [followBtn viewWithTag:kSpTag];
 	}
 
 	NSDictionary *info = self.userInfos[indexPath.row];
-
 	NSString *username = info[@"username"] ?: SCILocalized(@"Unknown user");
 	NSString *fullName = info[@"fullName"];
-	NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
 	NSURL *picURL = info[@"picURL"];
 
-	name.text = username;
-	sub.text = fullName ?: @"";
-	sub.hidden = !fullName.length;
+	nameLabel.text = username;
+	subLabel.text = fullName ?: @"";
+	subLabel.hidden = !fullName.length;
 
 	avatar.image = [UIImage systemImageNamed:@"person.circle.fill"];
 	avatar.tintColor = UIColor.tertiaryLabelColor;
 
 	if (picURL) {
-		NSString *expected = picURL.absoluteString;
-		objc_setAssociatedObject(avatar, &kAvatarURLKey, expected, OBJC_ASSOCIATION_COPY_NONATOMIC);
+		NSString *expectedURL = picURL.absoluteString;
+		objc_setAssociatedObject(avatar, @selector(image), expectedURL, OBJC_ASSOCIATION_COPY_NONATOMIC);
 
 		[SCIImageCache loadImageFromURL:picURL completion:^(UIImage *image) {
 			if (!image) return;
 
 			dispatch_async(dispatch_get_main_queue(), ^{
-				if (![objc_getAssociatedObject(avatar, &kAvatarURLKey) isEqualToString:expected]) return;
+				NSString *currentURL = objc_getAssociatedObject(avatar, @selector(image));
+				if (![currentURL isEqualToString:expectedURL]) return;
 
 				avatar.image = image;
 				avatar.tintColor = nil;
@@ -793,82 +937,90 @@ BOOL sciStoryHasMentionsOrShares(UIView *anchor) {
 		}];
 	}
 
-	[follow removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
-	[spin stopAnimating];
+	[followBtn removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+	[spinner stopAnimating];
+	spinner.color = UIColor.whiteColor;
 
-	BOOL isMe = self.currentUserPK.length ? [pk isEqualToString:self.currentUserPK] : [username isEqualToString:self.currentUsername];
+	NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
+	BOOL isMe = self.currentUserPK.length ? [pk isEqualToString:self.currentUserPK] : (self.currentUsername.length && [username isEqualToString:self.currentUsername]);
 
-	follow.hidden = isMe;
-	if (isMe) return cell;
+	if (isMe) {
+		followBtn.hidden = YES;
+		return cell;
+	}
 
-	BOOL following = [self.friendshipStatuses[pk][@"following"] boolValue];
-	sciStyleFollow(follow, following);
+	followBtn.hidden = NO;
 
-	objc_setAssociatedObject(follow, &kFollowUserKey, info[@"userObj"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	objc_setAssociatedObject(follow, &kFollowPKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	BOOL following = NO;
+	NSDictionary *status = pk ? self.friendshipStatuses[pk] : nil;
 
-	[follow addTarget:self action:@selector(followTapped:) forControlEvents:UIControlEventTouchUpInside];
+	if ([status isKindOfClass:NSDictionary.class]) {
+		following = [status[@"following"] boolValue];
+	}
+
+	sciStyleFollowBtn(followBtn, following);
+
+	if (info[@"userObj"]) objc_setAssociatedObject(followBtn, "userObj", info[@"userObj"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	if (pk) objc_setAssociatedObject(followBtn, "pk", pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+	[followBtn addTarget:self action:@selector(followTapped:) forControlEvents:UIControlEventTouchUpInside];
 
 	return cell;
 }
 
 - (void)followTapped:(UIButton *)sender {
-	NSString *pk = sciUserPK(objc_getAssociatedObject(sender, &kFollowUserKey)) ?: objc_getAssociatedObject(sender, &kFollowPKKey);
+	NSString *pk = sciUserPK(objc_getAssociatedObject(sender, "userObj")) ?: objc_getAssociatedObject(sender, "pk");
 	if (!pk.length) return;
 
-	BOOL following = [[sender titleForState:UIControlStateNormal] isEqualToString:SCILocalized(@"Following")];
+	BOOL currentlyFollowing = [[sender titleForState:UIControlStateNormal] isEqualToString:SCILocalized(@"Following")];
 
-	void (^run)(void) = ^{
-		UIActivityIndicatorView *spin = [sender viewWithTag:105];
-		NSString *oldTitle = [sender titleForState:UIControlStateNormal];
+	void (^perform)(void) = ^{
+		UIActivityIndicatorView *spinner = [sender viewWithTag:105];
+		NSString *savedTitle = [sender titleForState:UIControlStateNormal];
 
 		[sender setTitle:@"" forState:UIControlStateNormal];
 		sender.userInteractionEnabled = NO;
-		[spin startAnimating];
+		[spinner startAnimating];
 
 		__weak typeof(self) weakSelf = self;
 
 		SCIAPICompletion done = ^(NSDictionary *response, NSError *error) {
-			__strong typeof(weakSelf) self = weakSelf;
+			__strong typeof(weakSelf) self_ = weakSelf;
 
-			[spin stopAnimating];
+			[spinner stopAnimating];
 			sender.userInteractionEnabled = YES;
 
-			if (!response || ![response[@"status"] isEqualToString:@"ok"]) {
-				[sender setTitle:oldTitle forState:UIControlStateNormal];
+			BOOL ok = response && [response[@"status"] isEqualToString:@"ok"];
+
+			if (!ok) {
+				[sender setTitle:savedTitle forState:UIControlStateNormal];
 				return;
 			}
 
-			BOOL newFollowing = !following;
-			sciStyleFollow(sender, newFollowing);
+			BOOL newFollowing = !currentlyFollowing;
+			sciStyleFollowBtn(sender, newFollowing);
 
-			NSMutableDictionary *status = [self.friendshipStatuses[pk] mutableCopy] ?: NSMutableDictionary.dictionary;
+			NSMutableDictionary *status = [self_.friendshipStatuses[pk] mutableCopy] ?: NSMutableDictionary.dictionary;
 			status[@"following"] = @(newFollowing);
-			self.friendshipStatuses[pk] = status.copy;
+			self_.friendshipStatuses[pk] = status.copy;
 		};
 
-		if (following) {
-			[SCIInstagramAPI unfollowUserPK:pk completion:done];
-		} else {
-			[SCIInstagramAPI followUserPK:pk completion:done];
-		}
+		if (currentlyFollowing) [SCIInstagramAPI unfollowUserPK:pk completion:done];
+		else [SCIInstagramAPI followUserPK:pk completion:done];
 	};
 
-	if (!following && [SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:run title:SCILocalized(@"Confirm follow")];
-	} else if (following && [SCIUtils getBoolPref:@"unfollow_confirm"]) {
-		[SCIUtils showConfirmation:run title:SCILocalized(@"Confirm unfollow")];
+	if (!currentlyFollowing && [SCIUtils getBoolPref:@"follow_confirm"]) {
+		[SCIUtils showConfirmation:perform title:SCILocalized(@"Confirm follow")];
+	} else if (currentlyFollowing && [SCIUtils getBoolPref:@"unfollow_confirm"]) {
+		[SCIUtils showConfirmation:perform title:SCILocalized(@"Confirm unfollow")];
 	} else {
-		run();
+		perform();
 	}
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	NSString *username = self.userInfos[indexPath.row][@"username"];
-
-	if (username.length) {
-		[SCIURLOpener dismiss:self thenOpenInstagramProfileForUsername:username];
-	}
+	if (username.length) [SCIURLOpener dismiss:self thenOpenInstagramProfileForUsername:username];
 }
 
 @end
@@ -879,11 +1031,12 @@ void sciShowStoryMentions(UIViewController *presenter, UIView *anchor) {
 	if (![SCIUtils getBoolPref:@"view_story_mentions"] || !presenter) return;
 
 	IGMedia *media = sciCurrentStoryMedia(anchor);
+	NSArray *mentions = sciCurrentStoryMentions(anchor);
 	NSMutableArray *infos = NSMutableArray.array;
 	NSMutableSet *seen = NSMutableSet.set;
 
-	for (id mention in sciDirectMentions(media)) {
-		NSDictionary *info = sciInfoFromMention(mention);
+	for (id mention in mentions) {
+		NSDictionary *info = sciMentionUserInfo(mention);
 		NSString *pk = info[@"pk"] ?: sciUserPK(info[@"userObj"]);
 
 		if (!pk.length || [seen containsObject:pk]) continue;
@@ -894,14 +1047,16 @@ void sciShowStoryMentions(UIViewController *presenter, UIView *anchor) {
 
 	SCIStoryMentionsVC *vc = [[SCIStoryMentionsVC alloc] init];
 	vc.userInfos = infos.copy;
-	vc.sharedMediaIDs = sciSharedMediaIDs(media);
+	vc.sharedMediaIDs = sciCurrentStorySharedPostMediaIDs(anchor);
 	vc.storyAuthorPK = sciStoryOwnerPK(media);
 	vc.modalPresentationStyle = UIModalPresentationPageSheet;
 
-	UISheetPresentationController *sheet = vc.sheetPresentationController;
-	sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
-	sheet.prefersGrabberVisible = YES;
-	sheet.prefersScrollingExpandsWhenScrolledToEdge = YES;
+	if (@available(iOS 15.0, *)) {
+		UISheetPresentationController *sheet = vc.sheetPresentationController;
+		sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+		sheet.prefersGrabberVisible = YES;
+		sheet.prefersScrollingExpandsWhenScrolledToEdge = YES;
+	}
 
 	[presenter presentViewController:vc animated:YES completion:nil];
 }
@@ -909,65 +1064,60 @@ void sciShowStoryMentions(UIViewController *presenter, UIView *anchor) {
 NSArray *sciMaybeAppendStoryMentionsMenuItem(NSArray *items) {
 	if (!sciActiveStoryViewerVC || ![SCIUtils getBoolPref:@"view_story_mentions"]) return items;
 
-	NSSet *icons = [NSSet setWithArray:@[
-		@"report_pano_outline_24",
-		@"mute_24",
-		@"hide_pano_outline_24",
-		@"following_24",
-		@"plus_pano_outline_24",
+	// Probe IG icon names — IG localizes titles so the English check below fails on non-EN.
+	BOOL looksLikeStoryHeader = NO;
+	NSSet *storyHeaderImageNames = [NSSet setWithArray:@[
+		@"report_pano_outline_24", @"mute_24", @"hide_pano_outline_24",
+		@"following_24", @"plus_pano_outline_24",
 	]];
-
-	BOOL isStoryMenu = NO;
-
 	for (id item in items) {
 		@try {
-			id image = [item valueForKey:@"image"];
-			NSString *name = [image respondsToSelector:@selector(name)] ? [image performSelector:@selector(name)] : nil;
+			id img = [item valueForKey:@"image"];
+			NSString *imgName = nil;
+			if ([img respondsToSelector:@selector(name)]) {
+				imgName = [img performSelector:@selector(name)];
+			}
+			if (imgName.length && [storyHeaderImageNames containsObject:imgName]) {
+				looksLikeStoryHeader = YES; break;
+			}
 			NSString *title = [NSString stringWithFormat:@"%@", [item valueForKey:@"title"] ?: @""];
-
-			if ([icons containsObject:name] ||
-				[title isEqualToString:@"Report"] ||
+			if ([title isEqualToString:@"Report"] ||
 				[title isEqualToString:@"Mute"] ||
 				[title isEqualToString:@"Unfollow"] ||
 				[title isEqualToString:@"Follow"] ||
 				[title isEqualToString:@"Hide"]) {
-				isStoryMenu = YES;
-				break;
+				looksLikeStoryHeader = YES; break;
 			}
 		} @catch (__unused id e) {}
 	}
 
-	if (!isStoryMenu) return items;
+	if (!looksLikeStoryHeader) return items;
 
-	Class cls = NSClassFromString(@"IGDSMenuItem");
-	if (!cls) return items;
+	Class menuItemClass = NSClassFromString(@"IGDSMenuItem");
+	if (!menuItemClass) return items;
 
 	__weak UIViewController *weakVC = sciActiveStoryViewerVC;
 
 	void (^handler)(void) = ^{
 		UIViewController *vc = weakVC;
-
-		if (vc) {
-			sciShowStoryMentions(vc, vc.view);
-		}
+		if (vc) sciShowStoryMentions(vc, vc.view);
 	};
 
 	id newItem = nil;
 
 	@try {
-		newItem = ((id (*)(id, SEL, id, id, id))objc_msgSend)(
-			[cls alloc],
+		typedef id (*Init)(id, SEL, id, id, id);
+		newItem = ((Init)objc_msgSend)([menuItemClass alloc],
 			@selector(initWithTitle:image:handler:),
 			SCILocalized(@"View mentions"),
 			nil,
-			handler
-		);
+			handler);
 	} @catch (__unused id e) {}
 
 	if (!newItem) return items;
 
-	NSMutableArray *out = items.mutableCopy;
-	[out addObject:newItem];
+	NSMutableArray *newItems = items.mutableCopy;
+	[newItems addObject:newItem];
 
-	return out.copy;
+	return newItems.copy;
 }

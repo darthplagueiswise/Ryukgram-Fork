@@ -1,4 +1,5 @@
 #import "SCIEmbedDomainViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 #define SCI_CUSTOM_DOMAINS_KEY @"embed_custom_domains"
@@ -17,7 +18,7 @@ static NSArray *sciPresetDomains(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = SCILocalized(@"Embed domain");
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    SCIApplyGlassBackdropToViewController(self);
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self;
@@ -85,6 +86,7 @@ static NSArray *sciPresetDomains(void) {
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"cell"];
+	SCIStyleCellForGlass(cell);
     NSString *domain = indexPath.section == 0
         ? sciPresetDomains()[indexPath.row]
         : self.customDomains[indexPath.row];

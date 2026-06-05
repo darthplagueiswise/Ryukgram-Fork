@@ -1,5 +1,6 @@
 #import "SCIOptionSheet.h"
 #import "../Utils.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 @interface SCIOptionSheetVC : UITableViewController
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
@@ -17,6 +18,7 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
+	SCIApplyGlassBackdropToViewController(self);
 	self.tableView.allowsSelection = YES;
 	self.tableView.alwaysBounceVertical = NO;
 	UINavigationItem *nav = self.navigationItem;
@@ -34,6 +36,7 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
+	SCIStyleCellForGlass(cell);
 	NSDictionary *opt = self.options[(NSUInteger)indexPath.row];
 	cell.textLabel.text = opt[@"title"] ?: opt[@"value"];
 	cell.textLabel.numberOfLines = 0;

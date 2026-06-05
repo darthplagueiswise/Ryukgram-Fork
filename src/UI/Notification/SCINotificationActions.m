@@ -29,12 +29,10 @@ DEF(SCI_NOTIF_VOICE_SEND,           "voice_send");
 DEF(SCI_NOTIF_AUDIO_EXTRACT,        "audio_extract");
 
 DEF(SCI_NOTIF_UNSENT_MESSAGE,       "unsent_message");
-DEF(SCI_NOTIF_REACTION_REMOVED,     "reaction_removed");
 DEF(SCI_NOTIF_LIVE_TOGGLE,          "live_toggle");
 DEF(SCI_NOTIF_GIF_SENT,             "gif_sent");
 
 DEF(SCI_NOTIF_ANALYZER_DONE,        "analyzer_done");
-DEF(SCI_NOTIF_ANALYZER_RUN,         "analyzer_run");
 
 DEF(SCI_NOTIF_MEDIA_ERROR,          "media_error");
 DEF(SCI_NOTIF_PERMISSION_ERROR,     "permission_error");
@@ -123,7 +121,6 @@ NSArray<SCINotificationActionInfo *> *SCINotificationActionsAll(void) {
 
             // Stories & messages
             A(SCI_NOTIF_UNSENT_MESSAGE,     kCatStories,   @"Unsent message detected",   tog),
-            A(SCI_NOTIF_REACTION_REMOVED,   kCatStories,   @"Reaction removed detected",  tog),
             A(SCI_NOTIF_LIVE_TOGGLE,        kCatStories,   @"Live comments toggled",     tog),
             A(SCI_NOTIF_GIF_SENT,           kCatStories,   @"Custom GIF sent",           tog),
 
@@ -132,7 +129,6 @@ NSArray<SCINotificationActionInfo *> *SCINotificationActionsAll(void) {
             A(SCI_NOTIF_AUDIO_EXTRACT,      kCatAudio,     @"Audio extraction status",   tog),
 
             // Profile
-            A(SCI_NOTIF_ANALYZER_RUN,       kCatProfile,   @"Profile Analyzer progress", prog),
             A(SCI_NOTIF_ANALYZER_DONE,      kCatProfile,   @"Profile Analyzer complete", tog),
 
             // Errors

@@ -1,4 +1,5 @@
 #import "SCIHomeShortcutConfigViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../Features/Feed/SCIHomeShortcutCatalog.h"
 #import "../UI/SCIPopupChrome.h"
@@ -182,7 +183,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
 	self.contentView.layer.borderColor = UIColor.separatorColor.CGColor;
-	self.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+	self.contentView.backgroundColor = UIColor.clearColor;
 
 	_iconView = UIImageView.new;
 	_iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -232,7 +233,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.checkBadge.hidden = !selected;
 	self.iconView.tintColor = selected ? primary : UIColor.labelColor;
 	self.autoLabel.textColor = selected ? primary : UIColor.secondaryLabelColor;
-	self.contentView.backgroundColor = selected ? [primary colorWithAlphaComponent:0.16] : UIColor.secondarySystemGroupedBackgroundColor;
+	self.contentView.backgroundColor = selected ? [primary colorWithAlphaComponent:0.12] : UIColor.clearColor;
 	self.contentView.layer.borderColor = (selected ? primary : UIColor.separatorColor).CGColor;
 	self.contentView.layer.borderWidth = selected ? 2.0 : (1.0 / UIScreen.mainScreen.scale);
 }
@@ -273,7 +274,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Icon");
-	self.view.backgroundColor = SCIGlassBackdropColor();
+	SCIApplyGlassBackdropToViewController(self);
 
 	NSMutableArray *valid = [NSMutableArray arrayWithObject:@"auto"];
 
@@ -290,7 +291,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 
 	self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];
 	self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
-	self.collectionView.backgroundColor = UIColor.clearColor;
+	SCIStyleCollectionViewForGlass(self.collectionView);
 	self.collectionView.delegate = self;
 	self.collectionView.dataSource = self;
 	self.collectionView.alwaysBounceVertical = YES;
@@ -378,7 +379,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = SCIGlassBackdropColor();
+	SCIApplyGlassBackdropToViewController(self);
 	SCIStyleTableViewForGlass(self.tableView);
 	self.actions = sciLoadOrderedActions();
 

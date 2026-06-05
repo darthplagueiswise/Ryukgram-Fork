@@ -3,6 +3,7 @@
 #import "../Networking/SCIInstagramAPI.h"
 #import "../Utils.h"
 #import "../SCIURLOpener.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 
 static NSString *const kStoryAvatarLoadedNotif = @"SCIExcludedStoryUserAvatarLoaded";
 
@@ -254,6 +255,7 @@ static NSDictionary *SCINormalizedStoryUser(NSDictionary *e) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
+	SCIApplyGlassBackdropToViewController(self);
 	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:kStoryAvatarLoadedNotif object:nil];
 }
 

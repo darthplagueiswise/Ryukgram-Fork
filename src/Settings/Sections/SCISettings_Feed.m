@@ -42,7 +42,6 @@
 											@"header": SCILocalized(@"Hide"),
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide suggested stories") subtitle:SCILocalized(@"Removes suggested accounts from the stories tray") defaultsKey:@"hide_suggested_stories"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Hide story highlights") subtitle:SCILocalized(@"Removes resurfaced highlights from the stories tray in feed") defaultsKey:@"hide_story_highlights"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide stories midcards") subtitle:SCILocalized(@"Removes the Trending and Music promo cards from the stories tray") defaultsKey:@"hide_stories_midcards" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide stories tray") subtitle:SCILocalized(@"Hides the story tray at the top") defaultsKey:@"hide_stories_tray"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide entire feed") subtitle:SCILocalized(@"Removes all content from your home feed") defaultsKey:@"hide_entire_feed"],

@@ -2,6 +2,7 @@
 #import "SCIGalleryChip.h"
 #import "SCIGalleryCoreDataStack.h"
 #import "../Utils.h"
+#import "../Settings/SCISearchBarStyler.h"
 #import "SCIGalleryShim.h"
 #import <CoreData/CoreData.h>
 
@@ -312,7 +313,9 @@ static CGFloat const kSCIGridSpacing = 8.0;
 	self.usernameSearchBar.autocorrectionType = UITextAutocorrectionTypeNo;
 	[self.usernameSearchBar.heightAnchor constraintEqualToConstant:38.0].active = YES;
 
-	if (@available(iOS 13.0, *)) {
+	if (@available(iOS 26.0, *)) {
+		[SCISearchBarStyler styleSearchBar:self.usernameSearchBar];
+	} else if (@available(iOS 13.0, *)) {
 		self.usernameSearchBar.searchTextField.backgroundColor = UIColor.tertiarySystemFillColor;
 		self.usernameSearchBar.searchTextField.layer.cornerRadius = 10.0;
 		self.usernameSearchBar.searchTextField.clipsToBounds = YES;

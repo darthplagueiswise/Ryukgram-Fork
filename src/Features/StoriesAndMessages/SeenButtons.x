@@ -4,128 +4,45 @@
 #import "../../SCIChrome.h"
 #import "../../UI/SCIIcon.h"
 #import "SCIExcludedThreads.h"
-
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
 
-#pragma mark - State
+#pragma mark - Helpers
 
-BOOL dmSeenToggleEnabled = NO;
-
-static NSInteger sSeenBypass = 0;
-static NSInteger sShareDepth = 0;
-static __weak id sActiveThreadVC = nil;
-
-#pragma mark - Runtime Helpers
-
-static inline BOOL SCIResponds(id obj, SEL sel) {
-	return obj && [obj respondsToSelector:sel];
+static NSString *sciThreadIdForVC(id vc) {
+	if (!vc) return nil;
+	@try {
+		NSString *tid = [vc valueForKey:@"threadId"];
+		return [tid isKindOfClass:NSString.class] ? tid : nil;
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
-static inline id SCIGetIvar(id obj, const char *name) {
-	return obj ? [SCIUtils getIvarForObj:obj name:name] : nil;
+static id sciFeatureManagerForThreadVC(id vc) {
+	if (!vc) return nil;
+
+	@try {
+		id manager = [vc valueForKey:@"featureManager"];
+		if (manager) return manager;
+	} @catch (__unused id e) {}
+
+	Ivar ivar = class_getInstanceVariable([vc class], "_featureManager");
+	return ivar ? object_getIvar(vc, ivar) : nil;
 }
 
-static inline id SCIObj(id obj, SEL sel) {
-	return SCIResponds(obj, sel) ? ((id (*)(id, SEL))objc_msgSend)(obj, sel) : nil;
-}
-
-static inline BOOL SCIBool(id obj, SEL sel) {
-	return SCIResponds(obj, sel) && ((BOOL (*)(id, SEL))objc_msgSend)(obj, sel);
-}
-
-static inline NSString *SCIString(id obj) {
-	return obj ? [NSString stringWithFormat:@"%@", obj] : nil;
-}
-
-static inline BOOL SCISeenToggleMode(void) {
-	return [[SCIUtils getStringPref:@"seen_mode"] isEqualToString:@"toggle"];
-}
-
-static inline BOOL SCIReadReceiptsOn(void) {
-	return [SCIUtils getBoolPref:@"remove_lastseen"];
-}
-
-static NSString *SCIThreadId(id vc) {
-	id tid = SCIObj(vc, @selector(threadId));
-	return [tid isKindOfClass:NSString.class] ? tid : SCIString(tid);
-}
-
-static id SCIThreadVCForManager(id manager) {
-	id vc = SCIGetIvar(manager, "_vc");
-	Class cls = NSClassFromString(@"IGDirectThreadViewController");
-
-	return (cls && [vc isKindOfClass:cls]) ? vc : nil;
-}
-
-static id SCIManagerForThreadVC(id vc) {
-	return SCIGetIvar(vc, "_featureManager");
-}
-
-static id SCIThreadVCForAnchor(UIView *view) {
-	id vc = [SCIUtils nearestViewControllerForView:view];
-	Class cls = NSClassFromString(@"IGDirectThreadViewController");
-
-	return (cls && [vc isKindOfClass:cls]) ? vc : nil;
-}
-
-static BOOL SCISameThread(id a, id b) {
-	NSString *ta = SCIThreadId(a);
-	NSString *tb = SCIThreadId(b);
-
-	return ta.length && tb.length && [ta isEqualToString:tb];
-}
-
-static BOOL SCIAutoInteractEnabled(NSString *threadId) {
-	return SCIReadReceiptsOn() &&
-		   [SCIUtils getBoolPref:@"seen_auto_on_interact"] &&
-		   threadId.length &&
-		   ![SCIExcludedThreads isThreadIdExcluded:threadId];
-}
-
-BOOL sciAutoTypingEnabled(void) {
-	return SCIReadReceiptsOn() &&
-		   [SCIUtils getBoolPref:@"seen_auto_on_typing"] &&
-		   ![SCIExcludedThreads isActiveThreadExcluded];
-}
-
-static BOOL SCIThreadHasPresentedUI(id vc) {
-	return !vc ||
-		   SCIBool(vc, @selector(hasPresentedViewController)) ||
-		   SCIObj(vc, @selector(presentedViewController));
-}
-
-// Guards block forwards/modals; no composer check — likes & media sends have no keyboard.
-static BOOL SCIIsActiveVisibleChat(id vc) {
-	if (!vc || sShareDepth > 0 || SCIThreadHasPresentedUI(vc)) return NO;
-	if (SCIResponds(vc, @selector(isThreadViewVisible)) && !SCIBool(vc, @selector(isThreadViewVisible))) return NO;
-
-	return YES;
-}
-
-static BOOL SCIShouldAutoSeen(id manager) {
-	id vc = SCIThreadVCForManager(manager);
-	NSString *tid = SCIThreadId(vc);
-
-	return vc &&
-		   vc == sActiveThreadVC &&
-		   SCISameThread(vc, sActiveThreadVC) &&
-		   SCIAutoInteractEnabled(tid) &&
-		   SCIIsActiveVisibleChat(vc);
-}
-
-#pragma mark - Mark Seen
-
-static BOOL SCIMarkSeen(id vcOrManager) {
+static BOOL sciMarkThreadSeenSafely(id vcOrManager) {
 	if (!vcOrManager) return NO;
 
 	dispatch_async(dispatch_get_main_queue(), ^{
-		id target = SCIResponds(vcOrManager, @selector(markLastMessageAsSeen))
-			? vcOrManager
-			: SCIManagerForThreadVC(vcOrManager);
+		id target = vcOrManager;
 
-		if (!SCIResponds(target, @selector(markLastMessageAsSeen))) return;
+		if (![target respondsToSelector:@selector(markLastMessageAsSeen)]) {
+			target = sciFeatureManagerForThreadVC(vcOrManager);
+		}
+
+		if (!target || ![target respondsToSelector:@selector(markLastMessageAsSeen)]) return;
 
 		@try {
 			((void (*)(id, SEL))objc_msgSend)(target, @selector(markLastMessageAsSeen));
@@ -135,74 +52,69 @@ static BOOL SCIMarkSeen(id vcOrManager) {
 	return YES;
 }
 
+static id sciThreadVCForAnchor(UIView *anchor) {
+	id vc = [SCIUtils nearestViewControllerForView:anchor];
+	Class threadCls = NSClassFromString(@"IGDirectThreadViewController");
+	return (threadCls && [vc isKindOfClass:threadCls]) ? vc : nil;
+}
+
+static BOOL sciSeenToggleMode(void) {
+	return [[SCIUtils getStringPref:@"seen_mode"] isEqualToString:@"toggle"];
+}
+
+BOOL dmSeenToggleEnabled = NO;
+static NSInteger sciSeenAutoBypassCount = 0;
+__weak id sciActiveThreadVC = nil;
+
+static BOOL sciAutoInteractEnabled(void) {
+	if ([SCIExcludedThreads isActiveThreadExcluded]) return NO;
+	return [SCIUtils getBoolPref:@"remove_lastseen"] && [SCIUtils getBoolPref:@"seen_auto_on_interact"];
+}
+
+BOOL sciAutoTypingEnabled(void) {
+	if ([SCIExcludedThreads isActiveThreadExcluded]) return NO;
+	return [SCIUtils getBoolPref:@"remove_lastseen"] && [SCIUtils getBoolPref:@"seen_auto_on_typing"];
+}
+
 void sciDoAutoSeen(id threadVC) {
 	if (!threadVC) return;
 
-	sSeenBypass++;
-	SCIMarkSeen(threadVC);
+	sciSeenAutoBypassCount++;
+	sciMarkThreadSeenSafely(threadVC);
 
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		if (sSeenBypass > 0) sSeenBypass--;
+		if (sciSeenAutoBypassCount > 0) sciSeenAutoBypassCount--;
 	});
 }
 
-void sciDoAutoSeenActiveThread(void) {
-	sciDoAutoSeen(sActiveThreadVC);
-}
+#pragma mark - Auto Seen On Send
 
-static void SCIAutoSeenLater(id manager) {
-	if (!SCIShouldAutoSeen(manager)) return;
-
-	id vc = SCIThreadVCForManager(manager);
-	NSString *tid = SCIThreadId(vc);
-
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		id active = sActiveThreadVC;
-
-		if (!active || active != vc) return;
-		if (![tid isEqualToString:SCIThreadId(active)]) return;
-		if (!SCIAutoInteractEnabled(tid)) return;
-		if (sShareDepth > 0 || SCIThreadHasPresentedUI(active)) return;
-
-		sciDoAutoSeen(active);
-	});
-}
-
-static void SCIConfirmMarkSeen(UIViewController *presenter, void (^block)(void)) {
-	[SCIUtils confirmIfNeeded:[SCIUtils getBoolPref:@"confirm_mark_seen_dm"]
-						 title:SCILocalized(@"Mark as seen?")
-					   message:SCILocalized(@"This will send a read receipt for the latest messages.")
-				  confirmTitle:SCILocalized(@"Mark seen")
-						  from:presenter
-					 onConfirm:block
-					  onCancel:nil];
-}
-
-#pragma mark - Send Hooks
-
-// Fires on any send incl. reactions; the vcMatch gate blocks forwards/shares.
 static void (*orig_setHasSent)(id self, SEL _cmd, BOOL sent);
 static void new_setHasSent(id self, SEL _cmd, BOOL sent) {
-	BOOL should = sent && SCIShouldAutoSeen(self);
 	orig_setHasSent(self, _cmd, sent);
-	if (should) SCIAutoSeenLater(self);
+
+	if (!sent || !sciAutoInteractEnabled()) return;
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		sciDoAutoSeen(self);
+	});
 }
 
-#pragma mark - Active Thread
+#pragma mark - Active Thread Tracking
 
 %hook IGDirectThreadViewController
 
 - (void)viewDidAppear:(BOOL)animated {
 	%orig;
 
-	sShareDepth = 0;
-	sActiveThreadVC = self;
-	[SCIExcludedThreads setActiveThreadId:SCIThreadId(self)];
+	sciActiveThreadVC = self;
+	NSString *tid = sciThreadIdForVC(self);
+	if (tid.length) [SCIExcludedThreads setActiveThreadId:tid];
 }
 
-- (void)viewDidDisappear:(BOOL)animated {
-	if (sActiveThreadVC == self) {
-		sActiveThreadVC = nil;
+- (void)viewWillDisappear:(BOOL)animated {
+	if (sciActiveThreadVC == self) {
+		sciActiveThreadVC = nil;
 		[SCIExcludedThreads setActiveThreadId:nil];
 	}
 
@@ -211,243 +123,209 @@ static void new_setHasSent(id self, SEL _cmd, BOOL sent) {
 
 %end
 
-#pragma mark - Share Sheet Guard
+#pragma mark - Navigation Buttons
 
-%hook IGDirectShareSheetController
+void sciRefreshNavBarItems(UIView *anchor) {
+	if (!anchor || ![anchor respondsToSelector:@selector(setRightBarButtonItems:)]) return;
 
-- (id)presentShareSheetWithOverlayView:(BOOL)view directRecipientConfiguration:(id)configuration config:(id)config {
-	sShareDepth++;
-	return %orig;
+	NSArray *items = nil;
+	if ([anchor respondsToSelector:@selector(rightBarButtonItems)]) {
+		items = ((NSArray *(*)(id, SEL))objc_msgSend)(anchor, @selector(rightBarButtonItems));
+	}
+
+	((void (*)(id, SEL, id))objc_msgSend)(anchor, @selector(setRightBarButtonItems:), items ?: @[]);
 }
 
-- (id)presentShareSheetWithShortcutRecipients:(id)recipients showOverlayView:(BOOL)view directRecipientConfiguration:(id)configuration config:(id)config {
-	sShareDepth++;
-	return %orig;
-}
+static NSDictionary *sciEntryFromThreadVC(id vc);
 
-- (void)dismissShareSheetAnimated:(BOOL)animated logCancellation:(BOOL)cancellation completion:(id)completion {
-	%orig;
-	if (sShareDepth > 0) sShareDepth--;
-}
+static void sciOpenMessagesSettingsFromView(UIView *view, UIWindow *window) {
+	UIWindow *win = window ?: view.window;
 
-- (void)dismissShareSheetWithAnimationDuration:(double)duration logCancellation:(BOOL)cancellation {
-	%orig;
-	if (sShareDepth > 0) sShareDepth--;
-}
-
-- (void)shareSheetContainerDidDismiss:(id)dismiss {
-	%orig;
-	if (sShareDepth > 0) sShareDepth--;
-}
-
-%end
-
-#pragma mark - Nav Helpers
-
-static void SCIRefreshNav(UIView *view) {
-	if (!SCIResponds(view, @selector(setRightBarButtonItems:))) return;
-
-	NSArray *items = SCIObj(view, @selector(rightBarButtonItems)) ?: @[];
-	((void (*)(id, SEL, id))objc_msgSend)(view, @selector(setRightBarButtonItems:), items);
-}
-
-static UIWindow *SCIWindow(UIView *view, UIWindow *fallback) {
-	if (fallback) return fallback;
-	if (view.window) return view.window;
-
-	for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-		if (![scene isKindOfClass:UIWindowScene.class]) continue;
-
-		for (UIWindow *win in ((UIWindowScene *)scene).windows) {
-			if (win.isKeyWindow) return win;
+	if (!win) {
+		for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+			if (![scene isKindOfClass:UIWindowScene.class]) continue;
+			for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+				if (w.isKeyWindow) {
+					win = w;
+					break;
+				}
+			}
+			if (win) break;
 		}
 	}
 
-	return nil;
-}
-
-static NSDictionary *SCIEntryForThreadVC(id vc) {
-	NSString *tid = SCIThreadId(vc);
-	if (!tid.length) return nil;
-
-	NSString *name = @"";
-
-	@try {
-		if ([vc respondsToSelector:@selector(navigationItem)]) {
-			name = [[vc navigationItem] title] ?: @"";
-		}
-	} @catch (__unused id e) {}
-
-	return @{
-		@"threadId": tid,
-		@"threadName": name,
-		@"isGroup": @NO,
-		@"users": @[]
-	};
-}
-
-static void SCIOpenSettings(UIView *view, UIWindow *window) {
-	UIWindow *win = SCIWindow(view, window);
 	if (win) [SCIUtils showSettingsVC:win atTopLevelEntry:SCILocalized(@"Messages")];
 }
 
-static UIAction *SCIAction(NSString *title, id image, void (^handler)(__kindof UIAction *action)) {
-	return [UIAction actionWithTitle:title image:image identifier:nil handler:handler];
-}
-
-static UIMenu *SCIBuildMenu(UIView *anchor, NSString *threadId, UIWindow *window) {
+static UIMenu *sciBuildThreadActionsMenu(UIView *anchor, NSString *threadId, UIWindow *window) {
 	BOOL inList = threadId.length && [SCIExcludedThreads isInList:threadId];
 	BOOL excluded = threadId.length && [SCIExcludedThreads isThreadIdExcluded:threadId];
-	BOOL blockMode = [SCIExcludedThreads isBlockSelectedMode];
+	BOOL blockSelected = [SCIExcludedThreads isBlockSelectedMode];
+	BOOL seenFeatureOn = [SCIUtils getBoolPref:@"remove_lastseen"];
 
 	NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
 	__weak UIView *weakAnchor = anchor;
 
-	if (SCIReadReceiptsOn() && !excluded) {
-		if (SCISeenToggleMode()) {
+	if (seenFeatureOn && !excluded) {
+		if (sciSeenToggleMode()) {
 			NSString *title = dmSeenToggleEnabled ? SCILocalized(@"Disable read receipts") : SCILocalized(@"Enable read receipts");
 
-			UIAction *toggle = SCIAction(title, [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"], ^(__kindof UIAction *_) {
+			UIAction *toggle = [UIAction actionWithTitle:title
+												   image:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"]
+											  identifier:nil
+												 handler:^(__kindof UIAction *_) {
 				dmSeenToggleEnabled = !dmSeenToggleEnabled;
 
 				if (dmSeenToggleEnabled) {
-					SCIMarkSeen(SCIThreadVCForAnchor(weakAnchor));
+					sciMarkThreadSeenSafely(sciThreadVCForAnchor(weakAnchor));
 				}
 
 				SCINotifySuccess(SCI_NOTIF_SEEN_DM,
 					dmSeenToggleEnabled ? SCILocalized(@"Read receipts enabled") : SCILocalized(@"Read receipts disabled"),
 					nil);
 
-				SCIRefreshNav(weakAnchor);
-			});
+				sciRefreshNavBarItems(weakAnchor);
+			}];
 
 			toggle.state = dmSeenToggleEnabled ? UIMenuElementStateOn : UIMenuElementStateOff;
 			[items addObject:toggle];
 		}
 
-		[items addObject:SCIAction(SCILocalized(@"Mark messages as seen"), [SCIIcon imageNamed:@"eye"], ^(__kindof UIAction *_) {
-			UIViewController *presenter = weakAnchor ? [SCIUtils nearestViewControllerForView:weakAnchor] : nil;
+		UIAction *markSeen = [UIAction actionWithTitle:SCILocalized(@"Mark messages as seen")
+												 image:[SCIIcon imageNamed:@"eye"]
+											identifier:nil
+											   handler:^(__kindof UIAction *_) {
+			if (sciMarkThreadSeenSafely(sciThreadVCForAnchor(weakAnchor))) {
+				SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Marked messages as seen"), nil);
+			}
+		}];
 
-			SCIConfirmMarkSeen(presenter, ^{
-				if (SCIMarkSeen(SCIThreadVCForAnchor(weakAnchor))) {
-					SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Marked messages as seen"), nil);
-				}
-			});
-		})];
+		[items addObject:markSeen];
 	}
 
-	NSString *addTitle = blockMode ? SCILocalized(@"Add to block list") : SCILocalized(@"Exclude chat");
-	NSString *removeTitle = blockMode ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude chat");
+	NSString *addLabel = blockSelected ? SCILocalized(@"Add to block list") : SCILocalized(@"Exclude chat");
+	NSString *removeLabel = blockSelected ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude chat");
 
-	UIAction *list = SCIAction(inList ? removeTitle : addTitle, [SCIIcon imageNamed:(inList ? @"eye.fill" : @"eye.slash")], ^(__kindof UIAction *_) {
+	UIAction *listToggle = [UIAction actionWithTitle:(inList ? removeLabel : addLabel)
+											  image:[SCIIcon imageNamed:(inList ? @"eye.fill" : @"eye.slash")]
+										 identifier:nil
+											handler:^(__kindof UIAction *_) {
 		if (!threadId.length) return;
 
-		id vc = SCIThreadVCForAnchor(weakAnchor);
+		id threadVC = sciThreadVCForAnchor(weakAnchor);
 
 		if (inList) {
 			[SCIExcludedThreads removeThreadId:threadId];
 
-			SCINotifySuccess(blockMode ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_CHAT,
-				blockMode ? SCILocalized(@"Unblocked") : SCILocalized(@"Un-excluded"),
+			SCINotifySuccess(blockSelected ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_CHAT,
+				blockSelected ? SCILocalized(@"Unblocked") : SCILocalized(@"Un-excluded"),
 				nil);
 
-			if (blockMode) SCIMarkSeen(vc);
+			if (blockSelected) sciMarkThreadSeenSafely(threadVC);
 		} else {
-			[SCIExcludedThreads addOrUpdateEntry:SCIEntryForThreadVC(vc) ?: @{
-				@"threadId": threadId,
-				@"threadName": @"",
-				@"isGroup": @NO,
-				@"users": @[]
-			}];
+			NSDictionary *entry = sciEntryFromThreadVC(threadVC);
+			if (!entry) entry = @{ @"threadId": threadId, @"threadName": @"", @"isGroup": @NO, @"users": @[] };
 
-			SCINotifySuccess(blockMode ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_CHAT,
-				blockMode ? SCILocalized(@"Blocked") : SCILocalized(@"Excluded"),
+			[SCIExcludedThreads addOrUpdateEntry:entry];
+
+			SCINotifySuccess(blockSelected ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_CHAT,
+				blockSelected ? SCILocalized(@"Blocked") : SCILocalized(@"Excluded"),
 				nil);
 
-			if (!blockMode) SCIMarkSeen(vc);
+			if (!blockSelected) sciMarkThreadSeenSafely(threadVC);
 		}
 
-		SCIRefreshNav(weakAnchor);
-	});
+		sciRefreshNavBarItems(weakAnchor);
+	}];
 
-	if (excluded) list.attributes = UIMenuElementAttributesDestructive;
-	[items addObject:list];
+	if (excluded) listToggle.attributes = UIMenuElementAttributesDestructive;
+	[items addObject:listToggle];
 
 	if ([SCIUtils getBoolPref:@"unlimited_replay"] && !excluded) {
 		NSString *title = dmVisualMsgsViewedButtonEnabled
 			? SCILocalized(@"Visual messages: expiring")
 			: SCILocalized(@"Visual messages: unlimited replay");
 
-		NSString *icon = dmVisualMsgsViewedButtonEnabled
-			? @"photo.badge.checkmark"
-			: @"photo.badge.checkmark.fill";
+		NSString *icon = dmVisualMsgsViewedButtonEnabled ? @"photo.badge.checkmark" : @"photo.badge.checkmark.fill";
 
-		UIAction *replay = SCIAction(title, [SCIIcon imageNamed:icon], ^(__kindof UIAction *_) {
+		UIAction *replay = [UIAction actionWithTitle:title
+											   image:[SCIIcon imageNamed:icon]
+										  identifier:nil
+											 handler:^(__kindof UIAction *_) {
 			dmVisualMsgsViewedButtonEnabled = !dmVisualMsgsViewedButtonEnabled;
 
 			SCINotifySuccess(SCI_NOTIF_SEEN_DM,
 				dmVisualMsgsViewedButtonEnabled ? SCILocalized(@"Visual messages will expire") : SCILocalized(@"Unlimited replay enabled"),
 				nil);
 
-			SCIRefreshNav(weakAnchor);
-		});
+			sciRefreshNavBarItems(weakAnchor);
+		}];
 
 		replay.state = dmVisualMsgsViewedButtonEnabled ? UIMenuElementStateOff : UIMenuElementStateOn;
 		[items addObject:replay];
 	}
 
-	[items addObject:SCIAction(SCILocalized(@"Messages settings"), [UIImage systemImageNamed:@"gear"], ^(__kindof UIAction *_) {
-		SCIOpenSettings(weakAnchor, window);
-	})];
+	UIAction *settings = [UIAction actionWithTitle:SCILocalized(@"Messages settings")
+											image:[UIImage systemImageNamed:@"gear"]
+									   identifier:nil
+										  handler:^(__kindof UIAction *_) {
+		sciOpenMessagesSettingsFromView(weakAnchor, window);
+	}];
+
+	[items addObject:settings];
 
 	return [UIMenu menuWithTitle:@"" children:items];
 }
 
-static UIBarButtonItem *SCIChromeItem(NSString *aid, NSString *icon, CGFloat size, UIColor *tint, id target, SEL action, UIMenu *menu) {
-	SCIChromeButton *inner = nil;
-	UIBarButtonItem *item = SCIChromeBarButtonItem(@"", size, target, action, &inner);
+static NSDictionary *sciEntryFromThreadVC(id vc) {
+	if (!vc) return nil;
 
-	item.accessibilityIdentifier = aid;
-	[inner setIconResource:icon pointSize:size];
-	inner.iconTint = tint ?: UIColor.labelColor;
-	inner.menu = menu;
+	NSString *tid = sciThreadIdForVC(vc);
+	if (!tid.length) return nil;
 
-	return item;
+	NSString *name = @"";
+	NSMutableArray *users = [NSMutableArray array];
+
+	@try {
+		if ([vc respondsToSelector:@selector(navigationItem)]) {
+			name = [[vc navigationItem] title] ?: @"";
+		}
+
+		id thread = [vc valueForKey:@"thread"];
+		id threadUsers = thread ? [thread valueForKey:@"users"] : nil;
+
+		if ([threadUsers isKindOfClass:NSArray.class]) {
+			for (id user in threadUsers) {
+				NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+
+				@try {
+					id pk = [user valueForKey:@"pk"];
+					id username = [user valueForKey:@"username"];
+					id fullName = [user valueForKey:@"fullName"];
+
+					if (pk) dict[@"pk"] = [NSString stringWithFormat:@"%@", pk];
+					if (username) dict[@"username"] = [NSString stringWithFormat:@"%@", username];
+					if (fullName) dict[@"fullName"] = [NSString stringWithFormat:@"%@", fullName];
+				} @catch (__unused id e) {}
+
+				if (dict.count) [users addObject:dict];
+			}
+		}
+	} @catch (__unused id e) {}
+
+	return @{
+		@"threadId": tid,
+		@"threadName": name ?: @"",
+		@"isGroup": @NO,
+		@"users": users ?: @[]
+	};
 }
-
-static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
-	NSString *aid = item.accessibilityIdentifier;
-
-	if ([aid isEqualToString:@"sci-seen-btn"] ||
-		[aid isEqualToString:@"sci-unex-btn"] ||
-		[aid isEqualToString:@"sci-visual-btn"]) {
-		return YES;
-	}
-
-	if ([SCIUtils getBoolPref:@"hide_reels_blend"] && [aid isEqualToString:@"blend-button"]) {
-		return YES;
-	}
-
-	UIView *view = item.customView;
-	Class callCls = NSClassFromString(@"IGDirectCallButton");
-
-	if (view && callCls && [view isKindOfClass:callCls]) {
-		NSString *cvAid = view.accessibilityIdentifier;
-
-		if ([SCIUtils getBoolPref:@"hide_voice_call_button"] && [cvAid isEqualToString:@"audio-call"]) return YES;
-		if ([SCIUtils getBoolPref:@"hide_video_call_button"] && [cvAid isEqualToString:@"video-chat"]) return YES;
-	}
-
-	return NO;
-}
-
-#pragma mark - Navigation Buttons
 
 %hook IGTallNavigationBarView
 
 %new - (void)sciAddToListHandler:(id)sender {
-	id vc = SCIThreadVCForAnchor(self);
-	NSDictionary *entry = SCIEntryForThreadVC(vc);
+	id vc = sciThreadVCForAnchor(self);
+	NSDictionary *entry = sciEntryFromThreadVC(vc);
 	if (!entry) return;
 
 	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Add to block list")
@@ -459,7 +337,7 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Add") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
 		[SCIExcludedThreads addOrUpdateEntry:entry];
 		SCINotifySuccess(SCI_NOTIF_BLOCK_TOGGLE, SCILocalized(@"Added to block list"), nil);
-		SCIRefreshNav(weakSelf);
+		sciRefreshNavBarItems(weakSelf);
 	}]];
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
@@ -470,14 +348,14 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 }
 
 %new - (void)sciUnexcludeButtonHandler:(id)sender {
-	id vc = SCIThreadVCForAnchor(self);
-	NSString *tid = SCIThreadId(vc);
+	id vc = sciThreadVCForAnchor(self);
+	NSString *tid = sciThreadIdForVC(vc);
 	if (!tid.length) return;
 
-	BOOL blockMode = [SCIExcludedThreads isBlockSelectedMode];
+	BOOL blockSelected = [SCIExcludedThreads isBlockSelectedMode];
 
-	UIAlertController *alert = [UIAlertController alertControllerWithTitle:(blockMode ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude chat"))
-																   message:(blockMode ? SCILocalized(@"Read receipts will no longer be blocked for this chat.") : SCILocalized(@"This chat will resume normal read-receipt behavior."))
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:(blockSelected ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude chat"))
+																   message:(blockSelected ? SCILocalized(@"Read receipts will no longer be blocked for this chat.") : SCILocalized(@"This chat will resume normal read-receipt behavior."))
 															preferredStyle:UIAlertControllerStyleAlert];
 
 	__weak typeof(self) weakSelf = self;
@@ -485,7 +363,7 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Remove") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *_) {
 		[SCIExcludedThreads removeThreadId:tid];
 		SCINotifySuccess(SCI_NOTIF_EXCLUDE_CHAT, SCILocalized(@"Removed"), nil);
-		SCIRefreshNav(weakSelf);
+		sciRefreshNavBarItems(weakSelf);
 	}]];
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
@@ -496,85 +374,119 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 }
 
 - (void)setRightBarButtonItems:(NSArray<UIBarButtonItem *> *)items {
-	NSMutableArray *out = [NSMutableArray array];
+	BOOL hideVoice = [SCIUtils getBoolPref:@"hide_voice_call_button"];
+	BOOL hideVideo = [SCIUtils getBoolPref:@"hide_video_call_button"];
+	BOOL hideBlend = [SCIUtils getBoolPref:@"hide_reels_blend"];
+
+	NSMutableArray *newItems = [NSMutableArray array];
 
 	for (UIBarButtonItem *item in items ?: @[]) {
-		if (!SCIShouldSkipNativeItem(item)) [out addObject:item];
+		NSString *aid = item.accessibilityIdentifier;
+
+		if ([aid isEqualToString:@"sci-seen-btn"] ||
+			[aid isEqualToString:@"sci-unex-btn"] ||
+			[aid isEqualToString:@"sci-visual-btn"]) {
+			continue;
+		}
+
+		if (hideBlend && [aid isEqualToString:@"blend-button"]) continue;
+
+		UIView *customView = item.customView;
+		if (customView && [customView isKindOfClass:NSClassFromString(@"IGDirectCallButton")]) {
+			NSString *cvAx = customView.accessibilityIdentifier;
+			if (hideVoice && [cvAx isEqualToString:@"audio-call"]) continue;
+			if (hideVideo && [cvAx isEqualToString:@"video-chat"]) continue;
+		}
+
+		[newItems addObject:item];
 	}
 
-	id vc = SCIThreadVCForAnchor(self);
-	NSString *tid = SCIThreadId(vc);
-	BOOL excluded = tid.length && [SCIExcludedThreads isThreadIdExcluded:tid];
-	BOOL inList = tid.length && [SCIExcludedThreads isInList:tid];
-	BOOL blockMode = [SCIExcludedThreads isBlockSelectedMode];
+	id threadVC = sciThreadVCForAnchor(self);
+	NSString *threadId = sciThreadIdForVC(threadVC);
+	BOOL excluded = threadId.length && [SCIExcludedThreads isThreadIdExcluded:threadId];
+	BOOL inList = threadId.length && [SCIExcludedThreads isInList:threadId];
 
-	UIMenu *menu = SCIBuildMenu(self, tid, self.window);
+	if ([SCIUtils getBoolPref:@"remove_lastseen"] && !excluded) {
+		SCIChromeButton *inner = nil;
+		UIBarButtonItem *seenButton = SCIChromeBarButtonItem(@"", 22, self, @selector(seenButtonHandler:), &inner);
 
-	if (SCIReadReceiptsOn() && !excluded && [SCIUtils getBoolPref:@"show_dm_seen_button"]) {
-		UIColor *tint = (SCISeenToggleMode() && dmSeenToggleEnabled) ? SCIUtils.SCIColor_Primary : UIColor.labelColor;
-		[out addObject:SCIChromeItem(@"sci-seen-btn", @"eye", 22, tint, self, @selector(seenButtonHandler:), menu)];
+		[inner setIconResource:@"eye" pointSize:22];
+		seenButton.accessibilityIdentifier = @"sci-seen-btn";
+		inner.iconTint = (sciSeenToggleMode() && dmSeenToggleEnabled) ? SCIUtils.SCIColor_Primary : UIColor.labelColor;
+		inner.menu = sciBuildThreadActionsMenu(self, threadId, self.window);
+
+		[newItems addObject:seenButton];
 	}
 
-	BOOL showListButton = SCIReadReceiptsOn() && [SCIUtils getBoolPref:@"chat_quick_list_button"];
-	BOOL showRemove = !blockMode && inList && excluded;
-	BOOL showAdd = blockMode && !inList;
+	BOOL blockSelected = [SCIExcludedThreads isBlockSelectedMode];
+	BOOL showListButton = [SCIUtils getBoolPref:@"remove_lastseen"] && [SCIUtils getBoolPref:@"chat_quick_list_button"];
+	BOOL showRemove = !blockSelected && inList && excluded;
+	BOOL showAdd = blockSelected && !inList;
 
 	if (showListButton && (showRemove || showAdd)) {
-		NSString *icon = showRemove ? @"eye.slash.fill" : @"eye.slash";
-		UIColor *tint = showRemove ? SCIUtils.SCIColor_Primary : UIColor.labelColor;
+		SCIChromeButton *inner = nil;
 		SEL action = showRemove ? @selector(sciUnexcludeButtonHandler:) : @selector(sciAddToListHandler:);
+		NSString *icon = showRemove ? @"eye.slash.fill" : @"eye.slash";
 
-		[out addObject:SCIChromeItem(@"sci-unex-btn", icon, 18, tint, self, action, menu)];
+		UIBarButtonItem *listButton = SCIChromeBarButtonItem(@"", 18, self, action, &inner);
+
+		[inner setIconResource:icon pointSize:18];
+		listButton.accessibilityIdentifier = @"sci-unex-btn";
+		inner.iconTint = showRemove ? SCIUtils.SCIColor_Primary : UIColor.labelColor;
+		inner.menu = sciBuildThreadActionsMenu(self, threadId, self.window);
+
+		[newItems addObject:listButton];
 	}
 
-	if ([SCIUtils getBoolPref:@"unlimited_replay"] && !excluded && !SCIReadReceiptsOn()) {
+	if ([SCIUtils getBoolPref:@"unlimited_replay"] && !excluded && ![SCIUtils getBoolPref:@"remove_lastseen"]) {
+		SCIChromeButton *inner = nil;
 		NSString *icon = dmVisualMsgsViewedButtonEnabled ? @"photo.badge.checkmark" : @"photo.badge.checkmark.fill";
-		UIColor *tint = dmVisualMsgsViewedButtonEnabled ? UIColor.labelColor : SCIUtils.SCIColor_Primary;
 
-		[out addObject:SCIChromeItem(@"sci-visual-btn", icon, 18, tint, self, @selector(sciReplayToggleHandler:), nil)];
+		UIBarButtonItem *replayButton = SCIChromeBarButtonItem(@"", 18, self, @selector(sciReplayToggleHandler:), &inner);
+
+		[inner setIconResource:icon pointSize:18];
+		replayButton.accessibilityIdentifier = @"sci-visual-btn";
+		inner.iconTint = dmVisualMsgsViewedButtonEnabled ? UIColor.labelColor : SCIUtils.SCIColor_Primary;
+
+		[newItems addObject:replayButton];
 	}
 
-	%orig([out copy]);
+	%orig([newItems copy]);
 }
 
 %new - (void)seenButtonHandler:(id)sender {
-	UIBarButtonItem *item = [sender isKindOfClass:UIBarButtonItem.class] ? sender : nil;
-	SCIChromeButton *inner = [sender isKindOfClass:SCIChromeButton.class] ? sender : SCIChromeButtonForBarItem(item);
+	UIBarButtonItem *barItem = [sender isKindOfClass:UIBarButtonItem.class] ? sender : nil;
+	SCIChromeButton *inner = [sender isKindOfClass:SCIChromeButton.class] ? sender : SCIChromeButtonForBarItem(barItem);
 
-	if (SCISeenToggleMode()) {
+	if (sciSeenToggleMode()) {
 		dmSeenToggleEnabled = !dmSeenToggleEnabled;
 
 		UIColor *tint = dmSeenToggleEnabled ? SCIUtils.SCIColor_Primary : UIColor.labelColor;
 		if (inner) inner.iconTint = tint;
-		else item.tintColor = tint;
+		else barItem.tintColor = tint;
 
 		if (dmSeenToggleEnabled) {
-			SCIMarkSeen(SCIThreadVCForAnchor(self));
+			sciMarkThreadSeenSafely(sciThreadVCForAnchor(self));
+			SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Read receipts enabled"), nil);
+		} else {
+			SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Read receipts disabled"), nil);
 		}
-
-		SCINotifySuccess(SCI_NOTIF_SEEN_DM,
-			dmSeenToggleEnabled ? SCILocalized(@"Read receipts enabled") : SCILocalized(@"Read receipts disabled"),
-			nil);
 	} else {
-		__weak UIView *weakSelf = self;
-
-		SCIConfirmMarkSeen([SCIUtils nearestViewControllerForView:self], ^{
-			if (SCIMarkSeen(SCIThreadVCForAnchor(weakSelf))) {
-				SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Marked messages as seen"), nil);
-			}
-		});
+		if (sciMarkThreadSeenSafely(sciThreadVCForAnchor(self))) {
+			SCINotifySuccess(SCI_NOTIF_SEEN_DM, SCILocalized(@"Marked messages as seen"), nil);
+		}
 	}
 
-	NSString *tid = SCIThreadId(SCIThreadVCForAnchor(self));
-	UIMenu *menu = SCIBuildMenu(self, tid, self.window);
+	NSString *tid = sciThreadIdForVC(sciThreadVCForAnchor(self));
+	UIMenu *menu = sciBuildThreadActionsMenu(self, tid, self.window);
 
 	if (inner) inner.menu = menu;
-	else item.menu = menu;
+	else if (barItem) barItem.menu = menu;
 }
 
 %new - (void)sciReplayToggleHandler:(id)sender {
-	UIBarButtonItem *item = [sender isKindOfClass:UIBarButtonItem.class] ? sender : nil;
-	SCIChromeButton *inner = [sender isKindOfClass:SCIChromeButton.class] ? sender : SCIChromeButtonForBarItem(item);
+	UIBarButtonItem *barItem = [sender isKindOfClass:UIBarButtonItem.class] ? sender : nil;
+	SCIChromeButton *inner = [sender isKindOfClass:SCIChromeButton.class] ? sender : SCIChromeButtonForBarItem(barItem);
 
 	dmVisualMsgsViewedButtonEnabled = !dmVisualMsgsViewedButtonEnabled;
 
@@ -584,9 +496,9 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 	if (inner) {
 		[inner setIconResource:icon pointSize:18];
 		inner.iconTint = tint;
-	} else {
-		item.image = [SCIIcon imageNamed:icon];
-		item.tintColor = tint;
+	} else if (barItem) {
+		barItem.image = [SCIIcon imageNamed:icon];
+		barItem.tintColor = tint;
 	}
 
 	SCINotifySuccess(SCI_NOTIF_SEEN_DM,
@@ -596,38 +508,43 @@ static BOOL SCIShouldSkipNativeItem(UIBarButtonItem *item) {
 
 %end
 
-#pragma mark - Seen Blocking
+#pragma mark - Seen Blocking Logic
 
 %hook IGDirectThreadViewListAdapterDataSource
 
 - (BOOL)shouldUpdateLastSeenMessage {
-	if (!SCIReadReceiptsOn()) return %orig;
+	if (![SCIUtils getBoolPref:@"remove_lastseen"]) return %orig;
+
 	if ([SCIExcludedThreads isActiveThreadExcluded]) return %orig;
-	if (SCISeenToggleMode() && dmSeenToggleEnabled) return %orig;
-	if (sSeenBypass > 0) return %orig;
+	if (sciSeenToggleMode() && dmSeenToggleEnabled) return %orig;
+	if (sciSeenAutoBypassCount > 0) return %orig;
 
 	return NO;
 }
 
 %end
 
-#pragma mark - Visual Messages
-
-static inline BOOL SCIBlockVisualSeen(void) {
-	return [SCIUtils getBoolPref:@"unlimited_replay"] &&
-		   !dmVisualMsgsViewedButtonEnabled &&
-		   ![SCIExcludedThreads isActiveThreadExcluded];
-}
+#pragma mark - Visual Messages Viewed Logic
 
 %hook IGDirectVisualMessageViewerEventHandler
 
-- (void)visualMessageViewerController:(id)controller didBeginPlaybackForVisualMessage:(id)message atIndex:(long long)index {
-	if (SCIBlockVisualSeen()) return;
+- (void)visualMessageViewerController:(id)arg1 didBeginPlaybackForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
+	if ([SCIUtils getBoolPref:@"unlimited_replay"] &&
+		!dmVisualMsgsViewedButtonEnabled &&
+		![SCIExcludedThreads isActiveThreadExcluded]) {
+		return;
+	}
+
 	%orig;
 }
 
-- (void)visualMessageViewerController:(id)controller didEndPlaybackForVisualMessage:(id)message atIndex:(long long)index mediaCurrentTime:(double)time forNavType:(long long)type {
-	if (SCIBlockVisualSeen()) return;
+- (void)visualMessageViewerController:(id)arg1 didEndPlaybackForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 mediaCurrentTime:(CGFloat)arg4 forNavType:(NSInteger)arg5 {
+	if ([SCIUtils getBoolPref:@"unlimited_replay"] &&
+		!dmVisualMsgsViewedButtonEnabled &&
+		![SCIExcludedThreads isActiveThreadExcluded]) {
+		return;
+	}
+
 	%orig;
 }
 
@@ -636,11 +553,10 @@ static inline BOOL SCIBlockVisualSeen(void) {
 #pragma mark - Runtime Hooks
 
 %ctor {
-	Class cls = NSClassFromString(@"IGDirectThreadViewFeatureManager");
-	if (!cls) return;
+	Class managerClass = NSClassFromString(@"IGDirectThreadViewFeatureManager");
+	SEL sentSel = NSSelectorFromString(@"setHasSentAMessageOrUpdate:");
 
-	SEL sent = @selector(setHasSentAMessageOrUpdate:);
-	if (class_getInstanceMethod(cls, sent)) {
-		MSHookMessageEx(cls, sent, (IMP)new_setHasSent, (IMP *)&orig_setHasSent);
+	if (managerClass && class_getInstanceMethod(managerClass, sentSel)) {
+		MSHookMessageEx(managerClass, sentSel, (IMP)new_setHasSent, (IMP *)&orig_setHasSent);
 	}
 }

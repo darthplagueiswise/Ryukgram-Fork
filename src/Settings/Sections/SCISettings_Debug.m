@@ -1,5 +1,4 @@
 #import "SCISettingsSections.h"
-#import "../../SCIFileLog.h"
 
 @implementation SCITweakSettings (Section_Debug)
 
@@ -28,43 +27,6 @@
 												],
 											]
 										},
-#if SCI_FILELOG
-									@{
-											@"header": SCILocalized(@"Logging"),
-											@"footer": SCILocalized(@"Logs RyukGram's own activity to one shareable file across the app and its extensions. Off by default — turn it on, reproduce the issue, then share."),
-											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Enable file logging")
-																	   subtitle:@""
-																		  value:^BOOL{ return SCIFileLogIsEnabled(); }
-																		 action:^(BOOL on){ SCIFileLogSetEnabled(on); }],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Share log file")
-																	   subtitle:@""
-																		   icon:[SCISymbol symbolWithName:@"square.and.arrow.up"]
-																		 action:^(void) {
-													NSURL *url = SCIFileLogURL();
-													if (!url || ![NSFileManager.defaultManager fileExistsAtPath:url.path]) {
-														[SCIUtils showErrorHUDWithDescription:SCILocalized(@"Log file is empty")];
-														return;
-													}
-													UIActivityViewController *ac = [[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
-													UIViewController *top = sciTopVC();
-													if (!top) return;
-													if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-														ac.popoverPresentationController.sourceView = top.view;
-														ac.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMidY(top.view.bounds), 1, 1);
-													}
-													[top presentViewController:ac animated:YES completion:nil];
-												}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Clear log")
-																	   subtitle:@""
-																		   icon:[SCISymbol symbolWithName:@"trash"]
-																		 action:^(void) {
-													SCIFileLogClear();
-													[SCIUtils showToastForDuration:1.5 title:SCILocalized(@"Clear completed") subtitle:@""];
-												}],
-											]
-										},
-#endif
 										@{
 											@"header": @"FLEX",
 											@"rows": @[

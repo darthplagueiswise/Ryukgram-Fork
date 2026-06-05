@@ -2,130 +2,108 @@
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import <objc/runtime.h>
 #import <objc/message.h>
 
-static BOOL sciFileMenuPending;
-static __weak UIViewController *sciFileThreadVC;
-static id sciFilePickerDelegate;
-
-static inline id sciCall(id obj, SEL sel) {
-	return (obj && [obj respondsToSelector:sel]) ? ((id (*)(id, SEL))objc_msgSend)(obj, sel) : nil;
-}
-
-static BOOL sciSendFile(NSURL *url, UIViewController *vc) {
-	if (!url || !vc) return NO;
-
-	id fm = [SCIUtils getIvarForObj:vc name:"_featureManager"];
-	id fc = sciCall(fm, @selector(messageSenderFeatureController));
-	id sender = sciCall(fc, @selector(messageSender));
-	id threadKey = sciCall(vc, @selector(threadKey));
-
-	if (!sender || !threadKey) {
-		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"File sending not available")];
-		return NO;
-	}
-
-	SEL sel = @selector(sendFileWithURL:threadKey:attribution:replyMessagePk:quotedPublishedMessage:messageSentSpeedLogger:messageSentSpeedMarker:localSendSpeedLogger:localSendSpeedMarker:);
-	if (![sender respondsToSelector:sel]) {
-		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"File sending not supported")];
-		return NO;
-	}
-
-	((void (*)(id, SEL, id, id, id, id, id, id, id, id, id))objc_msgSend)(sender, sel, url, threadKey, nil, nil, nil, nil, nil, nil, nil);
-	return YES;
-}
+static BOOL sciFileMenuPending = NO;
+static __weak UIViewController *sciFileThreadVC = nil;
 
 @interface _SCIFilePickerDelegate : NSObject <UIDocumentPickerDelegate>
 @property (nonatomic, weak) UIViewController *threadVC;
 @end
 
+static _SCIFilePickerDelegate *sciFilePickerDelegate = nil;
+
 @implementation _SCIFilePickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-	(void)controller;
+    NSURL *url = urls.firstObject;
+    if (!url || !self.threadVC) return;
 
-	NSURL *url = urls.firstObject;
-	UIViewController *vc = self.threadVC;
-	sciFilePickerDelegate = nil;
+    id msgSenderFC = nil;
+    @try { msgSenderFC = [self.threadVC valueForKey:@"messageSenderFeatureController"]; } @catch (__unused id e) {}
+    if (!msgSenderFC) {
+        @try {
+            id fm = [self.threadVC valueForKey:@"featureManager"];
+            msgSenderFC = [fm valueForKey:@"messageSenderFeatureController"];
+        } @catch (__unused id e) {}
+    }
+    if (!msgSenderFC) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Message sender not found")]; return; }
 
-	if (url && vc) sciSendFile(url, vc);
-}
+    id sender = nil;
+    @try { sender = [msgSenderFC valueForKey:@"messageSender"]; } @catch (__unused id e) {}
+    if (!sender) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Send service not found")]; return; }
 
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
-	(void)controller;
-	sciFilePickerDelegate = nil;
+    SEL sendSel = NSSelectorFromString(@"sendFileWithURL:threadKey:attribution:replyMessagePk:quotedPublishedMessage:messageSentSpeedLogger:messageSentSpeedMarker:localSendSpeedLogger:localSendSpeedMarker:");
+    if (![sender respondsToSelector:sendSel]) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"File sending not supported")]; return; }
+
+    id threadKey = nil;
+    @try { threadKey = [self.threadVC valueForKey:@"threadKey"]; } @catch (__unused id e) {}
+    if (!threadKey) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"No thread key")]; return; }
+
+    typedef void (*SendFn)(id, SEL, id, id, id, id, id, id, id, id, id);
+    ((SendFn)objc_msgSend)(sender, sendSel, url, threadKey, nil, nil, nil, nil, nil, nil, nil);
 }
 
 @end
 
-static void sciShowFilePicker(UIViewController *vc) {
-	if (!vc) return;
+static void sciShowFilePicker(UIViewController *threadVC) {
+    sciFilePickerDelegate = [_SCIFilePickerDelegate new];
+    sciFilePickerDelegate.threadVC = threadVC;
 
-	_SCIFilePickerDelegate *delegate = [_SCIFilePickerDelegate new];
-	delegate.threadVC = vc;
-	sciFilePickerDelegate = delegate;
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-	UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
-#pragma clang diagnostic pop
-
-	picker.delegate = delegate;
-	picker.allowsMultipleSelection = NO;
-	[vc presentViewController:picker animated:YES completion:nil];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
+        initWithDocumentTypes:@[@"public.data"] inMode:UIDocumentPickerModeImport];
+    picker.delegate = sciFilePickerDelegate;
+    picker.allowsMultipleSelection = NO;
+    [threadVC presentViewController:picker animated:YES completion:nil];
 }
 
-%hook IGDirectThreadViewController
-
-- (void)viewDidDisappear:(BOOL)animated {
-	%orig;
-	if (sciFileThreadVC == (UIViewController *)self) sciFileThreadVC = nil;
-}
-
-- (void)composerOverflowButtonMenuWillPrepareExpandWithPlusButton:(id)plusButton {
-	%orig;
-
-	if (![SCIUtils getBoolPref:@"send_file"]) return;
-
-	sciFileThreadVC = (UIViewController *)self;
-	sciFileMenuPending = YES;
-}
-
-%end
+// MARK: - Plus menu injection
 
 %hook IGDSMenu
 
 - (id)initWithMenuItems:(NSArray *)items edr:(BOOL)edr headerLabelText:(id)header {
-	if (!sciFileMenuPending) return %orig;
+    if (![SCIUtils getBoolPref:@"send_file"] || !sciFileMenuPending) return %orig;
+    sciFileMenuPending = NO;
 
-	sciFileMenuPending = NO;
-	if (![SCIUtils getBoolPref:@"send_file"]) return %orig;
+    for (id item in items) {
+        if ([item respondsToSelector:@selector(title)]) {
+            id title = [item valueForKey:@"title"];
+            if ([title isKindOfClass:[NSString class]] && [title isEqualToString:SCILocalized(@"Send File")]) return %orig;
+        }
+    }
 
-	NSString *title = SCILocalized(@"Send File");
+    Class itemClass = NSClassFromString(@"IGDSMenuItem");
+    if (!itemClass) return %orig;
 
-	for (id item in items) {
-		id itemTitle = sciCall(item, @selector(title));
-		if ([itemTitle isKindOfClass:NSString.class] && [itemTitle isEqualToString:title]) return %orig;
-	}
+    UIImage *img = [[UIImage systemImageNamed:@"doc"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    void (^handler)(void) = ^{
+        if (sciFileThreadVC) sciShowFilePicker(sciFileThreadVC);
+    };
 
-	Class cls = NSClassFromString(@"IGDSMenuItem");
-	SEL sel = @selector(initWithTitle:image:handler:);
-	if (!cls || ![cls instancesRespondToSelector:sel]) return %orig;
+    SEL initSel = @selector(initWithTitle:image:handler:);
+    if (![itemClass instancesRespondToSelector:initSel]) return %orig;
 
-	UIImage *image = [[UIImage systemImageNamed:@"doc"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    typedef id (*InitFn)(id, SEL, id, id, id);
+    id fileItem = ((InitFn)objc_msgSend)([itemClass alloc], initSel, SCILocalized(@"Send File"), img, handler);
+    if (!fileItem) return %orig;
 
-	void (^handler)(void) = ^{
-		UIViewController *vc = sciFileThreadVC;
-		if (vc && vc.view.window) sciShowFilePicker(vc);
-	};
+    NSMutableArray *newItems = [NSMutableArray arrayWithObject:fileItem];
+    [newItems addObjectsFromArray:items];
+    return %orig(newItems, edr, header);
+}
 
-	id fileItem = ((id (*)(id, SEL, id, id, id))objc_msgSend)([cls alloc], sel, title, image, handler);
-	if (!fileItem) return %orig;
+%end
 
-	NSMutableArray *newItems = [NSMutableArray arrayWithObject:fileItem];
-	if (items.count) [newItems addObjectsFromArray:items];
+// MARK: - Thread VC hook
 
-	return %orig(newItems, edr, header);
+%hook IGDirectThreadViewController
+
+- (void)composerOverflowButtonMenuWillPrepareExpandWithPlusButton:(id)plusButton {
+    %orig;
+    if (![SCIUtils getBoolPref:@"send_file"]) return;
+    sciFileThreadVC = self;
+    sciFileMenuPending = YES;
 }
 
 %end

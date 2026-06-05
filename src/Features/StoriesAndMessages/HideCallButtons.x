@@ -1,23 +1,15 @@
 // Hide voice/video call buttons in DM thread header.
 
 #import "../../Utils.h"
-#import "../../CallButtonHelpers.h"
 
-static BOOL sciIsCallButton(UIView *b) {
-    return [b isKindOfClass:NSClassFromString(@"IGDirectCallButton")] ||
-           [b isKindOfClass:NSClassFromString(@"IGDirectJointCallButton")];
-}
+// IGDirectThreadCallButtonsCoordinator / IGDirectCallButton / IGNavigationBar
+// declared in InstagramHeaders.h
 
 static BOOL sciShouldHide(UIView *b) {
-    if (!sciIsCallButton(b)) return NO;
-    BOOL hideA = [SCIUtils getBoolPref:@"hide_voice_call_button"];
-    BOOL hideV = [SCIUtils getBoolPref:@"hide_video_call_button"];
-    if (hideA && hideV) return YES;
-    NSString *axId = b.accessibilityIdentifier ?: @"";
-    if ([axId isEqualToString:@"audio-call"] || [axId isEqualToString:@"rtc-audio-call-button"])
-        return hideA;
-    if ([axId isEqualToString:@"video-chat"] || [axId isEqualToString:@"rtc-video-chat-button"])
-        return hideV;
+    if (![b isKindOfClass:NSClassFromString(@"IGDirectCallButton")]) return NO;
+    NSString *axId = b.accessibilityIdentifier;
+    if ([axId isEqualToString:@"audio-call"]) return [SCIUtils getBoolPref:@"hide_voice_call_button"];
+    if ([axId isEqualToString:@"video-chat"]) return [SCIUtils getBoolPref:@"hide_video_call_button"];
     return NO;
 }
 
@@ -34,24 +26,6 @@ static BOOL sciPlatterContainsHiddenButton(UIView *platter) {
 
 %group HideCallButtonsGroup
 
-// New A/B: a single consolidated calling button opens the call-type menu. When
-// both types are hidden, drop it from the right bar array so nothing is rendered.
-%hook IGDirectThreadViewRightBarButtonsFeatureController
-- (id)createRightBarButtonItems {
-    NSArray *items = %orig;
-    if (!([SCIUtils getBoolPref:@"hide_voice_call_button"] &&
-          [SCIUtils getBoolPref:@"hide_video_call_button"]))
-        return items;
-    if (![items isKindOfClass:[NSArray class]]) return items;
-    Ivar iv = class_getInstanceVariable([self class], "_consolidatedCallingButton");
-    id callBtn = iv ? object_getIvar(self, iv) : nil;
-    if (!callBtn || ![items containsObject:callBtn]) return items;
-    NSMutableArray *out = [items mutableCopy];
-    [out removeObject:callBtn];
-    return out;
-}
-%end
-
 // Block taps in case a hidden button still receives hit-test events during transitions.
 %hook IGDirectThreadCallButtonsCoordinator
 - (void)_didTapAudioButton:(id)arg1 {
@@ -62,26 +36,9 @@ static BOOL sciPlatterContainsHiddenButton(UIView *platter) {
     if ([SCIUtils getBoolPref:@"hide_video_call_button"]) return;
     %orig;
 }
-- (void)_didTapButtonWithCallType:(long long)type {
-    BOOL resolved = NO;
-    BOOL isVideo = sciCallTypeIsVideo(self, type, &resolved);
-    BOOL hidden = isVideo ? [SCIUtils getBoolPref:@"hide_video_call_button"]
-                          : [SCIUtils getBoolPref:@"hide_voice_call_button"];
-    if (resolved && hidden) return;
-    %orig;
-}
-// Menu-entry filtering for the hidden type lives in CallConfirm.x's buttonMenuItems.
 %end
 
 %hook IGDirectCallButton
-- (void)didMoveToWindow {
-    %orig;
-    if (!self.window) return;
-    if (sciShouldHide((UIView *)self)) self.hidden = YES;
-}
-%end
-
-%hook IGDirectJointCallButton
 - (void)didMoveToWindow {
     %orig;
     if (!self.window) return;

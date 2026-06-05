@@ -1,6 +1,7 @@
 #import "SCIDateFormatPickerVC.h"
 #import "../Utils.h"
 #import "../UI/SCIOptionSheet.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/General/SCIDateFormatEntries.h"
 
 static NSString *const kFmtKey = @"feed_date_format";
@@ -110,7 +111,7 @@ static NSString *sciThresholdText(void) {
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Date format");
-	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+	SCIApplyGlassBackdropToViewController(self);
 
 	_tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	_tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -169,6 +170,7 @@ static NSString *sciThresholdText(void) {
 - (UITableViewCell *)formatCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"format"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"format"];
+	SCIStyleCellForGlass(cell);
 
 	NSString *key = sciDateFormatOptions()[indexPath.row][0];
 	NSString *current = [SCIUtils getStringPref:kFmtKey];
@@ -303,7 +305,7 @@ static NSString *sciThresholdText(void) {
 					defaultsKey:kCombineKey
 						options:options
 					   onChange:^(__unused NSString *value) {
-		[tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+		[tableView reloadData];
 	}];
 }
 
@@ -327,7 +329,7 @@ static NSString *sciThresholdText(void) {
 		if (days > 365) days = 365;
 
 		[NSUserDefaults.standardUserDefaults setInteger:days forKey:kThresholdKey];
-		[tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+		[tableView reloadData];
 	}]];
 
 	[self presentViewController:alert animated:YES completion:nil];

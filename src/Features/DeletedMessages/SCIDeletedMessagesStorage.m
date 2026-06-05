@@ -142,75 +142,6 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 	return out ?: @[];
 }
 
-+ (NSArray<SCIDeletedMessage *> *)messagesForThreadId:(NSString *)threadId ownerPK:(NSString *)ownerPK {
-	if (!threadId.length) return @[];
-
-	__block NSMutableArray *out = nil;
-	sciSync(^{
-		out = [NSMutableArray array];
-		for (SCIDeletedMessage *m in sciRead(ownerPK)) {
-			if ([m.threadId isEqualToString:threadId]) [out addObject:m];
-		}
-	});
-	return out ?: @[];
-}
-
-+ (NSArray<SCIDeletedMessageGroup *> *)groupedByThreadForOwnerPK:(NSString *)ownerPK {
-	__block NSArray *result = nil;
-
-	sciSync(^{
-		NSMutableDictionary<NSString *, NSMutableArray *> *map = [NSMutableDictionary dictionary];
-		NSMutableArray<NSString *> *order = [NSMutableArray array];
-
-		for (SCIDeletedMessage *m in sciRead(ownerPK)) {
-			// Legacy records with no threadId stay keyed by sender.
-			NSString *key = m.threadId.length ? [@"t:" stringByAppendingString:m.threadId]
-											  : (m.senderPk.length ? [@"s:" stringByAppendingString:m.senderPk] : nil);
-			if (!key) continue;
-			if (!map[key]) { map[key] = [NSMutableArray array]; [order addObject:key]; }
-			[map[key] addObject:m];
-		}
-
-		NSMutableArray *groups = [NSMutableArray arrayWithCapacity:map.count];
-		for (NSString *key in order) {
-			NSArray<SCIDeletedMessage *> *msgs = map[key];
-			SCIDeletedMessage *latest = msgs.firstObject;
-			if (!latest) continue;
-
-			BOOL isGroup = NO;
-			NSString *threadTitle = nil, *threadAvatar = nil;
-			for (SCIDeletedMessage *m in msgs) {
-				if (m.isGroup) isGroup = YES;
-				if (!threadTitle.length && m.threadTitle.length) threadTitle = m.threadTitle;
-				if (!threadAvatar.length && m.threadAvatarURL.length) threadAvatar = m.threadAvatarURL;
-			}
-
-			SCIDeletedMessageGroup *g = [SCIDeletedMessageGroup new];
-			g.threadId = latest.threadId;
-			g.isGroup = isGroup;
-			g.threadTitle = threadTitle;
-			g.threadAvatarURL = threadAvatar;
-			g.messages = msgs;
-
-			// 1-1: carry the other party's identity so the row renders as before.
-			g.senderPk = latest.senderPk;
-			g.senderUsername = latest.senderUsername;
-			g.senderFullName = latest.senderFullName;
-			g.senderProfilePicURL = latest.senderProfilePicURL;
-
-			[groups addObject:g];
-		}
-
-		[groups sortUsingComparator:^NSComparisonResult(SCIDeletedMessageGroup *a, SCIDeletedMessageGroup *b) {
-			return [(b.lastDeletedAt ?: NSDate.distantPast) compare:(a.lastDeletedAt ?: NSDate.distantPast)];
-		}];
-
-		result = groups;
-	});
-
-	return result ?: @[];
-}
-
 + (NSArray<SCIDeletedMessageGroup *> *)groupedBySenderForOwnerPK:(NSString *)ownerPK {
 	__block NSArray *result = nil;
 
@@ -291,10 +222,6 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 }
 
 + (BOOL)applySenderInfo:(NSDictionary *)info forSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK {
-	return [self applySenderInfo:info forSenderPK:senderPK ownerPK:ownerPK overwrite:NO];
-}
-
-+ (BOOL)applySenderInfo:(NSDictionary *)info forSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK overwrite:(BOOL)overwrite {
 	if (!senderPK.length || ![info isKindOfClass:NSDictionary.class]) return NO;
 
 	NSString *u = [info[@"username"] isKindOfClass:NSString.class] ? info[@"username"] : nil;
@@ -306,15 +233,15 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 		for (SCIDeletedMessage *m in list) {
 			if (![m.senderPk isEqualToString:senderPK]) continue;
 
-			if (u.length && (overwrite ? ![u isEqualToString:m.senderUsername] : !m.senderUsername.length)) {
+			if (u.length && !m.senderUsername.length) {
 				m.senderUsername = u;
 				*changed = YES;
 			}
-			if (fn.length && (overwrite ? ![fn isEqualToString:m.senderFullName] : !m.senderFullName.length)) {
+			if (fn.length && !m.senderFullName.length) {
 				m.senderFullName = fn;
 				*changed = YES;
 			}
-			if (p.length && (overwrite ? ![p isEqualToString:m.senderProfilePicURL] : !m.senderProfilePicURL.length)) {
+			if (p.length && !m.senderProfilePicURL.length) {
 				m.senderProfilePicURL = p;
 				*changed = YES;
 			}
@@ -337,53 +264,15 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 }
 
 + (void)deleteMessagesForSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK {
-	[self deleteMessagesForSenderPK:senderPK ownerPK:ownerPK threadlessOnly:NO];
-}
-
-+ (void)deleteMessagesForSenderPK:(NSString *)senderPK ownerPK:(NSString *)ownerPK threadlessOnly:(BOOL)threadlessOnly {
 	if (!senderPK.length) return;
 
 	sciRewrite(ownerPK, YES, ^(NSMutableArray<SCIDeletedMessage *> *list, BOOL *changed) {
 		for (NSInteger i = (NSInteger)list.count - 1; i >= 0; i--) {
 			SCIDeletedMessage *m = list[i];
 			if (![m.senderPk isEqualToString:senderPK]) continue;
-			if (threadlessOnly && m.threadId.length) continue;  // don't touch thread-grouped rows
 			sciRemoveFiles(m, ownerPK);
 			[list removeObjectAtIndex:(NSUInteger)i];
 			*changed = YES;
-		}
-	});
-}
-
-+ (void)deleteMessagesForThreadId:(NSString *)threadId ownerPK:(NSString *)ownerPK {
-	if (!threadId.length) return;
-
-	sciRewrite(ownerPK, YES, ^(NSMutableArray<SCIDeletedMessage *> *list, BOOL *changed) {
-		for (NSInteger i = (NSInteger)list.count - 1; i >= 0; i--) {
-			SCIDeletedMessage *m = list[i];
-			if (![m.threadId isEqualToString:threadId]) continue;
-			sciRemoveFiles(m, ownerPK);
-			[list removeObjectAtIndex:(NSUInteger)i];
-			*changed = YES;
-		}
-	});
-}
-
-+ (BOOL)applyThreadInfo:(NSDictionary *)info forThreadId:(NSString *)threadId ownerPK:(NSString *)ownerPK {
-	if (!threadId.length || ![info isKindOfClass:NSDictionary.class]) return NO;
-
-	NSNumber *grp = [info[@"is_group"] isKindOfClass:NSNumber.class] ? info[@"is_group"] : nil;
-	NSString *title = [info[@"thread_title"] isKindOfClass:NSString.class] ? info[@"thread_title"] : nil;
-	NSString *avatar = [info[@"thread_avatar_url"] isKindOfClass:NSString.class] ? info[@"thread_avatar_url"] : nil;
-	if (!grp && !title.length && !avatar.length) return NO;
-
-	return sciRewrite(ownerPK, YES, ^(NSMutableArray<SCIDeletedMessage *> *list, BOOL *changed) {
-		for (SCIDeletedMessage *m in list) {
-			if (![m.threadId isEqualToString:threadId]) continue;
-
-			if (grp && m.isGroup != grp.boolValue) { m.isGroup = grp.boolValue; *changed = YES; }
-			if (title.length && ![title isEqualToString:m.threadTitle]) { m.threadTitle = title; *changed = YES; }
-			if (avatar.length && ![avatar isEqualToString:m.threadAvatarURL]) { m.threadAvatarURL = avatar; *changed = YES; }
 		}
 	});
 }

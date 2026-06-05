@@ -122,7 +122,7 @@ static NSHashTable<SCILockSurfaceGuard *> *sciAllGuards(void) {
     UIView *cover = [UIView new];
     cover.frame = targetHost.bounds;
     cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    cover.backgroundColor = SCIGlassBackdropColor();
+    cover.backgroundColor = [SCIPopupChrome backgroundColor];
 
     UIStackView *stack = [UIStackView new];
     stack.translatesAutoresizingMaskIntoConstraints = NO;

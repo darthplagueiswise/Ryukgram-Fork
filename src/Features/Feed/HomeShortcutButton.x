@@ -12,14 +12,6 @@ static const void *kSCIHomeShortcutSingleActionKey = &kSCIHomeShortcutSingleActi
 
 static CGFloat const kSCIHomeShortcutPointSize = 20.0;
 
-// Live headers, weak — used to push config changes without a restart.
-static NSHashTable<UIView *> *sciHomeShortcutHeaders(void) {
-	static NSHashTable *hosts;
-	static dispatch_once_t once;
-	dispatch_once(&once, ^{ hosts = [NSHashTable weakObjectsHashTable]; });
-	return hosts;
-}
-
 static UIView *sciIvarView(id obj, const char *name) {
 	Ivar ivar = class_getInstanceVariable([obj class], name);
 	id view = ivar ? object_getIvar(obj, ivar) : nil;
@@ -153,7 +145,6 @@ static NSArray *sciButtonsByAddingShortcut(UIView *header, NSArray *buttons) {
 %hook IGHomeFeedHeaderView
 
 - (NSArray *)_visibleRightButtons {
-	[sciHomeShortcutHeaders() addObject:(UIView *)self];
 	return sciButtonsByAddingShortcut((UIView *)self, %orig);
 }
 
@@ -172,16 +163,5 @@ static NSArray *sciButtonsByAddingShortcut(UIView *header, NSArray *buttons) {
 %ctor {
 	if ([SCIUtils getBoolPref:kSCIHomeShortcutEnabledPrefKey]) {
 		%init(SCIHomeShortcutButton);
-
-		[NSNotificationCenter.defaultCenter addObserverForName:SCIHomeShortcutConfigDidChangeNotification
-														object:nil
-														 queue:NSOperationQueue.mainQueue
-													usingBlock:^(__unused NSNotification *note) {
-			for (UIView *header in sciHomeShortcutHeaders().allObjects) {
-				if (!header.superview) continue;
-				objc_setAssociatedObject(header, kSCIHomeShortcutSigKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-				[header setNeedsLayout];
-			}
-		}];
 	}
 }

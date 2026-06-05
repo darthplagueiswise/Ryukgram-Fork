@@ -17,6 +17,7 @@
 #import "../InstagramHeaders.h"
 #import "../ActionButton/SCIMediaViewer.h"
 #import "../ActionButton/SCIMediaActions.h"
+#import "../Settings/SCISearchBarStyler.h"
 #import "SCIAssetUtils.h"
 #import "SCIGalleryPaths.h"
 #import "../Utils.h"
@@ -155,8 +156,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	[[SCINotificationCenter shared] setDefaultTapProvider:^void (^(void))(void) {
 		if (![SCIUtils getBoolPref:@"sci_gallery_enabled"]) return nil;
 		return ^{ [SCIGalleryViewController presentGallery]; };
-	} ownerVCClass:[SCIGalleryViewController class]
-	  forAction:SCI_NOTIF_GALLERY_SAVE];
+	} forAction:SCI_NOTIF_GALLERY_SAVE];
 }
 
 #pragma mark - Presentation
@@ -221,7 +221,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	[[NSNotificationCenter defaultCenter] addObserver:self
 											 selector:@selector(handleGalleryPreferencesChanged:)
@@ -389,6 +389,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	controller.hidesNavigationBarDuringPresentation = NO;
 	controller.searchResultsUpdater = self;
 	controller.searchBar.placeholder = SCILocalized(@"Search");
+	[SCISearchBarStyler styleSearchBar:controller.searchBar];
 
 	self.searchController = controller;
 	self.navigationItem.searchController = controller;
@@ -868,6 +869,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	request.propertiesToFetch = @[@"sourceUsername", @"identifier", @"dateAdded"];
 	request.predicate = [NSPredicate predicateWithFormat:@"sourceUsername != nil AND sourceUsername != %@", @""];
 	request.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:NO]];
+	request.fetchBatchSize = 400;
 
 	NSArray<NSDictionary *> *rows = [context executeFetchRequest:request error:nil];
 	NSMutableDictionary<NSString *, NSNumber *> *counts = [NSMutableDictionary dictionary];
@@ -920,6 +922,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	request.propertiesToFetch = @[@"folderPath", @"identifier", @"dateAdded"];
 	request.predicate = [NSPredicate predicateWithFormat:@"folderPath != nil AND folderPath != %@", @""];
 	request.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:NO]];
+	request.fetchBatchSize = 400;
 
 	NSArray<NSDictionary *> *rows = [context executeFetchRequest:request error:nil];
 	NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *thumbs = [NSMutableDictionary dictionary];
@@ -972,6 +975,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	request.resultType = NSDictionaryResultType;
 	request.propertiesToFetch = @[@"folderPath"];
 	request.predicate = [NSPredicate predicateWithFormat:@"folderPath != nil AND folderPath != ''"];
+	request.fetchBatchSize = 200;
 
 	NSArray<NSDictionary *> *rows = [context executeFetchRequest:request error:nil];
 	NSMutableDictionary<NSString *, NSNumber *> *counts = [NSMutableDictionary dictionary];

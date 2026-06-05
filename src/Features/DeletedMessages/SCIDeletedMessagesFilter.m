@@ -19,14 +19,13 @@
 	c.customStart = self.customStart;
 	c.customEnd = self.customEnd;
 	c.sort = self.sort;
-	c.ephemeralOnly = self.ephemeralOnly;
 	return c;
 }
 
 - (BOOL)hasKindFilter { return self.kinds.count > 0; }
 
 - (BOOL)isEmpty {
-	return self.searchText.length == 0 && !self.hasKindFilter && self.dateRange == SCIDMDateRangeAll && !self.ephemeralOnly;
+	return self.searchText.length == 0 && !self.hasKindFilter && self.dateRange == SCIDMDateRangeAll;
 }
 
 - (BOOL)matchesKind:(SCIDeletedMessageKind)kind {
@@ -140,7 +139,6 @@ static void sciSortGroups(NSMutableArray<SCIDeletedMessageGroup *> *groups, SCID
 	NSMutableArray *out = [NSMutableArray arrayWithCapacity:messages.count];
 
 	for (SCIDeletedMessage *m in messages) {
-		if (self.ephemeralOnly && !m.isEphemeral) continue;
 		if (hasKind && ![self.kinds containsObject:@(m.kind)]) continue;
 		if (![self message:m matchesStart:start end:end]) continue;
 		if (![self message:m matchesSearch:q]) continue;
@@ -162,17 +160,13 @@ static void sciSortGroups(NSMutableArray<SCIDeletedMessageGroup *> *groups, SCID
 		NSArray *filtered = [self apply:g.messages];
 
 		if (!filtered.count && groupNameSearchOnly) {
-			BOOL hit = sciContains(g.senderUsername, q) || sciContains(g.senderFullName, q) || sciContains(g.threadTitle, q);
+			BOOL hit = sciContains(g.senderUsername, q) || sciContains(g.senderFullName, q);
 			if (hit) filtered = g.messages;
 		}
 
 		if (!filtered.count) continue;
 
 		SCIDeletedMessageGroup *copy = [SCIDeletedMessageGroup new];
-		copy.threadId = g.threadId;
-		copy.isGroup = g.isGroup;
-		copy.threadTitle = g.threadTitle;
-		copy.threadAvatarURL = g.threadAvatarURL;
 		copy.senderPk = g.senderPk;
 		copy.senderUsername = g.senderUsername;
 		copy.senderFullName = g.senderFullName;

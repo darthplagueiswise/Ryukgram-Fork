@@ -1,5 +1,6 @@
 #import "SCIMediaChrome.h"
 #import "SCIAssetUtils.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 CGFloat const SCIMediaChromeTopBarContentHeight = 44.0;
@@ -11,11 +12,8 @@ static CGFloat const kSCIMediaChromeFloatingCornerRadius = 26.0;
 static CGFloat const kSCIMediaChromeHorizontalMargin = 16.0;
 static CGFloat const kSCIMediaChromeBottomGap = 12.0;
 
-UIBlurEffect *SCIMediaChromeBlurEffect(void) {
-	if (@available(iOS 13.0, *)) {
-		return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
-	}
-	return [UIBlurEffect effectWithStyle:UIBlurEffectStyleProminent];
+UIVisualEffect *SCIMediaChromeGlassEffect(void) {
+	return SCIRealLiquidGlassEffect(NO, YES, nil);
 }
 
 void SCIApplyMediaChromeNavigationBar(UINavigationBar *bar) {
@@ -23,7 +21,7 @@ void SCIApplyMediaChromeNavigationBar(UINavigationBar *bar) {
 	if (@available(iOS 13.0, *)) {
 		UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
 		[appearance configureWithTransparentBackground];
-		appearance.backgroundEffect = SCIMediaChromeBlurEffect();
+		appearance.backgroundEffect = SCIMediaChromeGlassEffect();
 		appearance.shadowColor = [UIColor clearColor];
 		appearance.shadowImage = [UIImage new];
 		bar.standardAppearance = appearance;
@@ -65,45 +63,30 @@ UIBarButtonItem *SCIMediaChromeTopBarButtonItem(NSString *resourceName, id targe
 	return item;
 }
 
-// Floating capsule that drifts above the safe-area bottom inset. Uses an
-// ultra-thin material with a hairline border + soft drop shadow — visually
-// distinct from upstream's edge-to-edge blurred bar.
 UIView *SCIMediaChromeInstallBottomBar(UIView *hostView) {
 	UIView *bar = [[UIView alloc] initWithFrame:CGRectZero];
 	bar.translatesAutoresizingMaskIntoConstraints = NO;
 	bar.clipsToBounds = NO;
 	bar.layer.shadowColor = [UIColor blackColor].CGColor;
-	bar.layer.shadowOpacity = 0.18;
-	bar.layer.shadowRadius = 14.0;
-	bar.layer.shadowOffset = CGSizeMake(0.0, 6.0);
+	bar.layer.shadowOpacity = 0.0;
+	bar.layer.shadowRadius = 0.0;
+	bar.layer.shadowOffset = CGSizeZero;
 	[hostView addSubview:bar];
 
-	UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:SCIMediaChromeBlurEffect()];
-	blur.translatesAutoresizingMaskIntoConstraints = NO;
-	blur.clipsToBounds = YES;
-	blur.layer.cornerRadius = kSCIMediaChromeFloatingCornerRadius;
-	blur.layer.cornerCurve = kCACornerCurveContinuous;
-	blur.layer.borderWidth = 0.5;
-	blur.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-	[bar addSubview:blur];
-
-	// Subtle inner highlight along the top edge (one-pixel hairline).
-	UIView *highlight = [[UIView alloc] init];
-	highlight.translatesAutoresizingMaskIntoConstraints = NO;
-	highlight.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.10];
-	highlight.layer.cornerRadius = 0.5;
-	[blur.contentView addSubview:highlight];
+	UIVisualEffectView *glass = [[UIVisualEffectView alloc] initWithEffect:SCIMediaChromeGlassEffect()];
+	glass.translatesAutoresizingMaskIntoConstraints = NO;
+	glass.clipsToBounds = YES;
+	glass.layer.cornerRadius = kSCIMediaChromeFloatingCornerRadius;
+	glass.layer.cornerCurve = kCACornerCurveContinuous;
+	glass.layer.borderWidth = 0.0;
+	glass.layer.borderColor = UIColor.clearColor.CGColor;
+	[bar addSubview:glass];
 
 	[NSLayoutConstraint activateConstraints:@[
-		[blur.topAnchor constraintEqualToAnchor:bar.topAnchor],
-		[blur.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor],
-		[blur.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
-		[blur.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
-
-		[highlight.topAnchor constraintEqualToAnchor:blur.contentView.topAnchor constant:1.0],
-		[highlight.leadingAnchor constraintEqualToAnchor:blur.contentView.leadingAnchor constant:18.0],
-		[highlight.trailingAnchor constraintEqualToAnchor:blur.contentView.trailingAnchor constant:-18.0],
-		[highlight.heightAnchor constraintEqualToConstant:1.0 / UIScreen.mainScreen.scale],
+		[glass.topAnchor constraintEqualToAnchor:bar.topAnchor],
+		[glass.bottomAnchor constraintEqualToAnchor:bar.bottomAnchor],
+		[glass.leadingAnchor constraintEqualToAnchor:bar.leadingAnchor],
+		[glass.trailingAnchor constraintEqualToAnchor:bar.trailingAnchor],
 	]];
 
 	[NSLayoutConstraint activateConstraints:@[
@@ -133,8 +116,8 @@ UIStackView *SCIMediaChromeInstallBottomRow(UIView *bottomBar, NSArray<UIView *>
 	stack.distribution = UIStackViewDistributionFillEqually;
 	stack.alignment = UIStackViewAlignmentCenter;
 
-	UIVisualEffectView *blur = (UIVisualEffectView *)bottomBar.subviews.firstObject;
-	UIView *host = [blur isKindOfClass:UIVisualEffectView.class] ? blur.contentView : bottomBar;
+	UIVisualEffectView *glass = (UIVisualEffectView *)bottomBar.subviews.firstObject;
+	UIView *host = [glass isKindOfClass:UIVisualEffectView.class] ? glass.contentView : bottomBar;
 	[host addSubview:stack];
 
 	[NSLayoutConstraint activateConstraints:@[

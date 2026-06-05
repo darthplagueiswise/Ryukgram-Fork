@@ -10,41 +10,28 @@ static BOOL sciMsgOnly(void) { return [SCIUtils getBoolPref:@"messages_only"]; }
 static BOOL sciMsgOnlyHideTabBar(void) {
     return sciMsgOnly() && [SCIUtils getBoolPref:@"messages_only_hide_tabbar"];
 }
-static BOOL sciMsgOnlyHideSearch(void) {
-    return sciMsgOnly() && [SCIUtils getBoolPref:@"messages_only_hide_search"];
-}
 
 %hook IGTabBarController
 
 // Block tab creation entirely so they never enter the buttons array (no gaps).
 - (void)_createAndConfigureTimelineButtonIfNeeded   { if (sciMsgOnly()) return; %orig; }
 - (void)_createAndConfigureReelsButtonIfNeeded      { if (sciMsgOnly()) return; %orig; }
-- (void)_createAndConfigureExploreButtonIfNeeded    { if (sciMsgOnlyHideSearch()) return; %orig; }
+- (void)_createAndConfigureExploreButtonIfNeeded    { if (sciMsgOnly()) return; %orig; }
 - (void)_createAndConfigureCameraButtonIfNeeded     { if (sciMsgOnly()) return; %orig; }
 - (void)_createAndConfigureDynamicTabButtonIfNeeded { if (sciMsgOnly()) return; %orig; }
 - (void)_createAndConfigureNewsButtonIfNeeded       { if (sciMsgOnly()) return; %orig; }
 - (void)_createAndConfigureStreamsButtonIfNeeded    { if (sciMsgOnly()) return; %orig; }
 
-// LaunchTab forces the content; we just sync the indicator once laid out.
+// Force initial selection to inbox once after the tab bar has fully laid out.
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     static BOOL launched = NO;
     if (sciMsgOnly() && !launched) {
         launched = YES;
-        ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciSyncTabBarSelection:), @"inbox");
+        SEL s = NSSelectorFromString(@"_directInboxButtonPressed");
+        if ([self respondsToSelector:s])
+            ((void(*)(id, SEL))objc_msgSend)(self, s);
     }
-}
-
-// Keep the indicator in step with the selected surface (incl. IG's late restore).
-- (void)setSelectedTabBarSurface:(id)surface animated:(BOOL)animated animateIndicator:(BOOL)animateIndicator {
-    %orig;
-    if (!sciMsgOnly()) return;
-    id cur = [self respondsToSelector:@selector(selectedTabBarSurface)] ? [self selectedTabBarSurface] : surface;
-    NSString *str = [cur respondsToSelector:@selector(tabStringFromSurfaceIntent)] ? [cur tabStringFromSurfaceIntent] : nil;
-    NSString *which = @"inbox";
-    if ([str isEqualToString:@"PROFILE"]) which = @"profile";
-    else if ([str isEqualToString:@"SEARCH"]) which = @"explore";
-    ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciSyncTabBarSelection:), which);
 }
 
 - (void)viewDidLayoutSubviews {
@@ -68,34 +55,16 @@ static BOOL sciMsgOnlyHideSearch(void) {
     Class c = [self class];
     Ivar ibIv = class_getInstanceVariable(c, "_directInboxButton");
     Ivar pbIv = class_getInstanceVariable(c, "_profileButton");
-    Ivar ebIv = class_getInstanceVariable(c, "_exploreButton");
     UIButton *inbox = ibIv ? object_getIvar(self, ibIv) : nil;
     UIButton *profile = pbIv ? object_getIvar(self, pbIv) : nil;
-    UIButton *explore = ebIv ? object_getIvar(self, ebIv) : nil;
-
-    UIButton *active = inbox;
-    if ([which isEqualToString:@"profile"]) active = profile;
-    else if ([which isEqualToString:@"explore"]) active = explore;
-
-    if ([inbox respondsToSelector:@selector(setSelected:)]) inbox.selected = (active == inbox);
-    if ([profile respondsToSelector:@selector(setSelected:)]) profile.selected = (active == profile);
-    if ([explore respondsToSelector:@selector(setSelected:)]) explore.selected = (active == explore);
+    BOOL profileActive = [which isEqualToString:@"profile"];
+    if ([inbox respondsToSelector:@selector(setSelected:)]) inbox.selected = !profileActive;
+    if ([profile respondsToSelector:@selector(setSelected:)]) profile.selected = profileActive;
 
     // No-op on classic tab bar (selector only exists on IGLiquidGlassInteractiveTabBar).
-    // Indicator index is visual order — derive from on-screen x, not the _buttons array.
     Ivar tbIv = class_getInstanceVariable(c, "_tabBar");
     id tabBar = tbIv ? object_getIvar(self, tbIv) : nil;
-    NSMutableArray<UIButton *> *ordered = [NSMutableArray array];
-    for (UIButton *b in @[ explore ?: NSNull.null, inbox ?: NSNull.null, profile ?: NSNull.null ]) {
-        if ([b isKindOfClass:[UIButton class]] && b.window) [ordered addObject:b];
-    }
-    [ordered sortUsingComparator:^NSComparisonResult(UIButton *a, UIButton *b) {
-        CGFloat xa = [a convertRect:a.bounds toView:nil].origin.x;
-        CGFloat xb = [b convertRect:b.bounds toView:nil].origin.x;
-        return xa < xb ? NSOrderedAscending : (xa > xb ? NSOrderedDescending : NSOrderedSame);
-    }];
-    NSInteger idx = active ? [ordered indexOfObjectIdenticalTo:active] : NSNotFound;
-    if (idx == NSNotFound) idx = 0;
+    NSInteger idx = profileActive ? 1 : 0;
     SEL setIdx = NSSelectorFromString(@"setSelectedTabBarItemIndex:animateIndicator:");
     if ([tabBar respondsToSelector:setIdx])
         ((void(*)(id, SEL, NSInteger, BOOL))objc_msgSend)(tabBar, setIdx, idx, YES);
@@ -110,11 +79,6 @@ static BOOL sciMsgOnlyHideSearch(void) {
     %orig;
     if (sciMsgOnly())
         ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciSyncTabBarSelection:), @"profile");
-}
-- (void)_exploreButtonPressed {
-    %orig;
-    if (sciMsgOnly())
-        ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciSyncTabBarSelection:), @"explore");
 }
 
 %end

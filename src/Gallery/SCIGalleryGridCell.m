@@ -19,7 +19,6 @@ static CGFloat const kSCIGalleryGridInfoHeight = 26.0;
 @property (nonatomic, strong) UIImageView *selectionBadge;
 
 @property (nonatomic, strong) UIView *infoOverlay;
-@property (nonatomic, strong) CAGradientLayer *infoGradient;
 @property (nonatomic, strong) UIImageView *sourceIcon;
 @property (nonatomic, strong) UILabel *infoLabel;
 
@@ -64,14 +63,7 @@ static CGFloat const kSCIGalleryGridInfoHeight = 26.0;
 	self.infoOverlay.hidden = YES;
 	[self.contentView addSubview:self.infoOverlay];
 
-	self.infoGradient = CAGradientLayer.layer;
-	self.infoGradient.colors = @[
-		(id)UIColor.clearColor.CGColor,
-		(id)[UIColor.blackColor colorWithAlphaComponent:0.65].CGColor,
-	];
-	self.infoGradient.startPoint = CGPointMake(0.5, 0.0);
-	self.infoGradient.endPoint = CGPointMake(0.5, 1.0);
-	[self.infoOverlay.layer addSublayer:self.infoGradient];
+	self.infoOverlay.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.55];
 
 	self.sourceIcon = UIImageView.new;
 	self.sourceIcon.translatesAutoresizingMaskIntoConstraints = NO;
@@ -157,7 +149,6 @@ static CGFloat const kSCIGalleryGridInfoHeight = 26.0;
 
 - (void)layoutSubviews {
 	[super layoutSubviews];
-	self.infoGradient.frame = self.infoOverlay.bounds;
 }
 
 - (void)prepareForReuse {

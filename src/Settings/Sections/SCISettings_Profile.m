@@ -26,12 +26,6 @@
 											]
 										},
 										@{
-											@"header": SCILocalized(@"Hide"),
-											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"No suggested users") subtitle:SCILocalized(@"Hides suggested accounts") defaultsKey:@"no_profile_suggested_users"],
-											]
-										},
-										@{
 											@"header": SCILocalized(@"Follower & following lists"),
 											@"footer": SCILocalized(@"Adds a button to filter & sort any followers/following list. Resets when you leave."),
 											@"rows": @[

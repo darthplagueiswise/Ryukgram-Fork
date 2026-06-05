@@ -2,6 +2,7 @@
 #import "SCIIconPicker.h"
 #import "../ActionButton/SCIActionIcon.h"
 #import "../Localization/SCILocalization.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 @interface SCIActionIconListViewController ()
 @property (nonatomic, strong) NSArray<NSNumber *> *sources;
@@ -15,6 +16,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+	SCIApplyGlassBackdropToViewController(self);
     self.title = SCILocalized(@"Action button icon");
     self.sources = [SCIActionIcon overridableSources];
 }
@@ -56,6 +58,7 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kID];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:kID];
+		SCIStyleCellForGlass(cell);
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     cell.imageView.tintColor = [UIColor labelColor];

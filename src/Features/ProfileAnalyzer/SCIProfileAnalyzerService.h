@@ -10,32 +10,24 @@ typedef NS_ENUM(NSInteger, SCIProfileAnalyzerError) {
     SCIProfileAnalyzerErrorCancelled,
 };
 
+// Hard cap — refuse to run beyond this follower count to dodge IG rate limits.
 extern const NSInteger SCIProfileAnalyzerMaxFollowerCount;
 
-// userInfo: @"status" (NSString), @"fraction" (NSNumber 0..1).
-extern NSNotificationName const SCIProfileAnalyzerProgressDidChangeNotification;
-// userInfo: @"user" (NSDictionary, raw IG payload).
-extern NSNotificationName const SCIProfileAnalyzerHeaderInfoDidChangeNotification;
-// userInfo: @"snapshot" (optional), @"error" (optional).
-extern NSNotificationName const SCIProfileAnalyzerDidFinishNotification;
+typedef void(^SCIPAProgress)(NSString *status, double fraction);
+typedef void(^SCIPACompletion)(SCIProfileAnalyzerSnapshot * _Nullable snapshot, NSError * _Nullable error);
+// Fires once after the self-user-info call so the header can paint immediately.
+typedef void(^SCIPAHeaderInfo)(NSDictionary *userInfo);
 
 @interface SCIProfileAnalyzerService : NSObject
 
 @property (nonatomic, readonly) BOOL isRunning;
 
-// Latest broadcast progress — used by mid-run VC mounts to paint immediately.
-@property (nonatomic, readonly, copy)   NSString *lastStatus;
-@property (nonatomic, readonly, assign) double    lastFraction;
-@property (nonatomic, readonly, copy, nullable) NSDictionary *lastHeaderInfo;
-
 + (instancetype)sharedService;
 
-- (void)start;
+- (void)runForSelfWithHeaderInfo:(nullable SCIPAHeaderInfo)headerInfo
+                        progress:(SCIPAProgress)progress
+                      completion:(SCIPACompletion)completion;
 - (void)cancel;
-
-// VC visibility hooks. Pill (de)materialises on 0↔1 transitions while a scan is in flight.
-- (void)attachObserver;
-- (void)detachObserver;
 
 @end
 
