@@ -1,6 +1,7 @@
 #import "SCIInternalSettingsApplier.h"
 #import "SCIDogfoodObjectRuntime.h"
 #import "SCIInternalGatePrefs.h"
+#import "SCIEmployeeDefaults.h"
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <os/log.h>
@@ -74,7 +75,11 @@ static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabled
 + (NSString *)applyNow {
     NSMutableString *out = [NSMutableString string];
     id session = [SCIDogfoodObjectRuntime activeUserSession];
-    if (!session) { [out appendString:@"no session — open after login"]; goto done; }
+    [SCIEmployeeDefaults installHooksIfNeeded];
+    [SCIEmployeeDefaults applyToStandardDefaults];
+    if (!session) { [out appendString:@"employeeDefaults=standard; no session — open after login"]; goto done; }
+    [SCIEmployeeDefaults applyToUserSession:session source:@"SCIInternalSettingsApplier.applyNow"];
+    [out appendString:@"employeeDefaults=ON; "];
     {
         id ais = [self autofillInternalSettingsForSession:session];
         if (ais) {

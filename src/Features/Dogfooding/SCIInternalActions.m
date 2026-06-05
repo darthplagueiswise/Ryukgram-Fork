@@ -1,4 +1,5 @@
 #import "SCIInternalActions.h"
+#import "SCIEmployeeDefaults.h"
 #import "SCIDogfoodObjectRuntime.h"
 #import "../../Utils.h"
 #import <objc/message.h>
@@ -231,6 +232,11 @@ static BOOL SCICallVoidBool(id obj, SEL sel, BOOL value, NSError **error) {
 
 + (void)setForceInternalEmployeeEnabled:(BOOL)on {
     [SCIUtils setPref:@(on) forKey:kSCIForceEmployeeKey];
+    if (on) {
+        [SCIEmployeeDefaults installHooksIfNeeded];
+        [SCIEmployeeDefaults applyToStandardDefaults];
+        [SCIEmployeeDefaults applyToUserSession:[self liveUserSession] source:@"SCIInternalActions.setForceInternalEmployeeEnabled"];
+    }
 }
 
 + (NSDictionary *)state {
@@ -247,6 +253,7 @@ static BOOL SCICallVoidBool(id obj, SEL sel, BOOL value, NSError **error) {
     d[@"bloksPrefetchEnabled"] = @([self bloksPrefetchEnabled]);
     d[@"debugFooterEnabled"] = @([self debugFooterEnabled]);
     d[@"forceInternalEmployeeEnabled"] = @([self forceInternalEmployeeEnabled]);
+    d[@"employeeDefaultsEnabled"] = @([SCIEmployeeDefaults enabled]);
     return d;
 }
 

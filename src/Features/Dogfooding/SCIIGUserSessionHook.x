@@ -1,4 +1,5 @@
 #import "SCIDogfoodObjectRuntime.h"
+#import "SCIEmployeeDefaults.h"
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -8,13 +9,13 @@ static id (*orig_foauser_userID)(id, SEL) = NULL;
 
 static id new_iguser_userID(id self, SEL _cmd) {
     id ret = orig_iguser_userID ? orig_iguser_userID(self, _cmd) : nil;
-    @try { [SCIDogfoodObjectRuntime noteLiveUserSession:self source:@"IGUserSession.userID"]; } @catch (__unused id e) {}
+    @try { [SCIDogfoodObjectRuntime noteLiveUserSession:self source:@"IGUserSession.userID"]; [SCIEmployeeDefaults applyToUserSession:self source:@"IGUserSession.userID"]; } @catch (__unused id e) {}
     return ret;
 }
 
 static id new_foauser_userID(id self, SEL _cmd) {
     id ret = orig_foauser_userID ? orig_foauser_userID(self, _cmd) : nil;
-    @try { [SCIDogfoodObjectRuntime noteLiveUserSession:self source:@"FOAUserSession.userID"]; } @catch (__unused id e) {}
+    @try { [SCIDogfoodObjectRuntime noteLiveUserSession:self source:@"FOAUserSession.userID"]; [SCIEmployeeDefaults applyToUserSession:self source:@"FOAUserSession.userID"]; } @catch (__unused id e) {}
     return ret;
 }
 
@@ -30,6 +31,7 @@ static void SCIInstallUserSessionHooks(void) {
 }
 
 %ctor {
+    [SCIEmployeeDefaults installHooksIfNeeded];
     SCIInstallUserSessionHooks();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallUserSessionHooks(); });
 }

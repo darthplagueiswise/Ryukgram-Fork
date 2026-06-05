@@ -16,6 +16,7 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
     return @[
         kSCIForceIGObjCMasterKey,
         @"sci_force_ig_is_employee",
+        @"sci_force_employee_defaults_persist",
         @"sci_force_ig_featured_internal_badge",
         @"sci_force_ig_inbox_internal_badge",
         @"sci_force_ig_creation_internal_label",

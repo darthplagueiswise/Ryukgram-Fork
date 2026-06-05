@@ -22,6 +22,7 @@
 #import <substrate.h>
 #import <os/log.h>
 #import "SCIInternalGatePrefs.h"
+#import "SCIEmployeeDefaults.h"
 
 static NSString *const kSCIForceEmployeeKey = @"sci_force_ig_internal_employee";
 static NSString *const kSCIForceIsEmployeeKey = @"sci_force_ig_is_employee";
@@ -143,6 +144,7 @@ static void SCIInstallAllGates(void) {
 %ctor {
     @autoreleasepool {
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
+        [SCIEmployeeDefaults installHooksIfNeeded];
         SCIInstallAllGates();
         double delays[] = {1.0, 3.0, 6.0};
         for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
@@ -150,6 +152,7 @@ static void SCIInstallAllGates(void) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(t * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 SCIInstallAllGates();
+                [SCIEmployeeDefaults installHooksIfNeeded];
             });
         }
     }
