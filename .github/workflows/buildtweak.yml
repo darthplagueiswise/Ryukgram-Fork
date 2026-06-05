@@ -17,12 +17,16 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      SDK_NAME: iPhoneOS26.2.sdk
+      OUTPUT_BASENAME: Ryukgram-1.3.3.${{ github.run_number }}
+
     steps:
       - uses: actions/checkout@v4
         with:
           path: main
 
-      - run: brew install ldid dpkg make
+      - run: brew install ldid dpkg make zip
 
       - run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
@@ -46,20 +50,30 @@ jobs:
         run: |
           git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
           cd iOS-SDKs
-          git sparse-checkout set --no-cone iPhoneOS26.2.sdk
+          git sparse-checkout set --no-cone "$SDK_NAME"
           git checkout
           mkdir -p "$THEOS/sdks"
           mv *.sdk "$THEOS/sdks"
         env:
           THEOS: ${{ github.workspace }}/theos
 
-      - run: |
+      - name: Validate SDK 26.2 and build rootless arm64
+        run: |
+          set -euo pipefail
           cd main
           chmod +x scripts/*.sh build.sh modules/build-dev.sh || true
           scripts/validate-sdk26-liquidglass.sh
+          test -d "$THEOS/sdks/$SDK_NAME"
+          grep -q 'TARGET := iphone:clang:26.2:16.3' Makefile
+          grep -q '^ARCHS = arm64$' Makefile
           ./scripts/setup-ffmpegkit.sh
           ./build.sh rootless
-          ./build.sh rootful
+          mkdir -p release
+          DEB="$(ls -t packages/*rootless*.deb packages/*.deb 2>/dev/null | head -n 1)"
+          test -n "$DEB"
+          cp "$DEB" "release/${OUTPUT_BASENAME}.deb"
+          (cd release && zip -9 "${OUTPUT_BASENAME}.zip" "${OUTPUT_BASENAME}.deb")
+          ls -la release
         env:
           THEOS: ${{ github.workspace }}/theos
           THEOS_PLATFORM_DEB_COMPRESSION_TYPE: lzma
@@ -67,6 +81,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: RyukGram-debs
-          path: main/packages/*.deb
+          name: Ryukgram-1.3.3.${{ github.run_number }}
+          path: |
+            main/release/Ryukgram-1.3.3.${{ github.run_number }}.deb
+            main/release/Ryukgram-1.3.3.${{ github.run_number }}.zip
           if-no-files-found: error
