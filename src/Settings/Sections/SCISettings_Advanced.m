@@ -5,7 +5,6 @@
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../SCISymbolsBrowserViewController.h"
-#import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 
 @implementation SCITweakSettings (Section_Advanced)
 
@@ -82,8 +81,12 @@
 													   subtitle:SCILocalized(@"Restores gates auto-disabled after a crash. Tap after enabling toggles that were reset.")
 													       icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
 													     action:^(void) {
-														NSArray *d = [SCIInternalGatePrefs crashDisabledKeys];
-														[SCIInternalGatePrefs resetCrashGuardAndRestoreKeys];
+														NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+														NSArray *d = [ud arrayForKey:@"sci_internal_gate_crash_disabled_keys"] ?: @[];
+														for (NSString *key in d) [ud setBool:YES forKey:key];
+														[ud removeObjectForKey:@"sci_internal_gate_crash_pending_keys"];
+														[ud removeObjectForKey:@"sci_internal_gate_crash_disabled_keys"];
+														[ud removeObjectForKey:@"sci_internal_gate_crash_last_source"];
 														NSString *msg = d.count ? [NSString stringWithFormat:@"Restored %lu gate(s):\n%@",(unsigned long)d.count,[d componentsJoinedByString:@"\n"]] : @"No disabled gates. Guard cleared.";
 														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class])for(UIWindow *win in((UIWindowScene*)sc).windows)if(win.isKeyWindow){w=win;break;}if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController)top=top.presentedViewController;
