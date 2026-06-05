@@ -94,6 +94,15 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"lg_tab_bar_style_glass": @(NO),
 		@"liquid_glass_tabbar_mode": @"default",
 
+		@"sci_force_igplus_all": @(NO),
+		@"sci_igplus_eligibility": @(NO),
+		@"sci_force_internal_settings_menu": @(NO),
+		@"sci_force_internal_settings_loggedout": @(NO),
+		@"sci_apply_internal_native": @(NO),
+		@"sci_apply_force_bloks": @(NO),
+		@"sci_apply_bloks_prefetch": @(NO),
+		@"sci_apply_liquidglass": @(NO),
+
 		@"flex_app_launch": @(NO),
 		@"flex_app_start": @(NO),
 		@"flex_instagram": @(NO),

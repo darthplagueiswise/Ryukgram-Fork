@@ -6,6 +6,13 @@
 
 #define MLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] Menus " fmt, ##__VA_ARGS__)
 
+static Class SCIClassByNames(NSArray<NSString *> *names) {
+    for (NSString *n in names) { if (!n.length) continue; Class c = NSClassFromString(n); if (c) return c; c = objc_getClass(n.UTF8String); if (c) return c; }
+    unsigned int count = 0; Class *classes = objc_copyClassList(&count); Class found = Nil;
+    for (unsigned int i=0; classes && i<count && !found; i++) { const char *cn = class_getName(classes[i]); if (!cn) continue; NSString *s = [NSString stringWithUTF8String:cn]; for (NSString *n in names) if ([s isEqualToString:n] || [s hasSuffix:n] || [s containsString:n]) { found = classes[i]; break; } }
+    if (classes) free(classes); return found;
+}
+
 @implementation SCIInternalMenusLauncher
 
 + (UIViewController *)topVC { return [SCIDogfoodObjectRuntime topViewController]; }
@@ -21,9 +28,7 @@
     id session = [self session]; UIViewController *top = [self topVC];
     if (!session) return @"no live user session yet (open after login)";
     if (!top) return @"no top view controller";
-    Class C = NSClassFromString(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");
-    if (!C) C = NSClassFromString(@"IGDirectNotesDogfoodingSettingsStaticFuncs");
-    if (!C) C = NSClassFromString(@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs");
+    Class C = SCIClassByNames(@[@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettingsStaticFuncs"]);
     SEL s = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
     if (C && [C respondsToSelector:s]) {
         @try { ((void(*)(id,SEL,id,id))objc_msgSend)(C, s, top, session); MLOG("notes dogfooding opened"); return @"opened Notes dogfooding settings"; }
