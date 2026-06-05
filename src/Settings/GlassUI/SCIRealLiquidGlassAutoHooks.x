@@ -5,6 +5,7 @@
 
 #import "SCIAdaptiveGlass.h"
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static BOOL SCIResponderChainIsRyuk(id view) {
     UIResponder *r = [view isKindOfClass:UIResponder.class] ? (UIResponder *)view : nil;
