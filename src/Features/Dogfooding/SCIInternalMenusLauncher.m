@@ -47,6 +47,20 @@
     }
 }
 
+// Best-effort native dogfooding settings opener.
+// Keep this method implemented because Advanced still exposes the row, but do not
+// allocate Swift VCs with nil non-optional init args. The runtime helper only uses
+// captured/live native objects and returns NO instead of trapping.
++ (NSString *)openDogfoodingSettingsVC {
+    @try {
+        BOOL ok = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
+        return ok ? @"opened native Dogfooding Settings"
+                  : @"native Dogfooding Settings opener unavailable: open Notes or use Symbols Browser/runtime first";
+    } @catch (id e) {
+        return [NSString stringWithFormat:@"threw: %@", e];
+    }
+}
+
 // +[IGURLHandler openInternalURL:presentationConfig:controller:animated:userSession:annotation:]
 // Best-effort — tries common internal settings URL schemes.
 + (NSString *)openInternalURLString:(NSString *)urlString {
