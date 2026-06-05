@@ -34,6 +34,7 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
         @"sci_force_internal_settings_loggedout",
         @"sci_force_igplus_all",
         @"sci_igplus_eligibility",
+        @"sci_force_aura_igplus",
     ];
 }
 
@@ -96,6 +97,25 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
             }
         });
     });
+}
+
+@end
+
++ (NSArray<NSString *> *)crashDisabledKeys {
+    NSArray *d = [SCIUtils getArrayPref:@"sci_internal_gate_crash_disabled_keys"];
+    return [d isKindOfClass:NSArray.class] ? d : @[];
+}
+
++ (void)resetCrashGuard {
+    [SCIUtils setPref:nil forKey:@"sci_internal_gate_crash_pending_keys"];
+    [SCIUtils setPref:nil forKey:@"sci_internal_gate_crash_disabled_keys"];
+    [SCIUtils setPref:nil forKey:@"sci_internal_gate_crash_last_source"];
+}
+
++ (void)resetCrashGuardAndRestoreKeys {
+    NSArray<NSString *> *disabled = [self crashDisabledKeys];
+    for (NSString *key in disabled) [SCIUtils setPref:@YES forKey:key];
+    [self resetCrashGuard];
 }
 
 @end
