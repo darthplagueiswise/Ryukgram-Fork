@@ -99,8 +99,6 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
     });
 }
 
-@end
-
 + (NSArray<NSString *> *)crashDisabledKeys {
     NSArray *d = [SCIUtils getArrayPref:@"sci_internal_gate_crash_disabled_keys"];
     return [d isKindOfClass:NSArray.class] ? d : @[];

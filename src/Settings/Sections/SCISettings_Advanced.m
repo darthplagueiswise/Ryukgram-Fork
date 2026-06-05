@@ -4,8 +4,8 @@
 #import "../SCIInternalActionsViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
-#import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 #import "../SCISymbolsBrowserViewController.h"
+#import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 
 @implementation SCITweakSettings (Section_Advanced)
 
@@ -79,16 +79,14 @@
 											@"footer": SCILocalized(@"Uses the native IGAutofillInternalSettings setters on the live user session to enable the debug footer and internal experience (persists via sessionUserDefaults). Tap Apply after you are logged in; toggles take effect after applying/restart."),
 											@"rows": @[
 												[SCISetting buttonCellWithTitle:SCILocalized(@"⚠️ Reset crash guard → restore gates")
-													   subtitle:SCILocalized(@"The crash guard auto-disabled your gates after a crash. Tap to restore them and clear the guard state.")
-													       icon:[SCISymbol symbolWithIGName:@"bcn_warning_triangle_outline_24" fallback:@"arrow.counterclockwise.circle"]
+													   subtitle:SCILocalized(@"Restores gates auto-disabled after a crash. Tap after enabling toggles that were reset.")
+													       icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
 													     action:^(void) {
-														NSArray *disabled = [SCIInternalGatePrefs crashDisabledKeys];
+														NSArray *d = [SCIInternalGatePrefs crashDisabledKeys];
 														[SCIInternalGatePrefs resetCrashGuardAndRestoreKeys];
-														NSString *msg = disabled.count
-														    ? [NSString stringWithFormat:@"Restored %lu gate(s):\n%@", (unsigned long)disabled.count, [disabled componentsJoinedByString:@"\n"]]
-														    : @"No disabled gates found. Crash guard state cleared.";
-														UIWindow *w = nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene *)sc).windows) if(win.isKeyWindow){ w=win; break; } if(w) break; }
-														UIViewController *top = w.rootViewController; while(top.presentedViewController) top = top.presentedViewController;
+														NSString *msg = d.count ? [NSString stringWithFormat:@"Restored %lu gate(s):\n%@",(unsigned long)d.count,[d componentsJoinedByString:@"\n"]] : @"No disabled gates. Guard cleared.";
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class])for(UIWindow *win in((UIWindowScene*)sc).windows)if(win.isKeyWindow){w=win;break;}if(w)break;}
+														UIViewController *top=w.rootViewController; while(top.presentedViewController)top=top.presentedViewController;
 														UIAlertController *a=[UIAlertController alertControllerWithTitle:@"Crash guard reset" message:msg preferredStyle:UIAlertControllerStyleAlert];
 														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 														if(top)[top presentViewController:a animated:YES completion:nil];
@@ -113,7 +111,6 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"Bloks prefetch ON") subtitle:SCILocalized(@"setBloksPrefetchEnabledWithEnabled:") defaultsKey:@"sci_apply_bloks_prefetch" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"LiquidGlass override ON") subtitle:SCILocalized(@"IGLiquidGlassNavigationExperimentHelper.shared") defaultsKey:@"sci_apply_liquidglass" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Force IGPlus eligibility layer") subtitle:SCILocalized(@"SUBSBenefitDataProvider + StoryPeek/DirectChat eligibility + CustomAppIcon availability") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
-														[SCISetting switchCellWithTitle:SCILocalized(@"Force Aura / IGPlus surfaces") subtitle:SCILocalized(@"Aura benefit evaluators + aura quiet posting gate") defaultsKey:@"sci_force_aura_igplus" requiresRestart:YES],
 											]
 										},
 										@{
