@@ -18,13 +18,13 @@
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Storage");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
-	self.tableView.backgroundColor = self.view.backgroundColor;
+	SCIStyleTableViewForGlass(self.tableView);
 	[self.view addSubview:self.tableView];
 
 	[NSNotificationCenter.defaultCenter addObserver:self

@@ -402,7 +402,7 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.title = SCILocalized(@"Profile Analyzer");
 	self.navigationItem.titleView = [self buildTitleViewWithBeta];
 

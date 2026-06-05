@@ -1,5 +1,4 @@
 #import "SCINotificationPillView.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import <math.h>
 
 static CGFloat const kPillCorner = 30.0;

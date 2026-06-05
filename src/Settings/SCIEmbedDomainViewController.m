@@ -1,5 +1,4 @@
 #import "SCIEmbedDomainViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 #define SCI_CUSTOM_DOMAINS_KEY @"embed_custom_domains"

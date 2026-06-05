@@ -1,5 +1,4 @@
 #import "SCIHomeShortcutConfigViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../Features/Feed/SCIHomeShortcutCatalog.h"
 #import "../UI/SCIPopupChrome.h"
@@ -274,7 +273,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Icon");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.view.backgroundColor = SCIGlassBackdropColor();
 
 	NSMutableArray *valid = [NSMutableArray arrayWithObject:@"auto"];
 
@@ -379,7 +378,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
+	self.view.backgroundColor = SCIGlassBackdropColor();
 	SCIStyleTableViewForGlass(self.tableView);
 	self.actions = sciLoadOrderedActions();
 

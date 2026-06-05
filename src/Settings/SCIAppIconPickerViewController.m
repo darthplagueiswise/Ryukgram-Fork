@@ -1,5 +1,4 @@
 #import "SCIAppIconPickerViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../UI/SCIPopupChrome.h"
 

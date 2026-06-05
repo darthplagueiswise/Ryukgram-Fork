@@ -1,7 +1,6 @@
 // Messages-only mode — no-op the tab creators we don't want, force inbox at launch.
 
 #import "../../Utils.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../../InstagramHeaders.h"
 #import "../../SCIChrome.h"
 #import <objc/runtime.h>

@@ -1,5 +1,4 @@
 #import "SCIIconPicker.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../ActionButton/SCIActionIcon.h"
 #import "../Localization/SCILocalization.h"
 

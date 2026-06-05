@@ -1,5 +1,4 @@
 #import "SCIBackupScopePickerVC.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "SCIBackupDetailVC.h"
 #import "../Utils.h"
 #import "../Localization/SCILocalization.h"

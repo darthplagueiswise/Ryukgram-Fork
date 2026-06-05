@@ -1,5 +1,4 @@
 #import "SCIIDListViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Localization/SCILocalization.h"
 
 @implementation SCIIDListConfig

@@ -1,5 +1,4 @@
 #import "SCIGalleryChip.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../UI/SCIIcon.h"
 

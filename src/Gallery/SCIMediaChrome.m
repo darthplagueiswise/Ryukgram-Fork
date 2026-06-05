@@ -1,5 +1,4 @@
 #import "SCIMediaChrome.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "SCIAssetUtils.h"
 #import "../Utils.h"
 

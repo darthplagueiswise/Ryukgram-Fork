@@ -1,5 +1,4 @@
 #import "SCILinksSheet.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Localization/SCILocalization.h"
 #import "../Tweak.h"
 #import "../Utils.h"

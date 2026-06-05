@@ -1,5 +1,4 @@
 #import "SCIActionMenuConfigViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../ActionButton/SCIActionMenuConfig.h"
 #import "../UI/SCIIcon.h"
 #import "../UI/SCIPopupChrome.h"

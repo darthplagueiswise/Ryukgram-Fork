@@ -338,7 +338,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Deleted messages");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 
 	[self installNavigationItems];
 	[self installSearchController];
@@ -410,7 +410,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.rowHeight = 76;
-	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
+	self.tableView.backgroundColor = SCIGlassBackdropColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0, 80, 0, 0);
 	[self.tableView registerClass:SCIDMSenderCell.class forCellReuseIdentifier:@"sender"];
 

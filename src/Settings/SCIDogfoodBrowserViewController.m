@@ -1,5 +1,4 @@
 #import "SCIDogfoodBrowserViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/MobileConfig/SCIMobileConfigRuntime.h"
 #import "../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import "../Features/Dogfooding/SCILauncherOverride.h"

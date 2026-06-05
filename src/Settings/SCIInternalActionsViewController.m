@@ -1,5 +1,4 @@
 #import "SCIInternalActionsViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/Dogfooding/SCIInternalActions.h"
 #import <objc/runtime.h>
 

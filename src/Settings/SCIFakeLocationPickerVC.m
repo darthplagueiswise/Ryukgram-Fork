@@ -1,5 +1,4 @@
 #import "SCIFakeLocationPickerVC.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import <MapKit/MapKit.h>
 #import "../Localization/SCILocalization.h"
 

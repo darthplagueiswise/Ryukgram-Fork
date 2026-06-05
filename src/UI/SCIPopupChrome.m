@@ -1,5 +1,4 @@
 #import "SCIPopupChrome.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/Theme/SCITheme.h"
 
 @implementation SCIPopupChrome

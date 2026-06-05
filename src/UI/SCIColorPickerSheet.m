@@ -1,5 +1,4 @@
 #import "SCIColorPickerSheet.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Localization/SCILocalization.h"
 #import <objc/runtime.h>
 

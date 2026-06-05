@@ -226,7 +226,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Download settings");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 3; }
@@ -341,7 +341,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Downloads");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.selected = [NSMutableSet set];
 
 	[self setupCollectionView];

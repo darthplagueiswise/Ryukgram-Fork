@@ -931,8 +931,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
-	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
+	self.tableView.backgroundColor = SCIGlassBackdropColor();
 	self.tableView.estimatedRowHeight = 80;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	self.tableView.estimatedSectionHeaderHeight = 32;
@@ -1022,7 +1022,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.title = self.group.senderUsername.length ? [@"@" stringByAppendingString:self.group.senderUsername] : SCILocalized(@"Deleted messages");
 
 	[self installSearchController];
@@ -1335,7 +1335,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 - (UIView *)buildBannerHeader {
 	UIView *banner = [UIView new];
 	banner.frame = CGRectMake(0, 0, self.view.bounds.size.width, 64);
-	banner.backgroundColor = [SCIPopupChrome backgroundColor];
+	banner.backgroundColor = SCIGlassBackdropColor();
 
 	UIImageView *avatar = [UIImageView new];
 	avatar.contentMode = UIViewContentModeScaleAspectFill;
@@ -1418,7 +1418,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
 	self.tableView.estimatedRowHeight = 80;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
-	self.tableView.backgroundColor = self.view.backgroundColor;
+	SCIStyleTableViewForGlass(self.tableView);
 	[self.tableView registerClass:SCIDMMessageCell.class forCellReuseIdentifier:@"msg"];
 	[self.view addSubview:self.tableView];
 

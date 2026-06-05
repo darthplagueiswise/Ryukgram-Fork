@@ -34,7 +34,7 @@ static NSString *sActiveThreadID = nil;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.navigationItem.prompt = SCILocalized(@"Tap to apply · hold to edit");
 
 	UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
@@ -45,7 +45,7 @@ static NSString *sActiveThreadID = nil;
 	_collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:layout];
 	_collectionView.dataSource = self;
 	_collectionView.delegate = self;
-	_collectionView.backgroundColor = [SCIPopupChrome backgroundColor];
+	_collectionView.backgroundColor = SCIGlassBackdropColor();
 	_collectionView.alwaysBounceVertical = YES;
 	_collectionView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_collectionView registerClass:[UICollectionViewCell class] forCellWithReuseIdentifier:kCellID];

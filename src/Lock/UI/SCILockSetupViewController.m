@@ -37,7 +37,7 @@
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Set passcode");
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
 
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]

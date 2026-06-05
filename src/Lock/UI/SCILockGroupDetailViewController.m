@@ -35,12 +35,12 @@
 	[super viewDidLoad];
 
 	self.title = self.info.displayName;
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	self.tableView.backgroundColor = self.view.backgroundColor;
+	SCIStyleTableViewForGlass(self.tableView);
 	self.tableView.contentInset = UIEdgeInsetsMake(-10.0, 0.0, 0.0, 0.0);
 	self.tableView.estimatedRowHeight = 58.0;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;

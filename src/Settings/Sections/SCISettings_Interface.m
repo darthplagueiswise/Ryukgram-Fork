@@ -1,5 +1,4 @@
 #import "SCISettingsSections.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../SCIAppIconPickerViewController.h"
 #import "../../InstagramHeaders.h"
 

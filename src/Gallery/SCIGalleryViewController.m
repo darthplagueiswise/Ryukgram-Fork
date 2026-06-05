@@ -221,7 +221,7 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 
 	[[NSNotificationCenter defaultCenter] addObserver:self
 											 selector:@selector(handleGalleryPreferencesChanged:)

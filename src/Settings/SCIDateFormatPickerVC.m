@@ -1,5 +1,4 @@
 #import "SCIDateFormatPickerVC.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../UI/SCIOptionSheet.h"
 #import "../Features/General/SCIDateFormatEntries.h"
@@ -115,7 +114,7 @@ static NSString *sciThresholdText(void) {
 
 	_tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	_tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	_tableView.backgroundColor = self.view.backgroundColor;
+	SCIStyleTableViewForGlass(_tableView);
 	_tableView.dataSource = self;
 	_tableView.delegate = self;
 

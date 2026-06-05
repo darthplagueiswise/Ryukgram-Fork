@@ -1,6 +1,5 @@
 #import "SCIBaseSettingsListViewController.h"
 #import "../UI/SCIPopupChrome.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 static NSString *const kSCIBaseCell = @"SCIBaseCell";

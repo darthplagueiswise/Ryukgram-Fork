@@ -1,5 +1,4 @@
 #import "SCISearchBarStyler.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 @implementation SCISearchBarStyler

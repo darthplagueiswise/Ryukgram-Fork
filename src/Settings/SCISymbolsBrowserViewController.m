@@ -6,7 +6,6 @@
 // We parse LC_SYMTAB + __LINKEDIT in the already-mapped image directly.
 
 #import "SCISymbolsBrowserViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 #import <mach-o/dyld.h>

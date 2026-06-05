@@ -1,5 +1,4 @@
 #import "SCIBackupDetailVC.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "SCISearchBarStyler.h"
 #import "../Utils.h"
 #import "../Localization/SCILocalization.h"

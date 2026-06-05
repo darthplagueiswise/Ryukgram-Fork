@@ -1,5 +1,4 @@
 #import "SCISettingsViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "SCIWhatsNew.h"
 #import "../UI/SCIPopupChrome.h"
 #import "SCISearchBarStyler.h"

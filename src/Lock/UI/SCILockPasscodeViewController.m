@@ -42,7 +42,7 @@
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 
 	self.pad = SCILockPasscodeView.new;
 	self.pad.translatesAutoresizingMaskIntoConstraints = NO;

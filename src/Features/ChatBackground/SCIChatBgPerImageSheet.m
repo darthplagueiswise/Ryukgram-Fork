@@ -40,7 +40,7 @@ static NSString *const kCell = @"cell";
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	SCIApplyGlassBackdropToViewController(self);
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:SCILocalized(@"Done") style:UIBarButtonItemStyleDone target:self action:@selector(done)];
 
 	_preview = [UIImageView new];
@@ -60,7 +60,7 @@ static NSString *const kCell = @"cell";
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
 	_tableView.delegate = self;
-	_tableView.backgroundColor = self.view.backgroundColor;
+	SCIStyleTableViewForGlass(_tableView);
 	_tableView.contentInset = UIEdgeInsetsMake(-6, 0, 0, 0);
 	_tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_tableView registerClass:UITableViewCell.class forCellReuseIdentifier:kCell];

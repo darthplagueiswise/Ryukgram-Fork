@@ -1,5 +1,4 @@
 #import "SCIGalleryDeleteViewController.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "SCIGalleryCoreDataStack.h"
 #import "SCIGalleryFile.h"
 #import "SCIAssetUtils.h"
