@@ -35,6 +35,7 @@ typedef NS_ENUM(NSInteger, SCIGatingRuntimeScope) {
 // On-demand, crash-guarded evaluation of one getter. Returns @(BOOL) or nil if the
 // getter is blacklisted / unavailable / could not be evaluated safely.
 + (nullable NSNumber *)evaluateClass:(NSString *)rawClassName selector:(NSString *)selectorName;
++ (nullable NSNumber *)evaluateClass:(NSString *)rawClassName selector:(NSString *)selectorName classMethod:(BOOL)isClassMethod;
 
 // Whether a correctly typed live receiver is currently available for safe evaluation.
 + (BOOL)hasLiveReceiverForClass:(NSString *)rawClassName;

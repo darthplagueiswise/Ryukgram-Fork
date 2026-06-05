@@ -119,11 +119,15 @@ static NSArray<SCISymEntry *> *SCIScanSymbols(BOOL wantFBShared) {
             SCISymEntry *e = [SCISymEntry new];
             e.name = nm;
             e.address = (uintptr_t)n->n_value + (uintptr_t)slide;
+            // Strict C-function hookability heuristic. Do not mark arbitrary C++/ObjC symbols
+            // such as IdNameMap/ParamsMap/IGUser* as "Bool gate": those are discovery symbols,
+            // not safely hookable BOOL accessors. Feature Gatings handles ObjC BOOL methods.
             e.isBoolGate =
-                [nm containsString:@"MobileConfig"] || [nm containsString:@"EasyGating"] ||
-                [nm containsString:@"GetBoolean"] || [nm containsString:@"GetBool"] ||
-                [nm containsString:@"InternalUse"] || [nm containsString:@"Gating"] ||
-                [nm containsString:@"Experiment"] || [nm containsString:@"Launcher"];
+                [nm containsString:@"IGMobileConfigBooleanValueForInternalUse"] ||
+                [nm containsString:@"IGMobileConfigSessionlessBooleanValueForInternalUse"] ||
+                [nm containsString:@"EasyGatingGetBoolean"] ||
+                [nm containsString:@"EasyGatingPlatformGetBoolean"] ||
+                [nm containsString:@"MCQEasyGatingGetBooleanInternal"];
             [out addObject:e];
         }
         break;
@@ -244,7 +248,7 @@ static NSArray<SCISymEntry *> *SCIScanSymbols(BOOL wantFBShared) {
     SCISymEntry *e = _filtered[ip.row];
     UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@ 0x%llx", e.name, (unsigned long long)e.address];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:[e.name substringFromIndex:1]
-        message:[NSString stringWithFormat:@"0x%llx\nBool gate: %@\nCopied to clipboard.",
+        message:[NSString stringWithFormat:@"0x%llx\nC BOOL gate candidate: %@\nCopied to clipboard.",
                  (unsigned long long)e.address, e.isBoolGate ? @"yes" : @"no"]
         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];

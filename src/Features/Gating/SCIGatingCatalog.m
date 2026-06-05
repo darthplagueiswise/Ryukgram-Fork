@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
+#import <mach-o/dyld.h>
 
 static NSString *const kBlacklistKey = @"sci_gating_eval_blacklist";
 static NSString *const kPendingKey   = @"sci_gating_eval_pending";
@@ -90,6 +91,24 @@ static BOOL SCIMethodLooksLikeNoArgumentBool(Method m) {
     return ret[0] == 'B' || ret[0] == 'c' || ret[0] == 'C';
 }
 
+
+static NSString *SCIImagePathForScope(SCIGatingRuntimeScope scope) {
+    uint32_t count = _dyld_image_count();
+    for (uint32_t i = 0; i < count; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) continue;
+        switch (scope) {
+            case SCIGatingRuntimeScopeInstagramMain:
+                if (strstr(name, "/Instagram.app/Instagram") && !strstr(name, ".dylib")) return [NSString stringWithUTF8String:name];
+                break;
+            case SCIGatingRuntimeScopeFBSharedFramework:
+                if (strstr(name, "/FBSharedFramework.framework/FBSharedFramework")) return [NSString stringWithUTF8String:name];
+                break;
+        }
+    }
+    return nil;
+}
+
 static BOOL SCIClassImageAllowedForScope(Class cls, SCIGatingRuntimeScope scope) {
     const char *image = cls ? class_getImageName(cls) : NULL;
     if (!image) return NO;
@@ -112,7 +131,7 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
         if (!SCIMethodLooksLikeNoArgumentBool(meth)) continue;
         SEL sel = method_getName(meth);
         const char *sname = sel_getName(sel);
-        if (!sname || !SCINameLooksLikeFlag(sname)) continue;
+        if (!sname) continue;
         [getters addObject:@{
             @"selector": [NSString stringWithUTF8String:sname],
             @"classMethod": @(classMethod),
@@ -149,14 +168,18 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
     }
 
     NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+
+    // Real runtime browser: enumerate ObjC classes owned by the selected Mach-O image.
+    // This is lazy and scope-selected, so it is not the old unsafe global startup scan.
+    NSString *imagePath = SCIImagePathForScope(scope);
     unsigned int clsCount = 0;
-    Class *all = objc_copyClassList(&clsCount);
-    if (all) {
+    const char **classNames = imagePath.length ? objc_copyClassNamesForImage(imagePath.UTF8String, &clsCount) : NULL;
+    if (classNames) {
         for (unsigned int i = 0; i < clsCount; i++) {
-            Class cls = all[i];
-            const char *cname = class_getName(cls);
-            if (!SCIClassImageAllowedForScope(cls, scope)) continue;
-            if (!cname || !SCIClassNameInteresting(cname)) continue;
+            const char *cname = classNames[i];
+            if (!cname) continue;
+            Class cls = objc_getClass(cname);
+            if (!cls) continue;
 
             NSMutableArray<NSDictionary *> *getters = [NSMutableArray array];
             SCIAppendBoolMethods(cls, NO, getters);
@@ -169,9 +192,9 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
                 return [as caseInsensitiveCompare:bs];
             }];
             NSString *raw = [NSString stringWithUTF8String:cname];
-            [out addObject:@{ @"class": SCIDemangle(raw), @"raw": raw, @"getters": getters }];
+            [out addObject:@{ @"class": SCIDemangle(raw), @"raw": raw, @"image": imagePath ?: @"", @"getters": getters }];
         }
-        free(all);
+        free(classNames);
     }
     [out sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"class"] caseInsensitiveCompare:b[@"class"]];
@@ -409,6 +432,10 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
 }
 
 + (nullable NSNumber *)evaluateClass:(NSString *)rawClassName selector:(NSString *)selectorName {
+    return [self evaluateClass:rawClassName selector:selectorName classMethod:NO];
+}
+
++ (nullable NSNumber *)evaluateClass:(NSString *)rawClassName selector:(NSString *)selectorName classMethod:(BOOL)isClassMethod {
     if (!rawClassName.length || !selectorName.length) return nil;
     if ([self isBlacklistedClass:rawClassName selector:selectorName]) return nil;
 
@@ -416,17 +443,15 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
     if (!cls) return nil;
     SEL sel = NSSelectorFromString(selectorName);
     if (!sel) return nil;
-    Method meth = class_getInstanceMethod(cls, sel);
+    Method meth = isClassMethod ? class_getClassMethod(cls, sel) : class_getInstanceMethod(cls, sel);
     if (!meth) return nil;
     if (![self methodLooksLikeNoArgumentBool:meth]) return nil;
     IMP imp = method_getImplementation(meth);
     if (!imp) return nil;
 
-    id receiver = [self bestReceiverForClass:cls];
+    id receiver = isClassMethod ? (id)cls : [self bestReceiverForClass:cls];
     if (!receiver) return nil;
 
-    // Arm the crash guard: if the call segfaults (uncatchable), the next launch will
-    // see this key still pending and blacklist it.
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     NSString *key = [self keyForClass:rawClassName selector:selectorName];
     [d setObject:key forKey:kPendingKey];
@@ -440,7 +465,6 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
         result = nil;
     }
 
-    // Disarm — we survived.
     [d removeObjectForKey:kPendingKey];
     [d synchronize];
 

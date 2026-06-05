@@ -167,7 +167,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     if (!r || r.blacklisted) { if (completion) completion(); return; }
     [self refreshLiveStateForRow:r];
     if (r.liveState != SCIGatingLiveStateReady) { if (completion) completion(); return; }
-    r.value = [SCIGatingCatalog evaluateClass:r.rawClass selector:r.selector];
+    r.value = [SCIGatingCatalog evaluateClass:r.rawClass selector:r.selector classMethod:r.classMethod];
     r.blacklisted = [SCIGatingCatalog isBlacklistedClass:r.rawClass selector:r.selector];
     r.liveState = r.blacklisted ? SCIGatingLiveStateUnavailable : (r.value ? SCIGatingLiveStateLoaded : SCIGatingLiveStateReady);
     if (completion) completion();
@@ -371,7 +371,7 @@ typedef NS_ENUM(NSInteger, SCIGatingLiveState) {
     if (self.sections.count == 0) {
         SCIGlassParamCell *cell = [tableView dequeueReusableCellWithIdentifier:@"status" forIndexPath:indexPath];
         NSString *title = self.scopeSelected ? @"No gating accessors found" : @"Choose a runtime scope";
-        NSString *subtitle = self.scopeSelected ? @"Try another search or switch runtime scope." : @"Pick Instagram executable or FBSharedFramework above. The catalog is built only after choosing.";
+        NSString *subtitle = self.scopeSelected ? @"No no-argument BOOL ObjC methods matched this filter. C symbols live in Symbols Browser." : @"Pick Instagram executable or FBSharedFramework above. Classes are enumerated lazily from the selected image.";
         [cell configureWithTitle:title
                         subtitle:subtitle
                            badge:nil emphasized:NO];
