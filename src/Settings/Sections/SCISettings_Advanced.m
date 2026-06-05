@@ -167,7 +167,7 @@
 												[SCISetting navigationCellWithTitle:SCILocalized(@"Symbols Browser")
 																							   subtitle:SCILocalized(@"All exported C symbols from Instagram / FBSharedFramework")
 																							      icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"function"]
-																						targetClass:SCISymbolsBrowserViewController.class],
+																						viewController:[SCISymbolsBrowserViewController new]],
 											]
 										},
 										@{
