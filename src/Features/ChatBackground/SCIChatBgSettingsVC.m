@@ -159,18 +159,16 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 - (void)rebuildSections {
 	__weak typeof(self) weak = self;
 
-	SCIBaseSettingsRow *enabled = [SCIBaseSettingsRow switchRowWithTitle:SCILocalized(@"Enable custom backgrounds")
-																 subtitle:SCILocalized(@"Adds your own image backgrounds to Instagram chats")
-																	value:^BOOL{
+	SCISetting *enabled = [SCISetting switchCellWithTitle:SCILocalized(@"Enable custom backgrounds")
+												 subtitle:SCILocalized(@"Adds your own image backgrounds to Instagram chats")
+													value:^BOOL{
 		return [[SCIChatBackgroundManager shared] isEnabled];
-	} action:^(BOOL on, UIViewController *vc) {
-		[(SCIChatBgSettingsVC *)vc setEnabled:on];
+	} action:^(BOOL on) {
+		[weak setEnabled:on];
 	}];
 
-	SCIBaseSettingsRow *pickDefault = [SCIBaseSettingsRow rowWithTitle:@""
-															  subtitle:nil
-																action:^(UIViewController *vc) {
-		[(SCIChatBgSettingsVC *)vc importBackgroundSetDefault:YES];
+	SCISetting *pickDefault = [SCISetting buttonCellWithTitle:@"" subtitle:@"" icon:nil action:^{
+		[weak importBackgroundSetDefault:YES];
 	}];
 	pickDefault.dynamicTitle = ^{
 		return [[SCIChatBackgroundManager shared] defaultAsset].length ? SCILocalized(@"Change default") : SCILocalized(@"Pick default");
@@ -179,13 +177,13 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 		return [[SCIChatBackgroundManager shared] defaultAsset].length ? SCILocalized(@"Replace the default background image") : SCILocalized(@"Choose an image used when no chat override exists");
 	};
 
-	SCIBaseSettingsRow *clearDefault = [SCIBaseSettingsRow destructiveRowWithTitle:SCILocalized(@"Clear default")
-																		  subtitle:SCILocalized(@"Remove the global fallback background")
-																			action:^(__unused UIViewController *vc) {
+	SCISetting *clearDefault = [SCISetting buttonCellWithTitle:SCILocalized(@"Clear default") subtitle:SCILocalized(@"Remove the global fallback background") icon:nil action:^{
 		[[SCIChatBackgroundManager shared] setDefaultAsset:nil];
 	}];
+	clearDefault.titleColor = UIColor.systemRedColor;
+	clearDefault.hidesDisclosureIndicator = YES;
 
-	SCIBaseSettingsRow *library = [SCIBaseSettingsRow customRowWithHeight:128 provider:^UITableViewCell *(UITableView *tableView, NSIndexPath *indexPath) {
+	SCISetting *library = [SCISetting customCellWithHeight:128 provider:^UITableViewCell *(UITableView *tableView, NSIndexPath *indexPath) {
 		SCIChatBgLibraryRowCell *cell = [tableView dequeueReusableCellWithIdentifier:kLibraryRowCell forIndexPath:indexPath];
 		cell.collectionView.dataSource = weak;
 		cell.collectionView.delegate = weak;
@@ -194,41 +192,37 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 		return cell;
 	}];
 
-	SCIBaseSettingsRow *chats = [SCIBaseSettingsRow rowWithTitle:@""
-														subtitle:SCILocalized(@"View and manage chats with custom backgrounds")
-														  action:^(UIViewController *vc) {
-		[vc.navigationController pushViewController:[SCIChatBgChatsListViewController new] animated:YES];
+	SCISetting *chats = [SCISetting buttonCellWithTitle:@"" subtitle:SCILocalized(@"View and manage chats with custom backgrounds") icon:nil action:^{
+		[weak.navigationController pushViewController:[SCIChatBgChatsListViewController new] animated:YES];
 	}];
 	chats.dynamicTitle = ^{
 		NSInteger count = [[SCIChatBackgroundManager shared] allThreadAssets].count;
 		return count ? [NSString stringWithFormat:SCILocalized(@"Browse chats (%ld)"), (long)count] : SCILocalized(@"Browse chats");
 	};
 
-	SCIBaseSettingsRow *reset = [SCIBaseSettingsRow destructiveRowWithTitle:SCILocalized(@"Reset all backgrounds")
-																   subtitle:SCILocalized(@"Delete library images, default background, and chat overrides")
-																	 action:^(UIViewController *vc) {
-		[(SCIChatBgSettingsVC *)vc confirmReset];
+	SCISetting *reset = [SCISetting buttonCellWithTitle:SCILocalized(@"Reset all backgrounds") subtitle:SCILocalized(@"Delete library images, default background, and chat overrides") icon:nil action:^{
+		[weak confirmReset];
 	}];
+	reset.titleColor = UIColor.systemRedColor;
+	reset.hidesDisclosureIndicator = YES;
 
-	self.sections = @[
-		[SCIBaseSettingsSection sectionWithHeader:nil
-										   footer:SCILocalized(@"After enabling, open any chat, tap the theme button, then tap the photo icon at the top-right.")
-											 rows:@[enabled]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Default background")
-										   footer:SCILocalized(@"Used only when a chat does not have its own custom background.")
-											 rows:@[pickDefault, clearDefault]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Library")
-										   footer:SCILocalized(@"Tap plus to add. Tap a background to edit, set as default, or delete.")
-											 rows:@[library]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Chats")
-										   footer:nil
-											 rows:@[chats]],
-		[SCIBaseSettingsSection sectionWithHeader:nil
-										   footer:nil
-											 rows:@[reset]]
-	];
-
-	[self reloadSettings];
+	[self applySettingSections:@[
+		[SCISettingsViewController sectionWithHeader:nil
+											 footer:SCILocalized(@"After enabling, open any chat, tap the theme button, then tap the photo icon at the top-right.")
+											   rows:@[enabled]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Default background")
+											 footer:SCILocalized(@"Used only when a chat does not have its own custom background.")
+											   rows:@[pickDefault, clearDefault]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Library")
+											 footer:SCILocalized(@"Tap plus to add. Tap a background to edit, set as default, or delete.")
+											   rows:@[library]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Chats")
+											 footer:nil
+											   rows:@[chats]],
+		[SCISettingsViewController sectionWithHeader:nil
+											 footer:nil
+											   rows:@[reset]]
+	]];
 }
 
 #pragma mark - Actions

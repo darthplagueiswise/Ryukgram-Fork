@@ -104,6 +104,32 @@
 	return setting;
 }
 
++ (instancetype)switchCellWithTitle:(NSString *)title
+						   subtitle:(nullable NSString *)subtitle
+							  value:(BOOL (^)(void))value
+							 action:(void (^)(BOOL on))action
+{
+	SCISetting *setting = [[self alloc] initWithType:SCITableCellSwitch];
+
+	setting.title = title;
+	setting.subtitle = subtitle;
+	setting.switchValueProvider = value;
+	setting.switchAction = action;
+
+	return setting;
+}
+
++ (instancetype)customCellWithHeight:(CGFloat)height
+							provider:(UITableViewCell *(^)(UITableView *tableView, NSIndexPath *indexPath))provider
+{
+	SCISetting *setting = [[self alloc] initWithType:SCITableCellCustom];
+
+	setting.customHeight = height;
+	setting.customCellProvider = provider;
+
+	return setting;
+}
+
 // MARK: - + stepperCellWithTitle
 
 + (instancetype)stepperCellWithTitle:(NSString *)title

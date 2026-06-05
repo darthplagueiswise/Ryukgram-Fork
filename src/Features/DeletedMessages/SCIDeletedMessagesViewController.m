@@ -11,9 +11,9 @@
 #import "../../SCIImageCache.h"
 #import "../../Networking/SCIInstagramAPI.h"
 #import "../../Localization/SCILocalization.h"
-#import "../../Settings/SCISearchBarStyler.h"
 #import "SCIDeletedMessagesStorageViewController.h"
 #import "SCIDeletedMessagesDate.h"
+#import "SCIDeletedMessagesCapture.h"
 
 #pragma mark - Sender row cell
 
@@ -144,13 +144,39 @@
 		 preview:(NSString *)preview
 			  time:(NSString *)time
 			unseen:(NSUInteger)unseen {
-	self.nameLabel.text = g.senderFullName.length ? g.senderFullName : (g.senderUsername.length ? g.senderUsername : SCILocalized(@"Unknown user"));
-	self.handleLabel.text = g.senderUsername.length ? [@"@" stringByAppendingString:g.senderUsername] : @"";
 	self.previewLabel.text = preview;
 	self.timeLabel.text = time;
 	self.countLabel.text = [NSString stringWithFormat:@"%lu", (unsigned long)unseen];
 	self.countBadge.hidden = unseen == 0;
 	self.nameLabel.font = [UIFont systemFontOfSize:16 weight:(unseen ? UIFontWeightSemibold : UIFontWeightRegular)];
+
+	if (g.isGroup) {
+		self.nameLabel.text = g.threadTitle.length ? g.threadTitle : SCILocalized(@"Group chat");
+
+		NSMutableArray<NSString *> *handles = [NSMutableArray array];
+		for (SCIDeletedMessage *m in g.distinctSenders) {
+			NSString *h = m.senderUsername.length ? [@"@" stringByAppendingString:m.senderUsername] : m.senderFullName;
+			if (h.length) [handles addObject:h];
+			if (handles.count >= 3) break;
+		}
+		self.handleLabel.text = handles.count ? [handles componentsJoinedByString:@", "] : SCILocalized(@"Group chat");
+
+		self.avatarView.image = [UIImage systemImageNamed:@"person.2.circle.fill"];
+		self.avatarView.tintColor = UIColor.systemGray3Color;
+		self.avatarURL = g.threadAvatarURL;
+		if (!g.threadAvatarURL.length) return;
+		NSURL *gurl = [NSURL URLWithString:g.threadAvatarURL];
+		if (!gurl) return;
+		__weak typeof(self) wsg = self;
+		[SCIImageCache loadImageFromURL:gurl completion:^(UIImage *img) {
+			if (!img || ![wsg.avatarURL isEqualToString:g.threadAvatarURL]) return;
+			wsg.avatarView.image = img;
+		}];
+		return;
+	}
+
+	self.nameLabel.text = g.senderFullName.length ? g.senderFullName : (g.senderUsername.length ? g.senderUsername : SCILocalized(@"Unknown user"));
+	self.handleLabel.text = g.senderUsername.length ? [@"@" stringByAppendingString:g.senderUsername] : @"";
 
 	self.avatarURL = g.senderProfilePicURL;
 	if (!g.senderProfilePicURL.length) return;
@@ -257,7 +283,7 @@ static void sciMarkSenderSeen(NSString *ownerPk, NSString *senderPk) {
 }
 
 static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ownerPk) {
-	NSTimeInterval seen = sciSeenTimestamp(ownerPk, g.senderPk);
+	NSTimeInterval seen = sciSeenTimestamp(ownerPk, g.identifier);
 	if (seen <= 0) return g.count;
 
 	NSUInteger n = 0;
@@ -277,6 +303,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 @property (nonatomic, strong) UILabel *footerLabel;
 @property (nonatomic, strong) NSArray<SCIDeletedMessageGroup *> *allGroups;
 @property (nonatomic, strong) NSArray<SCIDeletedMessageGroup *> *visibleGroups;
+@property (nonatomic, strong) NSMutableSet<NSString *> *resolvedThreadIds;
 @property (nonatomic, strong) SCIDeletedMessagesFilter *filter;
 @property (nonatomic, copy) NSString *ownerPK;
 @end
@@ -284,9 +311,12 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 @implementation SCIDeletedMessagesViewController
 
 + (void)load {
-	[SCINotificationCenter.shared setDefaultTapProvider:^void (^(void))(void) {
-		return ^{ [SCIDeletedMessagesViewController presentFromViewController:nil]; };
-	} forAction:SCI_NOTIF_UNSENT_MESSAGE];
+	for (NSString *action in @[SCI_NOTIF_UNSENT_MESSAGE, SCI_NOTIF_REACTION_REMOVED]) {
+		[SCINotificationCenter.shared setDefaultTapProvider:^void (^(void))(void) {
+			return ^{ [SCIDeletedMessagesViewController presentFromViewController:nil]; };
+		} ownerVCClass:[SCIDeletedMessagesViewController class]
+		  forAction:action];
+	}
 }
 
 + (void)presentFromViewController:(UIViewController *)presenter {
@@ -362,7 +392,6 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	sc.hidesNavigationBarDuringPresentation = NO;
 	sc.searchBar.placeholder = SCILocalized(@"Search senders or messages");
 	sc.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
-	[SCISearchBarStyler styleSearchBar:sc.searchBar];
 
 	self.searchCtl = sc;
 	self.navigationItem.searchController = sc;
@@ -493,6 +522,14 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 		fmtAction(SCILocalized(@"Absolute date + time"), @"absolute"),
 	]];
 
+	UIAction *refresh = [UIAction actionWithTitle:SCILocalized(@"Refresh names & photos")
+											image:[UIImage systemImageNamed:@"arrow.clockwise"]
+									   identifier:nil
+										  handler:^(__unused UIAction *_) {
+		[ws refreshAllMetadata];
+	}];
+	if (!self.allGroups.count) refresh.attributes = UIMenuElementAttributesDisabled;
+
 	UIAction *storage = [UIAction actionWithTitle:SCILocalized(@"Storage")
 											image:[UIImage systemImageNamed:@"externaldrive"]
 									   identifier:nil
@@ -512,7 +549,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 		dateMenu,
 		sortMenu,
 		formatMenu,
-		[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[storage, clear]]
+		[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[refresh, storage, clear]]
 	]];
 }
 
@@ -534,9 +571,31 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 - (void)reload {
 	self.ownerPK = [SCIUtils currentUserPK];
-	self.allGroups = [SCIDeletedMessagesStorage groupedBySenderForOwnerPK:self.ownerPK];
+	self.allGroups = [SCIDeletedMessagesStorage groupedByThreadForOwnerPK:self.ownerPK];
+	[self resolveThreadsNeedingInfo];
 	[self refilter];
 	[self refreshNavMenu];
+}
+
+// Resolve group flag/title + avatars for any thread still missing them (legacy / switched-in account).
+- (void)resolveThreadsNeedingInfo {
+	if (!self.resolvedThreadIds) self.resolvedThreadIds = [NSMutableSet set];
+
+	for (SCIDeletedMessageGroup *g in self.allGroups) {
+		if (!g.threadId.length || [self.resolvedThreadIds containsObject:g.threadId]) continue;
+
+		BOOL needs = !g.threadTitle.length;
+		if (!needs && g.isGroup) {
+			for (SCIDeletedMessage *m in g.distinctSenders) {
+				if (!m.senderProfilePicURL.length) { needs = YES; break; }
+			}
+		}
+		if (!needs) continue;
+
+		// Once per thread per session — don't re-fire for members who have no avatar.
+		[self.resolvedThreadIds addObject:g.threadId];
+		sciDMResolveThreadInfo(g.threadId, self.ownerPK);
+	}
 }
 
 - (void)refilter {
@@ -560,7 +619,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 		[self.emptyView applyIcon:(enabled ? @"tray" : @"tray.full")
 							 title:(enabled ? SCILocalized(@"No deleted messages yet") : SCILocalized(@"Logging is off"))
 						   message:(enabled
-									? SCILocalized(@"When someone unsends a message, it will appear here grouped by sender.")
+									? SCILocalized(@"When someone unsends a message, it will appear here grouped by chat.")
 									: SCILocalized(@"Enable Settings → Messages → Deleted messages log to start recording."))];
 	} else {
 		[self.emptyView applyIcon:@"line.3.horizontal.decrease.circle"
@@ -579,7 +638,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 		return;
 	}
 
-	self.footerLabel.text = [NSString stringWithFormat:SCILocalized(@"%lu messages from %lu users"),
+	self.footerLabel.text = [NSString stringWithFormat:SCILocalized(@"%lu messages in %lu chats"),
 							 (unsigned long)total,
 							 (unsigned long)self.allGroups.count];
 
@@ -605,6 +664,33 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 - (void)storageTapped {
 	[self.navigationController pushViewController:[SCIDeletedMessagesStorageViewController new] animated:YES];
+}
+
+- (void)refreshAllMetadata {
+	[self.resolvedThreadIds removeAllObjects];
+	NSString *owner = self.ownerPK;
+	NSMutableSet<NSString *> *threads = [NSMutableSet set];
+	NSMutableSet<NSString *> *legacySenders = [NSMutableSet set];
+
+	for (SCIDeletedMessageGroup *g in self.allGroups) {
+		if (g.threadId.length) [threads addObject:g.threadId];
+		else if (g.senderPk.length) [legacySenders addObject:g.senderPk];
+	}
+
+	for (NSString *tid in threads) sciDMRefreshThreadInfo(tid, owner);
+
+	// Legacy threadless records: refresh the sender via the user-info endpoint.
+	for (NSString *pk in legacySenders) {
+		[SCIInstagramAPI sendRequestWithMethod:@"GET"
+										  path:[NSString stringWithFormat:@"users/%@/info/", pk]
+										  body:nil
+									completion:^(NSDictionary *resp, NSError *error) {
+			NSDictionary *user = [resp[@"user"] isKindOfClass:NSDictionary.class] ? resp[@"user"] : nil;
+			if (user.count) [SCIDeletedMessagesStorage applySenderInfo:user forSenderPK:pk ownerPK:owner overwrite:YES];
+		}];
+	}
+
+	SCINotifyInfo(SCI_NOTIF_GENERIC, SCILocalized(@"Refreshing names & photos"), nil);
 }
 
 - (void)clearAllTapped {
@@ -640,11 +726,11 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	[cell applyGroup:g
 			  latest:latest
 			   owner:self.ownerPK
-			 preview:[self previewTextForMessage:latest]
+			 preview:[self previewTextForGroup:g latest:latest]
 				time:[SCIDeletedMessagesDate stringForDate:g.lastDeletedAt]
 			  unseen:sciUnseenCountForGroup(g, self.ownerPK)];
 
-	if (!g.senderProfilePicURL.length) [self backfillSenderIfNeeded:g];
+	if (!g.isGroup && !g.senderProfilePicURL.length) [self backfillSenderIfNeeded:g];
 	return cell;
 }
 
@@ -654,7 +740,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	SCIDeletedMessageGroup *g = [self groupAtIndexPath:ip];
 	if (!g) return;
 
-	sciMarkSenderSeen(self.ownerPK, g.senderPk);
+	sciMarkSenderSeen(self.ownerPK, g.identifier);
 	[tv reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
 
 	SCIDeletedMessagesUserDetailViewController *vc = [[SCIDeletedMessagesUserDetailViewController alloc] initWithGroup:g ownerPK:self.ownerPK];
@@ -669,7 +755,8 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	UIContextualAction *del = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
 																	  title:SCILocalized(@"Clear")
 																	handler:^(__unused UIContextualAction *a, __unused UIView *src, void (^done)(BOOL)) {
-		[SCIDeletedMessagesStorage deleteMessagesForSenderPK:g.senderPk ownerPK:ws.ownerPK];
+		if (g.threadId.length) [SCIDeletedMessagesStorage deleteMessagesForThreadId:g.threadId ownerPK:ws.ownerPK];
+		else [SCIDeletedMessagesStorage deleteMessagesForSenderPK:g.senderPk ownerPK:ws.ownerPK threadlessOnly:YES];
 		done(YES);
 	}];
 	del.image = [UIImage systemImageNamed:@"trash"];
@@ -709,9 +796,22 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 - (NSString *)previewTextForMessage:(SCIDeletedMessage *)m {
 	if (!m) return @"";
+	if (m.kind == SCIDeletedMessageKindReactionRemoved) {
+		NSString *e = m.reactionEmoji.length ? m.reactionEmoji : @"♡";
+		return m.text.length ? [NSString stringWithFormat:SCILocalized(@"removed %@ on: %@"), e, m.text]
+							 : [NSString stringWithFormat:SCILocalized(@"removed reaction %@"), e];
+	}
 	if (m.kind == SCIDeletedMessageKindText && m.text.length) return m.text;
 	if (m.previewText.length) return m.previewText;
 	return SCIDeletedMessageKindLocalizedName(m.kind);
+}
+
+- (NSString *)previewTextForGroup:(SCIDeletedMessageGroup *)g latest:(SCIDeletedMessage *)latest {
+	NSString *body = [self previewTextForMessage:latest];
+	if (!g.isGroup) return body;
+
+	NSString *who = latest.senderUsername.length ? latest.senderUsername : latest.senderFullName;
+	return who.length ? [NSString stringWithFormat:@"%@: %@", who, body] : body;
 }
 
 @end

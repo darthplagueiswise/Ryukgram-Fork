@@ -1,6 +1,6 @@
 #import "SCIBackupScopePickerVC.h"
-#import "SCIBackupDetailVC.h"
 #import "GlassUI/SCIAdaptiveGlass.h"
+#import "SCIBackupDetailVC.h"
 #import "../Utils.h"
 #import "../Localization/SCILocalization.h"
 
@@ -113,7 +113,7 @@
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	self.availableMask = [self maskFromRows:self.rows];
 	self.selection = self.initialSelection & self.availableMask;
 
@@ -142,7 +142,7 @@
 	self.tableView.delegate = self;
 	self.tableView.estimatedRowHeight = 64;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
-	SCIStyleTableViewForGlass(self.tableView);
+	self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 	[self.tableView registerClass:SCIPickerCell.class forCellReuseIdentifier:@"scope"];
 	[self.view addSubview:self.tableView];
@@ -155,9 +155,9 @@
 }
 
 - (void)buildCommitBar {
-	self.commitBar = [[SCIAdaptiveGlassPanelView alloc] initWithRadius:0.0];
+	self.commitBar = UIView.new;
 	self.commitBar.translatesAutoresizingMaskIntoConstraints = NO;
-	self.commitBar.backgroundColor = UIColor.clearColor;
+	self.commitBar.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	[self.view addSubview:self.commitBar];
 
 	self.continueButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -168,8 +168,7 @@
 	self.continueButton.layer.cornerCurve = kCACornerCurveContinuous;
 	[self.continueButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
 	[self.continueButton addTarget:self action:@selector(continueTapped) forControlEvents:UIControlEventTouchUpInside];
-	UIView *commitContent = [self.commitBar isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)self.commitBar).contentView : self.commitBar;
-	[commitContent addSubview:self.continueButton];
+	[self.commitBar addSubview:self.continueButton];
 
 	[NSLayoutConstraint activateConstraints:@[
 		[self.commitBar.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
@@ -263,7 +262,7 @@
 		if (oldChecked != newChecked) [changed addObject:[NSIndexPath indexPathForRow:i inSection:0]];
 	}
 
-	if (changed.count) [self.tableView reloadData];
+	if (changed.count) [self.tableView reloadRowsAtIndexPaths:changed withRowAnimation:UITableViewRowAnimationNone];
 }
 
 #pragma mark - Table
@@ -341,7 +340,7 @@
 - (void)pushRawJSON {
 	UIViewController *vc = UIViewController.new;
 	vc.title = SCILocalized(@"Raw JSON");
-	SCIApplyGlassBackdropToViewController(vc);
+	vc.view.backgroundColor = UIColor.systemBackgroundColor;
 
 	UITextView *tv = UITextView.new;
 	tv.translatesAutoresizingMaskIntoConstraints = NO;
@@ -349,7 +348,7 @@
 	tv.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
 	tv.text = self.rawJSON ?: @"{}";
 	tv.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
-	tv.backgroundColor = UIColor.clearColor;
+	tv.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	[vc.view addSubview:tv];
 
 	[NSLayoutConstraint activateConstraints:@[

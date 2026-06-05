@@ -67,18 +67,29 @@ static NSData *SCISilentWAVData(void) {
 
 	SCIBackgroundActivity *m = self.shared;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		BOOL wasEmpty = m.sources.count == 0;
 		active ? [m.sources addObject:source] : [m.sources removeObject:source];
-
-		if (wasEmpty && m.sources.count) [m startKeepAlive];
-		else if (!wasEmpty && !m.sources.count) [m stopKeepAlive];
+		[m reconcile];
 	});
+}
+
++ (BOOL)prefAllowsSource:(NSString *)source {
+	if ([source isEqualToString:@"dm_keepalive"]) return [SCIUtils getBoolPref:@"deleted_messages_keepalive"];
+	return [SCIUtils getBoolPref:@"bg_keepalive"];
+}
+
+- (void)reconcile {
+	BOOL authorized = NO;
+	for (NSString *s in self.sources) {
+		if ([SCIBackgroundActivity prefAllowsSource:s]) { authorized = YES; break; }
+	}
+
+	authorized ? [self startKeepAlive] : [self stopKeepAlive];
 }
 
 #pragma mark - Lifecycle
 
 - (void)startKeepAlive {
-	if (self.running || ![SCIUtils getBoolPref:@"bg_keepalive"] || ![self activateSession]) return;
+	if (self.running || ![self activateSession]) return;
 
 	self.running = YES;
 	self.interrupted = NO;

@@ -1,7 +1,7 @@
 #import "SCIAppIconPickerViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 #import "../UI/SCIPopupChrome.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 
 static NSString *const SCISelectedAppIconNameKey = @"SCISelectedAppIconName";
 static NSString *const SCIPrimaryAppIconKey = @"__primary__";

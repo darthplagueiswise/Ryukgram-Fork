@@ -394,6 +394,8 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 @property (nonatomic, assign) BOOL running;
 @property (nonatomic, copy) NSString *lastHeaderPK;
 @property (nonatomic, assign) BOOL pendingHeaderFetch;
+// Counts this VC as the analyzer's surface; re-appear after popping a child is a no-op.
+@property (nonatomic, assign) BOOL attachedToService;
 @end
 
 @implementation SCIProfileAnalyzerViewController
@@ -406,16 +408,21 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 
 	[self setupTable];
 
-	[[NSNotificationCenter defaultCenter] addObserver:self
-											 selector:@selector(analyzerDataChanged:)
-												 name:SCIProfileAnalyzerDataDidChangeNotification
-											   object:nil];
+	NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+	[nc addObserver:self selector:@selector(analyzerDataChanged:)
+	           name:SCIProfileAnalyzerDataDidChangeNotification object:nil];
+	[nc addObserver:self selector:@selector(serviceProgressDidChange:)
+	           name:SCIProfileAnalyzerProgressDidChangeNotification object:nil];
+	[nc addObserver:self selector:@selector(serviceHeaderInfoDidChange:)
+	           name:SCIProfileAnalyzerHeaderInfoDidChangeNotification object:nil];
+	[nc addObserver:self selector:@selector(serviceDidFinish:)
+	           name:SCIProfileAnalyzerDidFinishNotification object:nil];
 }
 
 - (void)dealloc {
 	[[NSNotificationCenter defaultCenter] removeObserver:self];
-	// Service is a singleton — drop in-flight scan when the VC pops.
-	if (self.running) [[SCIProfileAnalyzerService sharedService] cancel];
+	// Safety net — viewWillDisappear may be skipped on torn-down hierarchies.
+	if (_attachedToService) [[SCIProfileAnalyzerService sharedService] detachObserver];
 }
 
 - (void)analyzerDataChanged:(NSNotification *)note {
@@ -436,7 +443,25 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
+	if (!self.attachedToService) {
+		self.attachedToService = YES;
+		[[SCIProfileAnalyzerService sharedService] attachObserver];
+	}
 	@try { [self loadCachedReport]; } @catch (__unused NSException *e) {}
+	[self attachToRunningServiceIfAny];
+}
+
+// Only detach on a real teardown — pushing a child list also fires this.
+- (void)viewWillDisappear:(BOOL)animated {
+	[super viewWillDisappear:animated];
+	BOOL leaving = self.isBeingDismissed
+	            || self.isMovingFromParentViewController
+	            || self.navigationController.isBeingDismissed
+	            || self.navigationController.isMovingFromParentViewController;
+	if (leaving && self.attachedToService) {
+		self.attachedToService = NO;
+		[[SCIProfileAnalyzerService sharedService] detachObserver];
+	}
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -447,6 +472,16 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 		self.pendingHeaderFetch = NO;
 		@try { [self fetchAndCacheHeader]; } @catch (__unused NSException *e) {}
 	}
+}
+
+// Paint the cached progress state when mounting on top of an in-flight scan.
+- (void)attachToRunningServiceIfAny {
+	SCIProfileAnalyzerService *svc = [SCIProfileAnalyzerService sharedService];
+	if (!svc.isRunning) return;
+	[self enterRunningState];
+	self.headerView.progressLabel.text = svc.lastStatus.length ? svc.lastStatus : SCILocalized(@"Starting…");
+	self.headerView.avatar.progress = svc.lastFraction;
+	if (svc.lastHeaderInfo) [self paintHeaderFromUserInfo:svc.lastHeaderInfo];
 }
 
 - (UIView *)buildTitleViewWithBeta {
@@ -878,17 +913,17 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 			followers = [[self fieldCacheForUser:igUser][@"follower_count"] integerValue];
 		} @catch (__unused id e) {}
 	}
-	if (followers > SCIProfileAnalyzerMaxFollowerCount) {
-		self.headerView.warningLabel.hidden = NO;
+	BOOL overLimit = followers > SCIProfileAnalyzerMaxFollowerCount;
+	self.headerView.warningLabel.hidden = !overLimit;
+	if (overLimit) {
 		self.headerView.warningLabel.text = [NSString stringWithFormat:
 			SCILocalized(@"Follower count exceeds %ld — analysis disabled to avoid rate limits."),
 			(long)SCIProfileAnalyzerMaxFollowerCount];
-		self.headerView.scanButton.enabled = NO;
-		self.headerView.scanButton.alpha = 0.5;
-	} else {
-		self.headerView.warningLabel.hidden = YES;
-		self.headerView.scanButton.enabled = !self.running;
-		self.headerView.scanButton.alpha = self.running ? 0.5 : 1.0;
+	}
+	// enterRunningState owns the Cancel chrome while running; only touch enabled pre-scan.
+	if (!self.running) {
+		self.headerView.scanButton.enabled = !overLimit;
+		self.headerView.scanButton.alpha = overLimit ? 0.5 : 1.0;
 	}
 	[self.view setNeedsLayout];
 }
@@ -897,6 +932,12 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 
 - (void)analyzeTapped {
 	if (self.running) { [[SCIProfileAnalyzerService sharedService] cancel]; return; }
+	[self enterRunningState];
+	[[SCIProfileAnalyzerService sharedService] start];
+}
+
+// Idempotent — fresh start and mid-scan re-attach both call this.
+- (void)enterRunningState {
 	self.running = YES;
 	self.headerView.progressLabel.hidden = NO;
 	self.headerView.progressLabel.text = SCILocalized(@"Starting…");
@@ -904,17 +945,34 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 	self.headerView.avatar.progress = 0;
 	[self.headerView.scanButton setTitle:SCILocalized(@"Cancel") forState:UIControlStateNormal];
 	self.headerView.scanButton.backgroundColor = [UIColor systemRedColor];
+	self.headerView.scanButton.enabled = YES;
+	self.headerView.scanButton.alpha = 1.0;
+	[self.tableView reloadData];
 	[self.view setNeedsLayout];
+}
 
-	__weak typeof(self) weakSelf = self;
-	[[SCIProfileAnalyzerService sharedService] runForSelfWithHeaderInfo:^(NSDictionary *userInfo) {
-		[weakSelf paintHeaderFromUserInfo:userInfo];
-	} progress:^(NSString *status, double fraction) {
-		weakSelf.headerView.progressLabel.text = status;
-		weakSelf.headerView.avatar.progress = fraction;
-	} completion:^(SCIProfileAnalyzerSnapshot *snapshot, NSError *error) {
-		[weakSelf onAnalysisFinished:snapshot error:error];
-	}];
+#pragma mark - Service notification observers
+
+- (void)serviceProgressDidChange:(NSNotification *)note {
+	if (!self.isViewLoaded) return;
+	NSString *status = note.userInfo[@"status"];
+	NSNumber *fraction = note.userInfo[@"fraction"];
+	if ([status isKindOfClass:[NSString class]]) self.headerView.progressLabel.text = status;
+	if ([fraction isKindOfClass:[NSNumber class]]) self.headerView.avatar.progress = fraction.doubleValue;
+}
+
+- (void)serviceHeaderInfoDidChange:(NSNotification *)note {
+	if (!self.isViewLoaded) return;
+	NSDictionary *user = note.userInfo[@"user"];
+	if ([user isKindOfClass:[NSDictionary class]]) [self paintHeaderFromUserInfo:user];
+}
+
+- (void)serviceDidFinish:(NSNotification *)note {
+	if (!self.isViewLoaded) return;
+	SCIProfileAnalyzerSnapshot *snap = note.userInfo[@"snapshot"];
+	NSError *error = note.userInfo[@"error"];
+	[self onAnalysisFinished:[snap isKindOfClass:[SCIProfileAnalyzerSnapshot class]] ? snap : nil
+	                   error:[error isKindOfClass:[NSError class]] ? error : nil];
 }
 
 // IG payloads carry NSNull for absent fields — coerce safely.
@@ -973,6 +1031,7 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 }
 
 
+// Service owns persistence + success surface; VC just resets chrome + shows blocking errors.
 - (void)onAnalysisFinished:(SCIProfileAnalyzerSnapshot *)snapshot error:(NSError *)error {
 	self.running = NO;
 	self.headerView.progressLabel.hidden = YES;
@@ -991,27 +1050,7 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 		[self alertTitle:SCILocalized(@"Analysis failed") message:error.localizedDescription ?: @""];
 		return;
 	}
-	if (!snapshot) { [self loadCachedReport]; return; }
-
-	NSString *pk = [SCIUtils currentUserPK];
-	[SCIProfileAnalyzerStorage saveSnapshot:snapshot forUserPK:pk];
-	if ([SCIUtils getBoolPref:@"profile_analyzer_record_snapshots"]) {
-		NSInteger cap = (NSInteger)[SCIUtils getDoublePref:@"profile_analyzer_snapshot_cap"];
-		[SCIProfileAnalyzerStorage appendSnapshotToHistory:snapshot forUserPK:pk capacity:cap];
-	}
-	[SCIProfileAnalyzerStorage saveHeaderInfo:@{
-		@"username": snapshot.selfUsername ?: @"",
-		@"full_name": snapshot.selfFullName ?: @"",
-		@"profile_pic_url": snapshot.selfProfilePicURL ?: @"",
-		@"follower_count": @(snapshot.followerCount),
-		@"following_count": @(snapshot.followingCount),
-		@"media_count": @(snapshot.mediaCount),
-	} forUserPK:pk];
 	[self loadCachedReport];
-	SCINotifySuccess(SCI_NOTIF_ANALYZER_DONE,
-					 SCILocalized(@"Analysis complete"),
-					 [NSString stringWithFormat:SCILocalized(@"%lu followers · %lu following"),
-					  (unsigned long)snapshot.followers.count, (unsigned long)snapshot.following.count]);
 }
 
 - (void)resetTapped {
@@ -1088,7 +1127,9 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 		: self.categories[indexPath.row];
 	BOOL waitingForPrev = d.requiresPrevious && !self.report.previous;
 	BOOL hasReport = self.report.current != nil;
-	BOOL disabled = d.standalone ? (d.count == 0) : (waitingForPrev || !hasReport || d.count == 0);
+	// Locked while running — the report is about to be replaced.
+	BOOL disabled = d.standalone ? (d.count == 0)
+	                              : (self.running || waitingForPrev || !hasReport || d.count == 0);
 
 	cell.titleLabel.text = d.title;
 	if (d.standalone) {
@@ -1123,13 +1164,14 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 	}
 	if (indexPath.section == 3) {
 		if (indexPath.row == 0) [self infoTapped];
-		else [self resetTapped];
+		else if (!self.running) [self resetTapped];
 		return;
 	}
 	SCIPACategoryDescriptor *d = (indexPath.section == 1)
 		? self.trackingCategories[indexPath.row]
 		: self.categories[indexPath.row];
 	if (!d.standalone) {
+		if (self.running) return;
 		if (d.requiresPrevious && !self.report.previous) return;
 		if (!self.report.current) return;
 	}
@@ -1211,6 +1253,8 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 		cell.textLabel.textColor = [UIColor systemRedColor];
 		cell.imageView.image = [UIImage systemImageNamed:@"trash"];
 		cell.imageView.tintColor = [UIColor systemRedColor];
+		cell.contentView.alpha = self.running ? 0.5 : 1.0;
+		cell.selectionStyle = self.running ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
 	}
 	return cell;
 }

@@ -22,12 +22,11 @@
 											@"header": @"",
 											@"rows": @[
 												[SCISetting menuCellWithTitle:SCILocalized(@"Tap Controls") subtitle:SCILocalized(@"Change what happens when you tap on a reel") menu:[self menus][@"reels_tap_control"]],
-												[SCISetting menuCellWithTitle:SCILocalized(@"Auto-scroll reels") subtitle:SCILocalized(@"IG default: native behavior. RyukGram: re-advances after swiping back.") menu:[self menus][@"auto_scroll_reels_mode"]],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Always show progress scrubber") subtitle:SCILocalized(@"Forces the progress bar to appear on every reel") defaultsKey:@"reels_show_scrubber"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable auto-unmuting reels") subtitle:SCILocalized(@"Prevents reels from unmuting when the volume/silent button is pressed") defaultsKey:@"disable_auto_unmuting_reels" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm reel refresh") subtitle:SCILocalized(@"Shows an alert when you trigger a reels refresh") defaultsKey:@"refresh_reel_confirm"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable tab button refresh") subtitle:SCILocalized(@"Tapping the Reels tab while on reels does nothing") defaultsKey:@"disable_reels_tab_refresh"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Swipe left to profile") subtitle:SCILocalized(@"Swipe a reel left to open the author's profile") defaultsKey:@"reels_swipe_to_profile"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Swipe left to profile") subtitle:SCILocalized(@"Swipe a reel left to open the author's profile") defaultsKey:@"reels_swipe_to_profile" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Unlock password-locked reels") subtitle:SCILocalized(@"Shows buttons to reveal and auto-fill the password on locked reels") defaultsKey:@"unlock_password_reels"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Playback speed") subtitle:SCILocalized(@"Hold the 3-dot on any reel to open speed picker") defaultsKey:@"reels_playback_speed"],
 											]

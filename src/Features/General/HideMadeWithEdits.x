@@ -1,10 +1,11 @@
 #import "../../Utils.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 
-// Hides any IGPillButton whose text mentions "Edits" — Made with Edits,
-// Open in Edits, etc. Hooks IGPillButton's `configureWithViewModel:`
-// (resolved at %ctor) so it fires once per pill setup, not per layout.
+// Hides IGPillButtons labelled "Made with Edits" / "Use template", plus the
+// feed-post attribution row. configureWithViewModel: fires once per pill setup,
+// not per layout — cheaper hook point than a layout pass.
 
 static const void *kSCIPillEditsHideKey = &kSCIPillEditsHideKey;
 
@@ -29,8 +30,16 @@ static NSString *sciPillText(UIView *pill) {
     return sciFindFirstNonEmptyLabel(pill, 0).text;
 }
 
-static BOOL sciTextIsEdits(NSString *txt) {
-    return txt.length && [txt rangeOfString:@"edits" options:NSCaseInsensitiveSearch].location != NSNotFound;
+static BOOL sciTextShouldHidePill(NSString *txt) {
+    if (!txt.length) return NO;
+    return [txt rangeOfString:@"edits" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+           [txt rangeOfString:@"template" options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+static void sciCollapseView(UIView *v) {
+    v.hidden = YES;
+    v.alpha = 0;
+    CGRect f = v.frame; f.size = CGSizeZero; v.frame = f;
 }
 
 %hook IGPillButton
@@ -51,12 +60,44 @@ static void new_IGPillButton_configureWithViewModel(id self, SEL _cmd, id model)
     orig_IGPillButton_configureWithViewModel(self, _cmd, model);
     if (![SCIUtils getBoolPref:@"hide_made_with_edits"]) return;
     UIView *pill = (UIView *)self;
-    if (!sciTextIsEdits(sciPillText(pill))) return;
+    if (!sciTextShouldHidePill(sciPillText(pill))) return;
     objc_setAssociatedObject(pill, kSCIPillEditsHideKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    pill.hidden = YES;
-    pill.alpha = 0;
-    CGRect f = pill.frame; f.size = CGSizeZero; pill.frame = f;
+    sciCollapseView(pill);
     [pill removeFromSuperview];
+}
+
+// Feed-post attribution row. The controller exposes its view under the
+// ivar-named KVC key `madeWithEditsAttributionView`, not a generic
+// `attributionView` — try the specific keys first, then fall back to the
+// controller's own view.
+typedef void (*sci_configureView_t)(id, SEL);
+static sci_configureView_t orig_attribution_configureView[2];
+
+static void sci_run_attribution(id self, SEL _cmd, NSUInteger idx) {
+    if (orig_attribution_configureView[idx]) orig_attribution_configureView[idx](self, _cmd);
+    if (![SCIUtils getBoolPref:@"hide_made_with_edits"]) return;
+    UIView *v = nil;
+    for (NSString *key in @[@"madeWithEditsAttributionView", @"attributionView", @"templatesAttributionView"]) {
+        @try { id cand = [(NSObject *)self valueForKey:key];
+               if ([cand isKindOfClass:[UIView class]]) { v = cand; break; } }
+        @catch (__unused id e) {}
+    }
+    if (!v && [self respondsToSelector:@selector(view)]) {
+        id cv = ((id (*)(id, SEL))objc_msgSend)(self, @selector(view));
+        if ([cv isKindOfClass:[UIView class]]) v = cv;
+    }
+    if (v) sciCollapseView(v);
+}
+
+static void new_attribution_configureView_0(id self, SEL _cmd) { sci_run_attribution(self, _cmd, 0); }
+static void new_attribution_configureView_1(id self, SEL _cmd) { sci_run_attribution(self, _cmd, 1); }
+
+static void sciHookAttributionController(NSString *mangled, NSUInteger idx) {
+    static IMP imps[2] = { (IMP)new_attribution_configureView_0, (IMP)new_attribution_configureView_1 };
+    Class cls = objc_getClass(mangled.UTF8String);
+    if (cls && class_getInstanceMethod(cls, @selector(configureView))) {
+        MSHookMessageEx(cls, @selector(configureView), imps[idx], (IMP *)&orig_attribution_configureView[idx]);
+    }
 }
 
 %ctor {
@@ -67,19 +108,7 @@ static void new_IGPillButton_configureWithViewModel(id self, SEL _cmd, id model)
                         (IMP)new_IGPillButton_configureWithViewModel,
                         (IMP *)&orig_IGPillButton_configureWithViewModel);
     }
+
+    sciHookAttributionController(@"_TtC24IGFeedItemAttributionKit40IGFeedItemTemplatesAttributionController", 0);
+    sciHookAttributionController(@"_TtC24IGFeedItemAttributionKit44IGFeedItemMadeWithEditsAttributionController", 1);
 }
-
-// Feed-post "Made with Edits" attribution row.
-%hook _TtC24IGFeedItemAttributionKit44IGFeedItemMadeWithEditsAttributionController
-
-- (void)configureView {
-    %orig;
-    if (![SCIUtils getBoolPref:@"hide_made_with_edits"]) return;
-    UIView *v = [(NSObject *)self valueForKey:@"attributionView"];
-    if ([v isKindOfClass:[UIView class]]) {
-        v.hidden = YES;
-        CGRect f = v.frame; f.size.height = 0; v.frame = f;
-    }
-}
-
-%end

@@ -317,7 +317,8 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 + (void)load {
 	[[SCINotificationCenter shared] setDefaultTapProvider:^{
 		return ^{ [SCIDownloadManagerViewController present]; };
-	} forAction:SCI_NOTIF_DOWNLOAD];
+	} ownerVCClass:[SCIDownloadManagerViewController class]
+	  forAction:SCI_NOTIF_DOWNLOAD];
 }
 
 + (void)present {

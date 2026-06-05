@@ -1,4 +1,5 @@
 #import "SCISettingsSections.h"
+#import "../../Features/DeletedMessages/SCIDeletedMessagesCapture.h"
 
 @implementation SCITweakSettings (Section_Messages)
 
@@ -15,7 +16,8 @@
 																		navSections:@[@{
 																			@"header": @"",
 																			@"rows": @[
-																				[SCISetting switchCellWithTitle:SCILocalized(@"Manually mark messages as seen") subtitle:SCILocalized(@"Adds a button to DM threads to mark messages as seen") defaultsKey:@"remove_lastseen"],
+																				[SCISetting switchCellWithTitle:SCILocalized(@"Manually mark messages as seen") subtitle:SCILocalized(@"Blocks the auto read receipt — mark seen happens only when you choose") defaultsKey:@"remove_lastseen"],
+																				[SCISetting switchCellWithTitle:SCILocalized(@"Show seen button") subtitle:SCILocalized(@"Adds the eye button to DM threads. Off keeps receipt blocking on without the button") defaultsKey:@"show_dm_seen_button" requiresRestart:YES],
 																				[SCISetting menuCellWithTitle:SCILocalized(@"Read receipt mode") subtitle:SCILocalized(@"How the seen button behaves") menu:[self menus][@"seen_mode"]],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Auto mark seen on interact") subtitle:SCILocalized(@"Marks messages as seen when you send any message") defaultsKey:@"seen_auto_on_interact"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Auto mark seen on typing") subtitle:SCILocalized(@"Marks messages as seen when you start typing") defaultsKey:@"seen_auto_on_typing"],
@@ -33,23 +35,46 @@
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Indicate unsent messages") subtitle:SCILocalized(@"Shows an \"Unsent\" label on preserved messages") defaultsKey:@"indicate_unsent_messages"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Unsent message notification") subtitle:SCILocalized(@"Shows a notification pill when a message is unsent") defaultsKey:@"unsent_message_toast"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Warn before clearing on refresh") subtitle:SCILocalized(@"Confirmation dialog before clearing preserved messages") defaultsKey:@"warn_refresh_clears_preserved"],
+																				[SCISetting switchCellWithTitle:SCILocalized(@"Keep running in background")
+																										subtitle:SCILocalized(@"Catch view-once media unsent while you're away. ⚠️ May drain battery")
+																										value:^BOOL{ return [SCIUtils getBoolPref:@"deleted_messages_keepalive"]; }
+																										action:^(BOOL on) {
+																										if (!on) {
+																											[NSUserDefaults.standardUserDefaults setBool:NO forKey:@"deleted_messages_keepalive"];
+																											sciDMUpdateKeepAlive();
+																											return;
+																										}
+																										UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"Keep Instagram active in background")
+																											message:SCILocalized(@"Forces Instagram to keep running in the background so it can capture disappearing media that someone unsends while you're not in the app.\n\nMainly useful for view-once media — normal photos/videos are usually still recoverable without it. ⚠️ May significantly drain your battery, and can't capture anything if you force-quit Instagram from the app switcher.\n\nEnable it?")
+																											preferredStyle:UIAlertControllerStyleAlert];
+																										[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:^(UIAlertAction *_) {
+																											[NSUserDefaults.standardUserDefaults setBool:NO forKey:@"deleted_messages_keepalive"];
+																											[NSNotificationCenter.defaultCenter postNotificationName:@"SCISettingsShouldReload" object:nil];
+																										}]];
+																										[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Enable") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+																											[NSUserDefaults.standardUserDefaults setBool:YES forKey:@"deleted_messages_keepalive"];
+																											sciDMUpdateKeepAlive();
+																										}]];
+																										[sciTopVC() presentViewController:a animated:YES completion:nil];
+																				}],
 																			]
 																		}]
 												],
 												[SCISetting navigationCellWithTitle:SCILocalized(@"Deleted messages log")
-																		   subtitle:SCILocalized(@"Records every message someone unsends, grouped by sender")
+																		   subtitle:SCILocalized(@"Records every message someone unsends, grouped by chat")
 																			   icon:nil
 																		navSections:@[@{
 																			@"header": @"",
 																			@"footer": SCILocalized(@"When enabled, deleted messages and their media are saved on this device. Toggle off and clear the log to wipe history."),
 																			@"rows": @[
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Enable deleted messages log") subtitle:SCILocalized(@"Captures unsent messages with their text or media") defaultsKey:@"deleted_messages_log_enabled"],
+																				[SCISetting switchCellWithTitle:SCILocalized(@"Log removed reactions") subtitle:SCILocalized(@"Also records when someone removes a reaction, and which message it was on") defaultsKey:@"deleted_messages_log_reactions"],
 																				[SCISetting buttonCellWithTitle:SCILocalized(@"Open log")
-																									   subtitle:SCILocalized(@"Browse, filter and search recorded messages")
-																										   icon:[SCISymbol symbolWithName:@"tray.full"]
-																										 action:^(void) {
-																					[SCIDeletedMessagesViewController presentFromViewController:nil];
-																				}],
+																								   subtitle:SCILocalized(@"Browse, filter and search recorded messages")
+																									   icon:[SCISymbol symbolWithName:@"tray.full"]
+																									 action:^(void) {
+																				[SCIDeletedMessagesViewController presentFromViewController:nil];
+																			}],
 																			]
 																		}]
 												],
@@ -145,7 +170,7 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"Note actions") subtitle:SCILocalized(@"Adds copy text, download GIF/audio to the note long-press menu") defaultsKey:@"note_actions"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Copy text on hold") subtitle:SCILocalized(@"Copies note text directly on long press without opening the menu") defaultsKey:@"note_copy_on_hold"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Enable note theming") subtitle:SCILocalized(@"Enables the notes theme picker") defaultsKey:@"enable_notes_customization"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Custom note themes") subtitle:SCILocalized(@"Adds a paintbrush button and long-press shortcut to pick custom background and text colors") defaultsKey:@"custom_note_themes"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Custom note themes") subtitle:SCILocalized(@"Adds Background, Text and Emoji buttons to the note editor") defaultsKey:@"custom_note_themes"],
 											]
 										},
 										@{
@@ -158,6 +183,7 @@
 																	  viewController:[[SCIActionMenuConfigViewController alloc] initForSource:SCIActionSourceDM]];
 												   s.whatsNewID = @"ui_cfg_actionmenu"; s; }),
 												[SCISetting switchCellWithTitle:SCILocalized(@"Show mark-as-viewed button") subtitle:SCILocalized(@"Inserts an eye button to mark the current disappearing media as viewed") defaultsKey:@"dm_visual_seen_button" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Advance when marking as seen") subtitle:SCILocalized(@"Marking as viewed advances to the next stacked media instead of closing") defaultsKey:@"dm_visual_advance_on_mark_seen"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Show audio toggle") subtitle:SCILocalized(@"Inserts a speaker button to mute/unmute disappearing media") defaultsKey:@"dm_visual_audio_toggle" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Unlimited replay of visual messages") subtitle:SCILocalized(@"Replay visual messages without expiring. Toggle in the eye button menu, or as a standalone button when the eye button is disabled") defaultsKey:@"unlimited_replay"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable view-once limitations") subtitle:SCILocalized(@"Makes view-once messages behave like normal visual messages (loopable/pauseable)") defaultsKey:@"disable_view_once_limitations"],
@@ -167,8 +193,8 @@
 											@"header": SCILocalized(@"Instants"),
 											@"footer": SCILocalized(@"Tweaks for the QuickSnap / Instants camera surface."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Disable instants creation") subtitle:SCILocalized(@"Hides the functionality to create/send instants") defaultsKey:@"disable_instants_creation" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Send from gallery") subtitle:SCILocalized(@"Adds a gallery button to the instants camera so you can send a photo from your album") defaultsKey:@"instants_send_from_gallery" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Auto advance after reaction") subtitle:SCILocalized(@"Automatically moves to the next instant after you like or react") defaultsKey:@"instant_auto_advance_reaction"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Instants action button") subtitle:SCILocalized(@"Adds a RyukGram action button to the instants viewer header with expand, save, share, and bulk-save entries") defaultsKey:@"instants_download_btn"],
 												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"Configure menu")
 																			subtitle:SCILocalized(@"Reorder, enable/disable, set default tap, show date")

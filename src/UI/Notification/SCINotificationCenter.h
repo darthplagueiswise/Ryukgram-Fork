@@ -53,6 +53,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setDefaultTapProvider:(void (^ _Nullable (^ _Nullable)(void))(void))provider
                     forAction:(NSString *)actionID;
 
+// Same, plus an owner VC class — tap no-ops when an instance of that class
+// is already anywhere in the presentation chain.
+- (void)setDefaultTapProvider:(void (^ _Nullable (^ _Nullable)(void))(void))provider
+                 ownerVCClass:(nullable Class)ownerClass
+                    forAction:(NSString *)actionID;
+
 // Per-action pref defaults (notif_action_<id> = "default") — merged into
 // SCIRegisterDefaultsOnce so picker rows resolve to "Default" on first launch.
 + (NSDictionary<NSString *, NSString *> *)defaultPerActionPrefs;

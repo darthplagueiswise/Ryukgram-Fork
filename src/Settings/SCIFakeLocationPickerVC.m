@@ -94,7 +94,7 @@
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = UIColor.systemBackgroundColor;
 	self.title = self.titleText.length ? self.titleText : SCILocalized(@"Pick location");
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
 
@@ -155,11 +155,11 @@
 
 - (void)setupLocateButton {
 	self.locateButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	self.locateButton.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	self.locateButton.tintColor = UIColor.systemBlueColor;
 	self.locateButton.layer.cornerRadius = 8.0;
 	self.locateButton.translatesAutoresizingMaskIntoConstraints = NO;
 	[self.locateButton setImage:[UIImage systemImageNamed:@"location"] forState:UIControlStateNormal];
-	SCIApplyGlassToButton(self.locateButton);
 	[self.locateButton addTarget:self action:@selector(onLocateTap) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:self.locateButton];
 
@@ -172,7 +172,7 @@
 }
 
 - (void)setupCard {
-	self.cardView = [[UIVisualEffectView alloc] initWithEffect:SCIRealLiquidGlassEffect(NO, YES, nil)];
+	self.cardView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
 	self.cardView.layer.cornerRadius = 16.0;
 	self.cardView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.cardView.clipsToBounds = YES;
@@ -184,12 +184,12 @@
 	self.subtitleLabel = [self labelWithFont:[UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightRegular] color:UIColor.secondaryLabelColor];
 
 	self.useButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	self.useButton.backgroundColor = UIColor.systemBlueColor;
 	self.useButton.layer.cornerRadius = 12.0;
 	self.useButton.translatesAutoresizingMaskIntoConstraints = NO;
 	self.useButton.titleLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
 	[self.useButton setTitle:SCILocalized(@"Use this location") forState:UIControlStateNormal];
-	[self.useButton setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
-	SCIApplyGlassToButton(self.useButton);
+	[self.useButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
 	[self.useButton addTarget:self action:@selector(commit) forControlEvents:UIControlEventTouchUpInside];
 
 	UIView *content = self.cardView.contentView;

@@ -65,37 +65,31 @@ static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 - (void)rebuildSections {
 	__weak typeof(self) weak = self;
 
-	SCIBaseSettingsRow *enabled = [SCIBaseSettingsRow switchRowWithTitle:SCILocalized(@"Enable fake location")
-																 subtitle:SCILocalized(@"Override Instagram location reads.")
-																	value:^BOOL{
+	SCISetting *enabled = [SCISetting switchCellWithTitle:SCILocalized(@"Enable fake location")
+												 subtitle:SCILocalized(@"Override Instagram location reads.")
+													value:^BOOL{
 		return [SCIUtils getBoolPref:kEnabled];
-	} action:^(BOOL on, UIViewController *vc) {
-		SCIFakeLocationSettingsVC *self = (id)vc;
-		[self.defaults setBool:on forKey:kEnabled];
-		[self postMapButtonRefresh];
+	} action:^(BOOL on) {
+		[weak.defaults setBool:on forKey:kEnabled];
+		[weak postMapButtonRefresh];
 	}];
 
-	SCIBaseSettingsRow *showButton = [SCIBaseSettingsRow switchRowWithTitle:SCILocalized(@"Show map button")
-																   subtitle:SCILocalized(@"Show the quick button in Friends Map.")
-																	  value:^BOOL{
+	SCISetting *showButton = [SCISetting switchCellWithTitle:SCILocalized(@"Show map button")
+												   subtitle:SCILocalized(@"Show the quick button in Friends Map.")
+													  value:^BOOL{
 		return [SCIUtils getBoolPref:kShowBtn];
-	} action:^(BOOL on, UIViewController *vc) {
-		SCIFakeLocationSettingsVC *self = (id)vc;
-		[self.defaults setBool:on forKey:kShowBtn];
-		[self postMapButtonRefresh];
+	} action:^(BOOL on) {
+		[weak.defaults setBool:on forKey:kShowBtn];
+		[weak postMapButtonRefresh];
 	}];
 
-	SCIBaseSettingsRow *current = [SCIBaseSettingsRow rowWithTitle:@""
-														  subtitle:nil
-															action:nil];
+	SCISetting *current = [SCISetting staticCellWithTitle:@"" subtitle:@"" icon:nil];
 	current.dynamicTitle = ^{ return weak.currentName.length ? weak.currentName : SCILocalized(@"(unset)"); };
 	current.dynamicSubtitle = ^{ return [weak coordTextWithLat:weak.currentLat lon:weak.currentLon]; };
-	current.icon = [UIImage systemImageNamed:@"location.fill"];
+	current.iconImage = [UIImage systemImageNamed:@"location.fill"];
 
-	SCIBaseSettingsRow *select = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Select location on map")
-														 subtitle:nil
-														   action:^(UIViewController *vc) {
-		[(SCIFakeLocationSettingsVC *)vc openCurrentPicker];
+	SCISetting *select = [SCISetting buttonCellWithTitle:SCILocalized(@"Select location on map") subtitle:@"" icon:nil action:^{
+		[weak openCurrentPicker];
 	}];
 	select.titleColor = UIColor.systemBlueColor;
 
@@ -105,34 +99,30 @@ static NSString *const kMapBtnChanged = @"SCIFakeLocationMapBtnPrefChanged";
 		double lat = [preset[@"lat"] doubleValue];
 		double lon = [preset[@"lon"] doubleValue];
 
-		SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:name.length ? name : SCILocalized(@"Preset")
-														  subtitle:[self coordTextWithLat:lat lon:lon]
-															action:^(UIViewController *vc) {
-			SCIFakeLocationSettingsVC *self = (id)vc;
-			[self applyLat:lat lon:lon name:name enable:YES];
+		SCISetting *row = [SCISetting buttonCellWithTitle:name.length ? name : SCILocalized(@"Preset")
+												 subtitle:[self coordTextWithLat:lat lon:lon]
+													 icon:nil
+												   action:^{
+			[weak applyLat:lat lon:lon name:name enable:YES];
 		}];
-		row.accessoryType = UITableViewCellAccessoryNone;
-		row.icon = [UIImage systemImageNamed:@"mappin.circle.fill"];
+		row.hidesDisclosureIndicator = YES;
+		row.iconImage = [UIImage systemImageNamed:@"mappin.circle.fill"];
 		[presetRows addObject:row];
 	}
 
-	SCIBaseSettingsRow *addPreset = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Add preset")
-															subtitle:nil
-															  action:^(UIViewController *vc) {
-		[(SCIFakeLocationSettingsVC *)vc openPresetPicker];
+	SCISetting *addPreset = [SCISetting buttonCellWithTitle:SCILocalized(@"Add preset") subtitle:@"" icon:nil action:^{
+		[weak openPresetPicker];
 	}];
 	addPreset.titleColor = UIColor.systemBlueColor;
-	addPreset.accessoryType = UITableViewCellAccessoryNone;
-	addPreset.icon = [UIImage systemImageNamed:@"plus.circle.fill"];
+	addPreset.hidesDisclosureIndicator = YES;
+	addPreset.iconImage = [UIImage systemImageNamed:@"plus.circle.fill"];
 	[presetRows addObject:addPreset];
 
-	self.sections = @[
-		[SCIBaseSettingsSection sectionWithHeader:nil footer:SCILocalized(@"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map.") rows:@[enabled, showButton]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Current location") footer:nil rows:@[current, select]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Saved locations") footer:SCILocalized(@"Tap a preset to make it active. Swipe left to delete.") rows:presetRows],
-	];
-
-	[self reloadSettings];
+	[self applySettingSections:@[
+		[SCISettingsViewController sectionWithHeader:nil footer:SCILocalized(@"When on, Instagram location requests return your selected fake location. The map button adds a quick shortcut inside Friends Map.") rows:@[enabled, showButton]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Current location") footer:nil rows:@[current, select]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Saved locations") footer:SCILocalized(@"Tap a preset to make it active. Swipe left to delete.") rows:presetRows],
+	]];
 }
 
 #pragma mark - Actions

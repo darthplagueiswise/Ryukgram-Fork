@@ -1,181 +1,277 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // Swipe a reel left → open the author's profile via IG's own header tap so
 // the back gesture returns to the reel. Single-author uses
-// IGUnifiedVideoUserButton; collab uses IGCoreTextView's URL-attributed
-// span routed through the coauthor view's link delegate.
+// IGUnifiedVideoUserButton; collab uses the coauthor text attribution view's
+// IGCoreTextView URL span routed through IG's own link handler.
 
 static char kSCIReelsSwipePanKey;
+
 static const CGFloat kSCIReelsSwipeBottomIgnore = 140.0;
 static const NSTimeInterval kSCIReelsSwipeMaxDuration = 0.40;
 
-static UIView *sciDeepFindByClassName(UIView *root, NSString *name) {
-    if (!root) return nil;
-    if ([NSStringFromClass([root class]) isEqualToString:name]) return root;
-    for (UIView *sub in root.subviews) {
-        UIView *hit = sciDeepFindByClassName(sub, name);
-        if (hit) return hit;
-    }
-    return nil;
+static BOOL sciReelsSwipeEnabled(void) {
+	return [SCIUtils getBoolPref:@"reels_swipe_to_profile"];
 }
 
-static UIView *sciCurrentReelCell(UIViewController *sundialVC) {
-    SEL sels[] = {
-        @selector(currentViewCell),
-        @selector(swift__currentVideoCell),
-        @selector(currentAdCell),
-    };
-    for (size_t i = 0; i < sizeof(sels)/sizeof(sels[0]); i++) {
-        if ([sundialVC respondsToSelector:sels[i]]) {
-            id v = ((id(*)(id, SEL))objc_msgSend)(sundialVC, sels[i]);
-            if ([v isKindOfClass:[UIView class]]) return v;
-        }
-    }
-    return nil;
+static UIView *sciDeepFindByClass(UIView *root, Class cls) {
+	if (!root || !cls) return nil;
+	if ([root isKindOfClass:cls]) return root;
+
+	for (UIView *sub in root.subviews) {
+		UIView *hit = sciDeepFindByClass(sub, cls);
+		if (hit) return hit;
+	}
+
+	return nil;
 }
 
-// Collab reels: IGCoreTextView's _styledString holds a NSAttributedString
-// with `URL` spans per author; the coauthor view implements
-// coreTextView:didTapOnString:URL: which pushes via IG's nav.
-static BOOL sciTryCoauthorLinkTap(UIView *cell) {
-    UIView *attrib = sciDeepFindByClassName(cell, @"IGSundialViewerUserAttributionSwift.IGSundialViewerCoauthorUserTextAttributionView");
-    if (!attrib) return NO;
-    UIView *core = sciDeepFindByClassName(attrib, @"IGCoreTextView");
-    if (!core) return NO;
-    Ivar sIv = class_getInstanceVariable([core class], "_styledString");
-    id styled = sIv ? object_getIvar(core, sIv) : nil;
-    if (!styled) return NO;
-    Ivar aIv = class_getInstanceVariable([styled class], "_attributedString");
-    id rawAS = aIv ? object_getIvar(styled, aIv) : nil;
-    if (![rawAS isKindOfClass:[NSAttributedString class]]) return NO;
-    NSAttributedString *as = rawAS;
-    __block NSURL *url = nil;
-    __block NSString *tappedStr = nil;
-    [as enumerateAttribute:@"URL" inRange:NSMakeRange(0, as.length) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
-        if (!value) return;
-        if ([value isKindOfClass:[NSURL class]]) url = value;
-        else if ([value isKindOfClass:[NSString class]]) url = [NSURL URLWithString:value];
-        if (url) {
-            tappedStr = [as.string substringWithRange:range];
-            *stop = YES;
-        }
-    }];
-    if (!url) return NO;
-    SEL sel = @selector(coreTextView:didTapOnString:URL:);
-    if (![attrib respondsToSelector:sel]) return NO;
-    ((void(*)(id, SEL, id, id, id))objc_msgSend)(attrib, sel, core, tappedStr, url);
-    return YES;
+static UIView *sciCurrentReelCell(UIViewController *vc) {
+	if (!vc) return nil;
+
+	SEL sels[] = {
+		@selector(currentViewCell),
+		@selector(swift__currentVideoCell),
+		@selector(currentAdCell),
+	};
+
+	for (NSUInteger i = 0; i < sizeof(sels) / sizeof(sels[0]); i++) {
+		if (![vc respondsToSelector:sels[i]]) continue;
+
+		id cell = ((id (*)(id, SEL))objc_msgSend)(vc, sels[i]);
+		if ([cell isKindOfClass:UIView.class]) return cell;
+	}
+
+	return nil;
 }
 
-// Single-author reels: IGUnifiedVideoUserButton owns a UITapGestureRecognizer
-// wired to its own _handleSingleTap: which pushes via IG's nav.
+static NSAttributedString *sciAttributedStringFromCoreTextView(id core) {
+	if (!core) return nil;
+
+	SEL styledSel = @selector(styledString);
+	id styled = [core respondsToSelector:styledSel] ? ((id (*)(id, SEL))objc_msgSend)(core, styledSel) : nil;
+
+	if (!styled) {
+		Ivar iv = class_getInstanceVariable([core class], "_styledString");
+		styled = iv ? object_getIvar(core, iv) : nil;
+	}
+
+	SEL attrSel = @selector(attributedString);
+	id raw = [styled respondsToSelector:attrSel] ? ((id (*)(id, SEL))objc_msgSend)(styled, attrSel) : nil;
+
+	if (!raw) {
+		Ivar iv = styled ? class_getInstanceVariable([styled class], "_attributedString") : NULL;
+		raw = iv ? object_getIvar(styled, iv) : nil;
+	}
+
+	return [raw isKindOfClass:NSAttributedString.class] ? raw : nil;
+}
+
+static BOOL sciFirstURL(NSAttributedString *as, NSURL **outURL, NSString **outString) {
+	if (!as.length) return NO;
+
+	__block NSURL *url = nil;
+	__block NSString *text = nil;
+
+	[as enumerateAttribute:@"URL" inRange:NSMakeRange(0, as.length) options:0 usingBlock:^(id value, NSRange range, BOOL *stop) {
+		if ([value isKindOfClass:NSURL.class]) {
+			url = value;
+		} else if ([value isKindOfClass:NSString.class]) {
+			url = [NSURL URLWithString:value];
+		}
+
+		if (url) {
+			text = [as.string substringWithRange:range];
+			*stop = YES;
+		}
+	}];
+
+	if (!url) return NO;
+
+	if (outURL) *outURL = url;
+	if (outString) *outString = text;
+	return YES;
+}
+
+// Collab reels: reuse the coauthor text attribution view's own URL handler.
+static BOOL sciTryCoauthorTap(UIView *cell) {
+	static Class textCls;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		textCls = NSClassFromString(@"_TtC35IGSundialViewerUserAttributionSwift46IGSundialViewerCoauthorUserTextAttributionView");
+	});
+
+	UIView *attrib = sciDeepFindByClass(cell, textCls);
+	if (!attrib) return NO;
+
+	SEL textSel = @selector(attributionTextView);
+	id core = [attrib respondsToSelector:textSel] ? ((id (*)(id, SEL))objc_msgSend)(attrib, textSel) : nil;
+
+	if (!core) {
+		Ivar iv = class_getInstanceVariable([attrib class], "attributionTextView");
+		core = iv ? object_getIvar(attrib, iv) : nil;
+	}
+
+	NSURL *url = nil;
+	NSString *text = nil;
+
+	if (!sciFirstURL(sciAttributedStringFromCoreTextView(core), &url, &text)) return NO;
+
+	SEL tapSel = @selector(coreTextView:didTapOnString:URL:);
+	if (![attrib respondsToSelector:tapSel]) return NO;
+
+	((void (*)(id, SEL, id, id, id))objc_msgSend)(attrib, tapSel, core, text, url);
+	return YES;
+}
+
+// Single-author reels: reuse IGUnifiedVideoUserButton's own tap handler.
 static BOOL sciTryHeaderButtonTap(UIView *cell) {
-    UIView *button = sciDeepFindByClassName(cell, @"IGUnifiedVideoUserButton");
-    if (!button) return NO;
-    SEL handleTap = NSSelectorFromString(@"_handleSingleTap:");
-    if (![button respondsToSelector:handleTap]) return NO;
-    UITapGestureRecognizer *gr = nil;
-    for (UIGestureRecognizer *g in button.gestureRecognizers) {
-        if ([g isKindOfClass:[UITapGestureRecognizer class]]) { gr = (UITapGestureRecognizer *)g; break; }
-    }
-    if (!gr) return NO;
-    ((void(*)(id, SEL, id))objc_msgSend)(button, handleTap, gr);
-    return YES;
+	Class buttonCls = %c(IGUnifiedVideoUserButton);
+	UIView *button = sciDeepFindByClass(cell, buttonCls);
+	if (!button) return NO;
+
+	SEL tapSel = NSSelectorFromString(@"_handleSingleTap:");
+	if (![button respondsToSelector:tapSel]) return NO;
+
+	UITapGestureRecognizer *tap = nil;
+	Ivar iv = class_getInstanceVariable([button class], "_singleTapRecognizer");
+	id raw = iv ? object_getIvar(button, iv) : nil;
+
+	if ([raw isKindOfClass:UITapGestureRecognizer.class]) {
+		tap = raw;
+	} else {
+		for (UIGestureRecognizer *gr in button.gestureRecognizers) {
+			if ([gr isKindOfClass:UITapGestureRecognizer.class]) {
+				tap = (UITapGestureRecognizer *)gr;
+				break;
+			}
+		}
+	}
+
+	if (!tap) return NO;
+
+	((void (*)(id, SEL, id))objc_msgSend)(button, tapSel, tap);
+	return YES;
 }
 
-static BOOL sciTriggerHeaderUsernameTap(UIViewController *sundialVC) {
-    UIView *cell = sciCurrentReelCell(sundialVC);
-    if (!cell) return NO;
-    if (sciTryHeaderButtonTap(cell)) return YES;
-    if (sciTryCoauthorLinkTap(cell)) return YES;
-    return NO;
+static BOOL sciTriggerHeaderUsernameTap(UIViewController *vc) {
+	UIView *cell = sciCurrentReelCell(vc);
+	if (!cell) return NO;
+
+	return sciTryHeaderButtonTap(cell) || sciTryCoauthorTap(cell);
 }
 
-// Carousel reels (`IGSundialViewerCarouselCell` - don't hijack it.
-static BOOL sciCurrentReelIsCarousel(UIViewController *sundialVC) {
-    UIView *cell = sciCurrentReelCell(sundialVC);
-    if (!cell) return NO;
-    if ([NSStringFromClass([cell class]) containsString:@"Carousel"]) return YES;
-    return sciDeepFindByClassName(cell, @"IGSundialViewerCarouselCell") != nil;
+// Carousel reels use horizontal paging, so don't hijack left swipes there.
+static BOOL sciCurrentReelIsCarousel(UIViewController *vc) {
+	UIView *cell = sciCurrentReelCell(vc);
+	if (!cell) return NO;
+	if ([NSStringFromClass([cell class]) containsString:@"Carousel"]) return YES;
+	Class carousel = %c(IGSundialViewerCarouselCell);
+	return carousel && [cell isKindOfClass:carousel];
 }
 
-// Failure-couple ancestor pans so a leftward flick wins on the reel and
-// other directions still page tabs / scroll.
-static void sciCoupleParentPanRecognizers(UIView *startView, UIPanGestureRecognizer *ourPan) {
-    UIView *v = startView.superview;
-    int hops = 0;
-    while (v && hops++ < 20) {
-        for (UIGestureRecognizer *gr in v.gestureRecognizers) {
-            if (gr != ourPan && [gr isKindOfClass:[UIPanGestureRecognizer class]]) {
-                [gr requireGestureRecognizerToFail:ourPan];
-            }
-        }
-        if ([v isKindOfClass:[UIScrollView class]]) {
-            UIPanGestureRecognizer *sp = ((UIScrollView *)v).panGestureRecognizer;
-            if (sp && sp != ourPan) [sp requireGestureRecognizerToFail:ourPan];
-        }
-        v = v.superview;
-    }
+// Make parent pans wait for our left-swipe recognizer, while other directions
+// still pass through normally.
+static void sciCoupleParentPanRecognizers(UIView *view, UIPanGestureRecognizer *ourPan) {
+	for (UIView *v = view.superview; v; v = v.superview) {
+		for (UIGestureRecognizer *gr in v.gestureRecognizers) {
+			if (gr != ourPan && [gr isKindOfClass:UIPanGestureRecognizer.class]) {
+				[gr requireGestureRecognizerToFail:ourPan];
+			}
+		}
+
+		if ([v isKindOfClass:UIScrollView.class]) {
+			UIPanGestureRecognizer *pan = ((UIScrollView *)v).panGestureRecognizer;
+			if (pan && pan != ourPan) [pan requireGestureRecognizerToFail:ourPan];
+		}
+	}
 }
 
 @interface SCIReelsSwipeToProfileDelegate : NSObject <UIGestureRecognizerDelegate>
 @property (nonatomic, weak) UIViewController *owner;
 @property (nonatomic, weak) UIPanGestureRecognizer *pan;
 @property (nonatomic, assign) NSTimeInterval startTime;
+@property (nonatomic, assign) BOOL coupled;
 @end
 
 @implementation SCIReelsSwipeToProfileDelegate
 
 - (BOOL)gestureRecognizerShouldBegin:(UIPanGestureRecognizer *)gr {
-    if (![SCIUtils getBoolPref:@"reels_swipe_to_profile"]) return NO;
-    CGPoint v = [gr velocityInView:gr.view];
-    if (!(fabs(v.x) > fabs(v.y) * 1.2 && v.x < 0)) return NO;
-    CGPoint loc = [gr locationInView:gr.view];
-    if (loc.y > gr.view.bounds.size.height - kSCIReelsSwipeBottomIgnore) return NO;
-    if (sciCurrentReelIsCarousel(self.owner)) return NO;
-    self.startTime = CACurrentMediaTime();
-    return YES;
+	if (!sciReelsSwipeEnabled()) return NO;
+
+	CGPoint velocity = [gr velocityInView:gr.view];
+	if (!(velocity.x < 0.0 && fabs(velocity.x) > fabs(velocity.y) * 1.2)) return NO;
+
+	CGPoint loc = [gr locationInView:gr.view];
+	if (loc.y > gr.view.bounds.size.height - kSCIReelsSwipeBottomIgnore) return NO;
+
+	if (sciCurrentReelIsCarousel(self.owner)) return NO;
+
+	self.startTime = CACurrentMediaTime();
+	return YES;
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    return YES;
+	return YES;
 }
 
 - (void)handle:(UIPanGestureRecognizer *)gr {
-    if (gr.state != UIGestureRecognizerStateEnded) return;
-    if (CACurrentMediaTime() - self.startTime > kSCIReelsSwipeMaxDuration) return;
-    CGPoint t = [gr translationInView:gr.view];
-    CGPoint v = [gr velocityInView:gr.view];
-    if (!(t.x < -60 || v.x < -400)) return;
-    if (fabs(t.x) < fabs(t.y) * 1.2) return;
-    UIViewController *vc = self.owner;
-    if (!vc) return;
-    sciTriggerHeaderUsernameTap(vc);
+	if (gr.state != UIGestureRecognizerStateEnded) return;
+	if (CACurrentMediaTime() - self.startTime > kSCIReelsSwipeMaxDuration) return;
+
+	CGPoint translation = [gr translationInView:gr.view];
+	CGPoint velocity = [gr velocityInView:gr.view];
+
+	if (!(translation.x < -60.0 || velocity.x < -400.0)) return;
+	if (fabs(translation.x) < fabs(translation.y) * 1.2) return;
+
+	sciTriggerHeaderUsernameTap(self.owner);
 }
 
 @end
 
+%group ReelsSwipeToProfileGroup
+
 %hook IGSundialFeedViewController
 
 - (void)viewDidLoad {
-    %orig;
-    if (objc_getAssociatedObject(self, &kSCIReelsSwipePanKey)) return;
-    SCIReelsSwipeToProfileDelegate *d = [[SCIReelsSwipeToProfileDelegate alloc] init];
-    d.owner = self;
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:d action:@selector(handle:)];
-    pan.delegate = d;
-    pan.maximumNumberOfTouches = 1;
-    d.pan = pan;
-    [self.view addGestureRecognizer:pan];
-    objc_setAssociatedObject(self, &kSCIReelsSwipePanKey, d, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	%orig;
+
+	if (!sciReelsSwipeEnabled()) return;
+	if (objc_getAssociatedObject(self, &kSCIReelsSwipePanKey)) return;
+
+	SCIReelsSwipeToProfileDelegate *delegate = [SCIReelsSwipeToProfileDelegate new];
+	delegate.owner = self;
+
+	UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:delegate action:@selector(handle:)];
+	pan.delegate = delegate;
+	pan.maximumNumberOfTouches = 1;
+
+	delegate.pan = pan;
+	[self.view addGestureRecognizer:pan];
+
+	objc_setAssociatedObject(self, &kSCIReelsSwipePanKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 - (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    SCIReelsSwipeToProfileDelegate *d = objc_getAssociatedObject(self, &kSCIReelsSwipePanKey);
-    if (d.pan) sciCoupleParentPanRecognizers(self.view, d.pan);
+	%orig;
+
+	SCIReelsSwipeToProfileDelegate *delegate = objc_getAssociatedObject(self, &kSCIReelsSwipePanKey);
+	if (!delegate.pan || delegate.coupled) return;
+
+	sciCoupleParentPanRecognizers(self.view, delegate.pan);
+	delegate.coupled = YES;
 }
 
 %end
+
+%end
+
+%ctor {
+	if (sciReelsSwipeEnabled()) {
+		%init(ReelsSwipeToProfileGroup);
+	}
+}

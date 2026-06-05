@@ -79,6 +79,12 @@ typedef NS_ENUM(NSInteger, SCIPADateFilter) {
 	SCIPADateFilter30d,
 };
 
+typedef NS_ENUM(NSInteger, SCIPABatchOp) {
+	SCIPABatchOpFollow,
+	SCIPABatchOpUnfollow,
+	SCIPABatchOpRemoveFollower,
+};
+
 #pragma mark - Cell
 
 @interface SCIPAUserCell : UITableViewCell
@@ -187,9 +193,38 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	SCIPACellActionPending,
 };
 
+- (void)resetButtonMenu {
+	self.actionButton.menu = nil;
+	self.actionButton.showsMenuAsPrimaryAction = NO;
+	[self.actionButton setImage:nil forState:UIControlStateNormal];
+	self.actionButton.semanticContentAttribute = UISemanticContentAttributeUnspecified;
+	self.actionButton.imageEdgeInsets = UIEdgeInsetsZero;
+}
+
+// Follow-back list rows: tap opens a menu instead of a single follow action.
+- (void)applyFollowMenu:(UIMenu *)menu pending:(BOOL)pending tint:(UIColor *)tint {
+	self.usernameTrailingToButton.active = YES;
+	self.usernameTrailingToEdge.active = NO;
+	self.actionButton.hidden = NO;
+	[self.actionSpinner stopAnimating];
+	[self.actionButton setTitle:SCILocalized(@"Follow") forState:UIControlStateNormal];
+	self.actionButton.backgroundColor = tint ?: [UIColor systemBlueColor];
+	[self.actionButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+	self.actionButton.tintColor = [UIColor whiteColor];
+	UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:10 weight:UIImageSymbolWeightBold];
+	[self.actionButton setImage:[UIImage systemImageNamed:@"chevron.down" withConfiguration:cfg] forState:UIControlStateNormal];
+	self.actionButton.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
+	self.actionButton.imageEdgeInsets = UIEdgeInsetsMake(0, 6, 0, -2);
+	self.actionButton.menu = menu;
+	self.actionButton.showsMenuAsPrimaryAction = YES;
+	self.actionButton.enabled = !pending;
+	self.actionButton.alpha = pending ? 0.55 : 1.0;
+}
+
 - (void)applyAction:(SCIPACellAction)state pending:(BOOL)pending tint:(UIColor *)tint {
 	self.usernameTrailingToButton.active = YES;
 	self.usernameTrailingToEdge.active = NO;
+	[self resetButtonMenu];
 	UIColor *primary = tint ?: [UIColor systemBlueColor];
 
 	switch (state) {
@@ -240,6 +275,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	self.boundPK = nil;
 	[self.actionSpinner stopAnimating];
 	self.actionButton.hidden = YES;
+	[self resetButtonMenu];
 }
 @end
 
@@ -934,11 +970,79 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 		[cell applyAction:SCIPACellActionLoading pending:NO tint:primary];
 	} else if ([status boolValue]) {
 		[cell applyAction:SCIPACellActionUnfollow pending:NO tint:primary];
+	} else if (self.kind == SCIPAListKindFollow) {
+		// They follow you, you don't follow back — offer follow-back or remove-follower.
+		[cell applyFollowMenu:[self followRowMenuForUser:user] pending:NO tint:primary];
+		cell.onActionTap = nil;
+		return;
 	} else {
 		[cell applyAction:SCIPACellActionFollow pending:NO tint:primary];
 	}
 	__weak typeof(self) weakSelf = self;
 	cell.onActionTap = ^(SCIPAUserCell *c) { [weakSelf performActionForUser:user]; };
+}
+
+- (UIMenu *)followRowMenuForUser:(SCIProfileAnalyzerUser *)user {
+	__weak typeof(self) weakSelf = self;
+	UIAction *follow = [UIAction actionWithTitle:SCILocalized(@"Follow back")
+										   image:[UIImage systemImageNamed:@"person.badge.plus"]
+									  identifier:nil
+										 handler:^(__kindof UIAction *_) {
+		[weakSelf sendFriendshipForUser:user follow:YES reload:YES];
+	}];
+	UIAction *remove = [UIAction actionWithTitle:SCILocalized(@"Remove follower")
+										   image:[UIImage systemImageNamed:@"person.fill.xmark"]
+									  identifier:nil
+										 handler:^(__kindof UIAction *_) {
+		[weakSelf confirmRemoveFollowerForUser:user];
+	}];
+	remove.attributes = UIMenuElementAttributesDestructive;
+	return [UIMenu menuWithChildren:@[follow, remove]];
+}
+
+- (void)confirmRemoveFollowerForUser:(SCIProfileAnalyzerUser *)user {
+	if ([self.pendingPKs containsObject:user.pk]) return;
+	NSString *msg = [NSString stringWithFormat:SCILocalized(@"Remove @%@ as a follower?"), user.username ?: @""];
+	UIAlertController *a = [UIAlertController alertControllerWithTitle:nil message:msg preferredStyle:UIAlertControllerStyleAlert];
+	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+	__weak typeof(self) weakSelf = self;
+	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Remove") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+		[weakSelf removeFollowerForUser:user];
+	}]];
+	[self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)removeFollowerForUser:(SCIProfileAnalyzerUser *)user {
+	if ([self.pendingPKs containsObject:user.pk]) return;
+	[self.pendingPKs addObject:user.pk];
+	[self reloadVisibleRowsForPKs:@[user.pk]];
+	__weak typeof(self) weakSelf = self;
+	[SCIInstagramAPI removeFollowerPK:user.pk completion:^(NSDictionary *resp, NSError *err) {
+		typeof(self) strongSelf = weakSelf;
+		if (!strongSelf) return;
+		[strongSelf.pendingPKs removeObject:user.pk];
+		BOOL ok = (err == nil) && ([resp[@"status"] isEqualToString:@"ok"] || resp[@"friendship_status"]);
+		if (ok) {
+			[strongSelf persistFollowerRemovalForUser:user];
+			[strongSelf removeUserFromList:user];
+		} else {
+			[SCIUtils showErrorHUDWithDescription:err.localizedDescription ?: SCILocalized(@"Request failed")];
+			[strongSelf reloadVisibleRowsForPKs:@[user.pk]];
+		}
+	}];
+}
+
+// Mirror a follower removal into the snapshot so category counts update live.
+- (void)persistFollowerRemovalForUser:(SCIProfileAnalyzerUser *)user {
+	NSString *pk = [SCIUtils currentUserPK];
+	SCIProfileAnalyzerSnapshot *snap = [SCIProfileAnalyzerStorage currentSnapshotForUserPK:pk];
+	if (!snap) return;
+	NSMutableArray *followers = [snap.followers mutableCopy] ?: [NSMutableArray array];
+	if (![followers containsObject:user]) return;
+	[followers removeObject:user];
+	snap.followers = followers;
+	snap.followerCount = MAX(0, snap.followerCount - 1);
+	[SCIProfileAnalyzerStorage updateCurrentSnapshot:snap forUserPK:pk];
 }
 
 #pragma mark - Single-row action
@@ -1206,7 +1310,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	NSUInteger n = self.selectedPKs.count;
 	BOOL follow = (self.kind == SCIPAListKindFollow);
 	NSString *t = follow
-		? [NSString stringWithFormat:SCILocalized(@"Follow %lu"), (unsigned long)n]
+		? [NSString stringWithFormat:SCILocalized(@"%lu selected"), (unsigned long)n]
 		: [NSString stringWithFormat:SCILocalized(@"Unfollow %lu"), (unsigned long)n];
 	[self.batchActionButton setTitle:t forState:UIControlStateNormal];
 	self.batchActionButton.backgroundColor = follow
@@ -1216,12 +1320,48 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	self.batchActionButton.alpha = n > 0 ? 1.0 : 0.5;
 }
 
+- (NSString *)verbForBatchOp:(SCIPABatchOp)op {
+	switch (op) {
+		case SCIPABatchOpFollow:         return SCILocalized(@"Follow");
+		case SCIPABatchOpRemoveFollower: return SCILocalized(@"Remove");
+		case SCIPABatchOpUnfollow:       return SCILocalized(@"Unfollow");
+	}
+}
+
 - (void)batchActionTapped {
 	NSUInteger n = self.selectedPKs.count;
 	if (!n) return;
-	BOOL follow = (self.kind == SCIPAListKindFollow);
-	NSString *verb = follow ? SCILocalized(@"Follow") : SCILocalized(@"Unfollow");
-	NSString *title = follow ? SCILocalized(@"Batch follow") : SCILocalized(@"Batch unfollow");
+	// Follow-back list: pick follow-back vs remove-follower before confirming.
+	if (self.kind == SCIPAListKindFollow) {
+		UIAlertController *sheet = [UIAlertController
+			alertControllerWithTitle:[NSString stringWithFormat:SCILocalized(@"%lu selected"), (unsigned long)n]
+							 message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+		__weak typeof(self) weakSelf = self;
+		[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Follow back") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+			[weakSelf confirmBatchOp:SCIPABatchOpFollow];
+		}]];
+		[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Remove follower") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+			[weakSelf confirmBatchOp:SCIPABatchOpRemoveFollower];
+		}]];
+		[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+		sheet.popoverPresentationController.sourceView = self.batchActionButton;
+		sheet.popoverPresentationController.sourceRect = self.batchActionButton.bounds;
+		[self presentViewController:sheet animated:YES completion:nil];
+		return;
+	}
+	[self confirmBatchOp:SCIPABatchOpUnfollow];
+}
+
+- (void)confirmBatchOp:(SCIPABatchOp)op {
+	NSUInteger n = self.selectedPKs.count;
+	if (!n) return;
+	NSString *verb = [self verbForBatchOp:op];
+	NSString *title;
+	switch (op) {
+		case SCIPABatchOpFollow:         title = SCILocalized(@"Batch follow"); break;
+		case SCIPABatchOpRemoveFollower: title = SCILocalized(@"Batch remove followers"); break;
+		case SCIPABatchOpUnfollow:       title = SCILocalized(@"Batch unfollow"); break;
+	}
 	NSString *msg;
 	if (n > kSCIPABatchCap) {
 		msg = [NSString stringWithFormat:SCILocalized(@"%@ %lu accounts? The first %ld will be processed to avoid rate limits."),
@@ -1233,41 +1373,52 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	UIAlertController *a = [UIAlertController alertControllerWithTitle:title
 															  message:msg preferredStyle:UIAlertControllerStyleAlert];
 	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-	UIAlertActionStyle style = follow ? UIAlertActionStyleDefault : UIAlertActionStyleDestructive;
+	UIAlertActionStyle style = (op == SCIPABatchOpFollow) ? UIAlertActionStyleDefault : UIAlertActionStyleDestructive;
 	__weak typeof(self) weakSelf = self;
 	[a addAction:[UIAlertAction actionWithTitle:verb style:style handler:^(UIAlertAction *_) {
-		[weakSelf runBatchAction];
+		[weakSelf runBatchActionForOp:op];
 	}]];
 	[self presentViewController:a animated:YES completion:nil];
 }
 
-- (void)runBatchAction {
-	BOOL follow = (self.kind == SCIPAListKindFollow);
+- (void)runBatchActionForOp:(SCIPABatchOp)op {
 	NSMutableArray<SCIProfileAnalyzerUser *> *queue = [NSMutableArray array];
 	for (SCIProfileAnalyzerUser *u in self.allUsers) {
 		if (![self.selectedPKs containsObject:u.pk]) continue;
-		// Skip users already in the target state.
+		// Skip users already in the target follow state (remove-follower has no such state).
 		NSNumber *st = self.friendshipStatus[u.pk];
-		if (st && [st boolValue] == follow) continue;
+		if (op == SCIPABatchOpFollow   && st && [st boolValue])  continue;
+		if (op == SCIPABatchOpUnfollow && st && ![st boolValue]) continue;
 		[queue addObject:u];
 		if (queue.count >= kSCIPABatchCap) break;
 	}
 	[self.selectedPKs removeAllObjects];
 	[self refreshBatchBar];
 	if (queue.count) [SCIBackgroundActivity setSource:@"analyzer_batch" active:YES];
-	[self batchStep:queue done:0 total:queue.count];
+	[self batchStep:queue op:op done:0 total:queue.count];
 }
 
 - (void)batchStep:(NSMutableArray<SCIProfileAnalyzerUser *> *)queue
+			   op:(SCIPABatchOp)op
 			 done:(NSUInteger)done
 			total:(NSUInteger)total {
-	BOOL follow = (self.kind == SCIPAListKindFollow);
 	if (!queue.count) {
 		[SCIBackgroundActivity setSource:@"analyzer_batch" active:NO];
-		NSString *finishedTitle = follow ? SCILocalized(@"Batch follow finished") : SCILocalized(@"Batch unfollow finished");
-		NSString *finishedSub = follow
-			? [NSString stringWithFormat:SCILocalized(@"%lu accounts followed"), (unsigned long)total]
-			: [NSString stringWithFormat:SCILocalized(@"%lu accounts unfollowed"), (unsigned long)total];
+		NSString *finishedTitle, *finishedSub;
+		switch (op) {
+			case SCIPABatchOpFollow:
+				finishedTitle = SCILocalized(@"Batch follow finished");
+				finishedSub = [NSString stringWithFormat:SCILocalized(@"%lu accounts followed"), (unsigned long)total];
+				break;
+			case SCIPABatchOpRemoveFollower:
+				finishedTitle = SCILocalized(@"Batch remove followers finished");
+				finishedSub = [NSString stringWithFormat:SCILocalized(@"%lu followers removed"), (unsigned long)total];
+				break;
+			case SCIPABatchOpUnfollow:
+				finishedTitle = SCILocalized(@"Batch unfollow finished");
+				finishedSub = [NSString stringWithFormat:SCILocalized(@"%lu accounts unfollowed"), (unsigned long)total];
+				break;
+		}
 		SCINotifySuccess(SCI_NOTIF_ANALYZER_DONE, finishedTitle, finishedSub);
 		self.navigationItem.prompt = nil;
 		[self toggleSelectionMode];
@@ -1283,21 +1434,34 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 		NSUInteger nextDone = done + 1;
 		BOOL ok = (err == nil) && ([resp[@"status"] isEqualToString:@"ok"] || resp[@"friendship_status"]);
 		if (ok) {
-			strongSelf.friendshipStatus[u.pk] = @(follow);
-			[SCIPAFriendshipCache setFollowing:follow forPK:u.pk];
-			[strongSelf persistFriendshipChangeForUser:u followed:follow];
+			if (op == SCIPABatchOpRemoveFollower) {
+				[strongSelf persistFollowerRemovalForUser:u];
+			} else {
+				BOOL follow = (op == SCIPABatchOpFollow);
+				strongSelf.friendshipStatus[u.pk] = @(follow);
+				[SCIPAFriendshipCache setFollowing:follow forPK:u.pk];
+				[strongSelf persistFriendshipChangeForUser:u followed:follow];
+			}
 			[strongSelf removeUserFromList:u];
 		}
-		NSString *progressFmt = follow ? SCILocalized(@"Following… %lu / %lu") : SCILocalized(@"Unfollowing… %lu / %lu");
+		NSString *progressFmt;
+		switch (op) {
+			case SCIPABatchOpFollow:         progressFmt = SCILocalized(@"Following… %lu / %lu"); break;
+			case SCIPABatchOpRemoveFollower: progressFmt = SCILocalized(@"Removing… %lu / %lu"); break;
+			case SCIPABatchOpUnfollow:       progressFmt = SCILocalized(@"Unfollowing… %lu / %lu"); break;
+		}
 		strongSelf.navigationItem.prompt = [NSString stringWithFormat:progressFmt,
 											(unsigned long)nextDone, (unsigned long)total];
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSCIPABatchDelay * NSEC_PER_SEC)),
 					   dispatch_get_main_queue(), ^{
-			[weakSelf batchStep:queue done:nextDone total:total];
+			[weakSelf batchStep:queue op:op done:nextDone total:total];
 		});
 	};
-	if (follow) [SCIInstagramAPI followUserPK:u.pk completion:handler];
-	else		[SCIInstagramAPI unfollowUserPK:u.pk completion:handler];
+	switch (op) {
+		case SCIPABatchOpFollow:         [SCIInstagramAPI followUserPK:u.pk completion:handler]; break;
+		case SCIPABatchOpRemoveFollower: [SCIInstagramAPI removeFollowerPK:u.pk completion:handler]; break;
+		case SCIPABatchOpUnfollow:       [SCIInstagramAPI unfollowUserPK:u.pk completion:handler]; break;
+	}
 }
 
 // Dismissing mid-batch stops the step chain via the weak self — clear keep-alive here.

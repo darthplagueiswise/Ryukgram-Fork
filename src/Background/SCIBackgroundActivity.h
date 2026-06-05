@@ -7,7 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 // named sources so concurrent ops can't trip each other's start/stop.
 @interface SCIBackgroundActivity : NSObject
 
-// Idempotent. Keep-alive runs while ≥1 source is active. Gated by `bg_keepalive`.
+// Idempotent. Runs while ≥1 active source is authorized by its own pref.
 + (void)setSource:(NSString *)source active:(BOOL)active;
 
 @end

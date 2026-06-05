@@ -1,4 +1,4 @@
-#import "../Settings/SCIBaseSettingsListViewController.h"
+#import "../Settings/SCISettingsViewController.h"
 
-@interface SCIGallerySettingsViewController : SCIBaseSettingsListViewController
+@interface SCIGallerySettingsViewController : SCISettingsViewController
 @end

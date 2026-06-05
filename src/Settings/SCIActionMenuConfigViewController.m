@@ -1,8 +1,8 @@
 #import "SCIActionMenuConfigViewController.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../ActionButton/SCIActionMenuConfig.h"
 #import "../UI/SCIIcon.h"
 #import "../UI/SCIPopupChrome.h"
-#import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Utils.h"
 
 #pragma mark - Shared helpers
@@ -13,9 +13,7 @@ static UIImage *sciLoadIcon(NSString *name) {
 }
 
 static UITableViewCell *sciCell(void) {
-	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-	SCIStyleCellForGlass(cell);
-	return cell;
+	return [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
 }
 
 static UIListContentConfiguration *sciContent(UITableViewCell *cell, NSString *title, NSString *subtitle) {

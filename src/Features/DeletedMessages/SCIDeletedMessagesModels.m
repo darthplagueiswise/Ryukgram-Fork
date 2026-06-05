@@ -18,6 +18,7 @@ static const SCIDMKindInfo kSCIDMKindInfos[] = {
 	{ SCIDeletedMessageKindShare,		@"share",		@"Share",	@"arrowshape.turn.up.right.fill" },
 	{ SCIDeletedMessageKindLink,		@"link",		@"Link",	@"link" },
 	{ SCIDeletedMessageKindAudioShare,	@"audio_share",	@"Audio",	@"music.note" },
+	{ SCIDeletedMessageKindReactionRemoved,	@"reaction_removed",	@"Reaction removed",	@"heart.slash.fill" },
 	{ SCIDeletedMessageKindOther,		@"other",		@"Other",	@"bubble.left.fill" },
 	{ SCIDeletedMessageKindUnknown,		@"unknown",		@"Unknown",	@"bubble.left.fill" },
 };
@@ -60,6 +61,47 @@ NSString *SCIDeletedMessageKindLocalizedName(SCIDeletedMessageKind kind) {
 
 NSString *SCIDeletedMessageKindSymbol(SCIDeletedMessageKind kind) {
 	return sciKindInfo(kind)->symbol;
+}
+
+NSString *SCIDeletedMessageMediaStatusToString(SCIDeletedMessageMediaStatus s) {
+	switch (s) {
+		case SCIDeletedMessageMediaStatusSaved:       return @"saved";
+		case SCIDeletedMessageMediaStatusPending:     return @"pending";
+		case SCIDeletedMessageMediaStatusFailed:      return @"failed";
+		case SCIDeletedMessageMediaStatusUnavailable: return @"unavailable";
+		case SCIDeletedMessageMediaStatusNone:        break;
+	}
+	return @"none";
+}
+
+SCIDeletedMessageMediaStatus SCIDeletedMessageMediaStatusFromString(NSString *s) {
+	if (![s isKindOfClass:NSString.class]) return SCIDeletedMessageMediaStatusNone;
+	NSString *x = s.lowercaseString;
+	if ([x isEqualToString:@"saved"])       return SCIDeletedMessageMediaStatusSaved;
+	if ([x isEqualToString:@"pending"])     return SCIDeletedMessageMediaStatusPending;
+	if ([x isEqualToString:@"failed"])      return SCIDeletedMessageMediaStatusFailed;
+	if ([x isEqualToString:@"unavailable"]) return SCIDeletedMessageMediaStatusUnavailable;
+	return SCIDeletedMessageMediaStatusNone;
+}
+
+NSString *SCIDeletedMessageMediaStatusNote(SCIDeletedMessage *m) {
+	if (!m) return nil;
+	switch (m.mediaStatus) {
+		case SCIDeletedMessageMediaStatusPending:
+			return SCILocalized(@"Downloading…");
+		case SCIDeletedMessageMediaStatusFailed:
+			return m.isEphemeral
+				? SCILocalized(@"Disappearing media expired before it could be saved")
+				: SCILocalized(@"Media couldn’t be downloaded — the link expired");
+		case SCIDeletedMessageMediaStatusUnavailable:
+			return m.isEphemeral
+				? SCILocalized(@"Disappearing media — gone before it could be saved")
+				: SCILocalized(@"Media wasn’t available to save");
+		case SCIDeletedMessageMediaStatusSaved:
+		case SCIDeletedMessageMediaStatusNone:
+			return nil;
+	}
+	return nil;
 }
 
 #pragma mark - JSON helpers
@@ -117,6 +159,8 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 
 	m.threadId = sciStr(dict[@"thread_id"]);
 	m.threadTitle = sciStr(dict[@"thread_title"]);
+	m.threadAvatarURL = sciStr(dict[@"thread_avatar_url"]);
+	m.isGroup = sciNum(dict[@"is_group"]).boolValue;
 	m.senderPk = sciStr(dict[@"sender_pk"]) ?: @"";
 	m.senderUsername = sciStr(dict[@"sender_username"]);
 	m.senderFullName = sciStr(dict[@"sender_full_name"]);
@@ -136,6 +180,16 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 	m.thumbnailPath = sciStr(dict[@"thumbnail_path"]);
 	m.mediaMimeType = sciStr(dict[@"media_mime"]);
 
+	m.isEphemeral = sciNum(dict[@"is_ephemeral"]).boolValue;
+	m.mediaPk = sciStr(dict[@"media_pk"]);
+	m.mediaCandidates = sciCleanArray(dict[@"media_candidates"], NSDictionary.class);
+	if (dict[@"media_status"]) {
+		m.mediaStatus = SCIDeletedMessageMediaStatusFromString(sciStr(dict[@"media_status"]));
+	} else {
+		// Legacy records: infer Saved if a blob exists, else None.
+		m.mediaStatus = m.mediaPath.length ? SCIDeletedMessageMediaStatusSaved : SCIDeletedMessageMediaStatusNone;
+	}
+
 	m.durationSeconds = sciDouble(dict[@"duration"]);
 	m.waveform = sciCleanArray(dict[@"waveform"], NSNumber.class);
 
@@ -146,6 +200,10 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 	m.originalText = sciStr(dict[@"original_text"]);
 	m.editCount = sciNum(dict[@"edit_count"]).unsignedIntegerValue;
 	m.edits = sciCleanArray(dict[@"edits"], NSDictionary.class);
+
+	m.reactionEmoji = sciStr(dict[@"reaction_emoji"]);
+	m.targetMessageId = sciStr(dict[@"target_message_id"]);
+	m.reactionTargetUsername = sciStr(dict[@"reaction_target_username"]);
 
 	// Backward safety: old captures may save audio as unknown but still have duration/waveform.
 	if (m.kind == SCIDeletedMessageKindUnknown) {
@@ -162,6 +220,8 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 	sciSet(d, @"message_id", self.messageId);
 	sciSet(d, @"thread_id", self.threadId);
 	sciSet(d, @"thread_title", self.threadTitle);
+	sciSet(d, @"thread_avatar_url", self.threadAvatarURL);
+	if (self.isGroup) d[@"is_group"] = @YES;
 	sciSet(d, @"sender_pk", self.senderPk);
 	sciSet(d, @"sender_username", self.senderUsername);
 	sciSet(d, @"sender_full_name", self.senderFullName);
@@ -182,6 +242,11 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 	sciSet(d, @"thumbnail_path", self.thumbnailPath);
 	sciSet(d, @"media_mime", self.mediaMimeType);
 
+	if (self.mediaStatus != SCIDeletedMessageMediaStatusNone) d[@"media_status"] = SCIDeletedMessageMediaStatusToString(self.mediaStatus);
+	if (self.isEphemeral) d[@"is_ephemeral"] = @YES;
+	sciSet(d, @"media_pk", self.mediaPk);
+	sciSet(d, @"media_candidates", self.mediaCandidates);
+
 	if (self.durationSeconds > 0) d[@"duration"] = @(self.durationSeconds);
 	sciSet(d, @"waveform", self.waveform);
 
@@ -194,6 +259,10 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 	if (self.editCount > 0) d[@"edit_count"] = @(self.editCount);
 	sciSet(d, @"edits", self.edits);
 
+	sciSet(d, @"reaction_emoji", self.reactionEmoji);
+	sciSet(d, @"target_message_id", self.targetMessageId);
+	sciSet(d, @"reaction_target_username", self.reactionTargetUsername);
+
 	return d;
 }
 
@@ -204,5 +273,22 @@ static NSArray *sciCleanArray(id v, Class itemClass) {
 - (NSUInteger)count { return self.messages.count; }
 - (SCIDeletedMessage *)latest { return self.messages.firstObject; }
 - (NSDate *)lastDeletedAt { return self.latest.deletedAt ?: self.latest.capturedAt ?: self.latest.sentAt; }
+
+- (NSString *)identifier {
+	if (self.threadId.length) return self.threadId;
+	return self.senderPk.length ? [@"s:" stringByAppendingString:self.senderPk] : @"";
+}
+
+- (NSArray<SCIDeletedMessage *> *)distinctSenders {
+	NSMutableArray<SCIDeletedMessage *> *out = [NSMutableArray array];
+	NSMutableSet<NSString *> *seen = [NSMutableSet set];
+	for (SCIDeletedMessage *m in self.messages) {
+		NSString *pk = m.senderPk.length ? m.senderPk : (m.senderUsername ?: @"");
+		if (!pk.length || [seen containsObject:pk]) continue;
+		[seen addObject:pk];
+		[out addObject:m];
+	}
+	return out;
+}
 
 @end

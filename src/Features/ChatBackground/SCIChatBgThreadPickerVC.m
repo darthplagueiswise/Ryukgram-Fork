@@ -35,6 +35,7 @@ static NSString *sActiveThreadID = nil;
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	self.navigationItem.prompt = SCILocalized(@"Tap to apply · hold to edit");
 
 	UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
 	layout.minimumInteritemSpacing = 12;
@@ -50,6 +51,10 @@ static NSString *sActiveThreadID = nil;
 	[_collectionView registerClass:[UICollectionViewCell class] forCellWithReuseIdentifier:kCellID];
 	[_collectionView registerClass:[UICollectionViewCell class] forCellWithReuseIdentifier:kAddCellID];
 	[_collectionView registerClass:[UICollectionViewCell class] forCellWithReuseIdentifier:kDefaultCellID];
+
+	UILongPressGestureRecognizer *hold = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+	[_collectionView addGestureRecognizer:hold];
+
 	[self.view addSubview:_collectionView];
 	[NSLayoutConstraint activateConstraints:@[
 		[_collectionView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
@@ -141,6 +146,19 @@ static NSString *sActiveThreadID = nil;
 	if (self.threadID.length) [[SCIChatBackgroundManager shared] setAsset:asset forThreadID:self.threadID];
 	else					  [[SCIChatBackgroundManager shared] setDefaultAsset:asset];
 	[self dismiss];
+}
+
+- (void)handleLongPress:(UILongPressGestureRecognizer *)gr {
+	if (gr.state != UIGestureRecognizerStateBegan) return;
+
+	NSIndexPath *ip = [self.collectionView indexPathForItemAtPoint:[gr locationInView:self.collectionView]];
+	NSInteger addIndex = (NSInteger)self.assets.count + 1;
+	if (!ip || ip.item <= 0 || ip.item >= addIndex) return;
+
+	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+
+	NSString *asset = self.assets[ip.item - 1];
+	[SCIPopupChrome presentVC:[[SCIChatBgPerImageSheet alloc] initWithAsset:asset] from:self];
 }
 
 - (void)dismiss {

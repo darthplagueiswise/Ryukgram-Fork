@@ -364,7 +364,9 @@ static void sciTrackPendingLocalKeys(NSArray *keys) {
 
 #pragma mark - Update extraction
 
-static void sciCaptureMessagesFromUpdate(id update) {
+static void sciCaptureMessagesFromUpdate(id update, NSString *ownerPk, NSString *threadId) {
+	NSSet *preserved = sciLogOn() ? sciGetPreservedIds() : nil;
+
 	for (NSString *ivar in @[@"_insertMessages", @"_replaceMessages_messages"]) {
 		NSArray *messages = sciIvar(update, ivar.UTF8String);
 		if (![messages isKindOfClass:NSArray.class]) continue;
@@ -372,6 +374,15 @@ static void sciCaptureMessagesFromUpdate(id update) {
 		for (id m in messages) {
 			sciTrackMessage(m);
 			sciDMCaptureNoteInsert(m);
+
+			@try {
+				if (preserved.count) {
+					NSString *sid = sciServerIdFromMessage(m);
+					if (sid.length && [preserved containsObject:sid]) {
+						sciDMCaptureNotePreservedMessage(m, ownerPk, threadId);
+					}
+				}
+			} @catch (__unused id e) {}
 		}
 	}
 }
@@ -381,7 +392,10 @@ static void sciCaptureEditsFromUpdate(id update, NSString *ownerPk, NSString *th
 
 	NSString *sid = sciString(sciIvar(update, "_mutateMessage_messageId"));
 	id mut = sciIvar(update, "_mutateMessage_contentMutation");
-	if (sid.length && mut) sciDMCaptureNoteEdit(sid, mut, ownerPk, threadId);
+	if (sid.length && mut) {
+		sciDMCaptureNoteEdit(sid, mut, ownerPk, threadId);
+		sciDMCaptureNoteReaction(sid, mut, ownerPk, threadId);
+	}
 
 	NSArray *pairs = sciIvar(update, "_mutateMultipleMessages_contentMutations");
 	if (![pairs isKindOfClass:NSArray.class]) return;
@@ -389,7 +403,10 @@ static void sciCaptureEditsFromUpdate(id update, NSString *ownerPk, NSString *th
 	for (id pair in pairs) {
 		NSString *psid = sciString(sciIvar(pair, "_messageId")) ?: sciString(sciKVC(pair, @"messageId"));
 		id pmut = sciIvar(pair, "_contentMutation") ?: sciKVC(pair, @"contentMutation");
-		if (psid.length && pmut) sciDMCaptureNoteEdit(psid, pmut, ownerPk, threadId);
+		if (psid.length && pmut) {
+			sciDMCaptureNoteEdit(psid, pmut, ownerPk, threadId);
+			sciDMCaptureNoteReaction(psid, pmut, ownerPk, threadId);
+		}
 	}
 }
 
@@ -426,15 +443,17 @@ static BOOL sciProcessMessageUpdate(id update,
 									NSMutableSet<NSString *> *preserved) {
 	if (!update || !ownerPk.length) return NO;
 
-	sciCaptureMessagesFromUpdate(update);
-	sciCaptureEditsFromUpdate(update, ownerPk, threadId);
+	// Capture is best-effort and must never prevent the keep-deleted logic below from running.
+	@try {
+		sciCaptureMessagesFromUpdate(update, ownerPk, threadId);
+		sciCaptureEditsFromUpdate(update, ownerPk, threadId);
+	} @catch (__unused id e) {}
 
 	NSArray *keys = sciIvar(update, "_removeMessages_messageKeys");
 	if (![keys isKindOfClass:NSArray.class] || !keys.count) return NO;
 
 	long long reason = sciIntIvar(update, "_removeMessages_reason", -1);
 
-	// delete-for-you, not unsend.
 	if (reason == 2) {
 		sciTrackDeleteForYouKeys(keys);
 		return NO;
@@ -720,6 +739,26 @@ static void sciHook(Class cls, SEL sel, IMP imp, IMP *orig) {
 	}
 }
 
+#pragma mark - Visual (view-once) on-open capture
+
+static void (*orig_visualViewerDidAppear)(id, SEL, BOOL);
+static void new_visualViewerDidAppear(id self, SEL _cmd, BOOL animated) {
+	orig_visualViewerDidAppear(self, _cmd, animated);
+	if (!sciLogOn()) return;
+
+	@try {
+		// viewer._dataSource._dataSource._currentMessage = IGDirectVisualMessage
+		id ds = sciIvar(self, "_dataSource");
+		id playlist = sciIvar(ds, "_dataSource");
+		id vmsg = sciIvar(playlist, "_currentMessage") ?: sciIvar(self, "_initialVisualMessage");
+
+		id attr = sciIvar(self, "_attributionDelegate");
+		id meta = sciIvar(attr, "_contextIdentifier");
+
+		sciDMCaptureVisualMessageOnOpen(vmsg, meta, sciCurrentUserPk());
+	} @catch (__unused id e) {}
+}
+
 %ctor {
 	sciHook(NSClassFromString(@"IGDirectCacheUpdatesApplicator"),
 			NSSelectorFromString(@"_applyThreadUpdates:completion:userAccess:"),
@@ -745,6 +784,11 @@ static void sciHook(Class cls, SEL sel, IMP imp, IMP *orig) {
 			NSSelectorFromString(@"initWithMessage:title:textAttributes:textParts:actionLogType:collapsible:hidden:genAIMetadata:"),
 			(IMP)new_actionLogInit,
 			(IMP *)&orig_actionLogInit);
+
+	sciHook(NSClassFromString(@"IGDirectVisualMessageViewerController"),
+			@selector(viewDidAppear:),
+			(IMP)new_visualViewerDidAppear,
+			(IMP *)&orig_visualViewerDidAppear);
 
 	if (!sciIndicatorOn()) {
 		sciPreservedByPk = NSMutableDictionary.dictionary;

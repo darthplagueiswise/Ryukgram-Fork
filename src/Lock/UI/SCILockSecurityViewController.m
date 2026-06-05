@@ -48,59 +48,51 @@
 - (void)rebuildSections {
 	__weak typeof(self) weak = self;
 
-	SCIBaseSettingsRow *lock = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Lock with passcode")
-													   subtitle:nil
-														 action:^(UIViewController *vc) {
-		[vc.navigationController pushViewController:[SCILockPasscodeRootViewController new] animated:YES];
-	}];
+	SCISetting *lock = [SCISetting navigationCellWithTitle:SCILocalized(@"Lock with passcode") subtitle:@"" icon:nil viewController:[SCILockPasscodeRootViewController new]];
 	lock.dynamicSubtitle = ^{ return [weak lockSummary]; };
-	lock.icon = [SCIIcon imageNamed:@"ig_icon_lock_prism_filled_24" pointSize:24];
+	lock.iconImage = [SCIIcon imageNamed:@"ig_icon_lock_prism_filled_24" pointSize:24];
 
-	SCIBaseSettingsRow *hidden = [SCIBaseSettingsRow rowWithTitle:SCILocalized(@"Hidden chats")
-														 subtitle:nil
-														   action:^(UIViewController *vc) {
-		[vc.navigationController pushViewController:[SCIHiddenChatsViewController new] animated:YES];
+	SCISetting *hidden = [SCISetting buttonCellWithTitle:SCILocalized(@"Hidden chats") subtitle:@"" icon:nil action:^{
+		[weak.navigationController pushViewController:[SCIHiddenChatsViewController new] animated:YES];
 	}];
 	hidden.dynamicSubtitle = ^{
 		NSUInteger count = [SCIHiddenChats allEntries].count;
 		return count ? [NSString stringWithFormat:SCILocalized(@"%lu hidden"), (unsigned long)count] : SCILocalized(@"Long-press a DM to add");
 	};
-	hidden.icon = [SCIIcon imageNamed:@"ig_icon_direct_off_prism_outline_24" pointSize:24];
+	hidden.iconImage = [SCIIcon imageNamed:@"ig_icon_direct_off_prism_outline_24" pointSize:24];
 
-	SCIBaseSettingsRow *hideUI = [self switchRowWithTitle:SCILocalized(@"Hide UI on capture")
-												 subtitle:SCILocalized(@"Redact RyukGram buttons from screenshots, screen recordings, and mirroring")
-													  key:@"hide_ui_on_capture"
-												 restart:NO];
+	SCISetting *hideUI = [self switchRowWithTitle:SCILocalized(@"Hide UI on capture")
+										 subtitle:SCILocalized(@"Redact RyukGram buttons from screenshots, screen recordings, and mirroring")
+											  key:@"hide_ui_on_capture"
+										 restart:NO];
 
-	SCIBaseSettingsRow *removeAlert = [self switchRowWithTitle:SCILocalized(@"Remove screenshot alert")
-													  subtitle:SCILocalized(@"Suppress IG's \"X took a screenshot\" notification across stories, DMs and disappearing media")
-														   key:@"remove_screenshot_alert"
-													  restart:NO];
+	SCISetting *removeAlert = [self switchRowWithTitle:SCILocalized(@"Remove screenshot alert")
+											  subtitle:SCILocalized(@"Suppress IG's \"X took a screenshot\" notification across stories, DMs and disappearing media")
+												   key:@"remove_screenshot_alert"
+											  restart:NO];
 
-	SCIBaseSettingsRow *instants = [self switchRowWithTitle:SCILocalized(@"Allow Instants screenshots")
-												   subtitle:SCILocalized(@"Bypasses the Instants screenshot block")
-														key:@"instants_allow_screenshot"
-												   restart:YES];
+	SCISetting *instants = [self switchRowWithTitle:SCILocalized(@"Allow Instants screenshots")
+										   subtitle:SCILocalized(@"Bypasses the Instants screenshot block")
+												key:@"instants_allow_screenshot"
+										   restart:YES];
 
-	self.sections = @[
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Lock")
-										   footer:SCILocalized(@"Passcode + biometric. Gate the tweak settings popup, gallery, deleted-messages log, individual chats and the whole app.")
-											 rows:@[lock]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Hidden chats")
-										   footer:SCILocalized(@"Long-press a DM thread → Hide chat to add it here. Hidden chats are filtered out of the inbox until you remove them from this list.")
-											 rows:@[hidden]],
-		[SCIBaseSettingsSection sectionWithHeader:SCILocalized(@"Screenshots & capture")
-										   footer:SCILocalized(@"Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts.")
-											 rows:@[hideUI, removeAlert, instants]]
-	];
-
-	[self reloadSettings];
+	[self applySettingSections:@[
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Lock")
+											 footer:SCILocalized(@"Passcode + biometric. Gate the tweak settings popup, gallery, deleted-messages log, individual chats and the whole app.")
+											   rows:@[lock]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Hidden chats")
+											 footer:SCILocalized(@"Long-press a DM thread → Hide chat to add it here. Hidden chats are filtered out of the inbox until you remove them from this list.")
+											   rows:@[hidden]],
+		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Screenshots & capture")
+											 footer:SCILocalized(@"Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts.")
+											   rows:@[hideUI, removeAlert, instants]]
+	]];
 }
 
-- (SCIBaseSettingsRow *)switchRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle key:(NSString *)key restart:(BOOL)restart {
-	return [SCIBaseSettingsRow switchRowWithTitle:title subtitle:subtitle value:^BOOL{
+- (SCISetting *)switchRowWithTitle:(NSString *)title subtitle:(NSString *)subtitle key:(NSString *)key restart:(BOOL)restart {
+	return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL{
 		return [SCIUtils getBoolPref:key];
-	} action:^(BOOL on, __unused UIViewController *vc) {
+	} action:^(BOOL on) {
 		[[NSUserDefaults standardUserDefaults] setBool:on forKey:key];
 		[[NSUserDefaults standardUserDefaults] synchronize];
 		if (restart) [SCIUtils showRestartConfirmation];

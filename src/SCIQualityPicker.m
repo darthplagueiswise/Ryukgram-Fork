@@ -17,6 +17,20 @@ static inline NSString *SCIQualityBandwidth(NSInteger bandwidth) {
 	return bandwidth >= 1000000 ? [NSString stringWithFormat:@"%.1f Mbps", bandwidth / 1000000.0] : [NSString stringWithFormat:@"%ld Kbps", (long)(bandwidth / 1000)];
 }
 
+static inline NSString *SCIQualityFileSize(long long bytes) {
+	if (bytes <= 0) return @"";
+	NSByteCountFormatter *fmt = [NSByteCountFormatter new];
+	fmt.countStyle = NSByteCountFormatterCountStyleFile;
+	fmt.allowedUnits = bytes >= 1024 * 1024 ? NSByteCountFormatterUseMB : NSByteCountFormatterUseKB;
+	return [fmt stringFromByteCount:bytes];
+}
+
+static inline NSString *SCIQualityAppendInfo(NSString *info, NSString *extra) {
+	if (!extra.length) return info ?: @"";
+	if (!info.length) return extra;
+	return [NSString stringWithFormat:@"%@ • %@", info, extra];
+}
+
 static inline NSString *SCIQualityCodec(NSString *codecs, NSString *fallback) {
 	if (!codecs.length) return fallback ?: @"";
 	return [codecs componentsSeparatedByString:@"."].firstObject ?: codecs;
@@ -46,7 +60,7 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 	if (!self) return nil;
 
 	self.selectionStyle = UITableViewCellSelectionStyleDefault;
-	self.backgroundColor = UIColor.clearColor;
+	self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
 	_iconButton = [UIButton buttonWithType:UIButtonTypeSystem];
 	_iconButton.tintColor = UIColor.labelColor;
@@ -145,6 +159,9 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 @property (nonatomic, assign) BOOL hasAudio;
 @property (nonatomic, copy) void (^onPickStandard)(void);
 @property (nonatomic, copy) void (^onPickHD)(SCIDashRepresentation *video, SCIDashRepresentation *audio);
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *sizeCache;
+@property (nonatomic, strong) NSMutableSet<NSString *> *sizeLoading;
+@property (nonatomic, strong) NSMutableIndexSet *loadingVideoRows;
 @end
 
 @implementation _SCIQualitySheetVC
@@ -152,7 +169,11 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = UIColor.clearColor;
+	self.sizeCache = [NSMutableDictionary dictionary];
+	self.sizeLoading = [NSMutableSet set];
+	self.loadingVideoRows = [NSMutableIndexSet indexSet];
+
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	self.titleLabel = [UILabel new];
 	self.titleLabel.text = SCILocalized(@"Download Quality");
@@ -247,6 +268,7 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 
 	if (ip.section == 0) {
 		NSString *subtitle = self.hasAudio ? SCILocalized(@"720p • progressive • fastest") : SCILocalized(@"720p • progressive • silent");
+		subtitle = SCIQualityAppendInfo(subtitle, [self sizeTextForURL:self.standardURL]);
 		[cell setTitle:SCILocalized(@"Standard") subtitle:subtitle icon:self.previewIcon menu:[self menuForStandard]];
 		cell.iconButton.hidden = self.standardURL == nil;
 		cell.iconButton.tag = -1;
@@ -256,10 +278,16 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 
 	if (ip.section == 1) {
 		SCIDashRepresentation *rep = self.videoReps[ip.row];
-		NSString *title = [NSString stringWithFormat:@"%@ • %@", [self qualityLabelForRep:rep], SCIQualityBandwidth(rep.bandwidth)];
-		[cell setTitle:title subtitle:[self subtitleForRep:rep] icon:self.previewIcon menu:[self menuForVideoRep:rep]];
+		NSString *bandwidth = SCIQualityBandwidth(rep.bandwidth);
+		NSString *title = bandwidth.length ? [NSString stringWithFormat:@"%@ • %@", [self qualityLabelForRep:rep], bandwidth] : [self qualityLabelForRep:rep];
+
+		NSString *subtitle = [self subtitleForRep:rep];
+		subtitle = SCIQualityAppendInfo(subtitle, [self combinedSizeTextForVideo:rep.url audio:self.audioRep.url]);
+
+		[cell setTitle:title subtitle:subtitle icon:self.previewIcon menu:[self menuForVideoRep:rep]];
 		cell.iconButton.tag = ip.row;
 		[cell.iconButton addTarget:self action:@selector(playPreview:) forControlEvents:UIControlEventTouchUpInside];
+		[cell setLoading:[self.loadingVideoRows containsIndex:ip.row]];
 		return cell;
 	}
 
@@ -271,11 +299,16 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 		if (codec.length) [parts addObject:codec];
 		if (bandwidth.length) [parts addObject:bandwidth];
 
-		[cell setTitle:SCILocalized(@"Audio only") subtitle:parts.count ? [parts componentsJoinedByString:@" • "] : @"m4a" icon:SCIQualityIcon(@"music.note", 18.0) menu:nil];
+		NSString *subtitle = parts.count ? [parts componentsJoinedByString:@" • "] : @"m4a";
+		subtitle = SCIQualityAppendInfo(subtitle, [self sizeTextForURL:self.audioRep.url]);
+
+		[cell setTitle:SCILocalized(@"Audio only") subtitle:subtitle icon:SCIQualityIcon(@"music.note", 18.0) menu:nil];
+
 		return cell;
 	}
 
-	[cell setTitle:SCILocalized(@"Photo") subtitle:SCILocalized(@"Raw image") icon:SCIQualityIcon(@"photo", 18.0) menu:nil];
+	NSString *subtitle = SCIQualityAppendInfo(SCILocalized(@"Raw image"), [self sizeTextForURL:self.photoURL]);
+	[cell setTitle:SCILocalized(@"Photo") subtitle:subtitle icon:SCIQualityIcon(@"photo", 18.0) menu:nil];
 	return cell;
 }
 
@@ -330,6 +363,7 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 	NSInteger idx = sender.tag;
 	if (idx < 0 || idx >= (NSInteger)self.videoReps.count) return;
 
+	[self.loadingVideoRows addIndex:idx];
 	NSIndexPath *ip = [NSIndexPath indexPathForRow:idx inSection:1];
 	[( _SCIQualityCell *)[self.tableView cellForRowAtIndexPath:ip] setLoading:YES];
 
@@ -394,6 +428,7 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 
 - (void)restorePlayButton:(NSInteger)idx {
 	dispatch_async(dispatch_get_main_queue(), ^{
+		[self.loadingVideoRows removeIndex:idx];
 		NSIndexPath *ip = [NSIndexPath indexPathForRow:idx inSection:1];
 		[( _SCIQualityCell *)[self.tableView cellForRowAtIndexPath:ip] setLoading:NO];
 	});
@@ -420,7 +455,70 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 			[SCIMediaActions downloadPhotoOnlyForMedia:self.mediaRef action:self.saveAction];
 	}];
 }
+- (NSString *)sizeTextForURL:(NSURL *)url {
+	if (!url.absoluteString.length) return @"";
 
+	NSNumber *cached = self.sizeCache[url.absoluteString];
+	if (cached) {
+		long long bytes = cached.longLongValue;
+		return bytes > 0 ? SCIQualityFileSize(bytes) : SCILocalized(@"Size unknown");
+	}
+
+	[self fetchSizeForURL:url];
+	return SCILocalized(@"calculating size…");
+}
+
+- (NSString *)combinedSizeTextForVideo:(NSURL *)videoURL audio:(NSURL *)audioURL {
+	NSString *videoKey = videoURL.absoluteString;
+	NSString *audioKey = audioURL.absoluteString;
+
+	if (!videoKey.length) return @"";
+
+	NSNumber *videoSize = self.sizeCache[videoKey];
+	NSNumber *audioSize = audioKey.length ? self.sizeCache[audioKey] : @(0);
+
+	if (!videoSize) [self fetchSizeForURL:videoURL];
+	if (audioKey.length && !audioSize) [self fetchSizeForURL:audioURL];
+
+	if (!videoSize || (audioKey.length && !audioSize))
+		return SCILocalized(@"calculating size…");
+
+	long long v = videoSize.longLongValue;
+	long long a = audioSize.longLongValue;
+
+	if (v <= 0 || a < 0)
+		return SCILocalized(@"Size unknown");
+
+	return SCIQualityFileSize(v + a);
+}
+
+- (void)fetchSizeForURL:(NSURL *)url {
+	NSString *key = url.absoluteString;
+	if (!key.length || self.sizeCache[key] || [self.sizeLoading containsObject:key]) return;
+
+	[self.sizeLoading addObject:key];
+
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+	req.HTTPMethod = @"HEAD";
+	req.timeoutInterval = 8.0;
+	req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+
+	NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
+		long long bytes = response.expectedContentLength;
+		if (bytes <= 0 && [response isKindOfClass:NSHTTPURLResponse.class]) {
+			NSString *length = ((NSHTTPURLResponse *)response).allHeaderFields[@"Content-Length"];
+			bytes = length.longLongValue;
+		}
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			self.sizeCache[key] = @(bytes > 0 ? bytes : -1);
+			[self.sizeLoading removeObject:key];
+			[self.tableView reloadData];
+		});
+	}];
+
+	[task resume];
+}
 @end
 
 @implementation SCIQualityPicker

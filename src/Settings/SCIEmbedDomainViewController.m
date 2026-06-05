@@ -18,7 +18,7 @@ static NSArray *sciPresetDomains(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = SCILocalized(@"Embed domain");
-    SCIApplyGlassBackdropToViewController(self);
+    self.view.backgroundColor = [UIColor systemBackgroundColor];
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self;

@@ -5,8 +5,7 @@
 @implementation SCISearchBarStyler
 
 + (BOOL)shouldUseNativeGlass {
-	if (@available(iOS 26.0, *)) return YES;
-	return [SCIUtils getBoolPref:@"lg_swizzle_buttons"];
+	return [SCIUtils getBoolPref:@"liquid_glass_buttons"];
 }
 
 + (UIColor *)searchFieldColor {
@@ -34,19 +33,17 @@
 
 	UITextField *field = searchBar.searchTextField;
 	field.borderStyle = UITextBorderStyleRoundedRect;
-	field.backgroundColor = UIColor.clearColor;
-	field.layer.backgroundColor = UIColor.clearColor.CGColor;
+	field.backgroundColor = nil;
+	field.layer.backgroundColor = nil;
 	field.layer.cornerRadius = 0.0;
 	field.layer.masksToBounds = NO;
-	field.clipsToBounds = NO;
-	field.textColor = UIColor.labelColor;
 }
 
 + (void)styleSearchBar:(UISearchBar *)searchBar {
 	if (!searchBar) return;
 
 	if ([self shouldUseNativeGlass]) {
-		SCIStyleSearchBarForGlass(searchBar);
+		[self resetSearchBar:searchBar];
 		return;
 	}
 
@@ -70,9 +67,7 @@
 	field.layer.cornerRadius = 18.0;
 	field.layer.cornerCurve = kCACornerCurveContinuous;
 	field.layer.masksToBounds = YES;
-	field.background = nil;
-	field.disabledBackground = nil;
-	field.clipsToBounds = NO;
+	field.clipsToBounds = YES;
 
 	field.leftView.tintColor = placeholder;
 	field.rightView.tintColor = placeholder;

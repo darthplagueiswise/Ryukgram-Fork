@@ -42,7 +42,22 @@
 // MARK: - Sections
 
 + (NSArray *)sections {
-	return @[
+	NSMutableArray *sections = [NSMutableArray array];
+
+	if ([SCIUtils allTweakOptionsDisabled]) {
+		SCISetting *warn = [SCISetting buttonCellWithTitle:SCILocalized(@"All tweak options are disabled")
+												  subtitle:SCILocalized(@"Tap to re-enable everything")
+													  icon:[SCISymbol symbolWithIGName:@"warning" fallback:@"exclamationmark.triangle.fill"]
+													action:^{
+			[SCIUtils setPref:@(NO) forKey:@"sci_disable_all"];
+			[NSNotificationCenter.defaultCenter postNotificationName:@"SCISettingsShouldReload" object:nil];
+			[SCIUtils showRestartConfirmation];
+		}];
+		warn.titleColor = [UIColor systemRedColor];
+		[sections addObject:@{ @"header": @"", @"rows": @[warn] }];
+	}
+
+	[sections addObjectsFromArray:@[
 		@{
 			@"header": @"",
 			@"rows": @[
@@ -135,7 +150,9 @@
 				[self aboutNavCell]
 			]
 		},
-	];
+	]];
+
+	return sections;
 }
 
 // MARK: - Action button icon

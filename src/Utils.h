@@ -27,6 +27,9 @@
 + (NSArray *)getArrayPref:(NSString *)key;
 + (void)setPref:(id)value forKey:(NSString *)key;
 
+// Master kill switch: when on, getBoolPref returns NO for all keys so the tweak behaves like stock IG.
++ (BOOL)allTweakOptionsDisabled;
+
 // Registered SCInsta defaults (set once at app launch by Tweak.x). Used by
 // the settings backup so any new pref is included automatically.
 + (NSDictionary<NSString *, id> *)sciRegisteredDefaults;
@@ -103,6 +106,17 @@
 + (BOOL)showConfirmation:(void(^)(void))okHandler cancelHandler:(void(^)(void))cancelHandler title:(NSString *)title;
 + (BOOL)showConfirmation:(void(^)(void))okHandler;
 + (BOOL)showConfirmation:(void(^)(void))okHandler cancelHandler:(void(^)(void))cancelHandler;
+
+// Generic gated-confirmation alert. When `gated` is NO, runs onConfirm
+// immediately. Presents from `presenter` (top-most if nil).
++ (void)confirmIfNeeded:(BOOL)gated
+                  title:(NSString *)title
+                message:(NSString *)message
+           confirmTitle:(NSString *)confirmTitle
+                   from:(UIViewController *)presenter
+              onConfirm:(void(^)(void))onConfirm
+               onCancel:(void(^)(void))onCancel;
+
 + (void)showRestartConfirmation;
 + (void)showRestartConfirmationWithTitle:(NSString *)title message:(NSString *)message;
 

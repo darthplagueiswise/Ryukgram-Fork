@@ -1,4 +1,4 @@
-#import "../../Settings/SCIBaseSettingsListViewController.h"
+#import "../../Settings/SCISettingsViewController.h"
 
-@interface SCIChatBgSettingsVC : SCIBaseSettingsListViewController
+@interface SCIChatBgSettingsVC : SCISettingsViewController
 @end

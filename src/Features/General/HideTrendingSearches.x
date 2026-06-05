@@ -19,7 +19,8 @@
 %end
 
 %ctor {
-    if ([SCIUtils getBoolPref:@"hide_trending_searches"]) {
+    if ([SCIUtils getBoolPref:@"hide_trending_searches"] ||
+        [SCIUtils getBoolPref:@"messages_only"]) {
         %init(HideTrendingSearchesGroup);
     }
 }

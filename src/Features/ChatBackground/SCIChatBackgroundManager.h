@@ -16,6 +16,19 @@ extern NSString *const SCIPrefChatBackgroundLibrary;
 extern NSString *const SCIPrefChatBackgroundPerImage;
 extern NSString *const SCIPrefChatBackgroundThreadMeta;
 
+// Which message bubbles auto-color tints. Incoming = the other party (legacy default).
+typedef NS_ENUM(NSInteger, SCIBubbleSides) {
+	SCIBubbleSidesIncoming = 0,
+	SCIBubbleSidesOutgoing = 1,
+	SCIBubbleSidesBoth = 2,
+};
+
+typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
+	SCIBubbleGradientDirectionVertical = 0,
+	SCIBubbleGradientDirectionHorizontal = 1,
+	SCIBubbleGradientDirectionDiagonal = 2,
+};
+
 @interface SCIChatBackgroundManager : NSObject
 
 + (instancetype)shared;
@@ -59,7 +72,32 @@ extern NSString *const SCIPrefChatBackgroundThreadMeta;
 - (void)setBlur:(double)value forAsset:(NSString *)asset;
 - (void)setDim:(double)value forAsset:(NSString *)asset;
 - (void)resetSettingsForAsset:(NSString *)asset;
+
+// Auto bubble color: tint message bubbles for chats using this background, with
+// contrast text. Colors are 1 (solid) or 2 (gradient, top→bottom); override falls back
+// to a color auto-derived from the image.
+- (BOOL)autoBubbleEnabledForAsset:(NSString *_Nullable)asset;
+- (void)setAutoBubble:(BOOL)on forAsset:(NSString *)asset;
+- (UIColor *_Nullable)autoBubbleColorForAsset:(NSString *_Nullable)asset;
+- (NSArray<UIColor *> *)bubbleColorsForAsset:(NSString *_Nullable)asset;
+- (UIColor *_Nullable)autoBubbleTextColorForAsset:(NSString *_Nullable)asset;
+- (NSArray<UIColor *> *_Nullable)bubbleColorOverrideForAsset:(NSString *_Nullable)asset;
+- (void)setBubbleColorOverride:(NSArray<UIColor *> *_Nullable)colors forAsset:(NSString *)asset;
 - (BOOL)hasCustomSettingsForAsset:(NSString *_Nullable)asset;
+
+// Which sides get tinted (default: incoming / other party).
+- (SCIBubbleSides)bubbleSidesForAsset:(NSString *_Nullable)asset;
+- (void)setBubbleSides:(SCIBubbleSides)sides forAsset:(NSString *)asset;
+
+// Gradient = override holds 2 colors. Toggling seeds/collapses the second color.
+- (BOOL)bubbleGradientForAsset:(NSString *_Nullable)asset;
+- (void)setBubbleGradient:(BOOL)on forAsset:(NSString *)asset;
+- (SCIBubbleGradientDirection)bubbleGradientDirectionForAsset:(NSString *_Nullable)asset;
+- (void)setBubbleGradientDirection:(SCIBubbleGradientDirection)direction forAsset:(NSString *)asset;
+
+// Manual text color override; nil falls back to auto contrast.
+- (UIColor *_Nullable)bubbleTextColorOverrideForAsset:(NSString *_Nullable)asset;
+- (void)setBubbleTextColorOverride:(UIColor *_Nullable)color forAsset:(NSString *)asset;
 
 // Import a UIImage or file URL — copies into the assets dir, dedup by sha1.
 - (NSString *_Nullable)importImage:(UIImage *)image;

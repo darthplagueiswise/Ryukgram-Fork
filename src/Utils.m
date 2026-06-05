@@ -15,13 +15,37 @@ static NSDictionary<NSString *, NSArray *> *sciCachedTopLevelEntries = nil;
 
 #pragma mark - Prefs
 
+static NSString *const kSCIDisableAllKey = @"sci_disable_all";
+static BOOL sciAllDisabled = NO;
+static BOOL sciAllDisabledStale = YES;
+
 static inline id SCIPrefValue(NSString *key) {
 	if (!key.length) return nil;
 	id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
 	return value ?: sciRegisteredDefaultsRef[key];
 }
 
+// Cached flag so the per-read check stays cheap; invalidated on any defaults write.
+static inline BOOL SCIAllTweaksDisabled(void) {
+	if (sciAllDisabledStale) {
+		id v = SCIPrefValue(kSCIDisableAllKey);
+		sciAllDisabled = [v isKindOfClass:NSNumber.class] && [(NSNumber *)v boolValue];
+		sciAllDisabledStale = NO;
+	}
+	return sciAllDisabled;
+}
+
+// Keys the kill switch leaves alone: the switch itself, and the IG beta-update nag suppressor.
+static inline BOOL SCIKillSwitchExempt(NSString *key) {
+	return [key isEqualToString:kSCIDisableAllKey] || [key isEqualToString:@"hide_testflight_nag"];
+}
+
++ (BOOL)allTweakOptionsDisabled {
+	return SCIAllTweaksDisabled();
+}
+
 + (BOOL)getBoolPref:(NSString *)key {
+	if (SCIAllTweaksDisabled() && !SCIKillSwitchExempt(key)) return NO;
 	id v = SCIPrefValue(key);
 	if ([v isKindOfClass:NSNumber.class]) return [(NSNumber *)v boolValue];
 	if ([v isKindOfClass:NSString.class]) return [(NSString *)v boolValue];
@@ -53,11 +77,7 @@ static inline id SCIPrefValue(NSString *key) {
 + (void)setPref:(id)value forKey:(NSString *)key {
 	if (!key.length) return;
 	NSUserDefaults *defs = NSUserDefaults.standardUserDefaults;
-	[defs willChangeValueForKey:key];
 	value ? [defs setObject:value forKey:key] : [defs removeObjectForKey:key];
-	[defs didChangeValueForKey:key];
-	[defs synchronize];
-	[[NSNotificationCenter defaultCenter] postNotificationName:NSUserDefaultsDidChangeNotification object:defs userInfo:@{@"key": key}];
 }
 
 + (NSDictionary<NSString *, id> *)sciRegisteredDefaults {
@@ -66,10 +86,17 @@ static inline id SCIPrefValue(NSString *key) {
 
 + (void)setSciRegisteredDefaults:(NSDictionary<NSString *, id> *)defaults {
 	sciRegisteredDefaultsRef = [defaults copy];
+	sciAllDisabledStale = YES;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		[NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+														object:nil queue:nil
+													usingBlock:^(__unused NSNotification *n) { sciAllDisabledStale = YES; }];
+	});
 }
 
 + (_Bool)liquidGlassEnabledBool:(_Bool)fallback {
-	return [self getBoolPref:@"lg_floating_tab_bar"] ?: fallback;
+	return [self getBoolPref:@"liquid_glass_surfaces"] ?: fallback;
 }
 
 #pragma mark - View Presentation
@@ -517,10 +544,7 @@ static id sciUnwrapRepostInnerMedia(id media) {
 #pragma mark - View Controllers
 
 + (UIViewController *)viewControllerForView:(UIView *)view {
-	if (!view) return nil;
-
-	SEL selector = NSSelectorFromString(@"viewDelegate");
-	if (![view respondsToSelector:selector]) return nil;
+	if (!view || ![view respondsToSelector:NSSelectorFromString(@"viewDelegate")]) return nil;
 
 	@try {
 		id vc = [view valueForKey:@"viewDelegate"];
@@ -531,10 +555,7 @@ static id sciUnwrapRepostInnerMedia(id media) {
 }
 
 + (UIViewController *)viewControllerForAncestralView:(UIView *)view {
-	if (!view) return nil;
-
-	SEL selector = NSSelectorFromString(@"_viewControllerForAncestor");
-	if (![view respondsToSelector:selector]) return nil;
+	if (!view || ![view respondsToSelector:NSSelectorFromString(@"_viewControllerForAncestor")]) return nil;
 
 	@try {
 		id vc = [view valueForKey:@"_viewControllerForAncestor"];
@@ -571,8 +592,6 @@ static UIWindow *SCIActiveWindow(void) {
 }
 
 + (BOOL)existingLongPressGestureRecognizerForView:(UIView *)view {
-	if (!view.gestureRecognizers.count) return NO;
-
 	for (UIGestureRecognizer *recognizer in view.gestureRecognizers) {
 		if ([recognizer isKindOfClass:UILongPressGestureRecognizer.class])
 			return YES;
@@ -583,8 +602,26 @@ static UIWindow *SCIActiveWindow(void) {
 
 #pragma mark - Alerts
 
+static UIAlertController *SCIAlert(NSString *title, NSString *message) {
+	return [UIAlertController alertControllerWithTitle:title message:message ?: SCILocalized(@"Are you sure?") preferredStyle:UIAlertControllerStyleAlert];
+}
+
+static void SCIPresentAlert(UIAlertController *alert, UIViewController *host) {
+	if (!alert) return;
+
+	if (!is_iPad()) {
+		[SCIUtils presentAlertInOwnWindow:alert];
+		return;
+	}
+
+	host = host ?: topMostController();
+	if (!host) return;
+
+	[host presentViewController:alert animated:YES completion:nil];
+}
+
 + (BOOL)showConfirmation:(void(^)(void))okHandler title:(NSString *)title {
-	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:SCILocalized(@"Are you sure?") preferredStyle:UIAlertControllerStyleAlert];
+	UIAlertController *alert = SCIAlert(title, nil);
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Yes") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
 		if (okHandler) okHandler();
@@ -592,12 +629,12 @@ static UIWindow *SCIActiveWindow(void) {
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"No!") style:UIAlertActionStyleCancel handler:nil]];
 
-	[topMostController() presentViewController:alert animated:YES completion:nil];
+	SCIPresentAlert(alert, nil);
 	return NO;
 }
 
 + (BOOL)showConfirmation:(void(^)(void))okHandler cancelHandler:(void(^)(void))cancelHandler title:(NSString *)title {
-	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:SCILocalized(@"Are you sure?") preferredStyle:UIAlertControllerStyleAlert];
+	UIAlertController *alert = SCIAlert(title, nil);
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Yes") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
 		if (okHandler) okHandler();
@@ -607,7 +644,7 @@ static UIWindow *SCIActiveWindow(void) {
 		if (cancelHandler) cancelHandler();
 	}]];
 
-	[topMostController() presentViewController:alert animated:YES completion:nil];
+	SCIPresentAlert(alert, nil);
 	return NO;
 }
 
@@ -619,19 +656,50 @@ static UIWindow *SCIActiveWindow(void) {
 	return [self showConfirmation:okHandler cancelHandler:cancelHandler title:nil];
 }
 
++ (void)confirmIfNeeded:(BOOL)gated
+                  title:(NSString *)title
+                message:(NSString *)message
+           confirmTitle:(NSString *)confirmTitle
+                   from:(UIViewController *)presenter
+              onConfirm:(void(^)(void))onConfirm
+               onCancel:(void(^)(void))onCancel {
+	if (!gated) {
+		if (onConfirm) onConfirm();
+		return;
+	}
+
+	UIViewController *host = presenter ?: topMostController();
+	if (!host) {
+		if (onConfirm) onConfirm();
+		return;
+	}
+
+	UIAlertController *alert = SCIAlert(title, message);
+
+	[alert addAction:[UIAlertAction actionWithTitle:(confirmTitle ?: SCILocalized(@"Yes")) style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+		if (onConfirm) onConfirm();
+	}]];
+
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *_) {
+		if (onCancel) onCancel();
+	}]];
+
+	SCIPresentAlert(alert, host);
+}
+
 + (void)showRestartConfirmation {
 	[self showRestartConfirmationWithTitle:SCILocalized(@"Restart required") message:SCILocalized(@"You must restart the app to apply this change")];
 }
 
 + (void)showRestartConfirmationWithTitle:(NSString *)title message:(NSString *)message {
-	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+	UIAlertController *alert = SCIAlert(title, message);
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Restart") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
 		exit(0);
 	}]];
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Later") style:UIAlertActionStyleCancel handler:nil]];
-	[topMostController() presentViewController:alert animated:YES completion:nil];
+	SCIPresentAlert(alert, nil);
 }
 
 #pragma mark - Toasts
@@ -642,15 +710,13 @@ static UIWindow *SCIActiveWindow(void) {
 
 + (void)showToastForDuration:(double)duration title:(NSString *)title subtitle:(NSString *)subtitle {
 	[[SCINotificationCenter shared] notifyAction:SCI_NOTIF_GENERIC
-										   title:title
-										subtitle:subtitle
-											icon:nil
-											tone:SCINotificationToneInfo
-										duration:duration];
+	                                       title:title
+	                                    subtitle:subtitle
+	                                        icon:nil
+	                                        tone:SCINotificationToneInfo
+	                                    duration:duration];
 }
 
-// Find IGRootViewController in any connected window. First lookup scans all roots,
-// presented controllers, and children. Later calls reuse weak cache safely.
 static IGRootViewController *sciFindIGRootVC(void) {
 	if (sciCachedIGRootVC && sciCachedIGRootVC.view.window)
 		return sciCachedIGRootVC;
@@ -660,14 +726,18 @@ static IGRootViewController *sciFindIGRootVC(void) {
 
 	NSMutableArray<UIViewController *> *queue = [NSMutableArray new];
 
+	UIViewController *activeRoot = SCIActiveWindow().rootViewController;
+	if (activeRoot) [queue addObject:activeRoot];
+
 	for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
 		if (![scene isKindOfClass:UIWindowScene.class]) continue;
-
-		for (UIWindow *window in ((UIWindowScene *)scene).windows) {
-			if (window.rootViewController)
-				[queue addObject:window.rootViewController];
+		for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+			UIViewController *r = w.rootViewController;
+			if (r && r != activeRoot) [queue addObject:r];
 		}
 	}
+
+	if (!queue.count) return nil;
 
 	for (NSUInteger i = 0; i < queue.count; i++) {
 		UIViewController *vc = queue[i];
@@ -680,8 +750,8 @@ static IGRootViewController *sciFindIGRootVC(void) {
 		if (vc.presentedViewController)
 			[queue addObject:vc.presentedViewController];
 
-		for (UIViewController *child in vc.childViewControllers)
-			[queue addObject:child];
+		if (vc.childViewControllers.count)
+			[queue addObjectsFromArray:vc.childViewControllers];
 	}
 
 	return nil;
@@ -692,10 +762,7 @@ static IGRootViewController *sciFindIGRootVC(void) {
 }
 
 + (void)showIGNativeToastForDuration:(double)duration title:(NSString *)title subtitle:(NSString *)subtitle onTap:(void (^)(void))onTap {
-	IGRootViewController *rootVC = sciFindIGRootVC();
-	if (!rootVC) return;
-
-	IGActionableConfirmationToastPresenter *toastPresenter = [rootVC toastPresenter];
+	IGActionableConfirmationToastPresenter *toastPresenter = [sciFindIGRootVC() toastPresenter];
 	if (!toastPresenter) return;
 
 	Class modelClass = NSClassFromString(@"IGActionableConfirmationToastViewModel");
@@ -705,10 +772,8 @@ static IGRootViewController *sciFindIGRootVC(void) {
 	[model setValue:title forKey:@"text_annotatedTitleText"];
 	[model setValue:subtitle forKey:@"text_annotatedSubtitleText"];
 
-	void (^tapCopy)(void) = [onTap copy];
-
 	[toastPresenter hideAlert];
-	[toastPresenter showAlertWithViewModel:model isAnimated:YES animationDuration:duration presentationPriority:0 tapActionBlock:tapCopy presentedHandler:nil dismissedHandler:nil];
+	[toastPresenter showAlertWithViewModel:model isAnimated:YES animationDuration:duration presentationPriority:0 tapActionBlock:[onTap copy] presentedHandler:nil dismissedHandler:nil];
 }
 
 #pragma mark - Math

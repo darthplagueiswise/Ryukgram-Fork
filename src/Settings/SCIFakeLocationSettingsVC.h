@@ -1,4 +1,4 @@
-#import "SCIBaseSettingsListViewController.h"
+#import "SCISettingsViewController.h"
 
-@interface SCIFakeLocationSettingsVC : SCIBaseSettingsListViewController
+@interface SCIFakeLocationSettingsVC : SCISettingsViewController
 @end

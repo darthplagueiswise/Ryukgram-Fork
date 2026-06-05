@@ -13,8 +13,9 @@
 #import "../../Localization/SCILocalization.h"
 #import "../../UI/Notification/SCINotificationCenter.h"
 #import "../../UI/Notification/SCINotificationActions.h"
+#import "../../Settings/SCISettingsViewController.h"
 
-@interface SCILockPasscodeRootViewController () <UITableViewDataSource, UITableViewDelegate>
+@interface SCILockPasscodeRootViewController () <UITableViewDataSource, UITableViewDelegate, SCISettingsSearchable>
 
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic) BOOL configured;
@@ -186,6 +187,28 @@
 
 	hero.frame = CGRectMake(0.0, 0.0, width, size.height);
 	self.tableView.tableHeaderView = hero;
+}
+
+#pragma mark - Search
+
+- (NSArray<NSDictionary *> *)sciSearchableSettingsEntries {
+	NSString *passcode = SCILocalized(@"Passcode");
+	NSMutableArray *out = [NSMutableArray arrayWithArray:@[
+		@{ @"title": SCILocalized(@"Enable lock"), @"subtitle": @"", @"section": @"" },
+		@{ @"title": SCILocalized(@"Change passcode"), @"subtitle": @"", @"section": passcode },
+		@{ @"title": SCILocalized(@"Reset passcode"), @"subtitle": SCILocalized(@"Requires your current passcode"), @"section": passcode },
+	]];
+
+	if ([self hasBiometric]) {
+		NSString *kind = [SCILockManager biometricKindDisplayName] ?: SCILocalized(@"Biometric");
+		[out addObject:@{ @"title": [NSString stringWithFormat:SCILocalized(@"Use %@"), kind], @"subtitle": @"", @"section": passcode }];
+	}
+
+	NSString *targets = SCILocalized(@"Lock targets");
+	for (SCILockGroupInfo *info in SCILockAllGroups())
+		if (info.displayName.length) [out addObject:@{ @"title": info.displayName, @"subtitle": @"", @"section": targets }];
+
+	return out;
 }
 
 #pragma mark - UITableViewDataSource

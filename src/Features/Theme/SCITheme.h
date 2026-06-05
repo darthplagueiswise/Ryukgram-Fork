@@ -7,10 +7,10 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, SCIThemeMode) {
-    SCIThemeModeOff = 0,
-    SCIThemeModeLight,
-    SCIThemeModeDark,
-    SCIThemeModeOLED,
+	SCIThemeModeOff = 0,
+	SCIThemeModeLight,
+	SCIThemeModeDark,
+	SCIThemeModeOLED,
 };
 
 extern NSString *const SCIThemePrefMode;     // string: off/light/dark/oled
@@ -20,8 +20,13 @@ extern NSString *const SCIThemePrefKeyboard; // string: off/dark/oled
 
 @interface SCITheme : NSObject
 
+// Reads NSUserDefaults once and refreshes the cached theme values.
+// Call after saving theme prefs if you want live changes without restart.
++ (void)reloadPrefs;
+
 + (SCIThemeMode)mode;
 + (BOOL)forceTheme;
++ (BOOL)oledChat;
 
 + (NSString *)modeKey;
 + (SCIThemeMode)modeForKey:(NSString *)key;
@@ -37,6 +42,7 @@ extern NSString *const SCIThemePrefKeyboard; // string: off/dark/oled
 
 // Keyboard theme resolved against current state: returns NO when
 // `theme_keyboard` is off, YES when force is on, else mirrors system dark.
++ (NSString *)keyboardModeKey;
 + (BOOL)keyboardShouldApplyDark;
 + (BOOL)keyboardShouldApplyOLED;
 
@@ -44,6 +50,9 @@ extern NSString *const SCIThemePrefKeyboard; // string: off/dark/oled
 + (UIColor *)surfaceColor;
 
 + (BOOL)colorIsNearBlack:(nullable UIColor *)color;
++ (BOOL)cgColorIsNearBlack:(nullable CGColorRef)cg;
+// Looser than near-black: catches IG's neutral dark-grey surface tiers for OLED flattening.
++ (BOOL)colorIsDarkSurface:(nullable UIColor *)color;
 
 // Hex helpers (#RRGGBB / #RRGGBBAA).
 + (nullable UIColor *)colorFromHex:(nullable NSString *)hex;

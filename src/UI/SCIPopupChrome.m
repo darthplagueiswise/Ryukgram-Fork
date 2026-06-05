@@ -1,30 +1,25 @@
 #import "SCIPopupChrome.h"
-#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
+#import "GlassUI/SCIAdaptiveGlass.h"
+#import "../Features/Theme/SCITheme.h"
 
 @implementation SCIPopupChrome
 
 + (UIColor *)backgroundColor {
-    return SCIGlassBackdropColor();
+    if ([SCITheme shouldRecolor]) return UIColor.blackColor;
+    return [UIColor systemGroupedBackgroundColor];
 }
 
 + (void)applyBackdropTo:(UIViewController *)vc {
     if (!vc.isViewLoaded) [vc loadViewIfNeeded];
-    if (SCIIsIOS26OrNewer()) {
-        SCIApplyGlassBackdropToViewController(vc);
-        return;
-    }
     UIColor *bg = [self backgroundColor];
     vc.view.backgroundColor = bg;
     NSMutableArray *stack = [NSMutableArray arrayWithObject:vc.view];
     while (stack.count) {
         UIView *v = stack.lastObject;
         [stack removeLastObject];
-        if ([v isKindOfClass:[UITableView class]]) {
-            SCIStyleTableViewForGlass((UITableView *)v);
-            return;
-        }
-        if ([v isKindOfClass:[UICollectionView class]]) {
-            SCIStyleCollectionViewForGlass((UICollectionView *)v);
+        if ([v isKindOfClass:[UITableView class]]
+            || [v isKindOfClass:[UICollectionView class]]) {
+            v.backgroundColor = bg;
             return;
         }
         for (UIView *sub in v.subviews) [stack addObject:sub];
@@ -34,10 +29,6 @@
 + (UINavigationController *)wrap:(UIViewController *)content {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:content];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
-    nav.view.backgroundColor = [self backgroundColor];
-    nav.navigationBar.backgroundColor = UIColor.clearColor;
-    nav.navigationBar.translucent = YES;
     [self applyBackdropTo:content];
     if (!content.navigationItem.leftBarButtonItem
         && !content.navigationItem.leftBarButtonItems.count) {
@@ -75,18 +66,8 @@
 }
 
 + (void)closeTopMost:(UIBarButtonItem *)sender {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *top = [self topMostController];
-        if (!top || top.isBeingDismissed) return;
-        [top.view endEditing:YES];
-        UINavigationController *nav = [top isKindOfClass:UINavigationController.class] ? (UINavigationController *)top : top.navigationController;
-        if (nav && nav.viewControllers.count > 1) {
-            [nav popViewControllerAnimated:YES];
-            return;
-        }
-        UIViewController *target = nav ?: top;
-        [target dismissViewControllerAnimated:YES completion:nil];
-    });
+    UIViewController *top = [self topMostController];
+    [top dismissViewControllerAnimated:YES completion:nil];
 }
 
 @end

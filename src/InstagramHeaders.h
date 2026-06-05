@@ -59,6 +59,10 @@
 @end
 
 @interface IGTabBarController : UIViewController
+- (NSArray *)allTabBarSurfaces;
+- (id)selectedTabBarSurface;
+- (void)setSelectedTabBarSurface:(id)surface animated:(BOOL)animated;
+- (void)setSelectedTabBarSurface:(id)surface animated:(BOOL)animated animateIndicator:(BOOL)animateIndicator;
 @end
 
 @interface IGTableViewCell: UITableViewCell
@@ -98,14 +102,11 @@
 @property(readonly) IGVideo *video;
 @property(readonly) IGPhoto *photo;
 - (id)mediaOverlay;
+- (id)mediaOverlayInfo; // sensitive/integrity cover descriptor (IGAPIMediaOverlayPayloadSchema)
 @end
 
 @interface IGSundialFeedInitialState : NSObject
 - (IGMedia *)initialVideo;
-@end
-
-// Sensitive-content cover cell (hosts a Bloks template).
-@interface IGMediaOverlayCell : UICollectionViewCell
 @end
 
 @interface IGPostItem : NSObject
@@ -246,8 +247,10 @@
 @property IGUser *user;
 @end
 
+@class IGStyledString;
 @interface IGCoreTextView : UIView
 @property(nonatomic, strong) NSString *text;
+@property(copy, nonatomic) IGStyledString *styledString;
 - (void)addHandleLongPress; // new
 - (void)handleLongPress:(UILongPressGestureRecognizer *)sender; // new
 @end
@@ -267,6 +270,19 @@
 @interface IGStyledString : NSObject
 @property (retain, nonatomic) NSMutableAttributedString *attributedString;
 - (void)appendString:(id)arg1;
+- (void)setColor:(UIColor *)color range:(NSRange)range;
+@end
+
+@interface IGDirectMessageBubbleView : UIView
+@end
+
+@interface IGDirectTextMessageBubbleView : UIView
+@end
+
+@interface IGDirectThreadThemeOverridesVariant : NSObject
+@end
+
+@interface IGGradientView : UIView
 @end
 
 @interface IGInstagramAppDelegate : NSObject <UIApplicationDelegate>
@@ -583,6 +599,7 @@
 @end
 
 @interface IGDSMenuItem : NSObject
+@property (copy, nonatomic) NSString *title;
 @end
 
 @interface IGDirectAudioWaveform : NSObject
@@ -634,11 +651,20 @@
 }
 @end
 
-// Call buttons in DM thread header. Coordinator owns _audioCallButton / _videoCallButton
-// (both IGDirectCallButton) and forwards taps to _didTapAudioButton: / _didTapVideoButton:.
-// Discovered by dumping the thread VC view hierarchy for IGDirectCallButton.
-@interface IGDirectThreadCallButtonsCoordinator : NSObject @end
+// DM-header call buttons. Old layout: coordinator owns audio/video IGDirectCallButtons.
+// Newer A/B: a joint button opens an IGDSMenu (buttonMenuItems) routed via
+// -_didTapButtonWithCallType:.
+@interface IGDirectThreadCallButtonsCoordinator : NSObject
+- (id)buttonMenuItems;
+@end
 @interface IGDirectCallButton : UIView @end
+@interface IGDirectJointCallButton : UIButton @end
+
+// Builds the DM thread's right-side nav items; the newer A/B renders a single
+// consolidated calling button (_consolidatedCallingButton) that opens the call menu.
+@interface IGDirectThreadViewRightBarButtonsFeatureController : NSObject
+- (id)createRightBarButtonItems;
+@end
 
 // IG's UINavigationBar subclass — hosts the iOS 26 liquid-glass platter layout.
 @interface IGNavigationBar : UINavigationBar @end
@@ -651,7 +677,6 @@
 @interface IGDirectThreadBackgroundView : UIView @end
 
 @interface IGDirectThreadBackgroundImageView : UIView @end
-@interface IGDirectMessageBubbleView : UIView @end
 
 // UIKit-private keyboard classes — OLED keyboard theme.
 @interface UIKBBackdropView : UIView @end

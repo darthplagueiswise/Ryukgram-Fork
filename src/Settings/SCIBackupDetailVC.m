@@ -1,6 +1,6 @@
 #import "SCIBackupDetailVC.h"
-#import "SCISearchBarStyler.h"
 #import "GlassUI/SCIAdaptiveGlass.h"
+#import "SCISearchBarStyler.h"
 #import "../Utils.h"
 #import "../Localization/SCILocalization.h"
 
@@ -24,13 +24,12 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIApplyGlassBackdropToViewController(self);
+	self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
-	SCIStyleTableViewForGlass(self.tableView);
 	self.tableView.estimatedRowHeight = 44;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	[self.view addSubview:self.tableView];
@@ -95,7 +94,6 @@
 	static NSString *rid = @"row";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:rid];
-	SCIStyleCellForGlass(cell);
 	NSDictionary *r = self.visibleSections[indexPath.section][@"rows"][indexPath.row];
 	cell.textLabel.text = r[@"title"];
 	cell.detailTextLabel.text = r[@"value"];

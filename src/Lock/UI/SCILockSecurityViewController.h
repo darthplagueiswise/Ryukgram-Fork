@@ -1,8 +1,7 @@
-// Top-level Security & Privacy page. Two layouts — onboarding hero when no
-// passcode is set, and the full per-target list once configured.
+// Top-level Security & Privacy page: passcode entry, hidden chats, capture toggles.
 
-#import "../../Settings/SCIBaseSettingsListViewController.h"
+#import "../../Settings/SCISettingsViewController.h"
 
-@interface SCILockSecurityViewController : SCIBaseSettingsListViewController
+@interface SCILockSecurityViewController : SCISettingsViewController
 
 @end

@@ -121,6 +121,17 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
     sciPerformRequest(sciBuildRequest(method, url, body), completion);
 }
 
++ (void)downloadAuthorizedURL:(NSURL *)url
+                   completion:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
+    if (!url) { if (completion) completion(nil, nil, nil); return; }
+    NSMutableURLRequest *req = sciBuildRequest(@"GET", url, nil);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (completion) completion(data, response, error);
+        }];
+    [task resume];
+}
+
 // ============ Friendships ============
 
 + (void)followUserPK:(NSString *)pk completion:(SCIAPICompletion)completion {
@@ -136,6 +147,14 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
     [self sendRequestWithMethod:@"POST"
                            path:[NSString stringWithFormat:@"friendships/destroy/%@/", pk]
                            body:@{@"user_id": pk, @"radio_type": @"wifi-none"}
+                     completion:completion];
+}
+
++ (void)removeFollowerPK:(NSString *)pk completion:(SCIAPICompletion)completion {
+    if (!pk.length) { if (completion) completion(nil, nil); return; }
+    [self sendRequestWithMethod:@"POST"
+                           path:[NSString stringWithFormat:@"friendships/remove_follower/%@/", pk]
+                           body:@{@"user_id": pk}
                      completion:completion];
 }
 
