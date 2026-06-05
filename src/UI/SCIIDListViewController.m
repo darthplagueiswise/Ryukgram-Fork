@@ -1,5 +1,6 @@
 #import "SCIIDListViewController.h"
 #import "../Localization/SCILocalization.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 @implementation SCIIDListConfig
 - (instancetype)init {
