@@ -37,13 +37,6 @@ static void sciInstallBackButtonOnController(UIViewController *vc, NSString *tit
 	vc.navigationItem.leftBarButtonItem = back;
 }
 
-static Class SCIClassByNames(NSArray<NSString *> *names) {
-    for (NSString *n in names) { if (!n.length) continue; Class c = NSClassFromString(n); if (c) return c; c = objc_getClass(n.UTF8String); if (c) return c; }
-    unsigned int count = 0; Class *classes = objc_copyClassList(&count); Class found = Nil;
-    for (unsigned int i=0; classes && i<count && !found; i++) { const char *cn = class_getName(classes[i]); if (!cn) continue; NSString *s = [NSString stringWithUTF8String:cn]; for (NSString *n in names) if ([s isEqualToString:n] || [s hasSuffix:n] || [s containsString:n]) { found = classes[i]; break; } }
-    if (classes) free(classes); return found;
-}
-
 @implementation SCIDogfooding
 
 + (void)sciDismissDogfoodModal:(id)sender {
@@ -66,7 +59,7 @@ static Class SCIClassByNames(NSArray<NSString *> *names) {
 }
 
 + (BOOL)isAvailable {
-	return SCIClassByNames(@[@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettingsStaticFuncs"]) != nil ||
+	return NSClassFromString(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs") != nil ||
 	       NSClassFromString(@"MetaLocalExperimentListViewController") != nil;
 }
 
@@ -78,7 +71,8 @@ static Class SCIClassByNames(NSArray<NSString *> *names) {
 	UIViewController *top = sciDogfoodTopVC();
 	if (!top) { [SCIUtils showErrorHUDWithDescription:@"No top view controller"]; return; }
 
-	Class notesClass = SCIClassByNames(@[@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs", @"IGDirectNotesDogfoodingSettingsStaticFuncs"]);
+	Class notesClass = NSClassFromString(@"IGDirectNotesDogfoodingSettings.IGDirectNotesDogfoodingSettingsStaticFuncs");
+	if (!notesClass) notesClass = NSClassFromString(@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs");
 	SEL openSel = @selector(notesDogfoodingSettingsOpenOnViewController:userSession:);
 	if (notesClass && [notesClass respondsToSelector:openSel]) {
 		@try {

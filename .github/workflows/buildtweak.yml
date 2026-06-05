@@ -26,8 +26,7 @@ jobs:
         with:
           path: main
 
-      - run: brew install ldid dpkg make
-
+      - run: brew install ldid dpkg make zip
       - run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
       - uses: actions/checkout@v4

@@ -556,7 +556,7 @@ static UIButton *SCIToolbarButton(NSString *title, NSString *symbol, id target, 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     if (@available(iOS 15.0, *)) {
         UIButtonConfiguration *cfg;
-        if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration glassButtonConfiguration];
+        if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration clearGlassButtonConfiguration];
         else cfg = [UIButtonConfiguration plainButtonConfiguration];
         cfg.title = title;
         cfg.image = [UIImage systemImageNamed:symbol];

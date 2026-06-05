@@ -4,6 +4,7 @@
 #import "../SCIInternalActionsViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
+#import "../SCISymbolsBrowserViewController.h"
 
 @implementation SCITweakSettings (Section_Advanced)
 
@@ -157,6 +158,16 @@
 														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
 													}
 												],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Runtime"),
+											@"footer": SCILocalized(@"Exports ALL Mach-O C symbols from the selected image — including IGMobileConfigBoolean*, EasyGating*, and other C functions FLEX cannot show. Blue = Bool gating candidate. Tap a row to copy name+address."),
+											@"rows": @[
+												[SCISetting navigationCellWithTitle:SCILocalized(@"Symbols Browser")
+																							   subtitle:SCILocalized(@"All exported C symbols from Instagram / FBSharedFramework")
+																							      icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"function"]
+																						targetClass:SCISymbolsBrowserViewController.class],
 											]
 										},
 										@{

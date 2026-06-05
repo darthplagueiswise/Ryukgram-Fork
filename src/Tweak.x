@@ -178,11 +178,8 @@ static BOOL sDidShowSettings;
 
 %end
 
-// MARK: - Debug / bug report menus
-// Do not hook IGWindow/IGBugReportUploader here. Blocking these native paths
-// prevents Instagram debug/internal menus from appearing and Logos requires
-// every declared %group to be initialized. Keeping this section as plain code
-// avoids both the runtime block and the non-initialized group build error.
+// MARK: - Debug / bug report blocking
+// Removed: do not block Instagram debug/bug-report/internal menus.
 
 // MARK: - Screenshot blocking
 
@@ -716,7 +713,6 @@ static void sciInstallLiquidGlassHooks(void) {
 	sLG_TabBarStyleGlass       = nativeLiquidGlass || SCI_PREF(@"lg_tab_bar_style_glass");
 
 	%init(SCIAppLifecycleGroup);
-	// Native debug/bug-report menus are intentionally not hooked.
 	%init(SCIScreenshotBlockGroup);
 	%init(SCIHideItemsGroup);
 	%init(SCIConfirmActionsGroup);

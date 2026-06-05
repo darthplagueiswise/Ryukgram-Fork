@@ -1,78 +1,107 @@
-// ============================================================================
 // SCIInternalSettingsMenuHook.x
-// ============================================================================
-// Makes IG's own internal/debug entries appear inside the native Bug Reporter
-// menu. This does NOT block IGWindow.showDebugMenu; it only forces the menu VC's
-// constructor/getters to expose internal rows.
+// Stable ABI hooks for Instagram's own internal settings entry in the bug reporter menu.
+// Validated against Instagram(32): IGBugReporterMenu.IGBugReportMenuViewController
+// exposes initWithDeviceSession:...showInternalSettings:showLoggedOutInternalSettings:showShake...
+// and getters showInternalSettings/showLoggedOutInternalSettings/showShakeToReportPreferenceToggle/showDogfoodingAssistant.
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
 #import "SCIInternalGatePrefs.h"
-#import "SCIDogfoodObjectRuntime.h"
 
-#define BLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] InternalMenu " fmt, ##__VA_ARGS__)
-static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabledForKey:k]; }
-static NSString *const kForce  = @"sci_force_internal_settings_menu";
+#define ILOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] InternalMenu " fmt, ##__VA_ARGS__)
+
+static NSString *const kForce = @"sci_force_internal_settings_menu";
 static NSString *const kLogged = @"sci_force_internal_settings_loggedout";
 
-typedef id (*InitT)(id, SEL, id, id, id, id, id, id, long, long, BOOL, BOOL, BOOL);
-static InitT gOrig = NULL;
-static SEL gSel = NULL;
-static BOOL (*orig_showInternal)(id, SEL) = NULL;
-static BOOL (*orig_showLoggedOut)(id, SEL) = NULL;
-static BOOL (*orig_showShake)(id, SEL) = NULL;
-static BOOL (*orig_showAssistant)(id, SEL) = NULL;
+static inline BOOL SCIInternalMenuEnabled(void) { return [SCIInternalGatePrefs objCGateEnabledForKey:kForce]; }
+static inline BOOL SCIInternalMenuLoggedOutEnabled(void) { return SCIInternalMenuEnabled() && [SCIInternalGatePrefs individualGateEnabledForKey:kLogged]; }
 
-static Class SCIClassByNames(NSArray<NSString *> *names) {
-    for (NSString *n in names) { if (!n.length) continue; Class c = NSClassFromString(n); if (c) return c; c = objc_getClass(n.UTF8String); if (c) return c; }
-    unsigned int count = 0; Class *classes = objc_copyClassList(&count); Class found = Nil;
-    for (unsigned int i=0; classes && i<count && !found; i++) { const char *cn = class_getName(classes[i]); if (!cn) continue; NSString *s = [NSString stringWithUTF8String:cn]; for (NSString *n in names) if ([s isEqualToString:n] || [s hasSuffix:n] || [s containsString:n]) { found = classes[i]; break; } }
-    if (classes) free(classes); return found;
+static Class SCIInternalMenuClass(void) {
+    Class C = NSClassFromString(@"_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
+    if (!C) C = NSClassFromString(@"IGBugReporterMenu.IGBugReportMenuViewController");
+    if (!C) C = NSClassFromString(@"IGBugReportMenuViewController");
+    return C;
 }
 
-static BOOL new_showInternal(id self, SEL _cmd) { return ON(kForce) ? YES : (orig_showInternal ? orig_showInternal(self,_cmd) : NO); }
-static BOOL new_showLoggedOut(id self, SEL _cmd) { return (ON(kForce) && ON(kLogged)) ? YES : (orig_showLoggedOut ? orig_showLoggedOut(self,_cmd) : NO); }
-static BOOL new_showShake(id self, SEL _cmd) { return ON(kForce) ? YES : (orig_showShake ? orig_showShake(self,_cmd) : NO); }
-static BOOL new_showAssistant(id self, SEL _cmd) { return ON(kForce) ? YES : (orig_showAssistant ? orig_showAssistant(self,_cmd) : NO); }
+typedef id (*SCIBugMenuInitIMP)(id, SEL, id, id, id, id, id, id, long, long, BOOL, BOOL, BOOL);
+static SCIBugMenuInitIMP sOrigBugMenuInit = NULL;
 
-static void SCIHookBoolGetter(Class C, NSString *name, IMP newImp, IMP *orig) {
-    SEL s = NSSelectorFromString(name);
-    if (*orig || !class_getInstanceMethod(C, s)) return;
-    MSHookMessageEx(C, s, newImp, orig);
-    [SCIDogfoodObjectRuntime noteAction:@"Internal menu getter hook" status:(*orig ? @"hooked" : @"failed") detail:[NSString stringWithFormat:@"%s#%@", class_getName(C), name]];
+static id sci_bugMenuInitHook(id self, SEL _cmd,
+    id deviceSession, id userSession, id reliabilityLogging,
+    id navChain, id endpoint, id entryPoint,
+    long style, long status,
+    BOOL showInternal, BOOL showLoggedOut, BOOL showShake)
+{
+    if (SCIInternalMenuEnabled()) {
+        showInternal = YES;
+        showShake = YES;
+        if (SCIInternalMenuLoggedOutEnabled()) showLoggedOut = YES;
+    }
+    return sOrigBugMenuInit ? sOrigBugMenuInit(self, _cmd, deviceSession, userSession, reliabilityLogging, navChain, endpoint, entryPoint, style, status, showInternal, showLoggedOut, showShake) : self;
 }
 
-static void installInternalSettingsMenuHook(void) {
-    static BOOL initDone = NO;
-    Class C = SCIClassByNames(@[@"_TtC17IGBugReporterMenu29IGBugReportMenuViewController", @"IGBugReporterMenu.IGBugReportMenuViewController", @"IGBugReportMenuViewController"]);
-    if (!C) { [SCIDogfoodObjectRuntime noteAction:@"Internal menu hook" status:@"class not loaded" detail:@"IGBugReportMenuViewController"]; return; }
+static BOOL (*sOrigShowInternal)(id, SEL) = NULL;
+static BOOL sci_showInternal(id self, SEL _cmd) {
+    if (SCIInternalMenuEnabled()) return YES;
+    return sOrigShowInternal ? sOrigShowInternal(self, _cmd) : NO;
+}
 
-    if (!initDone) {
-        gSel = NSSelectorFromString(@"initWithDeviceSession:userSession:reliabilityLogging:navChain:endpoint:entryPoint:style:internalSettingsAvailabilityStatus:showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:");
-        if (class_getInstanceMethod(C, gSel)) {
-            IMP newImp = imp_implementationWithBlock(^id(id me, id deviceSession, id userSession, id reliabilityLogging, id navChain, id endpoint, id entryPoint, long style, long status, BOOL showInternal, BOOL showLoggedOut, BOOL showShake) {
-                BOOL fi = showInternal, fl = showLoggedOut, fs = showShake;
-                if (ON(kForce)) { fi = YES; fs = YES; if (ON(kLogged)) fl = YES; }
-                return gOrig ? gOrig(me, gSel, deviceSession, userSession, reliabilityLogging, navChain, endpoint, entryPoint, style, status, fi, fl, fs) : me;
-            });
-            IMP orig = NULL; MSHookMessageEx(C, gSel, newImp, &orig); gOrig = (InitT)orig; initDone = (orig != NULL);
-            [SCIDogfoodObjectRuntime noteAction:@"Internal menu init hook" status:(orig?@"hooked":@"failed") detail:NSStringFromClass(C)];
-        }
+static BOOL (*sOrigShowLoggedOut)(id, SEL) = NULL;
+static BOOL sci_showLoggedOut(id self, SEL _cmd) {
+    if (SCIInternalMenuLoggedOutEnabled()) return YES;
+    return sOrigShowLoggedOut ? sOrigShowLoggedOut(self, _cmd) : NO;
+}
+
+static BOOL (*sOrigShowShake)(id, SEL) = NULL;
+static BOOL sci_showShake(id self, SEL _cmd) {
+    if (SCIInternalMenuEnabled()) return YES;
+    return sOrigShowShake ? sOrigShowShake(self, _cmd) : NO;
+}
+
+static BOOL (*sOrigShowAssistant)(id, SEL) = NULL;
+static BOOL sci_showAssistant(id self, SEL _cmd) {
+    if (SCIInternalMenuEnabled()) return YES;
+    return sOrigShowAssistant ? sOrigShowAssistant(self, _cmd) : NO;
+}
+
+static void SCIHookBoolGetter(Class C, SEL sel, IMP replacement, IMP *orig) {
+    if (!C || !sel || *orig) return;
+    if (!class_getInstanceMethod(C, sel)) return;
+    MSHookMessageEx(C, sel, replacement, orig);
+    ILOG("getter %{public}s %{public}s", sel_getName(sel), *orig ? "hooked" : "failed");
+}
+
+static void SCIInstallInternalMenuHook(void) {
+    static BOOL didInitHook = NO;
+    Class C = SCIInternalMenuClass();
+    if (!C) { ILOG("IGBugReportMenuViewController not loaded"); return; }
+
+    SEL initSel = NSSelectorFromString(@"initWithDeviceSession:userSession:reliabilityLogging:navChain:endpoint:entryPoint:style:internalSettingsAvailabilityStatus:showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:");
+    if (!didInitHook && class_getInstanceMethod(C, initSel)) {
+        IMP orig = NULL;
+        MSHookMessageEx(C, initSel, (IMP)sci_bugMenuInitHook, &orig);
+        sOrigBugMenuInit = (SCIBugMenuInitIMP)orig;
+        didInitHook = (orig != NULL);
+        ILOG("init hook %{public}s", didInitHook ? "hooked" : "failed");
     }
 
-    SCIHookBoolGetter(C, @"showInternalSettings", (IMP)new_showInternal, (IMP *)&orig_showInternal);
-    SCIHookBoolGetter(C, @"showLoggedOutInternalSettings", (IMP)new_showLoggedOut, (IMP *)&orig_showLoggedOut);
-    SCIHookBoolGetter(C, @"showShakeToReportPreferenceToggle", (IMP)new_showShake, (IMP *)&orig_showShake);
-    SCIHookBoolGetter(C, @"showDogfoodingAssistant", (IMP)new_showAssistant, (IMP *)&orig_showAssistant);
+    SCIHookBoolGetter(C, @selector(showInternalSettings), (IMP)sci_showInternal, (IMP *)&sOrigShowInternal);
+    SCIHookBoolGetter(C, @selector(showLoggedOutInternalSettings), (IMP)sci_showLoggedOut, (IMP *)&sOrigShowLoggedOut);
+    SCIHookBoolGetter(C, @selector(showShakeToReportPreferenceToggle), (IMP)sci_showShake, (IMP *)&sOrigShowShake);
+    SCIHookBoolGetter(C, @selector(showDogfoodingAssistant), (IMP)sci_showAssistant, (IMP *)&sOrigShowAssistant);
 }
 
 %ctor {
     @autoreleasepool {
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
-        installInternalSettingsMenuHook();
-        double d[] = {1.0, 3.0, 6.0, 10.0};
-        for (NSUInteger i=0;i<sizeof(d)/sizeof(d[0]);i++) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(d[i]*NSEC_PER_SEC)),dispatch_get_main_queue(),^{ installInternalSettingsMenuHook(); });
+        SCIInstallInternalMenuHook();
+        double delays[] = {1.0, 3.0, 6.0, 10.0};
+        for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[i] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                SCIInstallInternalMenuHook();
+            });
+        }
     }
 }
