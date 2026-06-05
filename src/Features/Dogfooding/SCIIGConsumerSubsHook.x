@@ -24,7 +24,7 @@
 
 #define SCILOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] IGPlus " fmt, ##__VA_ARGS__)
 static NSString *const kMaster = @"sci_force_igplus_all";
-static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabledForKey:kMaster] || [SCIInternalGatePrefs objCGateEnabledForKey:k]; }
+static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs individualGateEnabledForKey:kMaster] || [SCIInternalGatePrefs individualGateEnabledForKey:k]; }
 
 // selector <-> pref table (no-arg BOOL getters)
 typedef struct { const char *sel; NSString *key; } SCIBenefit;
@@ -83,7 +83,8 @@ static void hookIsBenefitActive(Class cls) {
 
 static void install(void) {
     if (!gDone) gDone=[NSMutableSet set];
-    Class svc = NSClassFromString(@"IGConsumerSubsService");
+    Class svc = NSClassFromString(@"IGConsumerSubsService.IGConsumerSubsService");
+    if (!svc) svc = NSClassFromString(@"IGConsumerSubsService");
     if (!svc) svc = NSClassFromString(@"_TtC21IGConsumerSubsService21IGConsumerSubsService");
     if (svc) {
         NSArray<NSString *> *keys = benefitKeys();
@@ -94,7 +95,8 @@ static void install(void) {
         SCILOG("IGConsumerSubsService not loaded yet");
     }
     // StoryPeek coordinator (isPeekActive)
-    Class peek = NSClassFromString(@"_TtC23IGConsumerSubsStoryPeek34IGConsumerSubsStoryPeekCoordinator");
+    Class peek = NSClassFromString(@"IGConsumerSubsStoryPeek.IGConsumerSubsStoryPeekCoordinator");
+    if (!peek) peek = NSClassFromString(@"_TtC23IGConsumerSubsStoryPeek34IGConsumerSubsStoryPeekCoordinator");
     if (peek) hookGetter(peek, NSSelectorFromString(@"isPeekActive"), @"sci_igplus_story_peek_active");
 }
 

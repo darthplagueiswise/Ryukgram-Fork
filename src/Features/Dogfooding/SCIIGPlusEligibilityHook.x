@@ -24,7 +24,7 @@
 #import "SCIInternalSettingsApplier.h"
 
 #define ELOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] IGPlusElig " fmt, ##__VA_ARGS__)
-static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabledForKey:@"sci_force_igplus_all"] || [SCIInternalGatePrefs objCGateEnabledForKey:k]; }
+static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs individualGateEnabledForKey:@"sci_force_igplus_all"] || [SCIInternalGatePrefs individualGateEnabledForKey:k]; }
 
 static NSMutableSet<NSString *> *gDone;
 

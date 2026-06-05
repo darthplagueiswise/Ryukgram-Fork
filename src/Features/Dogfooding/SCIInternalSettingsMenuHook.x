@@ -41,7 +41,8 @@ static SEL   gSel  = NULL;
 
 static void installInternalSettingsMenuHook(void) {
     static BOOL done = NO; if (done) return;
-    Class C = NSClassFromString(@"IGBugReportMenuViewController");
+    Class C = NSClassFromString(@"IGBugReporterMenu.IGBugReportMenuViewController");
+    if (!C) C = NSClassFromString(@"IGBugReportMenuViewController");
     if (!C) C = NSClassFromString(@"_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
     if (!C) return;
     gSel = NSSelectorFromString(@"initWithDeviceSession:userSession:reliabilityLogging:navChain:endpoint:entryPoint:style:internalSettingsAvailabilityStatus:showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:");

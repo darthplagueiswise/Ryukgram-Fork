@@ -544,9 +544,11 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
         return NO;
     }
 
-    // Do not allocate IGDogfoodingSettingsViewController directly. In Instagram 431
-    // that Swift VC requires an internal config/analytics stack and a bare init can
-    // trap before ObjC @catch can help. Use only the validated static opener.
+    // Validated in Instagram(30): +[IGDogfoodingSettings openWithConfig:onViewController:userSession:].
+    // Never allocate IGDogfoodingSettingsViewController directly here; its Swift init
+    // can trap when the internal config stack is incomplete. The static opener is the
+    // safe entrypoint. Prefer a live config captured from native flows, otherwise try
+    // a plain IGDogfoodingSettingsConfig object and let the native opener validate it.
     Class settings = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettings") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
     SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
     if (!settings || ![settings respondsToSelector:openSel]) {
@@ -555,14 +557,25 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
     }
 
     id config = [self liveInstanceOfClassNameContaining:@"IGDogfoodingSettingsConfig"];
+    NSString *configSource = config ? @"live IGDogfoodingSettingsConfig" : @"fresh IGDogfoodingSettingsConfig";
     if (!config) {
-        [self noteAction:@"Open Native Dogfood Settings" status:@"needs live IGDogfoodingSettingsConfig" detail:@"Open a native dogfood surface first; refusing bare Swift init to avoid crash."];
+        Class cfgCls = NSClassFromString(@"IGDogfoodingSettingsConfig");
+        if (!cfgCls) cfgCls = NSClassFromString(@"_TtC20IGDogfoodingSettings26IGDogfoodingSettingsConfig");
+        if (cfgCls) {
+            @try { config = [[cfgCls alloc] init]; }
+            @catch (id e) { [self noteAction:@"Open Native Dogfood Settings" status:@"config init exception" detail:e]; }
+        }
+    }
+
+    if (!config) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"no config" detail:@"No live/fresh IGDogfoodingSettingsConfig available; refusing direct VC init to avoid Swift trap."];
         return NO;
     }
 
     @try {
         ((void(*)(id,SEL,id,id,id))objc_msgSend)(settings, openSel, config, top, session);
-        [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:NSStringFromClass(settings)];
+        [self noteObject:config role:@"IGDogfoodingSettingsConfig" source:@"tryOpenNativeDogfoodSettings"];
+        [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:configSource];
         return YES;
     } @catch (id e) {
         [self noteAction:@"Open Native Dogfood Settings" status:@"exception" detail:e];

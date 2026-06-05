@@ -20,7 +20,8 @@ static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabled
         if (ais) return ais;
     }
     // Fallback: construct one bound to the session.
-    Class C = NSClassFromString(@"IGAutofillInternalSettings");
+    Class C = NSClassFromString(@"AutofillInternalSettingsInstagram.IGAutofillInternalSettings");
+    if (!C) C = NSClassFromString(@"IGAutofillInternalSettings");
     if (!C) C = NSClassFromString(@"_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings");
     if (C) {
         SEL iwus = NSSelectorFromString(@"initWithUserSession:");
@@ -41,7 +42,8 @@ static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabled
 }
 
 + (NSString *)applyLiquidGlass {
-    Class H = NSClassFromString(@"IGLiquidGlassNavigationExperimentHelper");
+    Class H = NSClassFromString(@"IGLiquidGlassExperimentHelper.IGLiquidGlassNavigationExperimentHelper");
+    if (!H) H = NSClassFromString(@"IGLiquidGlassNavigationExperimentHelper");
     if (!H) H = NSClassFromString(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper");
     if (!H) return @"";
     SEL sharedSel = NSSelectorFromString(@"shared");
