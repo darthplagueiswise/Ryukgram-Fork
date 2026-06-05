@@ -1,5 +1,6 @@
 #import "SCIDirectUserResolver.h"
 #import <UIKit/UIKit.h>
+#import <dispatch/dispatch.h>
 #import <objc/runtime.h>
 
 // Weak so account-switch / logout drops it; the hook re-stamps on every
@@ -73,7 +74,13 @@ id sciDirectUserResolverUserForPK(NSString *pk) {
         Ivar qIv = class_getInstanceVariable([userMap class], "_queue");
         id qObj = qIv ? object_getIvar(userMap, qIv) : nil;
         Class dqCls = NSClassFromString(@"OS_dispatch_queue");
-        dispatch_queue_t userQueue = (dqCls && [qObj isKindOfClass:dqCls]) ? (__bridge dispatch_queue_t)qObj : nil;
+        // dispatch_queue_t is an Objective-C object pointer with modern SDKs.
+        // A __bridge cast is only valid for CF/non-ObjC pointer ownership transitions
+        // and fails under SDK 26.x. A plain ObjC pointer cast is the correct form here.
+        dispatch_queue_t userQueue = nil;
+        if (dqCls && [qObj isKindOfClass:dqCls]) {
+            userQueue = (dispatch_queue_t)qObj;
+        }
 
         __block id result = nil;
         dispatch_block_t lookup = ^{
