@@ -19,6 +19,7 @@ UIVisualEffect *SCIRealLiquidGlassEffect(BOOL clearStyle, BOOL interactive, UICo
 }
 
 static NSInteger const kSCIRealGlassBackgroundTag = 0x51C126;
+static NSInteger const kSCIRealGlassSceneBackdropTag = 0x51C127;
 
 static UIColor *SCIGlassBorderColor(void);
 static UIColor *SCIGlassReadableFillColor(void);
@@ -26,13 +27,53 @@ static UIColor *SCIGlassReadableFillColor(void);
 UIColor *SCIGlassBaseSurfaceColor(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.02 alpha:1.0]
-            : [UIColor colorWithWhite:0.97 alpha:1.0];
+            ? [UIColor colorWithWhite:0.0 alpha:0.16]
+            : [UIColor colorWithWhite:1.0 alpha:0.12];
     }];
 }
 
 UIColor *SCIGlassBackdropColor(void) {
-    return SCIGlassBaseSurfaceColor();
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:0.0 alpha:0.10]
+            : [UIColor colorWithWhite:1.0 alpha:0.10];
+    }];
+}
+
+static UIColor *SCIGlassEffectTintColor(void) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:1.0 alpha:0.045]
+            : [UIColor colorWithWhite:1.0 alpha:0.10];
+    }];
+}
+
+static UIVisualEffectView *SCIEnsureRootLiquidGlassBackdrop(UIView *root) {
+    if (!root || !SCIIsIOS26OrNewer()) return nil;
+    UIVisualEffect *effect = SCIRealLiquidGlassEffect(YES, NO, SCIGlassBackdropColor());
+    if (!effect) return nil;
+
+    UIVisualEffectView *backdrop = (UIVisualEffectView *)[root viewWithTag:kSCIRealGlassSceneBackdropTag];
+    if (![backdrop isKindOfClass:UIVisualEffectView.class]) {
+        backdrop = [[UIVisualEffectView alloc] initWithEffect:effect];
+        backdrop.tag = kSCIRealGlassSceneBackdropTag;
+        backdrop.userInteractionEnabled = NO;
+        backdrop.translatesAutoresizingMaskIntoConstraints = NO;
+        [root insertSubview:backdrop atIndex:0];
+        [NSLayoutConstraint activateConstraints:@[
+            [backdrop.topAnchor constraintEqualToAnchor:root.topAnchor],
+            [backdrop.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+            [backdrop.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+            [backdrop.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+        ]];
+    } else {
+        backdrop.effect = effect;
+        [root sendSubviewToBack:backdrop];
+    }
+
+    backdrop.backgroundColor = UIColor.clearColor;
+    backdrop.contentView.backgroundColor = UIColor.clearColor;
+    return backdrop;
 }
 
 static BOOL SCIViewShouldReceiveGlassBackground(UIView *view) {
@@ -164,11 +205,12 @@ void SCIStyleSearchBarForGlass(UISearchBar *searchBar) {
         UITextField *field = searchBar.searchTextField;
         field.textColor = UIColor.labelColor;
         field.tintColor = UIColor.systemBlueColor;
-        field.backgroundColor = SCIGlassReadableFillColor();
-        field.layer.backgroundColor = [SCIGlassReadableFillColor() resolvedColorWithTraitCollection:searchBar.traitCollection].CGColor;
+        field.backgroundColor = UIColor.clearColor;
+        field.layer.backgroundColor = UIColor.clearColor.CGColor;
         field.borderStyle = UITextBorderStyleNone;
         field.background = nil;
         field.disabledBackground = nil;
+        SCIApplyGlassToView(field, 20.0, YES);
         field.clipsToBounds = YES;
         field.layer.cornerRadius = 18.0;
         if ([field.layer respondsToSelector:@selector(setCornerCurve:)]) field.layer.cornerCurve = kCACornerCurveContinuous;
@@ -190,10 +232,16 @@ void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
     if (!vc.isViewLoaded) [vc loadViewIfNeeded];
 
     UIView *root = vc.view;
-    root.backgroundColor = SCIGlassBaseSurfaceColor();
-    root.opaque = YES;
+    root.backgroundColor = SCIIsIOS26OrNewer() ? UIColor.clearColor : SCIGlassBaseSurfaceColor();
+    root.opaque = NO;
+    root.layer.backgroundColor = UIColor.clearColor.CGColor;
+    SCIEnsureRootLiquidGlassBackdrop(root);
     SCIConfigureScrollViewForGlass(root);
     SCIApplyLiquidGlassToViewTree(root);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SCIEnsureRootLiquidGlassBackdrop(root);
+        SCIApplyLiquidGlassToViewTree(root);
+    });
 
     UINavigationBar *bar = vc.navigationController.navigationBar;
     if (bar) {
@@ -202,8 +250,8 @@ void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
         if (@available(iOS 13.0, *)) {
             UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
             [appearance configureWithTransparentBackground];
-            appearance.backgroundEffect = SCIRealLiquidGlassEffect(NO, YES, nil);
-            appearance.backgroundColor = [SCIGlassReadableFillColor() colorWithAlphaComponent:0.74];
+            appearance.backgroundEffect = SCIRealLiquidGlassEffect(YES, YES, SCIGlassBackdropColor());
+            appearance.backgroundColor = UIColor.clearColor;
             appearance.shadowColor = UIColor.clearColor;
             bar.standardAppearance = appearance;
             bar.scrollEdgeAppearance = appearance;
@@ -217,6 +265,7 @@ void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
         [appearance configureWithTransparentBackground];
         appearance.backgroundColor = UIColor.clearColor;
         appearance.shadowColor = UIColor.clearColor;
+        appearance.backgroundEffect = SCIRealLiquidGlassEffect(YES, YES, SCIGlassBackdropColor());
         toolbar.standardAppearance = appearance;
         if (@available(iOS 15.0, *)) toolbar.scrollEdgeAppearance = appearance;
         toolbar.translucent = YES;
@@ -262,6 +311,7 @@ void SCIApplyGlassToButton(UIButton *button) {
         cfg.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
         button.configuration = cfg;
     }
+    SCIEnsureRealGlassBackground(button, MAX(18.0, button.layer.cornerRadius), YES, YES, SCIGlassEffectTintColor());
 }
 
 void SCIApplyGlassToSearchBar(UISearchBar *searchBar) {
@@ -339,8 +389,8 @@ static UIColor *SCIGlassBorderColor(void) {
 static UIColor *SCIGlassReadableFillColor(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.08 alpha:0.76]
-            : [UIColor colorWithWhite:1.0 alpha:0.82];
+            ? [UIColor colorWithWhite:0.02 alpha:0.20]
+            : [UIColor colorWithWhite:1.0 alpha:0.24];
     }];
 }
 
@@ -385,9 +435,9 @@ static UIColor *SCIGlassReadableFillColor(void) {
 }
 
 - (void)applyReadableGlassStyle {
-    self.effect = SCIRealLiquidGlassEffect(self.sciGlassClearStyle, self.sciGlassInteractive, self.sciGlassTintColor);
+    self.effect = SCIRealLiquidGlassEffect(self.sciGlassClearStyle, self.sciGlassInteractive, self.sciGlassTintColor ?: SCIGlassEffectTintColor());
     self.backgroundColor = UIColor.clearColor;
-    self.contentView.backgroundColor = SCIGlassReadableFillColor();
+    self.contentView.backgroundColor = SCIIsIOS26OrNewer() ? UIColor.clearColor : SCIGlassReadableFillColor();
     self.layer.cornerRadius = self.sciCornerRadius;
     if ([self.layer respondsToSelector:@selector(setCornerCurve:)]) self.layer.cornerCurve = kCACornerCurveContinuous;
     self.layer.masksToBounds = SCIIsIOS26OrNewer();
@@ -651,3 +701,88 @@ static UIButton *SCIToolbarButton(NSString *title, NSString *symbol, id target, 
 }
 
 @end
+
+
+#pragma mark - Liquid Glass modal transition
+
+@interface SCIGlassPresentAnimator : NSObject <UIViewControllerAnimatedTransitioning>
+@end
+
+@interface SCIGlassDismissAnimator : NSObject <UIViewControllerAnimatedTransitioning>
+@end
+
+@interface SCIGlassModalTransitioningDelegate : NSObject <UIViewControllerTransitioningDelegate>
++ (instancetype)sharedDelegate;
+@end
+
+@implementation SCIGlassPresentAnimator
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)transitionContext { return 0.42; }
+- (void)animateTransition:(id<UIViewControllerContextTransitioning>)transitionContext {
+    UIView *container = transitionContext.containerView;
+    UIViewController *toVC = [transitionContext viewControllerForKey:UITransitionContextToViewControllerKey];
+    UIView *toView = [transitionContext viewForKey:UITransitionContextToViewKey] ?: toVC.view;
+    toView.frame = [transitionContext finalFrameForViewController:toVC];
+    toView.alpha = 0.0;
+    toView.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.965, 0.965), CGAffineTransformMakeTranslation(0.0, 18.0));
+    [container addSubview:toView];
+    SCIApplyLiquidGlassToViewTree(toView);
+
+    [UIView animateWithDuration:[self transitionDuration:transitionContext]
+                          delay:0.0
+         usingSpringWithDamping:0.88
+          initialSpringVelocity:0.55
+                        options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+                     animations:^{
+        toView.alpha = 1.0;
+        toView.transform = CGAffineTransformIdentity;
+    } completion:^(BOOL finished) {
+        [transitionContext completeTransition:!transitionContext.transitionWasCancelled];
+    }];
+}
+@end
+
+@implementation SCIGlassDismissAnimator
+- (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)transitionContext { return 0.24; }
+- (void)animateTransition:(id<UIViewControllerContextTransitioning>)transitionContext {
+    UIView *fromView = [transitionContext viewForKey:UITransitionContextFromViewKey];
+    [UIView animateWithDuration:[self transitionDuration:transitionContext]
+                          delay:0.0
+                        options:UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+                     animations:^{
+        fromView.alpha = 0.0;
+        fromView.transform = CGAffineTransformConcat(CGAffineTransformMakeScale(0.985, 0.985), CGAffineTransformMakeTranslation(0.0, 10.0));
+    } completion:^(BOOL finished) {
+        fromView.transform = CGAffineTransformIdentity;
+        [transitionContext completeTransition:!transitionContext.transitionWasCancelled];
+    }];
+}
+@end
+
+@implementation SCIGlassModalTransitioningDelegate
++ (instancetype)sharedDelegate {
+    static SCIGlassModalTransitioningDelegate *delegate;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        delegate = [SCIGlassModalTransitioningDelegate new];
+    });
+    return delegate;
+}
+
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForPresentedController:(UIViewController *)presented
+                                                                  presentingController:(UIViewController *)presenting
+                                                                      sourceController:(UIViewController *)source {
+    return [SCIGlassPresentAnimator new];
+}
+
+- (id<UIViewControllerAnimatedTransitioning>)animationControllerForDismissedController:(UIViewController *)dismissed {
+    return [SCIGlassDismissAnimator new];
+}
+@end
+
+void SCIApplyGlassModalPresentation(UIViewController *vc) {
+    if (!vc) return;
+    vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
+    vc.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
+    vc.transitioningDelegate = (id<UIViewControllerTransitioningDelegate>)[SCIGlassModalTransitioningDelegate sharedDelegate];
+    vc.view.backgroundColor = UIColor.clearColor;
+}

@@ -2,6 +2,7 @@
 #import "SCILockManager.h"
 #import "SCILockGroups.h"
 #import "../Utils.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 
 static BOOL SCIIsForeignVC(UIViewController *vc) {
     NSString *cls = vc ? NSStringFromClass([vc class]) : @"";
@@ -37,6 +38,11 @@ static UIWindow *SCIKeyWindow(void) {
 }
 
 @implementation SCILockedSurfaceNavigationController
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    SCIApplyLiquidGlassToViewTree(self.view);
+}
 
 // IG push-notif deep links target topmost nav. If we're up, IG would push
 // into our stack — detect foreign VCs, unwind all lock surfaces, forward to IG.

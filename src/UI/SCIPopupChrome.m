@@ -33,9 +33,8 @@
 
 + (UINavigationController *)wrap:(UIViewController *)content {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:content];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
-    nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
-    nav.view.backgroundColor = [self backgroundColor];
+    SCIApplyGlassModalPresentation(nav);
+    nav.view.backgroundColor = UIColor.clearColor;
     nav.navigationBar.backgroundColor = UIColor.clearColor;
     nav.navigationBar.translucent = YES;
     [self applyBackdropTo:content];

@@ -5,6 +5,7 @@
 #import "SCILockedSurfaceNavigationController.h"
 #import "UI/SCILockPasscodeViewController.h"
 #import "../UI/SCIPopupChrome.h"
+#import "../Settings/GlassUI/SCIAdaptiveGlass.h"
 #import "../Localization/SCILocalization.h"
 
 @implementation SCILockGate
@@ -96,8 +97,7 @@ static BOOL sciGroupInheritsSettingsLock(NSString *gid) {
     [self runGated:groupID from:presenter then:^{
         SCILockedSurfaceNavigationController *nav = [[SCILockedSurfaceNavigationController alloc] initWithRootViewController:contentVC];
         nav.lockGroupID = groupID;
-        nav.modalPresentationStyle = UIModalPresentationOverFullScreen;
-        nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+        SCIApplyGlassModalPresentation(nav);
         nav.view.backgroundColor = UIColor.clearColor;
         nav.navigationBar.backgroundColor = UIColor.clearColor;
         nav.navigationBar.translucent = YES;
