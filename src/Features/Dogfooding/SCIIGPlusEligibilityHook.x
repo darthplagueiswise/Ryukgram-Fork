@@ -50,15 +50,15 @@ static void install(void) {
     forceYES(@"_TtC23SUBSBenefitDataProvider23SUBSBenefitDataProvider", @"isBenefitActiveWithBenefitType:", YES);
 
     NSString *peek = @"_TtC34IGConsumerSubsStoryPeekEligibility34IGConsumerSubsStoryPeekEligibility";
-    forceYES(peek, @"isPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO);
-    forceYES(peek, @"isUpsellPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO);
-    forceYES(peek, @"isAnyPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO);
+    forceYES(peek, @"isPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE: B48@0:8q16q24@32@40
+    forceYES(peek, @"isUpsellPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE
+    forceYES(peek, @"isAnyPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE
 
     forceYES(@"_TtC29IGConsumerSubsDirectChatPeeks39IGConsumerSubsDirectChatPeekEligibility",
-             @"isChatPeekFeatureEligibleWithLauncherSet:consumerSubsService:", NO);
+             @"isChatPeekFeatureEligibleWithLauncherSet:consumerSubsService:", YES); // INSTANCE: B32@0:8@16@24
 
     forceYES(@"_TtC27IGConsumerSubsCustomAppIcon33IGConsumerSubsCustomAppIconHelper",
-             @"isCustomAppIconAvailableWithUserSession:", NO);
+             @"isCustomAppIconAvailableWithUserSession:", YES); // INSTANCE: B24@0:8@16
 }
 
 %ctor {
