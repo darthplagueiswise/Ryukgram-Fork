@@ -83,6 +83,23 @@
 											]
 										},
 										@{
+											@"header": SCILocalized(@"Sessioned/MCI MobileConfig BOOL gates (FBSharedFramework)"),
+											@"footer": SCILocalized(@"fishhook de 3 gates BOOL do FBShared importados pelo Instagram. Symbols Browser classifica como \'candidate: no\' por heurístico — disasm confirma retorno BOOL. MCIExperiment chama MCIExtension como tail-call."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force all Sessioned/MCI BOOL gates") subtitle:SCILocalized(@"Master: MSGCSessionedMobileConfigGetBoolean + MCIExperiment + MCIExtension") defaultsKey:@"sci_force_sessioned_mc_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"MSGCSessionedMobileConfigGetBoolean") subtitle:SCILocalized(@"Gate booleano ligado à sessão de usuário (MSGC)") defaultsKey:@"sci_force_msgc_sessioned_boolean" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"MCIExtensionExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Helper interno do MCIExperiment") defaultsKey:@"sci_force_mci_extension_boolean" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"MCIExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Entry point externo do cache de experimento") defaultsKey:@"sci_force_mci_experiment_boolean" requiresRestart:YES],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Navigation Options VC (LiquidGlass)"),
+											@"footer": SCILocalized(@"IGExperimentalNavigationSelectionViewController: hook injeta userSession + cria navigationState mínimo. Toggle LiquidGlass funciona direto no menu do IG via IGLiquidGlassNavigationExperimentHelper.shared. Este toggle espelha o mesmo estado."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"LiquidGlass navigation (espelha toggle do IG)") subtitle:SCILocalized(@"sci_nav_liquidglass_enabled — aplicado 5s após launch") defaultsKey:@"sci_nav_liquidglass_enabled" requiresRestart:NO],
+											]
+										},
+										@{
 											@"header": SCILocalized(@"XPlugins (observação)"),
 											@"footer": SCILocalized(@"_XPluginsGetListLookupDataPair é definida (não importada) no binário do Instagram. Hook via MSHookFunction + dlsym. Modo observação: loga list/key/result sem alterar retorno. Para ver os logs: log stream --predicate 'subsystem contains \"SCIXPlugins\"' --level debug. Não tente forçar retorno fake sem conhecer o layout do struct."),
 											@"rows": @[
