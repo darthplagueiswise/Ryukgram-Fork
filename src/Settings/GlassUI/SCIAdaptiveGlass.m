@@ -147,19 +147,28 @@ void SCIApplyLiquidGlassToViewTree(UIView *root) {
         BOOL isScrollView = [view isKindOfClass:UITableView.class] ||
             [view isKindOfClass:UICollectionView.class] ||
             [view isKindOfClass:UIScrollView.class];
+        BOOL isReusableCell = [view isKindOfClass:UITableViewCell.class] ||
+            [view isKindOfClass:UICollectionViewCell.class] ||
+            [view isKindOfClass:UITableViewHeaderFooterView.class];
+
         SCIConfigureScrollViewForGlass(view);
+
         if ([view isKindOfClass:UISearchBar.class]) {
             SCIApplyGlassToSearchBar((UISearchBar *)view);
         } else if ([view isKindOfClass:UISegmentedControl.class]) {
             SCIApplyGlassToSegmentedControl((UISegmentedControl *)view);
         } else if ([view isKindOfClass:UITabBar.class]) {
             SCIApplyGlassToTabBar((UITabBar *)view);
-        } else if ([view isKindOfClass:UIButton.class]) {
-            SCIApplyGlassToButton((UIButton *)view);
-        } else if (!isScrollView && SCIViewShouldReceiveGlassBackground(view)) {
+        } else if (!isScrollView && !isReusableCell && SCIViewShouldReceiveGlassBackground(view)) {
             CGFloat radius = view.layer.cornerRadius > 0.0 ? view.layer.cornerRadius : 16.0;
             SCIApplyGlassToView(view, radius, [view isKindOfClass:UIControl.class]);
         }
+
+        // Do not walk into table/collection cells. UIKit owns disclosure indicators,
+        // accessory buttons, switches, and value pills there. Styling those internal
+        // subviews globally was the cause of the tiny grey overlay buttons and the
+        // broken blue/wrapped “Padrão” pill. Cells are styled only at the cell level.
+        if (isReusableCell) continue;
 
         for (UIView *subview in view.subviews) [stack addObject:subview];
     }
@@ -264,12 +273,20 @@ void SCIApplyGlassToView(UIView *view, CGFloat radius, BOOL interactive) {
 
 void SCIApplyGlassToButton(UIButton *button) {
     if (!button) return;
+    NSString *title = [button titleForState:UIControlStateNormal];
+    NSAttributedString *attributedTitle = [button attributedTitleForState:UIControlStateNormal];
+    UIImage *image = [button imageForState:UIControlStateNormal];
+
+    // Never turn anonymous UIKit/private accessory buttons into glass pills.
+    // Explicit RyukGram buttons have a title or image; accessory chevrons/empty
+    // controls often do not, and changing their configuration corrupts the row UI.
+    if (!title.length && !attributedTitle.length && !image) return;
+
     button.backgroundColor = UIColor.clearColor;
     if (@available(iOS 15.0, *)) {
-        NSString *title = [button titleForState:UIControlStateNormal];
-        UIImage *image = [button imageForState:UIControlStateNormal];
         UIButtonConfiguration *cfg = button.configuration ?: SCIRealGlassButtonConfiguration(NO);
         if (title.length) cfg.title = title;
+        if (attributedTitle.length) cfg.attributedTitle = attributedTitle;
         if (image) cfg.image = image;
         cfg.background.backgroundColor = UIColor.clearColor;
         cfg.baseForegroundColor = button.tintColor ?: UIColor.labelColor;
