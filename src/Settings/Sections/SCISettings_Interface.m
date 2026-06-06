@@ -1,6 +1,7 @@
 #import "SCISettingsSections.h"
 #import "../SCIAppIconPickerViewController.h"
 #import "../../InstagramHeaders.h"
+#import "../../Features/Gating/SCIBulkGatingPresets.h"
 
 @implementation SCITweakSettings (Section_Interface)
 
@@ -65,45 +66,79 @@
 											]
 										},
 										@{
-											@"header": SCILocalized(@"Liquid Glass — Buttons & Notifications"),
-											@"footer": SCILocalized(@"iOS 26+ visual API. Each switch hooks one IGDSLauncherConfig / SwizzleToggle getter; off falls through to the app's original value."),
+											@"header": SCILocalized(@"Liquid Glass"),
+											@"footer": SCILocalized(@"Aplica 23 overrides de Feature Gating (IGDSLauncherConfig, IGLiquidGlass, IGLiquidGlassNavigationExperimentHelper, IGLiquidGlassInteractiveTabBar, IGDSAlertDialogLiquidGlass). Hooks instalados imediatamente via getter hook — sem restart para efeito em memória; restart completa a aplicação visual."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Native Liquid Glass") subtitle:SCILocalized(@"Enables the coherent iOS 26 glass path: buttons, navigation, rendering, blur and tab bar style") defaultsKey:@"lg_native_enabled" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG button swizzle") subtitle:SCILocalized(@"IGLiquidGlassSwizzleToggle.isEnabled — the actual button shape rendering") defaultsKey:@"lg_swizzle_buttons" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG in-app notifications") subtitle:SCILocalized(@"IGDSLauncherConfig.isLiquidGlassInAppNotificationEnabled") defaultsKey:@"lg_inapp_notif" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG toasts") subtitle:SCILocalized(@"IGDSLauncherConfig.isLiquidGlassToastEnabled") defaultsKey:@"lg_toast" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG ease-in/out blur") subtitle:SCILocalized(@"IGDSLauncherConfig.isLiquidGlassEaseInOutBlurEnabled") defaultsKey:@"lg_ease_in_out_blur" requiresRestart:YES],
+												({
+													SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Liquid Glass")
+														subtitle:@""
+															icon:[SCISymbol symbolWithName:@"sparkles" color:[UIColor systemCyanColor] size:20]
+														  action:^{
+														BOOL cur = [SCIBulkGatingPresets isLiquidGlassActive];
+														[SCIBulkGatingPresets applyLiquidGlass:!cur];
+														UIAlertController *a = [UIAlertController
+															alertControllerWithTitle:@"Liquid Glass"
+															message:!cur ? @"✓ Ativado — 23 getter hooks aplicados via Feature Gating.\n\nReinicie para efeito visual completo." : @"Desativado — overrides removidos. Reinicie para reverter."
+															preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														[sciTopVC() presentViewController:a animated:YES completion:nil];
+													}];
+													s.dynamicValueText = ^NSString *{ return [SCIBulkGatingPresets isLiquidGlassActive] ? @"ON" : @"OFF"; };
+													s;
+												}),
+												[SCISetting menuCellWithTitle:SCILocalized(@"Liquid Glass tab bar") subtitle:SCILocalized(@"Fixed impede encolhimento. Hide oculta ao rolar") menu:[self menus][@"liquid_glass_tabbar_mode"]],
 											]
 										},
 										@{
-											@"header": SCILocalized(@"Liquid Glass — Navigation"),
-											@"footer": SCILocalized(@"IGLiquidGlassNavigationExperimentHelper. The init hook applies override APIs (overrideIsEnabled:, overrideIsGlassRenderingOptimizationEnabled:, ...) on the shared singleton."),
+											@"header": SCILocalized(@"Status Bar Old School"),
+											@"footer": SCILocalized(@"IGThrowbackChromeExperimentHelper.isEnabled — torna a status bar azul (estilo clássico anterior ao iOS 26). Hook via getter hook do Feature Gating; independente do preset Liquid Glass."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG navigation (master)") subtitle:SCILocalized(@"isEnabled + overrideIsEnabled:") defaultsKey:@"lg_nav_enabled" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG home feed header") subtitle:SCILocalized(@"isHomeFeedHeaderEnabled") defaultsKey:@"lg_home_feed_header" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG glass rendering optimization") subtitle:SCILocalized(@"overrideIsGlassRenderingOptimizationEnabled:") defaultsKey:@"lg_glass_rendering" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG glass background steps") subtitle:SCILocalized(@"overrideGlassBackgroundAlphaDiscreteSteps:") defaultsKey:@"lg_glass_background_steps" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG legibility blur") subtitle:SCILocalized(@"overrideIsLegibilityBlurEnabled:") defaultsKey:@"lg_legibility_blur" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG profile nav bar height match") subtitle:SCILocalized(@"overrideIsProfileOtherNavBarHeightMatchSelf:") defaultsKey:@"lg_profile_navbar_match" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"LG profile segmented tabs glass") subtitle:SCILocalized(@"Glass ON for profile segmented tabs (isProfileSegmentedTabsGlassDisabled = NO)") defaultsKey:@"lg_profile_segmented_tabs_glass" requiresRestart:YES],
+												({
+													SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Status Bar Old School")
+														subtitle:@""
+															icon:[SCISymbol symbolWithName:@"iphone" color:[UIColor systemBlueColor] size:20]
+														  action:^{
+														BOOL cur = [SCIBulkGatingPresets isStatusBarOldSchoolActive];
+														[SCIBulkGatingPresets applyStatusBarOldSchool:!cur];
+														UIAlertController *a = [UIAlertController
+															alertControllerWithTitle:@"Status Bar Old School"
+															message:!cur ? @"✓ Ativado — status bar clássica (azul) via IGThrowbackChromeExperimentHelper. Reinicie para aplicar." : @"Desativado."
+															preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														[sciTopVC() presentViewController:a animated:YES completion:nil];
+													}];
+													s.dynamicValueText = ^NSString *{ return [SCIBulkGatingPresets isStatusBarOldSchoolActive] ? @"ON" : @"OFF"; };
+													s;
+												}),
 											]
 										},
 										@{
-											@"header": SCILocalized(@"Liquid Glass — Surfaces (Tab Bar)"),
-											@"footer": SCILocalized(@"Fishhook on IG-internal C functions gating floating / dynamic / homecoming tab bar variants. Works pre-iOS 26."),
+											@"header": SCILocalized(@"Story Tray"),
+											@"footer": SCILocalized(@"IGHomecomingConfiguration: isStoriesTrayOnAllTabsEnabled · showCinemaStoriesTrayOnSwipeUp · isDynamicTabStoryGridEnabled. Todos via getter hook. Hook persistido — reaplicado a cada launch."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Floating tab bar") subtitle:SCILocalized(@"IGFloatingTabBarEnabled") defaultsKey:@"lg_floating_tab_bar" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Tab bar dynamic sizing") subtitle:SCILocalized(@"IGTabBarDynamicSizingEnabled") defaultsKey:@"lg_tab_bar_dynamic_sizing" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Tab bar enhanced dynamic sizing") subtitle:SCILocalized(@"IGTabBarEnhancedDynamicSizingEnabled") defaultsKey:@"lg_tab_bar_enhanced_sizing" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Tab bar homecoming + floating") subtitle:SCILocalized(@"IGTabBarHomecomingWithFloatingTabEnabled") defaultsKey:@"lg_tab_bar_homecoming_floating" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Tab bar glass style") subtitle:SCILocalized(@"IGTabBarStyleForLauncherSet → 1 (glass)") defaultsKey:@"lg_tab_bar_style_glass" requiresRestart:YES],
+												({
+													SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Story Tray")
+														subtitle:@""
+															icon:[SCISymbol symbolWithName:@"circle.grid.3x3.fill" color:[UIColor systemPurpleColor] size:20]
+														  action:^{
+														BOOL cur = [SCIBulkGatingPresets isStoryTrayActive];
+														[SCIBulkGatingPresets applyStoryTray:!cur];
+														UIAlertController *a = [UIAlertController
+															alertControllerWithTitle:@"Story Tray"
+															message:!cur ? @"✓ Ativado — stories tray em todos os tabs + cinema swipe + story grid. Reinicie para efeito completo." : @"Desativado — overrides removidos."
+															preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														[sciTopVC() presentViewController:a animated:YES completion:nil];
+													}];
+													s.dynamicValueText = ^NSString *{ return [SCIBulkGatingPresets isStoryTrayActive] ? @"ON" : @"OFF"; };
+													s;
+												}),
 											]
 										},
 										@{
 											@"header": SCILocalized(@"Experimental features"),
 											@"footer": SCILocalized(@"These features rely on hidden Instagram flags and may not work on all accounts or versions."),
 											@"rows": @[
-												[SCISetting menuCellWithTitle:SCILocalized(@"Liquid glass tab bar") subtitle:SCILocalized(@"Fixed prevents shrinking. Hide makes it disappear when scrolling down") menu:[self menus][@"liquid_glass_tabbar_mode"]],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Enable teen app icons") subtitle:SCILocalized(@"Hold down on the Instagram logo to change the app icon") defaultsKey:@"teen_app_icons" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Disable app haptics") subtitle:SCILocalized(@"Disables haptics/vibrations within the app") defaultsKey:@"disable_haptics"],
 												({ SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Open app icon picker") subtitle:SCILocalized(@"Change the app icon from the bundled icons")
