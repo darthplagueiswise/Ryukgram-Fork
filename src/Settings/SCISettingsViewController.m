@@ -32,11 +32,6 @@ static char kSCIRowKey;
 	return self;
 }
 
-- (void)viewDidLayoutSubviews {
-	[super viewDidLayoutSubviews];
-	SCIApplyLiquidGlassToViewTree(self.view);
-}
-
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"settings.language.title");

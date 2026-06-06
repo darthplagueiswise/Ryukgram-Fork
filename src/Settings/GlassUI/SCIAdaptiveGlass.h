@@ -18,7 +18,6 @@ void SCIStyleSegmentedControlForGlass(UISegmentedControl *control);
 void SCIStyleTableViewForGlass(UITableView *tableView);
 void SCIStyleCollectionViewForGlass(UICollectionView *collectionView);
 void SCIStyleCellForGlass(UITableViewCell *cell);
-void SCIApplyGlassModalPresentation(UIViewController *vc);
 
 @interface SCIAdaptiveGlassPanelView : UIVisualEffectView
 @property (nonatomic, assign) CGFloat sciCornerRadius;
