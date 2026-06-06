@@ -72,6 +72,24 @@
 											]
 										},
 										@{
+											@"header": SCILocalized(@"EasyGating C gates (FBSharedFramework)"),
+											@"footer": SCILocalized(@"Hooks BOOL-returning EasyGating C functions exported by FBSharedFramework and imported by Instagram via GOT (fishhook — sideload safe). Master switch ativa os 4 simultaneamente. Individual para diagnóstico granular. Confirme nos logs: [SCIGate] EasyGate rebind_symbols=0."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL gates") subtitle:SCILocalized(@"Master switch: EasyGatingPlatformGetBoolean + _Internal + _AuthData + MCQ") defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Internal DoNotUseOrMock") subtitle:SCILocalized(@"EasyGatingGetBoolean_Internal_DoNotUseOrMock (wrapper → Platform)") defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Platform") subtitle:SCILocalized(@"EasyGatingPlatformGetBoolean (implementação central)") defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — AuthDataContext") subtitle:SCILocalized(@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — MCQ dispatch") subtitle:SCILocalized(@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock (dispatch por int32 jump-table)") defaultsKey:@"sci_force_easy_gating_mcq" requiresRestart:YES],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"XPlugins (observação)"),
+											@"footer": SCILocalized(@"_XPluginsGetListLookupDataPair é definida (não importada) no binário do Instagram. Hook via MSHookFunction + dlsym. Modo observação: loga list/key/result sem alterar retorno. Para ver os logs: log stream --predicate 'subsystem contains \"SCIXPlugins\"' --level debug. Não tente forçar retorno fake sem conhecer o layout do struct."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Observar XPluginsGetListLookupDataPair") subtitle:SCILocalized(@"Loga chamadas a _XPluginsGetListLookupDataPair (list/key/result) — sem override") defaultsKey:@"sci_xplugins_observe" requiresRestart:YES],
+											]
+										},
+										@{
 											@"header": SCILocalized(@"Internal / Debug (native, live session)"),
 											@"footer": SCILocalized(@"Uses the native IGAutofillInternalSettings setters on the live user session to enable the debug footer and internal experience (persists via sessionUserDefaults). Tap Apply after you are logged in; toggles take effect after applying/restart."),
 											@"rows": @[
