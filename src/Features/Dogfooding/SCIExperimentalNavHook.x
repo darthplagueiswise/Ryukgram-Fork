@@ -193,7 +193,7 @@ static void sciInjectDependencies(id vc) {
            (long)indexPath.section, (long)indexPath.row,
            navState ? object_getClassName(navState) : "nil",
            session  ? object_getClassName(session)  : "nil");
-    %orig(tableView, didSelectRowAtIndexPath:indexPath);
+    %orig(tableView, indexPath);
 }
 
 %end
