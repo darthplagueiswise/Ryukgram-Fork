@@ -35,7 +35,7 @@ UIColor *SCIGlassBackdropColor(void) {
     return SCIGlassBaseSurfaceColor();
 }
 
-static void SCIApplySystemContainerGlassIfAvailable(UIViewController *vc) {
+void SCIApplyOfficialContainerGlassToViewController(UIViewController *vc) {
     if (!vc || !SCIIsIOS26OrNewer()) return;
     // UIKit 26 owns the container glass/background behavior when this selector exists.
     // Use objc_msgSend so the tweak keeps running on iOS 16.3+.
@@ -169,41 +169,38 @@ void SCIStyleSearchBarForGlass(UISearchBar *searchBar) {
     if (!searchBar) return;
     searchBar.searchBarStyle = UISearchBarStyleMinimal;
     searchBar.backgroundImage = UIImage.new;
-    searchBar.backgroundColor = UIColor.clearColor;
     searchBar.barTintColor = UIColor.clearColor;
+    searchBar.backgroundColor = UIColor.clearColor;
     searchBar.translucent = YES;
-    searchBar.returnKeyType = UIReturnKeySearch;
 
-    if (@available(iOS 13.0, *)) {
-        UITextField *field = searchBar.searchTextField;
-        field.textColor = UIColor.labelColor;
-        field.tintColor = UIColor.systemBlueColor;
-        field.backgroundColor = UIColor.clearColor;
-        field.layer.backgroundColor = UIColor.clearColor.CGColor;
-        field.borderStyle = UITextBorderStyleNone;
-        field.background = nil;
-        field.disabledBackground = nil;
-        field.clipsToBounds = YES;
-        field.layer.cornerRadius = 20.0;
-        if ([field.layer respondsToSelector:@selector(setCornerCurve:)]) field.layer.cornerCurve = kCACornerCurveContinuous;
-        field.layer.borderWidth = 0.0;
-        if (!SCIViewIsInsideAdaptiveGlass(searchBar)) {
-            SCIEnsureRealGlassBackground(field, 20.0, YES, NO, SCIGlassReadableFillColor());
-        }
-        field.leftView.tintColor = UIColor.secondaryLabelColor;
-        field.rightView.tintColor = UIColor.secondaryLabelColor;
-        NSString *placeholder = field.attributedPlaceholder.string ?: field.placeholder ?: @"";
-        field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder attributes:@{
-            NSForegroundColorAttributeName: UIColor.secondaryLabelColor
-        }];
-    }
+    UITextField *field = searchBar.searchTextField;
+    if (!field) return;
+
+    field.textColor = UIColor.labelColor;
+    field.tintColor = UIColor.systemBlueColor;
+    field.borderStyle = UITextBorderStyleNone;
+    field.background = nil;
+    field.disabledBackground = nil;
+    field.backgroundColor = UIColor.clearColor;
+    field.layer.backgroundColor = UIColor.clearColor.CGColor;
+    field.layer.cornerRadius = 0.0;
+    field.layer.borderWidth = 0.0;
+    field.layer.masksToBounds = NO;
+    field.clipsToBounds = NO;
+    field.leftView.tintColor = UIColor.secondaryLabelColor;
+    field.rightView.tintColor = UIColor.secondaryLabelColor;
+
+    NSString *placeholder = field.attributedPlaceholder.string ?: field.placeholder ?: @"";
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder attributes:@{
+        NSForegroundColorAttributeName: UIColor.secondaryLabelColor
+    }];
 }
 
 void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
     if (!vc) return;
     if (!vc.isViewLoaded) [vc loadViewIfNeeded];
 
-    SCIApplySystemContainerGlassIfAvailable(vc);
+    SCIApplyOfficialContainerGlassToViewController(vc);
 
     UIView *root = vc.view;
     root.backgroundColor = SCIGlassBaseSurfaceColor();
@@ -216,11 +213,11 @@ void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
     if (bar) {
         bar.translucent = YES;
         bar.backgroundColor = UIColor.clearColor;
+        bar.prefersLargeTitles = NO;
         if (@available(iOS 13.0, *)) {
             UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
             [appearance configureWithTransparentBackground];
-            appearance.backgroundEffect = SCIRealLiquidGlassEffect(NO, YES, nil);
-            appearance.backgroundColor = [SCIGlassReadableFillColor() colorWithAlphaComponent:0.72];
+            appearance.backgroundColor = UIColor.clearColor;
             appearance.shadowColor = UIColor.clearColor;
             bar.standardAppearance = appearance;
             bar.scrollEdgeAppearance = appearance;
@@ -296,7 +293,6 @@ void SCIApplyGlassToTabBar(UITabBar *tabBar) {
     if (@available(iOS 13.0, *)) {
         UITabBarAppearance *appearance = [UITabBarAppearance new];
         [appearance configureWithTransparentBackground];
-        appearance.backgroundEffect = SCIRealLiquidGlassEffect(NO, YES, nil);
         appearance.backgroundColor = UIColor.clearColor;
         appearance.shadowColor = UIColor.clearColor;
         tabBar.standardAppearance = appearance;

@@ -33,7 +33,7 @@
 
 + (UINavigationController *)wrap:(UIViewController *)content {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:content];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    nav.modalPresentationStyle = SCIIsIOS26OrNewer() ? UIModalPresentationPageSheet : UIModalPresentationFullScreen;
     nav.view.backgroundColor = [self backgroundColor];
     nav.navigationBar.backgroundColor = UIColor.clearColor;
     nav.navigationBar.translucent = YES;

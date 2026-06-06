@@ -405,7 +405,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	self.searchController.obscuresBackgroundDuringPresentation = NO;
 	self.searchController.searchBar.placeholder = SCILocalized(@"Search by username or name");
 	self.navigationItem.searchController = self.searchController;
-	self.navigationItem.hidesSearchBarWhenScrolling = NO;
+	self.navigationItem.hidesSearchBarWhenScrolling = YES;
 	self.definesPresentationContext = YES;
 }
 

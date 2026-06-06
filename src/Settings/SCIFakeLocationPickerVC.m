@@ -150,7 +150,7 @@
 	self.searchController.searchBar.placeholder = SCILocalized(@"Search address or place");
 
 	self.navigationItem.searchController = self.searchController;
-	self.navigationItem.hidesSearchBarWhenScrolling = NO;
+	self.navigationItem.hidesSearchBarWhenScrolling = YES;
 	self.definesPresentationContext = YES;
 }
 

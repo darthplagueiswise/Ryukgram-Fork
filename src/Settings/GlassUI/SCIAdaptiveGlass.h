@@ -6,6 +6,7 @@ BOOL SCIIsIOS26OrNewer(void);
 UIVisualEffect *_Nullable SCIRealLiquidGlassEffect(BOOL clearStyle, BOOL interactive, UIColor *_Nullable tintColor);
 UIColor *SCIGlassBaseSurfaceColor(void);
 UIColor *SCIGlassBackdropColor(void);
+void SCIApplyOfficialContainerGlassToViewController(UIViewController *vc);
 void SCIApplyGlassBackdropToViewController(UIViewController *vc);
 void SCIApplyGlassToView(UIView *view, CGFloat radius, BOOL interactive);
 void SCIApplyGlassToButton(UIButton *button);

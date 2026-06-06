@@ -45,6 +45,16 @@
 + (void)styleSearchBar:(UISearchBar *)searchBar {
 	if (!searchBar) return;
 
+	if (@available(iOS 26.0, *)) {
+		[self resetSearchBar:searchBar];
+		searchBar.searchBarStyle = UISearchBarStyleMinimal;
+		searchBar.translucent = YES;
+		searchBar.backgroundImage = UIImage.new;
+		searchBar.backgroundColor = UIColor.clearColor;
+		searchBar.barTintColor = UIColor.clearColor;
+		return;
+	}
+
 	if ([self shouldUseNativeGlass]) {
 		SCIStyleSearchBarForGlass(searchBar);
 		return;

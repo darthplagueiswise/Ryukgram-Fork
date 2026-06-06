@@ -39,6 +39,14 @@ static UIWindow *SCIKeyWindow(void) {
 
 @implementation SCILockedSurfaceNavigationController
 
+- (BOOL)prefersStatusBarHidden {
+    return [self.lockGroupID isEqualToString:SCILockGroupSettings] ? YES : [super prefersStatusBarHidden];
+}
+
+- (UIStatusBarAnimation)preferredStatusBarUpdateAnimation {
+    return UIStatusBarAnimationSlide;
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     SCIApplyLiquidGlassToViewTree(self.view);

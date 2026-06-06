@@ -41,7 +41,7 @@
 	self.searchController.obscuresBackgroundDuringPresentation = NO;
 	self.searchController.searchBar.placeholder = SCILocalized(@"Search");
 	self.navigationItem.searchController = self.searchController;
-	self.navigationItem.hidesSearchBarWhenScrolling = NO;
+	self.navigationItem.hidesSearchBarWhenScrolling = YES;
 	self.definesPresentationContext = YES;
 }
 
