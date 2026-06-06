@@ -51,6 +51,14 @@ typedef NS_ENUM(NSInteger, SCITableCell) {
 @property (nonatomic, copy, nullable) NSString *(^dynamicTitle)(void);
 @property (nonatomic, copy, nullable) NSString *(^dynamicSubtitle)(void);
 
+/// For hook-driven switch cells: dynamically provides current ON/OFF state
+/// instead of reading from defaultsKey. Re-evaluated on each cell render.
+@property (nonatomic, copy, nullable) BOOL (^dynamicSwitchValue)(void);
+
+/// For hook-driven switch cells: called when the UISwitch is toggled.
+/// When set, the default defaultsKey write is skipped — the block owns all state.
+@property (nonatomic, copy, nullable) void (^onSwitchChange)(BOOL isOn);
+
 /// Optional trailing label for a static cell. Rendered right-aligned; pairs
 /// with `subtitle` (which still renders beneath the title) when both are set.
 @property (nonatomic, copy, nullable) NSString *valueText;
@@ -88,6 +96,14 @@ typedef NS_ENUM(NSInteger, SCITableCell) {
                            subtitle:(NSString *)subtitle
                         defaultsKey:(NSString *)defaultsKey
                     requiresRestart:(BOOL)requiresRestart;
+
+/// Hook-driven switch: no defaultsKey storage. State read via getValue, toggle via onToggle.
+/// The block pair owns all persistence (typically via SCIBulkGatingPresets / setRuntimeBoolOverride).
++ (instancetype)hookSwitchCellWithTitle:(NSString *)title
+                               subtitle:(NSString *)subtitle
+                                   icon:(nullable SCISymbol *)icon
+                               getValue:(BOOL (^)(void))getValue
+                               onToggle:(void (^)(BOOL isOn))onToggle;
 
 + (instancetype)stepperCellWithTitle:(NSString *)title
                             subtitle:(NSString *)subtitle

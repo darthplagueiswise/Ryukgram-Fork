@@ -2,38 +2,47 @@
 //
 // Aplica/remove overrides do Feature Gating em massa.
 // Todos os nomes de classe/seletor foram verificados via:
-//   • disassembly do FBSharedFramework + Instagram (arm64)
-//   • screenshots FLEX do Feature Gatings mostrando "forced ON via getter hook"
-//   • comparação de nomes mangled Swift (_TtC<n>Module<m>Class)
+//   • disassembly do FBSharedFramework + Instagram arm64 (lief)
+//   • __objc_methname scan (confirma seletores presentes na imagem)
+//   • __cstring scan (confirma nomes de classe ObjC e mangled Swift)
+//   • screenshots FLEX do Feature Gatings (confirma "forced ON via getter hook")
 //
-// Qualquer classe não encontrada em runtime é ignorada silenciosamente por
-// setRuntimeBoolOverride: (que checa objc_getClass + Method existence antes de hookear).
+// Regra de segurança (sideload): usa exclusivamente setRuntimeBoolOverride:/
+// setDirectBoolOverride: via MSHookMessageEx em __DATA IMP tables.
+// NUNCA MSHookFunction em __TEXT pages.
 
 #import "SCIBulkGatingPresets.h"
 #import "SCIGatingCatalog.h"
+#import "../../SCIPrefObserver.h"
 
-// Alias curto
-#define SRBO(cls, sel, cm, val) [SCIGatingCatalog setRuntimeBoolOverride:(val) class:(cls) selector:(sel) classMethod:(cm)]
-#define CRBO(cls, sel, cm)      [SCIGatingCatalog clearRuntimeBoolOverrideForClass:(cls) selector:(sel) classMethod:(cm)]
+#define SRBO(cls, sel, cm, val) \
+    [SCIGatingCatalog setRuntimeBoolOverride:(val) class:(cls) selector:(sel) classMethod:(cm)]
+#define CRBO(cls, sel, cm) \
+    [SCIGatingCatalog clearRuntimeBoolOverrideForClass:(cls) selector:(sel) classMethod:(cm)]
+
+// Defaults key para o seletor de wordmark
+static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
 
 @implementation SCIBulkGatingPresets
 
-// ── Liquid Glass ─────────────────────────────────────────────────────────────────
+// ─── Liquid Glass ────────────────────────────────────────────────────────────
 
 + (void)applyLiquidGlass:(BOOL)on {
 
-    // ① IGDSLauncherConfig — ObjC, instance methods, 9 flags
-    //    Confirmado via disasm FBSharedFramework + screenshots (todos "forced ON")
+    // ① IGDSLauncherConfig — ObjC, instance methods, 11 flags
+    //    Confirmados via __objc_methname scan de FBSharedFramework
     NSString *ds = @"IGDSLauncherConfig";
     for (NSString *s in @[
         @"canUseInternalLiquidGlassDebugger",
         @"isLiquidGlassCGContextBlurEnabled",
         @"isLiquidGlassEaseInOutBlurEnabled",
+        @"isLiquidGlassEnabled",                         // confirmado
         @"isLiquidGlassIconBarButtonEnabled",
         @"isLiquidGlassInAppNotificationEnabled",
         @"isLiquidGlassNavigationContentStylePinningEnabled",
         @"isLiquidGlassToastEnabled",
         @"isLiquidGlassToastPeekEnabled",
+        @"isLiquidGlassToggleEnabled",                   // confirmado
         @"isOptimizeLiquidGlassGlyphRenderingEnabled",
     ]) { on ? SRBO(ds, s, NO, YES) : CRBO(ds, s, NO); }
 
@@ -47,7 +56,7 @@
     NSString *lgCls = @"_TtC13IGLiquidGlass13IGLiquidGlass";
     on ? SRBO(lgCls, @"isEnabled", YES, YES) : CRBO(lgCls, @"isEnabled", YES);
 
-    // ④ IGLiquidGlassNavigationExperimentHelper — Swift, instance methods
+    // ④ IGLiquidGlassNavigationExperimentHelper — Swift, instance methods, 5 flags
     //    Mangled: _TtC(29)IGLiquidGlassExperimentHelper(39)IGLiquidGlassNavigationExperimentHelper
     NSString *nh = @"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper";
     for (NSString *s in @[
@@ -57,11 +66,11 @@
         @"isProfileOtherNavBarHeightMatchSelf",
     ]) { on ? SRBO(nh, s, NO, YES) : CRBO(nh, s, NO); }
     // isProfileSegmentedTabsGlassDisabled → forçar OFF quando LiquidGlass ON
-    // (glass desativado para tabs segmentadas = glass ATIVO nos tabs)
-    on ? SRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO, NO) : CRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO);
+    on ? SRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO, NO)
+       : CRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO);
 
-    // ⑤ IGLiquidGlassInteractiveTabBar — ObjC, instance methods
-    //    Seletores confirmados via disasm FBSharedFramework
+    // ⑤ IGLiquidGlassInteractiveTabBar — ObjC, instance methods, 6 flags
+    //    Confirmados via __objc_methname + screenshots FLEX
     NSString *itb = @"IGLiquidGlassInteractiveTabBar";
     for (NSString *s in @[
         @"accessoryButtonEnabled",
@@ -74,20 +83,19 @@
 }
 
 + (BOOL)isLiquidGlassActive {
-    // Checa um flag representativo do grupo
     NSNumber *v = [SCIGatingCatalog runtimeBoolOverrideStateForClass:@"IGDSLauncherConfig"
-                                                            selector:@"isLiquidGlassToastEnabled"
+                                                            selector:@"isLiquidGlassEnabled"
                                                          classMethod:NO];
     return v != nil && v.boolValue;
 }
 
-// ── Status Bar Old School ─────────────────────────────────────────────────────────
+// ─── Status Bar Old School ────────────────────────────────────────────────────
 
 + (void)applyStatusBarOldSchool:(BOOL)on {
     // IGThrowbackChromeExperimentHelper — módulo IGLiquidGlassExperimentHelper
     // Mangled: _TtC(29)IGLiquidGlassExperimentHelper(33)IGThrowbackChromeExperimentHelper
-    // Não encontrado no binário estático analisado, mas confirmado presente no device
-    // via FLEX ("Direct override: ON"). setRuntimeBoolOverride: faz no-op se classe ausente.
+    // Carregado dinamicamente em runtime; não presente nos binários estáticos analisados.
+    // setRuntimeBoolOverride: faz no-op silencioso se classe não encontrada via objc_getClass.
     NSString *cls = @"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper";
     on ? SRBO(cls, @"isEnabled", NO, YES) : CRBO(cls, @"isEnabled", NO);
 }
@@ -100,18 +108,32 @@
     return v != nil && v.boolValue;
 }
 
-// ── Story Tray ────────────────────────────────────────────────────────────────────
+// ─── Story Tray ───────────────────────────────────────────────────────────────
 
 + (void)applyStoryTray:(BOOL)on {
-    // IGNavConfiguration.IGHomecomingConfiguration — Swift, instance methods
+    // IGNavConfiguration.IGHomecomingConfiguration — Swift, instance methods, 6 flags
     // Mangled: _TtC(18)IGNavConfiguration(25)IGHomecomingConfiguration
-    // Seletores confirmados via disasm FBSharedFramework + screenshots FLEX
+    // Confirmados via __objc_methname scan + screenshots FLEX:
+    //   isStoriesTrayOnAllTabsEnabled ✓  showCinemaStoriesTrayOnSwipeUp ✓
+    //   isDynamicTabStoryGridEnabled ✓   isVerticalStoriesTray ✓ (NOVO)
+    //   isFeedCullingOnStoriesAccessEnabled ✓ (NOVO)
+    //   isHomecomingStoriesAccessFaceClusterEnabled ✓ (NOVO)
     NSString *hc = @"_TtC18IGNavConfiguration25IGHomecomingConfiguration";
     for (NSString *s in @[
         @"isStoriesTrayOnAllTabsEnabled",
         @"showCinemaStoriesTrayOnSwipeUp",
         @"isDynamicTabStoryGridEnabled",
+        @"isVerticalStoriesTray",
+        @"isFeedCullingOnStoriesAccessEnabled",
+        @"isHomecomingStoriesAccessFaceClusterEnabled",
     ]) { on ? SRBO(hc, s, NO, YES) : CRBO(hc, s, NO); }
+
+    // IGNavConfiguration base — Swift, instance method (NOVO)
+    // Mangled: _TtC(18)IGNavConfiguration(18)IGNavConfiguration
+    // enableStoriesTabHeaderButton confirmado via __objc_methname + FLEX
+    NSString *nc = @"_TtC18IGNavConfiguration18IGNavConfiguration";
+    on ? SRBO(nc, @"enableStoriesTabHeaderButton", NO, YES)
+       : CRBO(nc, @"enableStoriesTabHeaderButton", NO);
 }
 
 + (BOOL)isStoryTrayActive {
@@ -120,6 +142,58 @@
                                                             selector:@"isStoriesTrayOnAllTabsEnabled"
                                                          classMethod:NO];
     return v != nil && v.boolValue;
+}
+
+// ─── Instagram Wordmark ───────────────────────────────────────────────────────
+
++ (void)applyWordmark:(NSInteger)variant {
+    // IGDSLauncherConfig — ObjC, instance methods, mutually exclusive flags
+    // Confirmados via __objc_methname scan de FBSharedFramework
+    // Mapas visuais (confirmados por screenshots FLEX + logo preview):
+    //   variant 1 = isIGWordmark1aAltEnabled  → fonte arredondada moderna
+    //   variant 2 = isIGWordmark1aEnabled     → itálica condensada
+    //   variant 3 = isIGWordmark1bAltEnabled  → sans-serif limpa bold
+    //   variant 4 = isIGWordmark1bEnabled     → geométrica condensada
+    NSString *ds = @"IGDSLauncherConfig";
+    NSArray<NSString *> *sels = @[
+        @"isIGWordmark1aAltEnabled",
+        @"isIGWordmark1aEnabled",
+        @"isIGWordmark1bAltEnabled",
+        @"isIGWordmark1bEnabled",
+    ];
+    for (NSUInteger i = 0; i < sels.count; i++) {
+        BOOL active = (variant > 0 && (NSInteger)(i + 1) == variant);
+        active ? SRBO(ds, sels[i], NO, YES) : CRBO(ds, sels[i], NO);
+    }
+}
+
++ (NSInteger)activeWordmarkVariant {
+    NSString *ds = @"IGDSLauncherConfig";
+    NSArray<NSString *> *sels = @[
+        @"isIGWordmark1aAltEnabled",
+        @"isIGWordmark1aEnabled",
+        @"isIGWordmark1bAltEnabled",
+        @"isIGWordmark1bEnabled",
+    ];
+    for (NSUInteger i = 0; i < sels.count; i++) {
+        NSNumber *v = [SCIGatingCatalog runtimeBoolOverrideStateForClass:ds
+                                                                selector:sels[i]
+                                                             classMethod:NO];
+        if (v != nil && v.boolValue) return (NSInteger)(i + 1);
+    }
+    return 0;
+}
+
++ (void)installWordmarkPrefObserver {
+    [SCIPrefObserver observeKey:kWordmarkKey handler:^{
+        NSString *val = [[NSUserDefaults standardUserDefaults] stringForKey:kWordmarkKey];
+        NSInteger variant = 0;
+        if      ([val isEqualToString:@"1a_alt"]) variant = 1;
+        else if ([val isEqualToString:@"1a"])     variant = 2;
+        else if ([val isEqualToString:@"1b_alt"]) variant = 3;
+        else if ([val isEqualToString:@"1b"])     variant = 4;
+        [SCIBulkGatingPresets applyWordmark:variant];
+    }];
 }
 
 @end

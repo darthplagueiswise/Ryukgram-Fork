@@ -468,7 +468,7 @@ static char kSCIRowKey;
 		}
 		case SCITableCellSwitch: {
 			UISwitch *t = UISwitch.new;
-			t.on = row.disabled ? NO : [SCIUtils getBoolPref:row.defaultsKey];
+			t.on = row.disabled ? NO : (row.dynamicSwitchValue ? row.dynamicSwitchValue() : [SCIUtils getBoolPref:row.defaultsKey]);
 			t.onTintColor = [SCIUtils SCIColor_Primary];
 			t.enabled = !row.disabled;
 			objc_setAssociatedObject(t, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -572,6 +572,11 @@ static char kSCIRowKey;
 
 - (void)switchChanged:(UISwitch *)sender {
 	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
+	// Hook-driven cells own their own state — don't touch defaultsKey
+	if (row.onSwitchChange) {
+		row.onSwitchChange(sender.isOn);
+		return;
+	}
 	if (!row.defaultsKey.length) return;
 	[SCIUtils setPref:@(sender.isOn) forKey:row.defaultsKey];
 	if (row.requiresRestart) [SCIUtils showRestartConfirmation];

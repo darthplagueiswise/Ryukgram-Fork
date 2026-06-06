@@ -11,26 +11,44 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SCIBulkGatingPresets : NSObject
 
-// ── Liquid Glass (23 overrides: 22 ON + isProfileSegmentedTabsGlassDisabled=OFF) ──
-// Classes: IGDSLauncherConfig (9), IGDSAlertDialogLiquidGlass (+1 cls),
-//          IGLiquidGlass (+1 cls), IGLiquidGlassNavigationExperimentHelper (6 inst),
-//          IGLiquidGlassInteractiveTabBar (6 inst)
+// ── Liquid Glass ─────────────────────────────────────────────────────────────
+// IGDSLauncherConfig  (ObjC, inst, 11 flags — confirmados via disasm FBSharedFramework)
+// IGDSAlertDialogLiquidGlass (_TtC26…, Swift class method +isEnabled)
+// IGLiquidGlass (_TtC13…, Swift class method +isEnabled)
+// IGLiquidGlassNavigationExperimentHelper (_TtC29…, Swift inst, 5 flags)
+// IGLiquidGlassInteractiveTabBar (ObjC, inst, 6 flags)
+// Total: ~25 overrides
 + (void)applyLiquidGlass:(BOOL)on;
 + (BOOL)isLiquidGlassActive;
 
-// ── Status Bar Old School ────────────────────────────────────────────────────────
-// IGThrowbackChromeExperimentHelper.isEnabled → torna a status bar azul/clássica.
-// Classe Swift em módulo IGLiquidGlassExperimentHelper; não está no binário estático
-// analisado mas existe no device (confirmado via "Direct override: ON" no FLEX).
+// ── Status Bar Old School ─────────────────────────────────────────────────────
+// IGThrowbackChromeExperimentHelper — módulo IGLiquidGlassExperimentHelper
+// (carregado dinamicamente em runtime; setRuntimeBoolOverride faz no-op se ausente)
 + (void)applyStatusBarOldSchool:(BOOL)on;
 + (BOOL)isStatusBarOldSchoolActive;
 
-// ── Story Tray (3 overrides) ─────────────────────────────────────────────────────
-// IGNavConfiguration.IGHomecomingConfiguration:
-//   isStoriesTrayOnAllTabsEnabled, showCinemaStoriesTrayOnSwipeUp,
-//   isDynamicTabStoryGridEnabled
+// ── Story Tray ────────────────────────────────────────────────────────────────
+// _TtC18IGNavConfiguration25IGHomecomingConfiguration — 6 flags confirmados via FLEX:
+//   isStoriesTrayOnAllTabsEnabled · showCinemaStoriesTrayOnSwipeUp ·
+//   isDynamicTabStoryGridEnabled · isVerticalStoriesTray ·
+//   isFeedCullingOnStoriesAccessEnabled · isHomecomingStoriesAccessFaceClusterEnabled
+// _TtC18IGNavConfiguration18IGNavConfiguration — 1 flag:
+//   enableStoriesTabHeaderButton
 + (void)applyStoryTray:(BOOL)on;
 + (BOOL)isStoryTrayActive;
+
+// ── Instagram Wordmark ────────────────────────────────────────────────────────
+// IGDSLauncherConfig: isIGWordmark1aAltEnabled / isIGWordmark1aEnabled /
+//                     isIGWordmark1bAltEnabled / isIGWordmark1bEnabled
+// variant: 0=off, 1=1a-alt, 2=1a, 3=1b-alt, 4=1b
+// Todos mutually-exclusive; applyWordmark: garante que só um está ON.
++ (void)applyWordmark:(NSInteger)variant;
++ (NSInteger)activeWordmarkVariant;
+
+// ── Startup ───────────────────────────────────────────────────────────────────
+// Instala SCIPrefObserver para o seletor de wordmark.
+// Deve ser chamado no %ctor após installPersistedDirectOverrideHooks.
++ (void)installWordmarkPrefObserver;
 
 @end
 

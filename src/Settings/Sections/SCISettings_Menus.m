@@ -248,6 +248,29 @@
 			[UICommand commandWithTitle:SCILocalized(@"Following") image:nil action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"main_feed_mode", @"value": @"following", @"requiresRestart": @YES}],
 		]],
+		@"ig_wordmark_variant": [UIMenu menuWithChildren:@[
+			[UICommand commandWithTitle:SCILocalized(@"Padrão (desativado)")
+								  image:[UIImage systemImageNamed:@"nosign"]
+								 action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"off"}],
+			[UICommand commandWithTitle:SCILocalized(@"Estilo 1A-Alt (arredondada)")
+								  image:([UIImage imageNamed:@"instagram-wordmark-1a-alt"] ?: [UIImage systemImageNamed:@"1.circle.fill"])
+								 action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a_alt"}],
+			[UICommand commandWithTitle:SCILocalized(@"Estilo 1A (itálica)")
+								  image:([UIImage imageNamed:@"instagram-wordmark-1a"] ?: [UIImage systemImageNamed:@"1.circle"])
+								 action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a"}],
+			[UICommand commandWithTitle:SCILocalized(@"Estilo 1B-Alt (sans-serif bold)")
+								  image:([UIImage imageNamed:@"instagram-wordmark-1b-alt"] ?: [UIImage systemImageNamed:@"2.circle.fill"])
+								 action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b_alt"}],
+			[UICommand commandWithTitle:SCILocalized(@"Estilo 1B (geométrica)")
+								  image:([UIImage imageNamed:@"instagram-wordmark-1b"] ?: [UIImage systemImageNamed:@"2.circle"])
+								 action:@selector(menuChanged:)
+						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b"}],
+		]],
+
 		@"liquid_glass_tabbar_mode": [UIMenu menuWithChildren:@[
 			[UICommand commandWithTitle:SCILocalized(@"Default") image:nil action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"liquid_glass_tabbar_mode", @"value": @"default", @"requiresRestart": @YES}],

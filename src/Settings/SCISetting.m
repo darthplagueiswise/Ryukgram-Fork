@@ -104,6 +104,22 @@
 	return setting;
 }
 
+
++ (instancetype)hookSwitchCellWithTitle:(NSString *)title
+                               subtitle:(NSString *)subtitle
+                                   icon:(nullable SCISymbol *)icon
+                               getValue:(BOOL (^)(void))getValue
+                               onToggle:(void (^)(BOOL isOn))onToggle
+{
+    SCISetting *setting = [[self alloc] initWithType:SCITableCellSwitch];
+    setting.title              = title;
+    setting.subtitle           = subtitle;
+    setting.icon               = icon;
+    setting.dynamicSwitchValue = getValue;
+    setting.onSwitchChange     = onToggle;
+    return setting;
+}
+
 // MARK: - + stepperCellWithTitle
 
 + (instancetype)stepperCellWithTitle:(NSString *)title

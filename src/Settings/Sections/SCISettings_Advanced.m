@@ -4,6 +4,7 @@
 #import "../SCIInternalActionsViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
+#import "../../Features/Gating/SCIBulkGatingPresets.h"
 #import "../SCISymbolsBrowserViewController.h"
 
 @implementation SCITweakSettings (Section_Advanced)
@@ -218,6 +219,49 @@
 																							   subtitle:SCILocalized(@"All exported C symbols from Instagram / FBSharedFramework")
 																							      icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"function"]
 																						viewController:[SCISymbolsBrowserViewController new]],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Status Bar Old School"),
+											@"footer": SCILocalized(@"IGThrowbackChromeExperimentHelper.isEnabled — torna a status bar azul clássica. Hook via getter hook do Feature Gating; independente do preset Liquid Glass."),
+											@"rows": @[
+												[SCISetting hookSwitchCellWithTitle:SCILocalized(@"Status Bar Old School")
+																		   subtitle:@""
+																			   icon:[SCISymbol symbolWithName:@"iphone"]
+																		   getValue:^BOOL{ return [SCIBulkGatingPresets isStatusBarOldSchoolActive]; }
+																		   onToggle:^(BOOL on){ [SCIBulkGatingPresets applyStatusBarOldSchool:on]; }],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Story Tray"),
+											@"footer": SCILocalized(@"IGHomecomingConfiguration: isStoriesTrayOnAllTabsEnabled · showCinemaStoriesTrayOnSwipeUp · isDynamicTabStoryGridEnabled · isVerticalStoriesTray · isFeedCullingOnStoriesAccessEnabled · isHomecomingStoriesAccessFaceClusterEnabled. IGNavConfiguration: enableStoriesTabHeaderButton. Todos via getter hook — reaplicado a cada launch."),
+											@"rows": @[
+												[SCISetting hookSwitchCellWithTitle:SCILocalized(@"Story Tray")
+																		   subtitle:@""
+																			   icon:[SCISymbol symbolWithName:@"circle.grid.3x3.fill"]
+																		   getValue:^BOOL{ return [SCIBulkGatingPresets isStoryTrayActive]; }
+																		   onToggle:^(BOOL on){ [SCIBulkGatingPresets applyStoryTray:on]; }],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Instagram Wordmark"),
+											@"footer": SCILocalized(@"IGDSLauncherConfig: isIGWordmark1aAltEnabled · isIGWordmark1aEnabled · isIGWordmark1bAltEnabled · isIGWordmark1bEnabled. Apenas um ativo por vez. Aplicado via SCIPrefObserver — sem restart."),
+											@"rows": @[
+												({
+													SCISetting *wm = [SCISetting menuCellWithTitle:SCILocalized(@"Instagram Wordmark")
+																						 subtitle:SCILocalized(@"Muda a logo do Instagram na status bar")
+																							 menu:[self menus][@"ig_wordmark_variant"]];
+													// dynamicValueText mostra o estilo atual
+													wm.dynamicValueText = ^NSString *{
+														NSString *v = [[NSUserDefaults standardUserDefaults] stringForKey:@"sci_ig_wordmark_variant"];
+														if ([v isEqualToString:@"1a_alt"]) return @"1A-Alt";
+														if ([v isEqualToString:@"1a"])     return @"1A";
+														if ([v isEqualToString:@"1b_alt"]) return @"1B-Alt";
+														if ([v isEqualToString:@"1b"])     return @"1B";
+														return @"Off";
+													};
+													wm;
+												}),
 											]
 										},
 										@{
