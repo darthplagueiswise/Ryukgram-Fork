@@ -17,10 +17,20 @@ static BOOL sSCIEmployeeDefaultsNSHooksInstalled = NO;
 static BOOL sSCIEmployeeDefaultsIGHooksInstalled = NO;
 static BOOL sSCIEmployeeDefaultsApplying = NO;
 
+// CRASH FIX: calling NSUserDefaults inside an NSUserDefaults hook → infinite recursion.
+// Hook calls SCIEmployeeDefaultsEnabled → getBoolPref → boolForKey → hook → ∞
+// Cache the state as a plain C BOOL set BEFORE hooks install.
+static volatile BOOL sSCIEmployeeEnabledCache = NO;
+
+static void SCIUpdateEmployeeEnabledCache(void) {
+    sSCIEmployeeEnabledCache =
+        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeMasterKey] ||
+        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeGetterKey]  ||
+        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeDefaultsKey];
+}
+
 static BOOL SCIEmployeeDefaultsEnabled(void) {
-    return [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeMasterKey] ||
-           [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeGetterKey] ||
-           [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeDefaultsKey];
+    return sSCIEmployeeEnabledCache; // pure C — no ObjC, no NSUserDefaults
 }
 
 static BOOL SCIEmployeeKeyMatches(id keyObj) {
@@ -116,6 +126,7 @@ static id new_generic_objectForKey(id self, SEL _cmd, NSString *key) {
 }
 
 + (void)installHooksIfNeeded {
+    SCIUpdateEmployeeEnabledCache(); // populate cache before any hooks install
     if (!sSCIEmployeeDefaultsNSHooksInstalled) {
         sSCIEmployeeDefaultsNSHooksInstalled = YES;
         Class nsud = NSUserDefaults.class;
