@@ -50,6 +50,11 @@ NS_ASSUME_NONNULL_BEGIN
 // Deve ser chamado no %ctor após installPersistedDirectOverrideHooks.
 + (void)installWordmarkPrefObserver;
 
+
++ (NSArray<NSString *> *)igWordmarkModes;
++ (void)applyIGWordmarkMode:(NSString *)mode;
++ (NSString *)currentIGWordmarkMode;
+
 @end
 
 NS_ASSUME_NONNULL_END

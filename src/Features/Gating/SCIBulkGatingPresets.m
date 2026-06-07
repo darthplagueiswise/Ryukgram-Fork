@@ -23,6 +23,9 @@
 // Defaults key para o seletor de wordmark
 static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
 
+
+static NSString *const kSCIIGWordmarkModeKey = @"sci_igwordmark_mode";
+
 @implementation SCIBulkGatingPresets
 
 // ─── Liquid Glass ────────────────────────────────────────────────────────────
@@ -194,6 +197,41 @@ static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
         else if ([val isEqualToString:@"1b"])     variant = 4;
         [SCIBulkGatingPresets applyWordmark:variant];
     }];
+}
+
+
++ (NSArray<NSString *> *)igWordmarkModes {
+    return @[@"default", @"1a", @"1a_alt", @"1b", @"1b_alt"];
+}
+
++ (NSDictionary<NSString *, NSString *> *)igWordmarkSelectorMap {
+    return @{
+        @"1a": @"isIGWordmark1aEnabled",
+        @"1a_alt": @"isIGWordmark1aAltEnabled",
+        @"1b": @"isIGWordmark1bEnabled",
+        @"1b_alt": @"isIGWordmark1bAltEnabled"
+    };
+}
+
++ (void)applyIGWordmarkMode:(NSString *)mode {
+    NSString *m = [[self igWordmarkModes] containsObject:(mode ?: @"")] ? mode : @"default";
+    [[NSUserDefaults standardUserDefaults] setObject:m forKey:kSCIIGWordmarkModeKey];
+
+    NSString *cls = @"IGDSLauncherConfig";
+    NSDictionary<NSString *, NSString *> *map = [self igWordmarkSelectorMap];
+    for (NSString *key in map) {
+        NSString *sel = map[key];
+        if ([m isEqualToString:@"default"]) {
+            CRBO(cls, sel, NO);
+        } else {
+            SRBO(cls, sel, NO, [key isEqualToString:m]);
+        }
+    }
+}
+
++ (NSString *)currentIGWordmarkMode {
+    NSString *m = [[NSUserDefaults standardUserDefaults] stringForKey:kSCIIGWordmarkModeKey] ?: @"default";
+    return [[self igWordmarkModes] containsObject:m] ? m : @"default";
 }
 
 @end
