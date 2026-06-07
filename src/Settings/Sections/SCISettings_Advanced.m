@@ -101,10 +101,11 @@
 											]
 										},
 										@{
-											@"header": SCILocalized(@"XPlugins (observação)"),
-											@"footer": SCILocalized(@"_XPluginsGetListLookupDataPair é definida (não importada) no binário do Instagram. Hook via MSHookFunction + dlsym. Modo observação: loga list/key/result sem alterar retorno. Para ver os logs: log stream --predicate 'subsystem contains \"SCIXPlugins\"' --level debug. Não tente forçar retorno fake sem conhecer o layout do struct."),
+											@"header": SCILocalized(@"XPlugins"),
+											@"footer": SCILocalized(@"_XPluginsGetListLookupDataPair — exportada pelo Instagram, hookada via MSHookFunction+dlsym com delay de 2s (permite ao initializer do XPlugins substituir o null-stub antes do hook). Force: retorna sentinel não-nulo para chaves [IG-Only]/[Internal] quando orig retorna NULL. Combinar com 'Force all IG-only/debug ObjC gates' para passar também o checker. Log: log stream --predicate 'subsystem contains \"SCIXPlugins\"' --level debug."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Observar XPluginsGetListLookupDataPair") subtitle:SCILocalized(@"Loga chamadas a _XPluginsGetListLookupDataPair (list/key/result) — sem override") defaultsKey:@"sci_xplugins_observe" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force IG-Only/Internal menus") subtitle:SCILocalized(@"sci_xplugins_force_igonly — retorna non-NULL para chaves [IG-Only]/[Internal]. Combinar com employee gate.") defaultsKey:@"sci_xplugins_force_igonly" requiresRestart:NO],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Observar (log)") subtitle:SCILocalized(@"Loga list/key/result via os_log — ver com log stream --predicate 'subsystem contains \"SCIXPlugins\"'") defaultsKey:@"sci_xplugins_observe" requiresRestart:NO],
 											]
 										},
 										@{
@@ -265,6 +266,16 @@
 											]
 										},
 										@{
+											@"header": SCILocalized(@"IG-Only Menus & IGPlus"),
+											@"footer": SCILocalized(@"Ativar para desbloquear menus [IG-Only]/[Internal-Only]/[Dogfood] e benefícios IGPlus. Todos requerem restart exceto XPlugins force."),
+											@"rows": @[
+												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"IG-Only Menus & IGPlus")
+																				 subtitle:SCILocalized(@"Employee gate · XPlugins force · Internal menus · IGPlus benefits")
+																					 icon:[SCISymbol symbolWithName:@"lock.open.fill"]
+																			navSections:[self igOnlyMenusSections]]; s; }),
+											]
+										},
+										@{
 											@"header": SCILocalized(@"Advanced experimental features"),
 											@"footer": SCILocalized(@"Toggle hidden Instagram experiments. Some may not work on every account or IG version."),
 											@"rows": @[
@@ -276,5 +287,71 @@
 										}]
 				];
 }
+
+// ── IG-Only Menus & IGPlus sub-screen ────────────────────────────────────────
+
++ (NSArray *)igOnlyMenusSections {
+    return @[
+        @{
+            @"header": SCILocalized(@"Debug menus (IG-Only / Internal)"),
+            @"footer": SCILocalized(@"Desbloqueia menus [IG-Only], [Internal-Only] e [Dogfood] que aparecem contextualmente no app.\n\n1. Ativar os 3 primeiros toggles + restart.\n2. XPlugins force NÃO precisa de restart.\n3. Para Internal Settings: chacoalhe o device após login e toque 'Internal Settings'."),
+            @"rows": @[
+                [SCISetting switchCellWithTitle:SCILocalized(@"Employee gate (isEmployee)")
+                                       subtitle:SCILocalized(@"IGFacebookUserInfo.isEmployee + isInternal + ig_isInternal + isInternalOnly — porta de entrada para todos os menus IG-Only")
+                                    defaultsKey:@"sci_force_ig_internal_employee"
+                               requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Internal Settings menu")
+                                       subtitle:SCILocalized(@"IGBugReportMenuViewController.showInternalSettings — ativa 'Internal Settings' no menu de chacoalhar")
+                                    defaultsKey:@"sci_force_internal_settings_menu"
+                               requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"└ também quando deslogado")
+                                       subtitle:SCILocalized(@"showLoggedOutInternalSettings")
+                                    defaultsKey:@"sci_force_internal_settings_loggedout"
+                               requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"XPlugins force IG-Only (sem restart)")
+                                       subtitle:SCILocalized(@"sci_xplugins_force_igonly — _XPluginsGetListLookupDataPair retorna sentinel não-nulo para chaves [IG-Only]/[Internal]. Efeito em ~2s após launch.")
+                                    defaultsKey:@"sci_xplugins_force_igonly"
+                               requiresRestart:NO],
+                [SCISetting switchCellWithTitle:SCILocalized(@"XPlugins log (os_log)")
+                                       subtitle:SCILocalized(@"Loga list/key/result — log stream --predicate 'subsystem contains \"SCIXPlugins\"'")
+                                    defaultsKey:@"sci_xplugins_observe"
+                               requiresRestart:NO],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Instagram Plus (IGPlus)"),
+            @"footer": SCILocalized(@"Força os getters de benefício do IGConsumerSubsService + lower-level (SUBSBenefitDataProvider, StoryPeek, DirectChatPeek, CustomAppIcon). Cosmético/local — ações validadas no servidor ainda precisam de assinatura real. Restart após ativar."),
+            @"rows": @[
+                [SCISetting switchCellWithTitle:SCILocalized(@"★ Ativar TODOS os benefícios IGPlus")
+                                       subtitle:SCILocalized(@"Master: IGConsumerSubsService + SUBSBenefitDataProvider + peek eligibility + CustomAppIcon")
+                                    defaultsKey:@"sci_force_igplus_all"
+                               requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Eligibility layer (SUBSBenefit / peek)")
+                                       subtitle:SCILocalized(@"isBenefitActiveWithBenefitType: · isPeekEligible* · isChatPeekEligible · isCustomAppIconAvailable")
+                                    defaultsKey:@"sci_igplus_eligibility"
+                               requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"hasAccessToIGPlus") subtitle:@"" defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"hasAnyActiveBenefit / isBenefitActive:") subtitle:@"" defaultsKey:@"sci_igplus_any_active" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Custom Lists") subtitle:@"isCustomListsBenefitEnabled" defaultsKey:@"sci_igplus_custom_lists" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Superlikes") subtitle:@"isStorySuperlikesBenefitEnabled" defaultsKey:@"sci_igplus_story_superlikes" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Search Story Viewers") subtitle:@"isSearchStoryViewersBenefitEnabled" defaultsKey:@"sci_igplus_search_story_viewers" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Extend") subtitle:@"isStoryExtendBenefitEnabled" defaultsKey:@"sci_igplus_story_extend" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Rewatch") subtitle:@"isStoryRewatchBenefitEnabled" defaultsKey:@"sci_igplus_story_rewatch" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Peeks") subtitle:@"isStoryPeeksBenefitEnabled" defaultsKey:@"sci_igplus_story_peeks" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Spotlight") subtitle:@"isStorySpotlightBenefitEnabled" defaultsKey:@"sci_igplus_story_spotlight" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Highlights") subtitle:@"isSilentPostToHighlightsBenefitEnabled" defaultsKey:@"sci_igplus_silent_post_highlights" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Direct Message Peek") subtitle:@"isDirectMessagePeekBenefitEnabled" defaultsKey:@"sci_igplus_dm_peek" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Custom App Icon") subtitle:@"isCustomAppIconBenefitEnabled + isCustomAppIconAvailableWithUserSession:" defaultsKey:@"sci_igplus_custom_app_icon" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Branded Threads") subtitle:@"isBrandedThreadsBenefitEnabled" defaultsKey:@"sci_igplus_branded_threads" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Timestamp Viewers List") subtitle:@"isTimestampViewersListBenefitEnabled" defaultsKey:@"sci_igplus_timestamp_viewers" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Custom Bio Font") subtitle:@"isCustomBioFontInProfileBenefitEnabled" defaultsKey:@"sci_igplus_custom_bio_font" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Profile") subtitle:@"isSilentPostToProfileBenefitEnabled" defaultsKey:@"sci_igplus_silent_post_profile" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Pinned Posts Increased Limit") subtitle:@"isPinnedPostsIncreasedLimitEnabled" defaultsKey:@"sci_igplus_pinned_posts_limit" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Story Peek active") subtitle:@"IGConsumerSubsStoryPeekCoordinator.isPeekActive" defaultsKey:@"sci_igplus_story_peek_active" requiresRestart:YES],
+            ]
+        },
+    ];
+}
+
 
 @end
