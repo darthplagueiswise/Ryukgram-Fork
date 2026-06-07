@@ -2,9 +2,9 @@
 NS_ASSUME_NONNULL_BEGIN
 @interface SCIInternalMenusLauncher : NSObject
 // Presents IG's own internal/dogfooding menus using validated class-method
-// entrypoints + the live user session (no server gate involved).
+// entrypoints + the live user session/config observed from Instagram runtime.
 + (NSString *)openDogfoodingNotesSettings;     // +notesDogfoodingSettingsOpenOnViewController:userSession: (reliable)
-+ (NSString *)openDogfoodingSettingsVC;        // alloc IGDogfoodingSettingsViewController + present (best-effort)
++ (NSString *)openDogfoodingSettingsVC;        // +openWithConfig:onViewController:userSession: / initWithConfig:userSession: when config is captured
 + (NSString *)openInternalURLString:(NSString *)urlString; // +[IGURLHandler openInternalURL:...]
 @end
 NS_ASSUME_NONNULL_END

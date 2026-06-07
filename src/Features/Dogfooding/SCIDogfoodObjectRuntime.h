@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)noteSettingsObject:(nullable id)object role:(NSString *)role source:(nullable NSString *)source;
 + (void)noteAction:(NSString *)action status:(NSString *)status detail:(nullable id)detail;
 + (void)noteLiveUserSession:(nullable id)session source:(nullable NSString *)source;
++ (void)noteDogfoodConfig:(nullable id)config userSession:(nullable id)session source:(nullable NSString *)source;
 
 + (void)noteDogfoodingSettingChangeWithItem:(nullable id)item
                                   options:(nullable id)options
@@ -19,9 +20,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (UIViewController *)topViewController;
 + (nullable id)activeUserSession;
++ (nullable id)bestDogfoodSettingsConfig;
 + (nullable id)bestLauncherSet;
 + (nullable id)bestDogfooder;
 + (NSDictionary *)runtimeState;
++ (NSDictionary *)dogfoodNativeState;
 + (NSArray<NSDictionary *> *)liveObjectGraph;
 + (NSArray<NSDictionary *> *)runtimeStubsMatching:(nullable NSString *)query limit:(NSUInteger)limit;
 + (NSDictionary *)detailsForRuntimeStubClass:(NSString *)className;

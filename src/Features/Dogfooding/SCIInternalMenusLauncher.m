@@ -47,15 +47,13 @@
     }
 }
 
-// Best-effort native dogfooding settings opener.
-// Keep this method implemented because Advanced still exposes the row, but do not
-// allocate Swift VCs with nil non-optional init args. The runtime helper only uses
-// captured/live native objects and returns NO instead of trapping.
+// Native Dogfooding Settings opener. Uses only dump-confirmed selectors and only
+// calls the Swift entrypoint when the runtime has captured the real config object.
 + (NSString *)openDogfoodingSettingsVC {
     @try {
         BOOL ok = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
         return ok ? @"opened native Dogfooding Settings"
-                  : @"native Dogfooding Settings opener unavailable: open Notes or use Symbols Browser/runtime first";
+                  : @"native Dogfooding Settings unavailable: missing captured IGDogfoodingSettingsConfig/session; open an authorized native dogfood surface first";
     } @catch (id e) {
         return [NSString stringWithFormat:@"threw: %@", e];
     }

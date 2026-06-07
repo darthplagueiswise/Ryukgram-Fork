@@ -8,10 +8,23 @@ static void SCIHookDF(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     SEL sel = NSSelectorFromString(selName);
     if (!class_getInstanceMethod(cls, sel)) return;
     if (!sSCIDFInstalled) sSCIDFInstalled = [NSMutableSet new];
-    NSString *key = [NSString stringWithFormat:@"%@:%@", NSStringFromClass(cls), selName];
+    NSString *key = [NSString stringWithFormat:@"I:%@:%@", NSStringFromClass(cls), selName];
     if ([sSCIDFInstalled containsObject:key]) return;
     [sSCIDFInstalled addObject:key];
     MSHookMessageEx(cls, sel, newImp, origOut);
+}
+
+static void SCIHookDFClass(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
+    if (!cls || !selName.length || !newImp || !origOut) return;
+    SEL sel = NSSelectorFromString(selName);
+    if (!class_getClassMethod(cls, sel)) return;
+    Class meta = object_getClass(cls);
+    if (!meta) return;
+    if (!sSCIDFInstalled) sSCIDFInstalled = [NSMutableSet new];
+    NSString *key = [NSString stringWithFormat:@"C:%@:%@", NSStringFromClass(cls), selName];
+    if ([sSCIDFInstalled containsObject:key]) return;
+    [sSCIDFInstalled addObject:key];
+    MSHookMessageEx(meta, sel, newImp, origOut);
 }
 
 static BOOL SCIClassNameInterestingForDogfoodRuntime(NSString *cn) {
@@ -27,6 +40,15 @@ static BOOL SCIClassNameInterestingForDogfoodRuntime(NSString *cn) {
            [s containsString:@"facebookuserinfo"] ||
            [s containsString:@"baseuser"] ||
            [s containsString:@"userlauncherset"];
+}
+
+static Class SCIClassByNames(NSArray<NSString *> *names) {
+    for (NSString *name in names) {
+        Class cls = NSClassFromString(name);
+        if (!cls) cls = objc_getClass(name.UTF8String);
+        if (cls) return cls;
+    }
+    return Nil;
 }
 
 static id (*orig_df_dog_init)(id, SEL, id, id, id);
@@ -100,6 +122,21 @@ static id new_autofill_init(id self, SEL _cmd, id userSession) {
     return obj;
 }
 
+static void (*orig_df_settings_open)(id, SEL, id, id, id);
+static void new_df_settings_open(id self, SEL _cmd, id config, id viewController, id userSession) {
+    [SCIDogfoodObjectRuntime noteDogfoodConfig:config userSession:userSession source:@"IGDogfoodingSettings.openWithConfig:onViewController:userSession:"];
+    [SCIDogfoodObjectRuntime noteObject:viewController role:@"dogfoodSettingsPresenter" source:NSStringFromSelector(_cmd)];
+    if (orig_df_settings_open) orig_df_settings_open(self, _cmd, config, viewController, userSession);
+}
+
+static id (*orig_df_settings_vc_init)(id, SEL, id, id);
+static id new_df_settings_vc_init(id self, SEL _cmd, id config, id userSession) {
+    id obj = orig_df_settings_vc_init ? orig_df_settings_vc_init(self, _cmd, config, userSession) : self;
+    [SCIDogfoodObjectRuntime noteDogfoodConfig:config userSession:userSession source:@"IGDogfoodingSettingsViewController.initWithConfig:userSession:"];
+    [SCIDogfoodObjectRuntime noteObject:obj role:@"IGDogfoodingSettingsViewController" source:NSStringFromSelector(_cmd)];
+    return obj;
+}
+
 static id (*orig_ctx_sessionless_init)(id, SEL, id, id);
 static id new_ctx_sessionless_init(id self, SEL _cmd, id sessionID, id manager) {
     id obj = orig_ctx_sessionless_init ? orig_ctx_sessionless_init(self, _cmd, sessionID, manager) : self;
@@ -127,6 +164,12 @@ static void SCIInstallDogfoodObjectHooks(void) {
 
     Class autofill = NSClassFromString(@"AutofillInternalSettingsInstagram.IGAutofillInternalSettings") ?: NSClassFromString(@"_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings");
     SCIHookDF(autofill, @"initWithUserSession:", (IMP)new_autofill_init, (IMP *)&orig_autofill_init);
+
+    Class dogSettings = SCIClassByNames(@[@"IGDogfoodingSettings.IGDogfoodingSettings", @"_TtC20IGDogfoodingSettings20IGDogfoodingSettings"]);
+    SCIHookDFClass(dogSettings, @"openWithConfig:onViewController:userSession:", (IMP)new_df_settings_open, (IMP *)&orig_df_settings_open);
+
+    Class dogSettingsVC = SCIClassByNames(@[@"IGDogfoodingSettings.IGDogfoodingSettingsViewController", @"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController"]);
+    SCIHookDF(dogSettingsVC, @"initWithConfig:userSession:", (IMP)new_df_settings_vc_init, (IMP *)&orig_df_settings_vc_init);
 }
 
 %ctor {

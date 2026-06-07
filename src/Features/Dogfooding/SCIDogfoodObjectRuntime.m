@@ -12,6 +12,7 @@ static NSMutableArray<NSDictionary *> *sSCIDogfoodingSettingChanges;
 static dispatch_queue_t sSCIQueue;
 static BOOL sSCIInstalled;
 static __weak id sSCICapturedUserSession;
+static __weak id sSCICapturedDogfoodSettingsConfig;
 static NSTimeInterval sSCILastUserSessionNote;
 
 static NSString *SCISafeString(id v) {
@@ -20,6 +21,21 @@ static NSString *SCISafeString(id v) {
 }
 
 static NSString *SCIAddr(id obj) { return obj ? [NSString stringWithFormat:@"%p", obj] : @""; }
+
+static BOOL SCIClassNameContains(id obj, NSString *needle) {
+    if (!obj || !needle.length) return NO;
+    NSString *name = NSStringFromClass(object_getClass(obj)) ?: @"";
+    return [name containsString:needle];
+}
+
+static UIViewController *SCIPresentationAnchor(UIViewController *vc) {
+    if (!vc) return nil;
+    UIViewController *top = vc;
+    while (top.presentedViewController && !top.presentedViewController.isBeingDismissed) top = top.presentedViewController;
+    if ([top isKindOfClass:UINavigationController.class]) return ((UINavigationController *)top).topViewController ?: top;
+    if ([top isKindOfClass:UITabBarController.class]) return ((UITabBarController *)top).selectedViewController ?: top;
+    return top;
+}
 
 static NSArray<NSString *> *SCIInterestingIvarNames(void) {
     static NSArray *a; static dispatch_once_t once; dispatch_once(&once, ^{
@@ -311,6 +327,7 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 + (void)noteObject:(id)object role:(NSString *)role source:(NSString *)source {
     if (!object) return;
     SCIEnsureStore();
+    if (SCIClassNameContains(object, @"IGDogfoodingSettingsConfig")) sSCICapturedDogfoodSettingsConfig = object;
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     @synchronized (sSCIObjMeta) {
         NSMutableDictionary *m = [sSCIObjMeta objectForKey:object];
@@ -358,6 +375,14 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
     sSCICapturedUserSession = session;
     sSCILastUserSessionNote = now;
     [self noteObject:session role:@"activeUserSession" source:source ?: @"IGUserSession capture"];
+}
+
++ (void)noteDogfoodConfig:(id)config userSession:(id)session source:(NSString *)source {
+    if (config) {
+        sSCICapturedDogfoodSettingsConfig = config;
+        [self noteObject:config role:@"IGDogfoodingSettingsConfig" source:source ?: @"dogfood config capture"];
+    }
+    if (session) [self noteLiveUserSession:session source:source ?: @"dogfood config capture"];
 }
 
 + (void)noteSettingsObject:(id)object role:(NSString *)role source:(NSString *)source { [self noteObject:object role:role ?: @"settings" source:source]; }
@@ -414,6 +439,20 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 }
 
 + (id)activeUserSession { id s = [SCIUtils activeUserSession] ?: sSCICapturedUserSession; if (s) [self noteObject:s role:@"activeUserSession" source:(s == sSCICapturedUserSession ? @"captured userID" : @"SCIUtils.activeUserSession")]; return s; }
+
++ (id)bestDogfoodSettingsConfig {
+    id cfg = sSCICapturedDogfoodSettingsConfig;
+    if (cfg) {
+        [self noteObject:cfg role:@"IGDogfoodingSettingsConfig" source:@"bestDogfoodSettingsConfig.weak-cache"];
+        return cfg;
+    }
+    cfg = [self liveInstanceOfClassNameContaining:@"IGDogfoodingSettingsConfig"];
+    if (cfg) {
+        sSCICapturedDogfoodSettingsConfig = cfg;
+        [self noteObject:cfg role:@"IGDogfoodingSettingsConfig" source:@"bestDogfoodSettingsConfig.live-object-graph"];
+    }
+    return cfg;
+}
 
 + (id)bestDogfooder {
     __block id found = nil; SCIEnsureStore(); @synchronized (sSCIObjMeta) { NSEnumerator *e = [sSCIObjMeta keyEnumerator]; id obj = nil; while ((obj = [e nextObject])) { if ([NSStringFromClass(object_getClass(obj)) containsString:@"IGDogfooderProd"]) { found = obj; break; } } }
@@ -475,18 +514,26 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
     return [SCIDogfoodStubRuntime detailsForClassName:className ?: @""];
 }
 + (NSArray<NSDictionary *> *)liveObjectGraph {
-    SCIEnsureStore(); NSMutableArray *arr = [NSMutableArray array];
+    SCIEnsureStore();
+    NSMutableArray *arr = [NSMutableArray array];
     @synchronized (sSCIObjMeta) {
-        NSEnumerator *e = [sSCIObjMeta keyEnumerator]; id obj = nil;
+        NSEnumerator *e = [sSCIObjMeta keyEnumerator];
+        id obj = nil;
         while ((obj = [e nextObject])) {
             NSDictionary *m = [sSCIObjMeta objectForKey:obj];
             NSDictionary *snap = SCILightSnapshot(obj, m);
             if (snap.count) [arr addObject:snap];
-            if (arr.count >= 160) break;
         }
     }
-    [arr sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) { return [SCISafeString(b[@"lastSeen"]) compare:SCISafeString(a[@"lastSeen"])] ; }];
-    return arr;
+    [arr sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSTimeInterval av = [a[@"lastSeen"] doubleValue];
+        NSTimeInterval bv = [b[@"lastSeen"] doubleValue];
+        if (bv > av) return NSOrderedDescending;
+        if (bv < av) return NSOrderedAscending;
+        return [SCISafeString(a[@"class"]) localizedCaseInsensitiveCompare:SCISafeString(b[@"class"])];
+    }];
+    if (arr.count > 220) return [[arr subarrayWithRange:NSMakeRange(0, 220)] copy];
+    return [arr copy];
 }
 
 + (NSArray<NSDictionary *> *)settingsInjectionTargets {
@@ -501,14 +548,37 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 + (NSArray<NSDictionary *> *)recentActions { SCIEnsureStore(); @synchronized (sSCIRecentActions) { return [sSCIRecentActions copy] ?: @[]; } }
 
 + (NSDictionary *)runtimeState {
-    UIViewController *top = [self topViewController]; id session = [self activeUserSession]; id launcher = [self bestLauncherSet];
+    UIViewController *top = [self topViewController];
+    id session = [self activeUserSession];
+    id launcher = [self bestLauncherSet];
+    id cfg = [self bestDogfoodSettingsConfig];
     NSString *sessionUserID = session ? SCIStringCandidate(session, @[@"userID", @"userId", @"pk", @"fbid", @"_userID"]) : nil;
     return @{ @"topViewController": top ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(top)), SCIAddr(top)] : @"nil",
               @"activeUserSession": session ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(session)), SCIAddr(session)] : @"nil",
               @"activeUserID": sessionUserID ?: @"",
               @"bestLauncherSet": launcher ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(launcher)), SCIAddr(launcher)] : @"nil",
+              @"bestDogfoodSettingsConfig": cfg ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(cfg)), SCIAddr(cfg)] : @"nil",
               @"liveObjects": @([self liveObjectGraph].count),
               @"settingsTargets": @([self settingsInjectionTargets].count) };
+}
+
++ (NSDictionary *)dogfoodNativeState {
+    Class launcher = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettings") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
+    Class vc = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettingsViewController") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController");
+    SEL openSel = @selector(openWithConfig:onViewController:userSession:);
+    SEL initSel = @selector(initWithConfig:userSession:);
+    id cfg = [self bestDogfoodSettingsConfig];
+    id session = [self activeUserSession];
+    UIViewController *top = [self topViewController];
+    return @{
+        @"launcherClass": launcher ? NSStringFromClass(launcher) : @"nil",
+        @"launcherRespondsOpenWithConfig": @((launcher && [launcher respondsToSelector:openSel]) ? YES : NO),
+        @"viewControllerClass": vc ? NSStringFromClass(vc) : @"nil",
+        @"viewControllerRespondsInitWithConfig": @((vc && [vc instancesRespondToSelector:initSel]) ? YES : NO),
+        @"config": cfg ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(cfg)), SCIAddr(cfg)] : @"nil",
+        @"session": session ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(session)), SCIAddr(session)] : @"nil",
+        @"topViewController": top ? [NSString stringWithFormat:@"%@ %@", NSStringFromClass(object_getClass(top)), SCIAddr(top)] : @"nil"
+    };
 }
 
 + (NSDictionary *)fullSnapshot { return [self fullSnapshotIncludingDetails:NO]; }
@@ -537,20 +607,52 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 + (BOOL)tryOpenMetaLocalExperimentBrowser { [self noteAction:@"Open MetaLocalExperiment" status:@"attempt" detail:[self runtimeState]]; @try { [SCIDogfooding presentMetaLocalExperimentBrowser]; [self noteAction:@"Open MetaLocalExperiment" status:@"sent" detail:nil]; return YES; } @catch (id e) { [self noteAction:@"Open MetaLocalExperiment" status:@"exception" detail:e]; return NO; } }
 
 + (BOOL)tryOpenNativeDogfoodSettings {
-    UIViewController *top = [self topViewController]; id session = [self activeUserSession];
-    if (!top || !session) { [self noteAction:@"Open Native Dogfood Settings" status:@"missing top/session" detail:[self runtimeState]]; return NO; }
-    NSArray *classes = @[@"IGDogfoodingSettings.IGDogfoodingSettings", @"_TtC20IGDogfoodingSettings20IGDogfoodingSettings"];
+    UIViewController *top = SCIPresentationAnchor([self topViewController]);
+    id session = [self activeUserSession];
+    id cfg = [self bestDogfoodSettingsConfig];
+
+    if (!top || !session) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"missing top/session" detail:[self dogfoodNativeState]];
+        return NO;
+    }
+    if (!cfg) {
+        [self noteAction:@"Open Native Dogfood Settings" status:@"missing native config" detail:[self dogfoodNativeState]];
+        return NO;
+    }
+
+    Class launcher = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettings") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
     SEL openSel = @selector(openWithConfig:onViewController:userSession:);
-    for (NSString *name in classes) {
-        Class c = NSClassFromString(name); if (!c || ![c respondsToSelector:openSel]) continue;
-        id cfg = nil; Class cfgCls = NSClassFromString(@"IGDogfoodingSettingsConfig"); if (cfgCls) { @try { cfg = [[cfgCls alloc] init]; } @catch (__unused id e) {} }
-        @try { ((void(*)(id,SEL,id,id,id))objc_msgSend)(c, openSel, cfg, top, session); [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:name]; return YES; } @catch (id e) { [self noteAction:@"Open Native Dogfood Settings" status:@"exception" detail:e]; }
+    if (launcher && [launcher respondsToSelector:openSel]) {
+        @try {
+            ((void(*)(id,SEL,id,id,id))objc_msgSend)(launcher, openSel, cfg, top, session);
+            [self noteAction:@"Open Native Dogfood Settings" status:@"sent openWithConfig" detail:[self dogfoodNativeState]];
+            return YES;
+        } @catch (id e) {
+            [self noteAction:@"Open Native Dogfood Settings" status:@"openWithConfig exception" detail:e];
+        }
     }
+
     Class vcCls = NSClassFromString(@"IGDogfoodingSettings.IGDogfoodingSettingsViewController") ?: NSClassFromString(@"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController");
-    if (vcCls && [vcCls isSubclassOfClass:UIViewController.class]) {
-        @try { UIViewController *vc = [[vcCls alloc] init]; UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc]; nav.modalPresentationStyle = UIModalPresentationFullScreen; [top presentViewController:nav animated:YES completion:nil]; [self noteAction:@"Open Native Dogfood Settings" status:@"presented bare VC fallback" detail:NSStringFromClass(vcCls)]; return YES; } @catch (id e) { [self noteAction:@"Open Native Dogfood Settings" status:@"fallback exception" detail:e]; }
+    SEL initSel = @selector(initWithConfig:userSession:);
+    if (vcCls && [vcCls isSubclassOfClass:UIViewController.class] && [vcCls instancesRespondToSelector:initSel]) {
+        @try {
+            UIViewController *vc = ((id(*)(id,SEL,id,id))objc_msgSend)([vcCls alloc], initSel, cfg, session);
+            if (![vc isKindOfClass:UIViewController.class]) {
+                [self noteAction:@"Open Native Dogfood Settings" status:@"init returned non-VC" detail:[self dogfoodNativeState]];
+                return NO;
+            }
+            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+            nav.modalPresentationStyle = UIModalPresentationFullScreen;
+            [top presentViewController:nav animated:YES completion:nil];
+            [self noteAction:@"Open Native Dogfood Settings" status:@"presented initWithConfig" detail:[self dogfoodNativeState]];
+            return YES;
+        } @catch (id e) {
+            [self noteAction:@"Open Native Dogfood Settings" status:@"initWithConfig exception" detail:e];
+        }
     }
-    [self noteAction:@"Open Native Dogfood Settings" status:@"unavailable" detail:[self runtimeState]]; return NO;
+
+    [self noteAction:@"Open Native Dogfood Settings" status:@"unavailable" detail:[self dogfoodNativeState]];
+    return NO;
 }
 
 + (void)injectRowsIntoSettingsIfPossibleFromViewController:(UIViewController *)vc {
