@@ -57,7 +57,8 @@ static BOOL SCIViewShouldReceiveGlassBackground(UIView *view) {
     if ([view isKindOfClass:UILabel.class] || [view isKindOfClass:UIImageView.class] || [view isKindOfClass:UIStackView.class]) return NO;
     if ([view isKindOfClass:UITableView.class] || [view isKindOfClass:UICollectionView.class] || [view isKindOfClass:UIScrollView.class]) return NO;
     if ([view isKindOfClass:UITableViewCell.class] || [view isKindOfClass:UICollectionViewCell.class] || [view isKindOfClass:UITableViewHeaderFooterView.class]) return NO;
-    if ([view isKindOfClass:UISegmentedControl.class] || [view isKindOfClass:UIButton.class]) return YES;
+    if ([view isKindOfClass:UISegmentedControl.class]) return YES;
+    if ([view isKindOfClass:UIButton.class]) return NO;
     return NO;
 }
 
@@ -143,6 +144,11 @@ void SCIApplyLiquidGlassToViewTree(UIView *root) {
         UIView *view = stack.lastObject;
         [stack removeLastObject];
         if (view.tag == kSCIRealGlassBackgroundTag) continue;
+
+        // Never style or recurse into UIButton internals from the global tree pass.
+        // UIKit uses private button subviews for nav/accessory/chrome controls; adding
+        // glass there creates the extra grey capsules/circles seen behind every button.
+        if ([view isKindOfClass:UIButton.class]) continue;
 
         BOOL isScrollView = [view isKindOfClass:UITableView.class] ||
             [view isKindOfClass:UICollectionView.class] ||
@@ -251,7 +257,7 @@ void SCIApplyGlassBackdropToViewController(UIViewController *vc) {
 
 static UIButtonConfiguration *SCIRealGlassButtonConfiguration(BOOL prominent) {
     if (@available(iOS 26.0, *)) {
-        return prominent ? [UIButtonConfiguration prominentGlassButtonConfiguration] : [UIButtonConfiguration clearGlassButtonConfiguration];
+        return prominent ? [UIButtonConfiguration filledButtonConfiguration] : [UIButtonConfiguration plainButtonConfiguration];
     }
     if (@available(iOS 15.0, *)) {
         UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
@@ -273,25 +279,23 @@ void SCIApplyGlassToView(UIView *view, CGFloat radius, BOOL interactive) {
 
 void SCIApplyGlassToButton(UIButton *button) {
     if (!button) return;
-    NSString *title = [button titleForState:UIControlStateNormal];
-    NSAttributedString *attributedTitle = [button attributedTitleForState:UIControlStateNormal];
-    UIImage *image = [button imageForState:UIControlStateNormal];
 
-    // Never turn anonymous UIKit/private accessory buttons into glass pills.
-    // Explicit RyukGram buttons have a title or image; accessory chevrons/empty
-    // controls often do not, and changing their configuration corrupts the row UI.
-    if (!title.length && !attributedTitle.length && !image) return;
-
+    // Important: do not assign clearGlass/prominentGlass button configurations here.
+    // Those configurations are correct for standalone iOS 26 controls, but in this
+    // tweak they are often applied to navigation/accessory/buttons already sitting
+    // inside a glass/card container. The result is a second capsule/circle behind
+    // every button. Keep buttons visually owned by their parent container.
     button.backgroundColor = UIColor.clearColor;
+    button.layer.backgroundColor = UIColor.clearColor.CGColor;
+
     if (@available(iOS 15.0, *)) {
-        UIButtonConfiguration *cfg = button.configuration ?: SCIRealGlassButtonConfiguration(NO);
-        if (title.length) cfg.title = title;
-        if (attributedTitle.length) cfg.attributedTitle = attributedTitle;
-        if (image) cfg.image = image;
-        cfg.background.backgroundColor = UIColor.clearColor;
-        cfg.baseForegroundColor = button.tintColor ?: UIColor.labelColor;
-        cfg.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
-        button.configuration = cfg;
+        UIButtonConfiguration *cfg = button.configuration;
+        if (cfg) {
+            cfg.background.backgroundColor = UIColor.clearColor;
+            cfg.background.visualEffect = nil;
+            cfg.baseBackgroundColor = UIColor.clearColor;
+            button.configuration = cfg;
+        }
     }
 }
 
@@ -586,8 +590,7 @@ static UIButton *SCIToolbarButton(NSString *title, NSString *symbol, id target, 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     if (@available(iOS 15.0, *)) {
         UIButtonConfiguration *cfg;
-        if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration clearGlassButtonConfiguration];
-        else cfg = [UIButtonConfiguration plainButtonConfiguration];
+        cfg = [UIButtonConfiguration plainButtonConfiguration];
         cfg.title = title;
         cfg.image = [UIImage systemImageNamed:symbol];
         cfg.imagePadding = 5.0;
@@ -632,8 +635,7 @@ static UIButton *SCIToolbarButton(NSString *title, NSString *symbol, id target, 
     if (@available(iOS 15.0, *)) {
         UIButtonConfiguration *cfg = self.captureButton.configuration ?: ({
             UIButtonConfiguration *fallback;
-            if (@available(iOS 26.0, *)) fallback = [UIButtonConfiguration clearGlassButtonConfiguration];
-            else fallback = [UIButtonConfiguration plainButtonConfiguration];
+            fallback = [UIButtonConfiguration plainButtonConfiguration];
             fallback;
         });
         cfg.title = title;

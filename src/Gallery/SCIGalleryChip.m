@@ -32,7 +32,7 @@ static UIImage *SCIGalleryChipGlyph(NSString *name, CGFloat pointSize) {
 	chip.layer.cornerCurve = kCACornerCurveContinuous;
 	if (@available(iOS 15.0, *)) {
 		UIButtonConfiguration *cfg;
-		if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration clearGlassButtonConfiguration];
+		if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration plainButtonConfiguration];
 		else cfg = [UIButtonConfiguration plainButtonConfiguration];
 		cfg.title = title ?: @"";
 		if (sfSymbol.length) cfg.image = SCIGalleryChipGlyph(sfSymbol, ceil(fontSize * 1.7));

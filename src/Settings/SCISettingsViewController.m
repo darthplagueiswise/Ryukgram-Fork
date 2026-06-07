@@ -8,6 +8,7 @@
 #import "../Utils.h"
 #import "../Tweak.h"
 #import "../UI/SCIColorPicker.h"
+#import "../Features/Gating/SCIBulkGatingPresets.h"
 
 static char kSCIRowKey;
 
@@ -468,7 +469,7 @@ static char kSCIRowKey;
 		}
 		case SCITableCellSwitch: {
 			UISwitch *t = UISwitch.new;
-			t.on = row.disabled ? NO : (row.dynamicSwitchValue ? row.dynamicSwitchValue() : [SCIUtils getBoolPref:row.defaultsKey]);
+			t.on = row.disabled ? NO : [SCIUtils getBoolPref:row.defaultsKey];
 			t.onTintColor = [SCIUtils SCIColor_Primary];
 			t.enabled = !row.disabled;
 			objc_setAssociatedObject(t, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -506,7 +507,7 @@ static char kSCIRowKey;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
 			UIButtonConfiguration *bc = b.configuration ?: ({
 				UIButtonConfiguration *fallback;
-				if (@available(iOS 26.0, *)) fallback = UIButtonConfiguration.clearGlassButtonConfiguration;
+				if (@available(iOS 26.0, *)) fallback = UIButtonConfiguration.plainButtonConfiguration;
 				else fallback = UIButtonConfiguration.plainButtonConfiguration;
 				fallback;
 			});
@@ -572,11 +573,6 @@ static char kSCIRowKey;
 
 - (void)switchChanged:(UISwitch *)sender {
 	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
-	// Hook-driven cells own their own state — don't touch defaultsKey
-	if (row.onSwitchChange) {
-		row.onSwitchChange(sender.isOn);
-		return;
-	}
 	if (!row.defaultsKey.length) return;
 	[SCIUtils setPref:@(sender.isOn) forKey:row.defaultsKey];
 	if (row.requiresRestart) [SCIUtils showRestartConfirmation];
@@ -588,6 +584,12 @@ static char kSCIRowKey;
 		self.sections = [SCITweakSettings rebuildAdvancedEncodingSlotInSections:self.sections];
 		[self sciReloadFromNotification];
 	}
+	if ([row.defaultsKey isEqualToString:@"sci_bulk_liquid_glass_enabled"])
+		[SCIBulkGatingPresets applyLiquidGlass:sender.isOn];
+	if ([row.defaultsKey isEqualToString:@"sci_bulk_statusbar_oldschool_enabled"])
+		[SCIBulkGatingPresets applyStatusBarOldSchool:sender.isOn];
+	if ([row.defaultsKey isEqualToString:@"sci_bulk_story_tray_enabled"])
+		[SCIBulkGatingPresets applyStoryTray:sender.isOn];
 }
 
 - (void)stepperChanged:(UIStepper *)sender {
@@ -602,6 +604,8 @@ static char kSCIRowKey;
 	NSString *key = props[@"defaultsKey"];
 	id value = props[@"value"];
 	if (key.length && value) [SCIUtils setPref:value forKey:key];
+	if ([key isEqualToString:@"sci_ig_wordmark_mode"])
+		[SCIBulkGatingPresets applyIGWordmarkMode:[value isKindOfClass:NSString.class] ? value : @"default"];
 	[self sciReloadFromNotification];
 
 	NSString *pickerKey = props[@"presentColorPickerForKey"];

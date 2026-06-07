@@ -87,7 +87,7 @@
                          sfSymbol:(NSString *)symbol
                         iconColor:(UIColor *)iconColor {
     UIButtonConfiguration *cfg;
-    if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration prominentGlassButtonConfiguration];
+    if (@available(iOS 26.0, *)) cfg = [UIButtonConfiguration filledButtonConfiguration];
     else cfg = [UIButtonConfiguration filledButtonConfiguration];
 
     NSDictionary *attrs = @{
