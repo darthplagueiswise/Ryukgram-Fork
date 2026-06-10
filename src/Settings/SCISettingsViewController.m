@@ -609,10 +609,14 @@ static char kSCIRowKey;
 		if ([mcKeys containsObject:row.defaultsKey]) SCIInstallMobileConfigInternalUseGateIfNeeded();
 		if ([easyKeys containsObject:row.defaultsKey]) SCIInstallEasyGatingHooksIfNeeded();
 		if ([sessionedKeys containsObject:row.defaultsKey]) SCIInstallSessionedMCGateHooksIfNeeded();
+		if ([row.defaultsKey isEqualToString:@"sci_internal_menus"]) {
+			NSString *result = SCIInternalMenusForceApplyNow();
+			if (result.length) [SCIUtils showToastForDuration:2.0 title:@"RyukGram" subtitle:result];
+		}
 	}
-	// Internal & Dogfood Menus is persistence-only here. Do not fan this switch
-	// out into MobileConfig/internal/employee gates during launch. Runtime execution
-	// is manual post-launch via explicit toggles/buttons.
+	// Internal & Dogfood Menus persists normally, but only applies when the user
+	// toggles it ON inside Settings. No fan-out to dangerous startup gates and no
+	// automatic launch replay from persisted state.
 }
 
 - (void)stepperChanged:(UIStepper *)sender {
