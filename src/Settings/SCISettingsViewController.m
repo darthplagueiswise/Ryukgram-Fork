@@ -5,6 +5,7 @@
 #import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/General/SCICacheManager.h"
 #import "../Features/Dogfooding/SCIInternalMenusForce.h"
+#import "../Features/Dogfooding/SCIAdvancedHooks.h"
 #import "../Features/Gating/SCIBulkGatingPresets.h"
 #import "../SCIImageCache.h"
 #import "../Utils.h"
@@ -585,6 +586,7 @@ static char kSCIRowKey;
 	}
 	if (!row.defaultsKey.length) return;
 	[SCIUtils setPref:@(sender.isOn) forKey:row.defaultsKey];
+	SCIAdvancedHooksApplyForChangedKey(row.defaultsKey, sender.isOn);
 	if (row.requiresRestart) [SCIUtils showRestartConfirmation];
 	if ([row.defaultsKey isEqualToString:@"hide_suggested_stories"])
 		[NSNotificationCenter.defaultCenter postNotificationName:@"SCISuggestedStoriesReload" object:nil];
@@ -609,14 +611,11 @@ static char kSCIRowKey;
 		if ([mcKeys containsObject:row.defaultsKey]) SCIInstallMobileConfigInternalUseGateIfNeeded();
 		if ([easyKeys containsObject:row.defaultsKey]) SCIInstallEasyGatingHooksIfNeeded();
 		if ([sessionedKeys containsObject:row.defaultsKey]) SCIInstallSessionedMCGateHooksIfNeeded();
-		if ([row.defaultsKey isEqualToString:@"sci_internal_menus"]) {
-			NSString *result = SCIInternalMenusForceApplyNow();
-			if (result.length) [SCIUtils showToastForDuration:2.0 title:@"RyukGram" subtitle:result];
-		}
 	}
-	// Internal & Dogfood Menus persists normally, but only applies when the user
-	// toggles it ON inside Settings. No fan-out to dangerous startup gates and no
-	// automatic launch replay from persisted state.
+	// Advanced hook toggles are persisted above and applied live through
+	// SCIAdvancedHooksApplyForChangedKey(). Persisted ON states are replayed once
+	// after UIApplicationDidBecomeActiveNotification by SCIAdvancedHooks.m, never
+	// during dyld/static init or scene-create.
 }
 
 - (void)stepperChanged:(UIStepper *)sender {

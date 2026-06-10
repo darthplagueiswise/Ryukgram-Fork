@@ -93,14 +93,17 @@ static void SCIInstallInternalMenuHook(void) {
     SCIHookBoolGetter(C, @selector(showDogfoodingAssistant), (IMP)sci_showAssistant, (IMP *)&sOrigShowAssistant);
 }
 
+
+void SCIInstallInternalSettingsMenuHookIfNeeded(void) {
+    if (!SCIInternalMenuEnabled()) return;
+    [SCIInternalGatePrefs installCrashGuardIfNeeded];
+    SCIInstallInternalMenuHook();
+}
+
 %ctor {
     @autoreleasepool {
-        if (!SCIInternalMenuEnabled()) return;
-        [SCIInternalGatePrefs installCrashGuardIfNeeded];
-        // Single install at load. The bug-reporter menu VC is built only when the
-        // user navigates to it (long after launch), so the init hook is in place in
-        // time. No dispatch_after retry: per THEOS.md/CLAUDE.md that pattern enters
-        // scene-create and was the watchdog (0x8BADF00D) crash vector.
-        SCIInstallInternalMenuHook();
+        // Startup-safe: no persisted internal menu hook installation here.
+        // SCIAdvancedHooks.m applies active Advanced prefs after app activation,
+        // and switchChanged: applies immediately when the toggle is turned ON.
     }
 }
