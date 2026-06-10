@@ -97,12 +97,10 @@ static void SCIInstallInternalMenuHook(void) {
     @autoreleasepool {
         if (!SCIInternalMenuEnabled()) return;
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
+        // Single install at load. The bug-reporter menu VC is built only when the
+        // user navigates to it (long after launch), so the init hook is in place in
+        // time. No dispatch_after retry: per THEOS.md/CLAUDE.md that pattern enters
+        // scene-create and was the watchdog (0x8BADF00D) crash vector.
         SCIInstallInternalMenuHook();
-        double delays[] = {1.0, 3.0, 6.0, 10.0};
-        for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[i] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                SCIInstallInternalMenuHook();
-            });
-        }
     }
 }
