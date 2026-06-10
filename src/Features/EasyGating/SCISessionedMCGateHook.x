@@ -42,7 +42,7 @@ static volatile BOOL sCacheSMCExperiment = NO;
 
 static void SCIRefreshSMCCache(void) {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    BOOL all = [ud boolForKey:kSMCAll];
+    BOOL all = [ud boolForKey:kSMCAll] || [ud boolForKey:@"sci_force_all_mc_gates"];
     sCacheSMCAll       = all;
     sCacheSMCSessioned = all || [ud boolForKey:kSMCSessioned];
     sCacheSMCExtension = all || [ud boolForKey:kSMCExtension];
@@ -108,15 +108,17 @@ static void SCIInstallSMCKVO(void) {
 // ── Instalação ─────────────────────────────────────────────────────────────
 void SCIInstallSessionedMCGateHooksIfNeeded(void) {
     static BOOL done = NO;
+
+    SCIRefreshSMCCache();
+    BOOL any = sCacheSMCAll || sCacheSMCSessioned || sCacheSMCExtension || sCacheSMCExperiment;
+    if (!any) {
+        SCILOG("skip install: all prefs disabled");
+        return;
+    }
+
     if (done) return;
     done = YES;
-    
-    SCIRefreshSMCCache();
-    
-    // NOTA: MCIExtensionExperimentCacheGetMobileConfigBoolean é chamada por
-    // MCIExperimentCacheGetMobileConfigBoolean como tail-call. Ao hookear ambas,
-    // o master "experiment" hook intercepta o entry point externo e o "extension"
-    // hook captura chamadas diretas ao helper interno. Ambos são necessários.
+
     struct rebinding r[] = {
         {"MSGCSessionedMobileConfigGetBoolean",
          (void *)my_MSGCSessioned, (void **)&orig_MSGCSessioned},
@@ -127,12 +129,13 @@ void SCIInstallSessionedMCGateHooksIfNeeded(void) {
     };
     int rc = rebind_symbols(r, sizeof(r) / sizeof(r[0]));
     SCILOG("rebind_symbols=%d (0=ok)", rc);
-    
+
     SCIInstallSMCKVO();
 }
 
 %ctor {
     @autoreleasepool {
-        SCIInstallSessionedMCGateHooksIfNeeded();
+        // Startup-safe: do not install persisted Sessioned/MCI fishhooks from launch.
+        // SCIInstallSessionedMCGateHooksIfNeeded() is called only by an explicit Settings toggle.
     }
 }

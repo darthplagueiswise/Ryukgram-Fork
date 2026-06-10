@@ -24,7 +24,6 @@
 static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
 
 
-static NSString *const kSCIIGWordmarkModeKey = @"sci_igwordmark_mode";
 
 @implementation SCIBulkGatingPresets
 
@@ -190,48 +189,37 @@ static NSString *const kSCIIGWordmarkModeKey = @"sci_igwordmark_mode";
 + (void)installWordmarkPrefObserver {
     [SCIPrefObserver observeKey:kWordmarkKey handler:^{
         NSString *val = [[NSUserDefaults standardUserDefaults] stringForKey:kWordmarkKey];
-        NSInteger variant = 0;
-        if      ([val isEqualToString:@"1a_alt"]) variant = 1;
-        else if ([val isEqualToString:@"1a"])     variant = 2;
-        else if ([val isEqualToString:@"1b_alt"]) variant = 3;
-        else if ([val isEqualToString:@"1b"])     variant = 4;
+        NSInteger variant = [[SCIBulkGatingPresets igWordmarkVariantMap][val ?: @"off"] integerValue];
         [SCIBulkGatingPresets applyWordmark:variant];
     }];
 }
 
 
 + (NSArray<NSString *> *)igWordmarkModes {
-    return @[@"default", @"1a", @"1a_alt", @"1b", @"1b_alt"];
+    return @[@"off", @"1a_alt", @"1a", @"1b_alt", @"1b"];
 }
 
-+ (NSDictionary<NSString *, NSString *> *)igWordmarkSelectorMap {
++ (NSDictionary<NSString *, NSNumber *> *)igWordmarkVariantMap {
     return @{
-        @"1a": @"isIGWordmark1aEnabled",
-        @"1a_alt": @"isIGWordmark1aAltEnabled",
-        @"1b": @"isIGWordmark1bEnabled",
-        @"1b_alt": @"isIGWordmark1bAltEnabled"
+        @"off": @0,
+        @"1a_alt": @1,
+        @"1a": @2,
+        @"1b_alt": @3,
+        @"1b": @4,
     };
 }
 
 + (void)applyIGWordmarkMode:(NSString *)mode {
-    NSString *m = [[self igWordmarkModes] containsObject:(mode ?: @"")] ? mode : @"default";
-    [[NSUserDefaults standardUserDefaults] setObject:m forKey:kSCIIGWordmarkModeKey];
-
-    NSString *cls = @"IGDSLauncherConfig";
-    NSDictionary<NSString *, NSString *> *map = [self igWordmarkSelectorMap];
-    for (NSString *key in map) {
-        NSString *sel = map[key];
-        if ([m isEqualToString:@"default"]) {
-            CRBO(cls, sel, NO);
-        } else {
-            SRBO(cls, sel, NO, [key isEqualToString:m]);
-        }
-    }
+    NSString *m = [[self igWordmarkModes] containsObject:(mode ?: @"")] ? mode : @"off";
+    [[NSUserDefaults standardUserDefaults] setObject:m forKey:kWordmarkKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    NSInteger variant = [[self igWordmarkVariantMap][m] integerValue];
+    [self applyWordmark:variant];
 }
 
 + (NSString *)currentIGWordmarkMode {
-    NSString *m = [[NSUserDefaults standardUserDefaults] stringForKey:kSCIIGWordmarkModeKey] ?: @"default";
-    return [[self igWordmarkModes] containsObject:m] ? m : @"default";
+    NSString *m = [[NSUserDefaults standardUserDefaults] stringForKey:kWordmarkKey] ?: @"off";
+    return [[self igWordmarkModes] containsObject:m] ? m : @"off";
 }
 
 @end

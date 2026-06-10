@@ -53,7 +53,7 @@ static volatile BOOL sCacheEasyMCQ      = NO;
 
 static void SCIRefreshEasyGatingCache(void) {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    BOOL all = [ud boolForKey:kEasyAll];
+    BOOL all = [ud boolForKey:kEasyAll] || [ud boolForKey:@"sci_force_all_mc_gates"];
     sCacheEasyAll      = all;
     sCacheEasyInternal = all || [ud boolForKey:kEasyInternal];
     sCacheEasyPlatform = all || [ud boolForKey:kEasyPlatform];
@@ -128,14 +128,17 @@ static void SCIInstallEasyGatingKVO(void) {
 // Chamado do %ctor — seguro porque ainda não instalamos os hooks ao ler prefs.
 void SCIInstallEasyGatingHooksIfNeeded(void) {
     static BOOL done = NO;
+
+    SCIRefreshEasyGatingCache();
+    BOOL any = sCacheEasyAll || sCacheEasyInternal || sCacheEasyPlatform || sCacheEasyAuth || sCacheEasyMCQ;
+    if (!any) {
+        SCILOG("skip install: all prefs disabled");
+        return;
+    }
+
     if (done) return;
     done = YES;
 
-    // Leitura de NSUserDefaults é safe aqui: hooks ainda não estão instalados.
-    SCIRefreshEasyGatingCache();
-
-    // fishhook rebind — GOT rewrite em memória (safe para sideload).
-    // Nomes SEM underscore: fishhook compara contra o symbol name após o '_' inicial.
     struct rebinding r[] = {
         {"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
          (void *)my_EasyInternal, (void **)&orig_EasyInternal},
@@ -149,13 +152,12 @@ void SCIInstallEasyGatingHooksIfNeeded(void) {
     int rc = rebind_symbols(r, sizeof(r) / sizeof(r[0]));
     SCILOG("rebind_symbols=%d (0=ok)", rc);
 
-    // KVO instalado APÓS os hooks: handlers do KVO chamam SCIRefreshEasyGatingCache
-    // (ObjC puro) sem risco de re-entrant porque nossa cache é C static.
     SCIInstallEasyGatingKVO();
 }
 
 %ctor {
     @autoreleasepool {
-        SCIInstallEasyGatingHooksIfNeeded();
+        // Startup-safe: do not install persisted EasyGating fishhooks from launch.
+        // SCIInstallEasyGatingHooksIfNeeded() is called only by an explicit Settings toggle.
     }
 }

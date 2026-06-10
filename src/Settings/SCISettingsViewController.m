@@ -4,11 +4,16 @@
 #import "SCISearchBarStyler.h"
 #import "GlassUI/SCIAdaptiveGlass.h"
 #import "../Features/General/SCICacheManager.h"
+#import "../Features/Dogfooding/SCIInternalMenusForce.h"
+#import "../Features/Gating/SCIBulkGatingPresets.h"
 #import "../SCIImageCache.h"
 #import "../Utils.h"
 #import "../Tweak.h"
 #import "../UI/SCIColorPicker.h"
-#import "../Features/Gating/SCIBulkGatingPresets.h"
+
+void SCIInstallMobileConfigInternalUseGateIfNeeded(void);
+void SCIInstallEasyGatingHooksIfNeeded(void);
+void SCIInstallSessionedMCGateHooksIfNeeded(void);
 
 static char kSCIRowKey;
 
@@ -469,7 +474,7 @@ static char kSCIRowKey;
 		}
 		case SCITableCellSwitch: {
 			UISwitch *t = UISwitch.new;
-			t.on = row.disabled ? NO : [SCIUtils getBoolPref:row.defaultsKey];
+			t.on = row.disabled ? NO : (row.dynamicSwitchValue ? row.dynamicSwitchValue() : [SCIUtils getBoolPref:row.defaultsKey]);
 			t.onTintColor = [SCIUtils SCIColor_Primary];
 			t.enabled = !row.disabled;
 			objc_setAssociatedObject(t, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -573,6 +578,11 @@ static char kSCIRowKey;
 
 - (void)switchChanged:(UISwitch *)sender {
 	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
+	if (row.onSwitchChange) {
+		row.onSwitchChange(sender.isOn);
+		[self reloadCellForView:sender animated:NO];
+		return;
+	}
 	if (!row.defaultsKey.length) return;
 	[SCIUtils setPref:@(sender.isOn) forKey:row.defaultsKey];
 	if (row.requiresRestart) [SCIUtils showRestartConfirmation];
@@ -584,12 +594,25 @@ static char kSCIRowKey;
 		self.sections = [SCITweakSettings rebuildAdvancedEncodingSlotInSections:self.sections];
 		[self sciReloadFromNotification];
 	}
-	if ([row.defaultsKey isEqualToString:@"sci_bulk_liquid_glass_enabled"])
-		[SCIBulkGatingPresets applyLiquidGlass:sender.isOn];
-	if ([row.defaultsKey isEqualToString:@"sci_bulk_statusbar_oldschool_enabled"])
-		[SCIBulkGatingPresets applyStatusBarOldSchool:sender.isOn];
-	if ([row.defaultsKey isEqualToString:@"sci_bulk_story_tray_enabled"])
-		[SCIBulkGatingPresets applyStoryTray:sender.isOn];
+	NSSet<NSString *> *mcKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
+		@"sci_force_mc_internal_use_all", @"sci_force_mc_internal_use_boolean",
+		@"sci_force_ig_internal_apps_installed_after_ios18",
+		@"sci_force_minos_dogfood_mek_encryption"]];
+	NSSet<NSString *> *easyKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
+		@"sci_force_easy_gating_all", @"sci_force_easy_gating_internal",
+		@"sci_force_easy_gating_platform", @"sci_force_easy_gating_auth",
+		@"sci_force_easy_gating_mcq"]];
+	NSSet<NSString *> *sessionedKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
+		@"sci_force_sessioned_mc_all", @"sci_force_msgc_sessioned_boolean",
+		@"sci_force_mci_extension_boolean", @"sci_force_mci_experiment_boolean"]];
+	if (sender.isOn) {
+		if ([mcKeys containsObject:row.defaultsKey]) SCIInstallMobileConfigInternalUseGateIfNeeded();
+		if ([easyKeys containsObject:row.defaultsKey]) SCIInstallEasyGatingHooksIfNeeded();
+		if ([sessionedKeys containsObject:row.defaultsKey]) SCIInstallSessionedMCGateHooksIfNeeded();
+	}
+	// Internal & Dogfood Menus is persistence-only here. Do not fan this switch
+	// out into MobileConfig/internal/employee gates during launch. Runtime execution
+	// is manual post-launch via explicit toggles/buttons.
 }
 
 - (void)stepperChanged:(UIStepper *)sender {
@@ -604,8 +627,8 @@ static char kSCIRowKey;
 	NSString *key = props[@"defaultsKey"];
 	id value = props[@"value"];
 	if (key.length && value) [SCIUtils setPref:value forKey:key];
-	if ([key isEqualToString:@"sci_ig_wordmark_mode"])
-		[SCIBulkGatingPresets applyIGWordmarkMode:[value isKindOfClass:NSString.class] ? value : @"default"];
+	if ([key isEqualToString:@"sci_ig_wordmark_variant"] || [key isEqualToString:@"sci_ig_wordmark_mode"])
+		[SCIBulkGatingPresets applyIGWordmarkMode:[value isKindOfClass:NSString.class] ? value : @"off"];
 	[self sciReloadFromNotification];
 
 	NSString *pickerKey = props[@"presentColorPickerForKey"];

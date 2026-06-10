@@ -120,6 +120,19 @@ static void SCIHookClass(NSString *plain, NSArray<NSString *> *alts, SEL sel, IM
     SCILOG("class %{public}@ %{public}s: %{public}s", plain, sel_getName(sel), (*origOut ? "HOOKED" : "FAILED"));
 }
 
+
+static BOOL SCIAnyEmployeeForcePrefEnabled(void) {
+    return SCIForceGateOn(@"sci_force_ig_internal_employee") ||
+           SCIForceGateOn(@"sci_force_ig_is_employee") ||
+           SCIForceGateOn(@"sci_force_employee_defaults_persist") ||
+           SCIForceGateOn(@"sci_force_ig_featured_internal_badge") ||
+           SCIForceGateOn(@"sci_force_ig_inbox_internal_badge") ||
+           SCIForceGateOn(@"sci_force_ig_creation_internal_label") ||
+           SCIForceGateOn(@"sci_force_ig_launch_debug_info") ||
+           SCIForceGateOn(@"sci_force_ig_launch_debug_info_v2") ||
+           SCIForceGateOn(@"sci_force_ig_story_debug_underlay");
+}
+
 static void SCIInstallAllGates(void) {
     SCIHookInstance(@"IGFacebookUserInfo", @[], @selector(isEmployee),
                     (IMP)new_isEmployee, (IMP *)&orig_isEmployee);
@@ -143,17 +156,22 @@ static void SCIInstallAllGates(void) {
 
 %ctor {
     @autoreleasepool {
+        if (!SCIAnyEmployeeForcePrefEnabled()) return;
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
-        [SCIEmployeeDefaults installHooksIfNeeded];
-        SCIInstallAllGates();
-        double delays[] = {1.0, 3.0, 6.0};
-        for (NSUInteger i = 0; i < sizeof(delays) / sizeof(delays[0]); i++) {
-            double t = delays[i];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(t * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                SCIInstallAllGates();
-                [SCIEmployeeDefaults installHooksIfNeeded];
-            });
-        }
+        // Defer off static-init: see SCIEasyGatingHook.x for full explanation.
+        __block id _sciTok = [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"UIApplicationDidBecomeActiveNotification"
+                        object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(__unused NSNotification *note) {
+            if (_sciTok) { [[NSNotificationCenter defaultCenter] removeObserver:_sciTok]; _sciTok = nil; }
+            double delays[] = {0.5, 2.0, 5.0};
+            for (NSUInteger i = 0; i < sizeof(delays)/sizeof(delays[0]); i++) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delays[i]*NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    [SCIEmployeeDefaults installHooksIfNeeded];
+                    SCIInstallAllGates();
+                });
+            }
+        }];
     }
 }

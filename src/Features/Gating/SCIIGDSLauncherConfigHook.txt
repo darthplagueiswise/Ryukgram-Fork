@@ -1,0 +1,208 @@
+// SCIIGDSLauncherConfigHook.x
+//
+// VALIDAÇÃO BINÁRIA CONFIRMADA (lief scan, FBSharedFramework arm64):
+//
+//   Classe: IGDSLauncherConfig  → FBSharedFramework __cstring
+//   Protocolo: IGDSLauncherConfigProtocol → FBSharedFramework __cstring
+//   Todos os seletores abaixo: FBSharedFramework __objc_methname scan
+//
+//   IMPORTANTE: Classe em FBSharedFramework, acessível via NSClassFromString.
+//   canSupportLauncher + isEligibleForLaunch já são forçados pelo base launcher hook.
+//
+// GRUPOS:
+//   sci_igds_liquidglass   — isLiquidGlass* + _isLiquidGlassEnabled + canUseInternal*
+//   sci_igds_prism         — isPrism* + _isPrism* + isIGBPrism*
+//   sci_igds_launcher_all  — master: ativa todos os grupos
+
+#import <Foundation/Foundation.h>
+#import <objc/runtime.h>
+#import <substrate.h>
+#import <os/log.h>
+
+#define IGDS_LOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIIGDS] " fmt,##__VA_ARGS__)
+
+
+// ── Pref cache ────────────────────────────────────────────────────────────────
+static volatile BOOL sLG    = NO;
+static volatile BOOL sPrism = NO;
+static volatile BOOL sAll   = NO;
+static volatile BOOL sWM1a = NO;
+static volatile BOOL sWM1aAlt = NO;
+static volatile BOOL sWM1b = NO;
+static volatile BOOL sWM1bAlt = NO;
+static NSUInteger gHookCount = 0;
+
+static void IGDSReadPrefs(void) {
+    NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    sLG    = [ud boolForKey:@"sci_igds_liquidglass"] || [ud boolForKey:@"sci_apply_liquidglass"];
+    sPrism = [ud boolForKey:@"sci_igds_prism"];
+    sAll   = [ud boolForKey:@"sci_igds_launcher_all"];
+    sWM1a    = [ud boolForKey:@"sci_igds_wordmark_isIGWordmark1aEnabled"];
+    sWM1aAlt = [ud boolForKey:@"sci_igds_wordmark_isIGWordmark1aAltEnabled"];
+    sWM1b    = [ud boolForKey:@"sci_igds_wordmark_isIGWordmark1bEnabled"];
+    sWM1bAlt = [ud boolForKey:@"sci_igds_wordmark_isIGWordmark1bAltEnabled"];
+}
+
+// ── Generic hook helper ───────────────────────────────────────────────────────
+// Uses MSHookMessageEx(class, selector) — safe even with shared trampoline IMPs.
+// Stores a weak cache to avoid double-hooking.
+static NSMutableSet<NSString *> *gHooked;
+
+typedef BOOL (*BoolNoArg_t)(id, SEL);
+static NSMutableDictionary<NSString *, NSValue *> *gOrigs;
+
+static void HookBoolGetter(Class cls, SEL sel, BOOL(^force)(void)) {
+    if (!cls || !sel) return;
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return;
+    char ret[4]={0}; method_getReturnType(m, ret, sizeof(ret));
+    if (ret[0] != 'B' && ret[0] != 'c') return;
+    if (method_getNumberOfArguments(m) != 2) return;
+
+    NSString *key = [NSString stringWithFormat:@"%s#%s",
+                     class_getName(cls), sel_getName(sel)];
+    if ([gHooked containsObject:key]) return;
+
+    BOOL(^capturedForce)(void) = [force copy];
+    BoolNoArg_t origFn = (BoolNoArg_t)method_getImplementation(m);
+    gOrigs[key] = [NSValue valueWithPointer:(const void *)origFn];
+
+    IMP hook = imp_implementationWithBlock(^BOOL(id _self) {
+        if (capturedForce()) return YES;
+        BoolNoArg_t o = (BoolNoArg_t)[gOrigs[key] pointerValue];
+        return o ? o(_self, sel) : NO;
+    });
+    MSHookMessageEx(cls, sel, hook, nil);
+    [gHooked addObject:key];
+    gHookCount++;
+}
+
+
+// ── Confirmed selector lists (FBSharedFramework __objc_methname verified) ─────
+
+// LiquidGlass — ALL confirmed in FBSharedFramework methnames
+static NSArray<NSString *> *IGDSLiquidGlassPositive(void) {
+    return @[
+        @"isLiquidGlassEnabled",          // confirmed
+        @"_isLiquidGlassEnabled",         // confirmed (underscore variant)
+        @"isLiquidGlassToggleEnabled",    // confirmed
+        @"isLiquidGlassInAppNotificationEnabled",  // confirmed
+        @"isLiquidGlassToastEnabled",     // confirmed
+        @"isLiquidGlassToastPeekEnabled", // confirmed
+        @"isLiquidGlassIconBarButtonEnabled",      // confirmed
+        @"isLiquidGlassNavigationContentStylePinningEnabled",  // confirmed
+        @"isLiquidGlassEaseInOutBlurEnabled",      // confirmed
+        @"isLiquidGlassCGContextBlurEnabled",      // confirmed
+        @"isOptimizeLiquidGlassGlyphRenderingEnabled",  // confirmed
+        @"canUseInternalLiquidGlassDebugger",      // confirmed
+        @"isContextMenuMigrationEnabled",
+    ];
+}
+
+// Prism — ALL confirmed in FBSharedFramework methnames
+static NSArray<NSString *> *IGDSPrismPositive(void) {
+    return @[
+        @"_isPrismEnabled",               // confirmed (underscore!)
+        @"_isPrismDesignEnabled",         // confirmed (underscore!)
+        @"isPrismControlsEnabled",        // confirmed
+        @"isPrismDefaultTooltipEnabled",  // confirmed
+        @"isPrismToastsEnabled",          // confirmed
+        @"isPrismAlertDialogEnabled",     // confirmed
+        @"_isPrismAvatarRingEnabled",     // confirmed (underscore!)
+        @"isPrismContextMenuEnabled",     // confirmed
+        @"isPrismContextMenuRefactorEnabled",  // confirmed
+        @"isPrismIndigoButtonEnabled",    // confirmed
+        @"isPrismIndigoButtonM1DirectEnabled", // confirmed
+        @"isIGBPrismEnabled",             // confirmed
+        @"isPrismOverflowMenuEnabled",    // confirmed
+        @"isPrismOverflowMenuStampWidthIncreased",  // confirmed
+        @"isPrismCommentsEmptyStateEnabled",  // confirmed
+        @"isPrismDividersUpdateEnabled",  // confirmed
+        @"isPrismDividersProfileUpdateEnabled",    // confirmed
+        @"isPrismDividersNotificationsUpdateEnabled",  // confirmed
+        @"isPrismDividersEditReelEnabled", // confirmed
+        @"isPrismDividersCommentsUpdateEnabled",   // confirmed
+        @"isPrismDividersShareSheetUpdateEnabled", // confirmed
+        @"isPrismIndigoActionCellsEnabled",  // confirmed
+        @"isPrismMediaButtonsEnabled",    // confirmed
+        @"isPrismBottomSheetEnabled",     // confirmed
+        @"isPrismCreationIconsEnabled",   // confirmed
+        @"isPrismAllUserAssetsEnabled",   // confirmed
+        @"isPrismFollowRelatedUserAssetsEnabled",  // confirmed
+        @"_isPrismSecondaryNonUserIconsEnabled",   // confirmed (underscore)
+    ];
+}
+
+// General methods on IGDSLauncherConfig (FLEX confirmed, FBSharedFramework)
+static NSArray<NSString *> *IGDSGeneralPositive(void) {
+    return @[
+        @"isNavPushRoundedCornersEnabled",          // confirmed
+        @"isTransitionZoomCustomizationEnabled",    // confirmed
+        @"isNativeBottomsheetForiPhoneEnabled",
+        @"isNativeBottomsheetForiPhoneOnAllSurfacesEnabled",
+        @"isAnimatedWaveformVoiceEntrypointEnabled", // confirmed
+        @"isAsyncFontRegistrationEnabled",           // confirmed
+        @"isDirectChannelsMigrationEnabled",         // confirmed
+        @"isPageVCLayoutInvalidationFixEnabled",     // confirmed
+    ];
+}
+
+// Wordmark — ALL confirmed in FBSharedFramework methnames
+// NOTE: These are mutually exclusive. Do NOT force all at once.
+// They are exposed per-toggle in the settings submenu, NOT as a group.
+static NSArray<NSString *> *IGDSWordmarkSelectors(void) {
+    return @[
+        @"isIGWordmark1aEnabled",     // confirmed
+        @"isIGWordmark1aAltEnabled",  // confirmed
+        @"isIGWordmark1bEnabled",     // confirmed
+        @"isIGWordmark1bAltEnabled",  // confirmed
+    ];
+}
+
+// ── Install ───────────────────────────────────────────────────────────────────
+static BOOL sInstalled = NO;
+
+static void IGDSInstall(void) {
+    IGDSReadPrefs();
+    if (!sAll && !sLG && !sPrism) return;
+    if (!gHooked) gHooked = [NSMutableSet set];
+    if (!gOrigs)  gOrigs  = [NSMutableDictionary dictionary];
+
+    Class cls = NSClassFromString(@"IGDSLauncherConfig");
+    if (!cls) {
+        IGDS_LOG("IGDSLauncherConfig not found yet");
+        return;
+    }
+
+    for (NSString *sel in IGDSLiquidGlassPositive())
+        HookBoolGetter(cls, NSSelectorFromString(sel), ^{ return (BOOL)(sAll || sLG); });
+
+    for (NSString *sel in IGDSPrismPositive())
+        HookBoolGetter(cls, NSSelectorFromString(sel), ^{ return (BOOL)(sAll || sPrism); });
+
+    for (NSString *sel in IGDSGeneralPositive())
+        HookBoolGetter(cls, NSSelectorFromString(sel), ^{ return sAll; });
+
+    // Wordmark: each selector reads only C static cache inside the replacement block.
+    HookBoolGetter(cls, NSSelectorFromString(@"isIGWordmark1aEnabled"), ^{ return sWM1a; });
+    HookBoolGetter(cls, NSSelectorFromString(@"isIGWordmark1aAltEnabled"), ^{ return sWM1aAlt; });
+    HookBoolGetter(cls, NSSelectorFromString(@"isIGWordmark1bEnabled"), ^{ return sWM1b; });
+    HookBoolGetter(cls, NSSelectorFromString(@"isIGWordmark1bAltEnabled"), ^{ return sWM1bAlt; });
+
+    sInstalled = gHookCount > 0;
+    IGDS_LOG("installed=%d hooks=%lu LG=%d Prism=%d All=%d",
+             (int)sInstalled, (unsigned long)gHookCount,
+             (int)sLG, (int)sPrism, (int)sAll);
+}
+
+void SCIIGDSEnsureHooksInstalled(void) { IGDSInstall(); }
+
+%ctor {
+    @autoreleasepool {
+        IGDSInstall();
+        double d[] = {1.0, 3.0, 6.0};
+        for (NSUInteger i = 0; i < 3; i++)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(d[i]*NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ IGDSInstall(); });
+    }
+}

@@ -2,8 +2,8 @@
 // Ações em massa para os presets de Feature Gating.
 // Usa SCIGatingCatalog.setRuntimeBoolOverride: — o mesmo mecanismo que
 // o Feature Gatings UI (mostra "forced ON via getter hook").
-// Hooks são instalados imediatamente, sem restart.
-// Overrides são persistidos em NSUserDefaults e reaplicados no launch.
+// Hooks são instalados por ação explícita, sem restart.
+// Overrides são persistidos em NSUserDefaults, mas não são reinstalados automaticamente no launch.
 
 #import <Foundation/Foundation.h>
 
@@ -47,7 +47,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 // Instala SCIPrefObserver para o seletor de wordmark.
-// Deve ser chamado no %ctor após installPersistedDirectOverrideHooks.
+// Não deve ser usado para reinstalar hooks no %ctor; use apenas para ações explícitas de UI.
 + (void)installWordmarkPrefObserver;
 
 

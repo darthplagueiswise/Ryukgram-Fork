@@ -5,7 +5,7 @@
 + (SCISetting *)storiesNavCell {
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Stories")
 										   subtitle:@""
-											   icon:[SCISymbol symbolWithIGName:@"story" fallback:@"circle.dashed"]
+											   icon:[SCISymbol symbolWithIGName:@"story" fallback:@"camera.circle.fill"]
 										navSections:@[@{
 											@"header": SCILocalized(@"Action button"),
 											@"footer": SCILocalized(@"Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below."),

@@ -26,7 +26,6 @@
 
 // ── Pref keys ──────────────────────────────────────────────────────────────
 static NSString * const kBool        = @"sci_force_mc_internal_use_boolean";
-static NSString * const kSessionless = @"sci_force_mc_sessionless_internal_use_boolean";
 static NSString * const kInternalApp = @"sci_force_ig_internal_apps_installed_after_ios18";
 static NSString * const kMinos       = @"sci_force_minos_dogfood_mek_encryption";
 
@@ -34,29 +33,24 @@ static NSString * const kMinos       = @"sci_force_minos_dogfood_mek_encryption"
 // Written at %ctor and whenever the user flips a toggle (KVO).
 // Hooks read these atomically — zero risk of re-entrant NSUserDefaults call.
 static volatile BOOL sCacheBool        = NO;
-static volatile BOOL sCacheSessionless = NO;
 static volatile BOOL sCacheInternalApp = NO;
 static volatile BOOL sCacheMinos       = NO;
 
 static void SCIRefreshHookCache(void) {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    BOOL all = [ud boolForKey:@"sci_force_mc_internal_use_all"];
+    BOOL all = [ud boolForKey:@"sci_force_mc_internal_use_all"] || [ud boolForKey:@"sci_force_all_mc_gates"];
     sCacheBool        = all || [ud boolForKey:kBool];
-    sCacheSessionless = all || [ud boolForKey:kSessionless];
     sCacheInternalApp = all || [ud boolForKey:kInternalApp];
     sCacheMinos       = all || [ud boolForKey:kMinos];
-    SCILOG("cache refreshed — bool=%d sessionless=%d apps=%d minos=%d",
-           (int)sCacheBool, (int)sCacheSessionless,
-           (int)sCacheInternalApp, (int)sCacheMinos);
+    SCILOG("cache refreshed — bool=%d apps=%d minos=%d",
+           (int)sCacheBool, (int)sCacheInternalApp, (int)sCacheMinos);
 }
 
 // ── Originals ──────────────────────────────────────────────────────────────
 typedef BOOL (*MCBoolFn_t)(id, BOOL, void *);
-typedef BOOL (*MCSessionlessFn_t)(BOOL, void *);
 typedef BOOL (*SimpleBoolFn_t)(void);
 
 static MCBoolFn_t        orig_MCBool        = NULL;
-static MCSessionlessFn_t orig_MCSessionless = NULL;
 static SimpleBoolFn_t    orig_InternalApps  = NULL;
 static SimpleBoolFn_t    orig_Minos         = NULL;
 
@@ -64,10 +58,6 @@ static SimpleBoolFn_t    orig_Minos         = NULL;
 static BOOL my_MCBool(id session, BOOL def, void *p) {
     if (sCacheBool) return YES;
     return orig_MCBool ? orig_MCBool(session, def, p) : def;
-}
-static BOOL my_MCSessionless(BOOL def, void *p) {
-    if (sCacheSessionless) return YES;
-    return orig_MCSessionless ? orig_MCSessionless(def, p) : def;
 }
 static BOOL my_InternalApps(void) {
     if (sCacheInternalApp) return YES;
@@ -91,8 +81,8 @@ static SCIMCGateObserver *sObserver = nil;
 static void SCIInstallKVOObserver(void) {
     sObserver = [SCIMCGateObserver new];
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    for (NSString *key in @[kBool, kSessionless, kInternalApp, kMinos,
-                            @"sci_force_mc_internal_use_all"]) {
+    for (NSString *key in @[kBool, kInternalApp, kMinos,
+                            @"sci_force_mc_internal_use_all", @"sci_force_all_mc_gates"]) {
         [ud addObserver:sObserver forKeyPath:key
                options:NSKeyValueObservingOptionNew context:NULL];
     }
@@ -101,17 +91,21 @@ static void SCIInstallKVOObserver(void) {
 // ── Install ────────────────────────────────────────────────────────────────
 void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     static BOOL done = NO;
+
+    // Read prefs before installing hooks. If every pref is OFF, do not touch GOT/fishhook.
+    SCIRefreshHookCache();
+    BOOL any = sCacheBool || sCacheInternalApp || sCacheMinos;
+    if (!any) {
+        SCILOG("skip install: all prefs disabled");
+        return;
+    }
+
     if (done) return;
     done = YES;
-
-    // Read prefs once — safe here because we haven't installed hooks yet
-    SCIRefreshHookCache();
 
     struct rebinding r[] = {
         {"IGMobileConfigBooleanValueForInternalUse",
          (void *)my_MCBool, (void **)&orig_MCBool},
-        {"IGMobileConfigSessionlessBooleanValueForInternalUse",
-         (void *)my_MCSessionless, (void **)&orig_MCSessionless},
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
          (void *)my_InternalApps, (void **)&orig_InternalApps},
         {"MEBIsMinosDogfoodMekEncryptionVersionEnabled",
@@ -120,12 +114,12 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     int rc = rebind_symbols(r, sizeof(r) / sizeof(r[0]));
     SCILOG("rebind_symbols=%d (0=ok)", rc);
 
-    // Install KVO after hooks — safe because hooks don't call NSUserDefaults
     SCIInstallKVOObserver();
 }
 
 %ctor {
     @autoreleasepool {
-        SCIInstallMobileConfigInternalUseGateIfNeeded();
+        // Startup-safe: do not install persisted MobileConfig/internal-use fishhooks from launch.
+        // SCIInstallMobileConfigInternalUseGateIfNeeded() is called only by an explicit Settings toggle.
     }
 }

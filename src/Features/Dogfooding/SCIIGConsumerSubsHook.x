@@ -81,6 +81,15 @@ static void hookIsBenefitActive(Class cls) {
     SCILOG("isBenefitActive: %{public}s", gOrigActive?"HOOKED":"FAILED");
 }
 
+
+static BOOL SCIAnyIGPlusPrefEnabled(void) {
+    if ([SCIInternalGatePrefs individualGateEnabledForKey:kMaster]) return YES;
+    for (NSString *key in benefitKeys()) {
+        if ([SCIInternalGatePrefs individualGateEnabledForKey:key]) return YES;
+    }
+    return NO;
+}
+
 static void install(void) {
     if (!gDone) gDone=[NSMutableSet set];
     Class svc = NSClassFromString(@"IGConsumerSubsService");
@@ -100,6 +109,7 @@ static void install(void) {
 
 %ctor {
     @autoreleasepool {
+        if (!SCIAnyIGPlusPrefEnabled()) return;
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
         install();
         double delays[] = {1.0, 3.0, 6.0};

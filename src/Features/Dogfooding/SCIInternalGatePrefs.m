@@ -25,7 +25,6 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
         @"sci_force_ig_story_debug_underlay",
         kSCIMobileConfigMasterKey,
         @"sci_force_mc_internal_use_boolean",
-        @"sci_force_mc_sessionless_internal_use_boolean",
         @"sci_force_ig_internal_apps_installed_after_ios18",
         @"sci_force_minos_dogfood_mek_encryption",
         @"sci_force_mobileconfig_overrides",

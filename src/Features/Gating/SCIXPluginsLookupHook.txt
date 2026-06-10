@@ -1,0 +1,101 @@
+// SCIXPluginsLookupHook.x
+//
+// _XPluginsGetListLookupDataPair — INTERCEPTAÇÃO VIA DLSYM (version-independent)
+//
+// VALIDAÇÃO BINÁRIA (lief, Instagram arm64 build atual):
+//   _XPluginsGetListLookupDataPair EXPORTED dynamic symbol @ 0x101c4e6c0
+//   build antigo era 0x100da3bbc — por isso hardcode quebrou; dlsym resolve sempre.
+//
+// GUARDRAILS:
+//   - %ctor só instala se sci_xplugins_force_igonly ou sci_xplugins_observe já estiver ON.
+//   - replacement C não chama ObjC nem NSUserDefaults; só lê cache C estático.
+//   - sem mach_vm.h / mach_vm_region / endereço hardcoded.
+
+#import <Foundation/Foundation.h>
+#import <dlfcn.h>
+#import <substrate.h>
+#import <os/log.h>
+#import <string.h>
+
+#define SCILOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIXPlugins] " fmt,##__VA_ARGS__)
+
+static NSString *const kForce   = @"sci_xplugins_force_igonly";
+static NSString *const kObserve = @"sci_xplugins_observe";
+
+static volatile BOOL sForce   = NO;
+static volatile BOOL sObserve = NO;
+
+typedef void *(*XPluginsListLookup_t)(void *list, void *key);
+static XPluginsListLookup_t orig_XPluginsList = NULL;
+static char gSentinel[128];
+static BOOL sInstalled = NO;
+
+static BOOL isIGOnlyKey(void *key) {
+    if (!key) return NO;
+    const char *s = (const char *)key;
+    return (strncmp(s,"[IG-Only]",9)==0 || strncmp(s,"[IG-only]",9)==0 ||
+            strncmp(s,"[ig-only]",9)==0 || strncmp(s,"[Internal",9)==0 ||
+            strncmp(s,"[INTERNAL",9)==0);
+}
+
+static void *my_XPluginsList(void *list, void *key) {
+    void *result = orig_XPluginsList ? orig_XPluginsList(list,key) : NULL;
+    if (sObserve)
+        SCILOG("list=%p key=%p -> %p key='%s'",list,key,result,key?(const char*)key:"nil");
+    if (sForce && !result && isIGOnlyKey(key)) {
+        memset(gSentinel, 0, sizeof(gSentinel));
+        return gSentinel;
+    }
+    return result;
+}
+
+static void SCIRefreshXPluginsCache(void) {
+    NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    sForce   = [ud boolForKey:kForce];
+    sObserve = [ud boolForKey:kObserve];
+}
+
+@interface SCIXPluginsObserver : NSObject @end
+@implementation SCIXPluginsObserver
+- (void)observeValueForKeyPath:(NSString *)kp ofObject:(id)o
+                        change:(NSDictionary *)c context:(void *)ctx {
+    SCIRefreshXPluginsCache();
+}
+@end
+static SCIXPluginsObserver *sObs;
+
+static void SCIWriteInternalDefaults(void) {
+    NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+    [ud setBool:YES forKey:@"is_employee"];
+    [ud setBool:YES forKey:@"is_internal_build"];
+    [ud setBool:YES forKey:@"is_internal_only"];
+    [ud synchronize];
+}
+
+static void SCIInstallXPluginsHook(void) {
+    if (sInstalled) return;
+    void *real = dlsym(RTLD_DEFAULT, "XPluginsGetListLookupDataPair");
+    if (!real) { SCILOG("dlsym ainda indisponível"); return; }
+    SCILOG("dlsym XPluginsGetListLookupDataPair=%p", real);
+    if (sForce) SCIWriteInternalDefaults();
+    MSHookFunction(real, (void *)my_XPluginsList, (void **)&orig_XPluginsList);
+    sInstalled = (orig_XPluginsList != NULL);
+    SCILOG("hook instalado=%d", sInstalled);
+}
+
+%ctor {
+    @autoreleasepool {
+        SCIRefreshXPluginsCache();
+        if (!sForce && !sObserve) return;
+
+        sObs = [SCIXPluginsObserver new];
+        NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+        [ud addObserver:sObs forKeyPath:kForce options:NSKeyValueObservingOptionNew context:nil];
+        [ud addObserver:sObs forKeyPath:kObserve options:NSKeyValueObservingOptionNew context:nil];
+
+        double delays[] = {0.5, 2.0, 5.0};
+        for (NSUInteger i = 0; i < 3; i++)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delays[i]*NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ SCIInstallXPluginsHook(); });
+    }
+}

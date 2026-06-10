@@ -98,7 +98,7 @@ typedef NS_ENUM(NSInteger, SCITableCell) {
                     requiresRestart:(BOOL)requiresRestart;
 
 /// Hook-driven switch: no defaultsKey storage. State read via getValue, toggle via onToggle.
-/// The block pair owns all persistence (typically via SCIBulkGatingPresets / setRuntimeBoolOverride).
+/// The block pair owns all persistence (e.g. via SCIGatingCatalog setRuntimeBoolOverride).
 + (instancetype)hookSwitchCellWithTitle:(NSString *)title
                                subtitle:(NSString *)subtitle
                                    icon:(nullable SCISymbol *)icon

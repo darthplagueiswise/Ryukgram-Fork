@@ -31,7 +31,23 @@ static void SCIInstallUserSessionHooks(void) {
 }
 
 %ctor {
-    [SCIEmployeeDefaults installHooksIfNeeded];
-    SCIInstallUserSessionHooks();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallUserSessionHooks(); });
+    @autoreleasepool {
+        // Defer off static-init: see SCIEasyGatingHook.x for full explanation.
+        // SCIEmployeeDefaults installs GLOBAL NSUserDefaults hooks; doing that during
+        // dyld static init intercepts reads inside METARunPreApplicationMain.
+        __block id _sciTok = [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"UIApplicationDidBecomeActiveNotification"
+                        object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(__unused NSNotification *note) {
+            if (_sciTok) { [[NSNotificationCenter defaultCenter] removeObserver:_sciTok]; _sciTok = nil; }
+            double delays[] = {0.5, 2.0, 5.0};
+            for (NSUInteger i=0;i<sizeof(delays)/sizeof(delays[0]);i++) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delays[i]*NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    [SCIEmployeeDefaults installHooksIfNeeded];
+                    SCIInstallUserSessionHooks();
+                });
+            }
+        }];
+    }
 }

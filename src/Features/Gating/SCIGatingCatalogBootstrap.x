@@ -1,16 +1,12 @@
 #import "SCIGatingCatalog.h"
-#import "SCIBulkGatingPresets.h"
 
-// Runs very early. If a previous on-demand gating evaluation armed the crash guard and
-// the app then crashed (uncatchable fault inside a getter), the offending getter is moved
-// to the blacklist here so it is never auto-evaluated again. No hooks, no class scan —
-// just a defaults reconcile, so it is safe for a sideloaded build's launch path.
+// Startup-safe bootstrap.
+// Do not reinstall persisted runtime/direct hooks here. Stale persisted overrides can
+// crash before the app UI appears. Runtime/Feature Gating hooks are installed when the
+// user explicitly toggles/applies a getter. SCIGatingCatalog persists first, then tries
+// the selected getter once during that explicit UI action.
 %ctor {
     @autoreleasepool {
         [SCIGatingCatalog reconcileCrashGuardOnLaunch];
-        [SCIGatingCatalog installPersistedDirectOverrideHooks];
-        // SCIPrefObserver para o seletor de wordmark: aplica imediatamente quando
-        // o menu muda sem precisar de restart.
-        [SCIBulkGatingPresets installWordmarkPrefObserver];
     }
 }

@@ -1,3 +1,17 @@
+			@{
+				@"header": SCILocalized(@"Liquid Glass"),
+				@"footer": SCILocalized(@"Aplica o preset por ação explícita no menu, sem reinstalar overrides persistidos durante o launch."),
+				@"rows": @[
+					[SCISetting hookSwitchCellWithTitle:SCILocalized(@"Liquid Glass")
+									   subtitle:@""
+										   icon:[SCISymbol symbolWithName:@"sparkles"]
+									   getValue:^BOOL{ return [SCIBulkGatingPresets isLiquidGlassActive]; }
+									   onToggle:^(BOOL on){ [SCIBulkGatingPresets applyLiquidGlass:on]; }],
+					[SCISetting menuCellWithTitle:SCILocalized(@"Liquid Glass tab bar")
+									 subtitle:@""
+										 menu:[self menus][@"liquid_glass_tabbar_mode"]],
+				]
+			},
 #import "SCISettingsSections.h"
 #import "../SCIAppIconPickerViewController.h"
 #import "../../InstagramHeaders.h"
@@ -66,16 +80,16 @@
 		},
 		@{
 			@"header": SCILocalized(@"Liquid Glass"),
-			@"footer": SCILocalized(@"Aplica overrides de Feature Gating via getter hook (IGDSLauncherConfig, IGLiquidGlass, IGLiquidGlassNavigationExperimentHelper, IGLiquidGlassInteractiveTabBar, IGDSAlertDialogLiquidGlass). Efeito imediato; restart completa a aplicação visual."),
+			@"footer": SCILocalized(@"Aplica o preset por ação explícita no menu, sem reinstalar overrides persistidos durante o launch."),
 			@"rows": @[
 				[SCISetting hookSwitchCellWithTitle:SCILocalized(@"Liquid Glass")
-										   subtitle:@""
-											   icon:[SCISymbol symbolWithName:@"sparkles"]
-										   getValue:^BOOL{ return [SCIBulkGatingPresets isLiquidGlassActive]; }
-										   onToggle:^(BOOL on){ [SCIBulkGatingPresets applyLiquidGlass:on]; }],
+								   subtitle:@""
+									   icon:[SCISymbol symbolWithName:@"sparkles"]
+								   getValue:^BOOL{ return [SCIBulkGatingPresets isLiquidGlassActive]; }
+								   onToggle:^(BOOL on){ [SCIBulkGatingPresets applyLiquidGlass:on]; }],
 				[SCISetting menuCellWithTitle:SCILocalized(@"Liquid Glass tab bar")
-									 subtitle:SCILocalized(@"Fixed impede encolhimento. Hide oculta ao rolar")
-										 menu:[self menus][@"liquid_glass_tabbar_mode"]],
+								 subtitle:@""
+									 menu:[self menus][@"liquid_glass_tabbar_mode"]],
 			]
 		},
 		@{

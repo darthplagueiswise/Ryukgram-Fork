@@ -406,16 +406,23 @@ static void SCIAppendBoolMethods(Class cls, BOOL classMethod, NSMutableArray<NSD
 + (void)setRuntimeBoolOverride:(BOOL)value class:(NSString *)rawClassName selector:(NSString *)selectorName classMethod:(BOOL)isClassMethod {
     if (!rawClassName.length || !selectorName.length) return;
     NSString *legacy = isClassMethod ? nil : [self canonicalNameForClass:rawClassName selector:selectorName];
-    if (![self installRuntimeBoolHookForClass:rawClassName selector:selectorName classMethod:isClassMethod legacyName:legacy]) return;
+
+    // Persist first. Some Swift configuration classes are registered after the
+    // settings UI is already usable. If install fails now, it stays persisted for UI state, but launch bootstrap
+    // deliberately does not retry stale overrides.
     NSMutableDictionary *d = [[self runtimeBoolOverrides] mutableCopy];
     d[[self runtimeBoolKeyForClass:rawClassName selector:selectorName classMethod:isClassMethod]] = @(value);
     [NSUserDefaults.standardUserDefaults setObject:d forKey:kRuntimeBoolOverridesKey];
+
     if (!isClassMethod) {
         NSMutableDictionary *legacyOverrides = [[self directOverrides] mutableCopy];
         legacyOverrides[legacy] = @(value);
         [NSUserDefaults.standardUserDefaults setObject:legacyOverrides forKey:kDirectOverridesKey];
     }
     [NSUserDefaults.standardUserDefaults synchronize];
+
+    [self installRuntimeBoolHookForClass:rawClassName selector:selectorName classMethod:isClassMethod legacyName:legacy];
+
 }
 
 + (void)clearRuntimeBoolOverrideForClass:(NSString *)rawClassName selector:(NSString *)selectorName classMethod:(BOOL)isClassMethod {

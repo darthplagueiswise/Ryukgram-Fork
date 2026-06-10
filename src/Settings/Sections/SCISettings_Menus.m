@@ -1,4 +1,12 @@
 #import "SCISettingsSections.h"
+#import "../../Localization/SCILocalization.h"
+
+
+static UIImage *SCIWordmarkMenuImage(NSString *name) {
+    NSBundle *bundle = SCILocalizationBundle();
+    UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+    return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
 
 @implementation SCITweakSettings (Section_Menus)
 
@@ -249,24 +257,24 @@
 						   propertyList:@{@"defaultsKey": @"main_feed_mode", @"value": @"following", @"requiresRestart": @YES}],
 		]],
 		@"ig_wordmark_variant": [UIMenu menuWithChildren:@[
-			[UICommand commandWithTitle:SCILocalized(@"Padrão (desativado)")
+			[UICommand commandWithTitle:SCILocalized(@"Padrão")
 								  image:[UIImage systemImageNamed:@"nosign"]
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"off"}],
 			[UICommand commandWithTitle:SCILocalized(@"Estilo 1A-Alt (arredondada)")
-								  image:([UIImage imageNamed:@"instagram-wordmark-1a-alt"] ?: [UIImage systemImageNamed:@"1.circle.fill"])
+								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1a-alt") ?: [UIImage systemImageNamed:@"1.circle.fill"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a_alt"}],
 			[UICommand commandWithTitle:SCILocalized(@"Estilo 1A (itálica)")
-								  image:([UIImage imageNamed:@"instagram-wordmark-1a"] ?: [UIImage systemImageNamed:@"1.circle"])
+								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1a") ?: [UIImage systemImageNamed:@"1.circle"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a"}],
 			[UICommand commandWithTitle:SCILocalized(@"Estilo 1B-Alt (sans-serif bold)")
-								  image:([UIImage imageNamed:@"instagram-wordmark-1b-alt"] ?: [UIImage systemImageNamed:@"2.circle.fill"])
+								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1b-alt") ?: [UIImage systemImageNamed:@"2.circle.fill"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b_alt"}],
 			[UICommand commandWithTitle:SCILocalized(@"Estilo 1B (geométrica)")
-								  image:([UIImage imageNamed:@"instagram-wordmark-1b"] ?: [UIImage systemImageNamed:@"2.circle"])
+								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1b") ?: [UIImage systemImageNamed:@"2.circle"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b"}],
 		]],

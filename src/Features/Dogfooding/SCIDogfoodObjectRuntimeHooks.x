@@ -173,7 +173,19 @@ static void SCIInstallDogfoodObjectHooks(void) {
 }
 
 %ctor {
-    SCIInstallDogfoodObjectHooks();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallDogfoodObjectHooks(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallDogfoodObjectHooks(); });
+    @autoreleasepool {
+        // Deferred off static-init phase: see SCIEasyGatingHook.x for full explanation.
+        // Dogfood object hooks (MSHookMessageEx on MobileConfig context managers) are safe
+        // to install post-launch; the objects they hook are created after UIApplicationMain.
+        __block id _sciTok = [[NSNotificationCenter defaultCenter]
+            addObserverForName:@"UIApplicationDidBecomeActiveNotification"
+                        object:nil
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(__unused NSNotification *note) {
+            if (_sciTok) { [[NSNotificationCenter defaultCenter] removeObserver:_sciTok]; _sciTok = nil; }
+            SCIInstallDogfoodObjectHooks();
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallDogfoodObjectHooks(); });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ SCIInstallDogfoodObjectHooks(); });
+        }];
+    }
 }

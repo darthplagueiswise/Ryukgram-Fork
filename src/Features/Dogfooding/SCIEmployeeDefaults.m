@@ -127,6 +127,7 @@ static id new_generic_objectForKey(id self, SEL _cmd, NSString *key) {
 
 + (void)installHooksIfNeeded {
     SCIUpdateEmployeeEnabledCache(); // populate cache before any hooks install
+    if (!SCIEmployeeDefaultsEnabled()) return;
     if (!sSCIEmployeeDefaultsNSHooksInstalled) {
         sSCIEmployeeDefaultsNSHooksInstalled = YES;
         Class nsud = NSUserDefaults.class;

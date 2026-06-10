@@ -124,7 +124,6 @@ static NSArray<SCISymEntry *> *SCIScanSymbols(BOOL wantFBShared) {
             // not safely hookable BOOL accessors. Feature Gatings handles ObjC BOOL methods.
             e.isBoolGate =
                 [nm containsString:@"IGMobileConfigBooleanValueForInternalUse"] ||
-                [nm containsString:@"IGMobileConfigSessionlessBooleanValueForInternalUse"] ||
                 [nm containsString:@"EasyGatingGetBoolean"] ||
                 [nm containsString:@"EasyGatingPlatformGetBoolean"] ||
                 [nm containsString:@"MCQEasyGatingGetBooleanInternal"];

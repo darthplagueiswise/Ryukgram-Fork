@@ -171,6 +171,11 @@ static void hook_present(id self, SEL _cmd, id vc, BOOL animated, id completion)
 }
 
 %ctor {
+    // This installs a global UIViewController presentViewController hook, so keep it
+    // strictly opt-in. The feature already checks the pref inside the hook, but the
+    // hook itself must not be installed on a clean launch.
+    if (![SCIUtils getBoolPref:@"story_tray_actions"]) return;
+
     Class scCls = NSClassFromString(@"IGStorySectionController");
     if (scCls) {
         SEL sel = NSSelectorFromString(@"_didLongPressCell:");

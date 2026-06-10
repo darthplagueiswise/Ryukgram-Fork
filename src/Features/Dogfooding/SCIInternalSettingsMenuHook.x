@@ -95,6 +95,7 @@ static void SCIInstallInternalMenuHook(void) {
 
 %ctor {
     @autoreleasepool {
+        if (!SCIInternalMenuEnabled()) return;
         [SCIInternalGatePrefs installCrashGuardIfNeeded];
         SCIInstallInternalMenuHook();
         double delays[] = {1.0, 3.0, 6.0, 10.0};
