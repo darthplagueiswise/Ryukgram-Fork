@@ -17,10 +17,6 @@ static BOOL SCIKeyEqualsAny(NSString *key, NSArray<NSString *> *keys) {
     return NO;
 }
 
-static BOOL SCIAnyPrefEnabled(NSArray<NSString *> *keys) {
-    for (NSString *key in keys) if ([SCIUtils getBoolPref:key]) return YES;
-    return NO;
-}
 
 static NSArray<NSString *> *SCIMobileConfigKeys(void) {
     return @[@"sci_force_all_mc_gates",
@@ -96,22 +92,6 @@ static NSArray<NSString *> *SCIIGDSKeys(void) {
              @"sci_igds_wordmark_isIGWordmark1bAltEnabled"];
 }
 
-void SCIAdvancedHooksApplyForCurrentPrefs(void) {
-    @autoreleasepool {
-        if (SCIAnyPrefEnabled(SCIMobileConfigKeys())) SCIInstallMobileConfigInternalUseGateIfNeeded();
-        if (SCIAnyPrefEnabled(SCIEasyGatingKeys())) SCIInstallEasyGatingHooksIfNeeded();
-        if (SCIAnyPrefEnabled(SCISessionedMCKeys())) SCIInstallSessionedMCGateHooksIfNeeded();
-
-        if ([SCIUtils getBoolPref:@"sci_internal_menus"]) (void)SCIInternalMenusForceApplyNow();
-        if (SCIAnyPrefEnabled(SCIEmployeeObjCKeys())) {
-            SCIInstallIGEmployeeForceHooksIfNeeded();
-            SCIInstallInternalBuildHooksIfNeeded();
-        }
-        if (SCIAnyPrefEnabled(SCIInternalSettingsKeys())) SCIInstallInternalSettingsMenuHookIfNeeded();
-        if (SCIAnyPrefEnabled(SCIIGDSKeys())) SCIIGDSEnsureHooksInstalled();
-    }
-}
-
 void SCIAdvancedHooksApplyForChangedKey(NSString *key, BOOL isOn) {
     if (!isOn || !key.length) return;
     @autoreleasepool {
@@ -126,18 +106,5 @@ void SCIAdvancedHooksApplyForChangedKey(NSString *key, BOOL isOn) {
         }
         if (SCIKeyEqualsAny(key, SCIInternalSettingsKeys())) SCIInstallInternalSettingsMenuHookIfNeeded();
         if (SCIKeyEqualsAny(key, SCIIGDSKeys())) SCIIGDSEnsureHooksInstalled();
-    }
-}
-
-__attribute__((constructor)) static void SCIAdvancedHooksPostLaunchCtor(void) {
-    @autoreleasepool {
-        __block id token = nil;
-        token = [NSNotificationCenter.defaultCenter addObserverForName:@"UIApplicationDidBecomeActiveNotification"
-                                                                 object:nil
-                                                                  queue:NSOperationQueue.mainQueue
-                                                             usingBlock:^(__unused NSNotification *note) {
-            if (token) { [NSNotificationCenter.defaultCenter removeObserver:token]; token = nil; }
-            SCIAdvancedHooksApplyForCurrentPrefs();
-        }];
     }
 }

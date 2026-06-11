@@ -108,9 +108,6 @@ void SCIInstallInternalBuildHooksIfNeeded(void) {
 
 %ctor {
     @autoreleasepool {
-        // Startup-safe: do not install persisted internal build hooks during
-        // dyld/static init. SCIAdvancedHooks.m applies active Advanced prefs once
-        // after UIApplicationDidBecomeActiveNotification; switchChanged: applies
-        // immediately when the user turns the toggle ON.
+        SCIInstallInternalBuildHooksIfNeeded();
     }
 }

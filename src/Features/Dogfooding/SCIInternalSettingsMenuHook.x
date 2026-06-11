@@ -102,8 +102,6 @@ void SCIInstallInternalSettingsMenuHookIfNeeded(void) {
 
 %ctor {
     @autoreleasepool {
-        // Startup-safe: no persisted internal menu hook installation here.
-        // SCIAdvancedHooks.m applies active Advanced prefs after app activation,
-        // and switchChanged: applies immediately when the toggle is turned ON.
+        SCIInstallInternalSettingsMenuHookIfNeeded();
     }
 }

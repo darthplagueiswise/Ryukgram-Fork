@@ -164,9 +164,6 @@ void SCIInstallIGEmployeeForceHooksIfNeeded(void) {
 
 %ctor {
     @autoreleasepool {
-        // Startup-safe: no persisted ObjC internal hooks are installed during
-        // dyld/static init. SCIAdvancedHooks.m replays active Advanced prefs once
-        // after UIApplicationDidBecomeActiveNotification and switchChanged: also
-        // calls SCIInstallIGEmployeeForceHooksIfNeeded() when the toggle is turned ON.
+        SCIInstallIGEmployeeForceHooksIfNeeded();
     }
 }

@@ -12,9 +12,6 @@
 #import "../Tweak.h"
 #import "../UI/SCIColorPicker.h"
 
-void SCIInstallMobileConfigInternalUseGateIfNeeded(void);
-void SCIInstallEasyGatingHooksIfNeeded(void);
-void SCIInstallSessionedMCGateHooksIfNeeded(void);
 
 static char kSCIRowKey;
 
@@ -596,26 +593,9 @@ static char kSCIRowKey;
 		self.sections = [SCITweakSettings rebuildAdvancedEncodingSlotInSections:self.sections];
 		[self sciReloadFromNotification];
 	}
-	NSSet<NSString *> *mcKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
-		@"sci_force_mc_internal_use_all", @"sci_force_mc_internal_use_boolean",
-		@"sci_force_ig_internal_apps_installed_after_ios18",
-		@"sci_force_minos_dogfood_mek_encryption"]];
-	NSSet<NSString *> *easyKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
-		@"sci_force_easy_gating_all", @"sci_force_easy_gating_internal",
-		@"sci_force_easy_gating_platform", @"sci_force_easy_gating_auth",
-		@"sci_force_easy_gating_mcq"]];
-	NSSet<NSString *> *sessionedKeys = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
-		@"sci_force_sessioned_mc_all", @"sci_force_msgc_sessioned_boolean",
-		@"sci_force_mci_extension_boolean", @"sci_force_mci_experiment_boolean"]];
-	if (sender.isOn) {
-		if ([mcKeys containsObject:row.defaultsKey]) SCIInstallMobileConfigInternalUseGateIfNeeded();
-		if ([easyKeys containsObject:row.defaultsKey]) SCIInstallEasyGatingHooksIfNeeded();
-		if ([sessionedKeys containsObject:row.defaultsKey]) SCIInstallSessionedMCGateHooksIfNeeded();
-	}
-	// Advanced hook toggles are persisted above and applied live through
-	// SCIAdvancedHooksApplyForChangedKey(). Persisted ON states are replayed once
-	// after UIApplicationDidBecomeActiveNotification by SCIAdvancedHooks.m, never
-	// during dyld/static init or scene-create.
+	// Advanced hooks follow the same local pattern as the rest of the tweak:
+	// persist the toggle, then apply only the changed hook path for this session.
+	// No global post-launch replay and no duplicate installer calls here.
 }
 
 - (void)stepperChanged:(UIStepper *)sender {
