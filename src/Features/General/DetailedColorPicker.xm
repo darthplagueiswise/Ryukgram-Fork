@@ -14,7 +14,6 @@
 
 %new - (void)addLongPressGestureRecognizer {
     if ([self.gestureRecognizers count] == 0) {
-        NSLog(@"[SCInsta] Adding color eyedroppper long press gesture recognizer");
 
         UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
         longPress.minimumPressDuration = 0.25;
@@ -23,7 +22,7 @@
 }
 %new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
     if (sender.state != UIGestureRecognizerStateBegan) return;
-    
+
     UIColorPickerViewController *colorPickerController = [[UIColorPickerViewController alloc] init];
 
     colorPickerController.delegate = (id<UIColorPickerViewControllerDelegate>)self; // cast to suppress warnings
@@ -31,21 +30,18 @@
     colorPickerController.modalPresentationStyle = UIModalPresentationPopover;
     colorPickerController.supportsAlpha = NO;
     colorPickerController.selectedColor = self.color;
-    
+
     UIViewController *presentingVC = [SCIUtils nearestViewControllerForView:self];
-    
+
     if (presentingVC != nil) {
         [presentingVC presentViewController:colorPickerController animated:YES completion:nil];
     }
 }
 
-// UIColorPickerViewControllerDelegate Protocol
 %new - (void)colorPickerViewController:(UIColorPickerViewController *)viewController
                         didSelectColor:(UIColor *)color
                           continuously:(BOOL)continuously
 {
-    NSLog(@"[SCInsta] Selected text color: %@", color);
-
     UIColor *opaque = [color colorWithAlphaComponent:1.0];
     self.color = opaque;
 
@@ -55,10 +51,13 @@
     id presentingVC = [SCIUtils nearestViewControllerForView:self];
 
     if ([presentingVC isKindOfClass:%c(IGStoryTextEntryViewController)]) {
-        [presentingVC textViewControllerDidUpdateWithColor:color colorSource:0];
+        if ([presentingVC respondsToSelector:@selector(textViewControllerDidUpdateWithColor:colorSource:)])
+            [presentingVC textViewControllerDidUpdateWithColor:color colorSource:0];
+        else if ([presentingVC respondsToSelector:@selector(textEntryControls:didSelectColor:)])
+            [presentingVC textEntryControls:nil didSelectColor:color];
     }
     else if (
-        [presentingVC isKindOfClass:%c(IGStoryCreationDrawingViewController)]
+        [presentingVC isKindOfClass:(NSClassFromString(@"_TtC25IGStoryPostCaptureDrawing36IGStoryCreationDrawingViewController") ?: NSClassFromString(@"IGStoryCreationDrawingViewController"))]
         || [presentingVC isKindOfClass:%c(IGDirectThreadViewDrawingViewController)]
     ) {
         [presentingVC drawingControls:nil didSelectColor:color];
@@ -72,7 +71,7 @@
     UIView *colorPickingControls = [self superview];
 
     if (
-        [colorPickingControls isKindOfClass:%c(IGStoryColorPickingControls)]
+        [colorPickingControls isKindOfClass:(NSClassFromString(@"_TtC33IGStoryPostCaptureDrawingControls27IGStoryColorPickingControls") ?: NSClassFromString(@"IGStoryColorPickingControls"))]
         || [colorPickingControls isKindOfClass:%c(IGDirectThreadColorPickingControls)]
     ) {
         IGStoryEyedropperToggleButton *_eyedropperToggleButton = MSHookIvar<IGStoryEyedropperToggleButton *>(colorPickingControls, "_eyedropperToggleButton");

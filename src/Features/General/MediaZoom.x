@@ -186,7 +186,7 @@ static void sciAddZoomGesture(UIView *view) {
 %hook IGFeedItemPagePhotoCell
 - (void)didMoveToSuperview {
     %orig;
-    if (self.superview) sciAddZoomGesture((UIView *)self);
+    if (((UIView *)self).superview) sciAddZoomGesture((UIView *)self);
 }
 %end
 
@@ -196,3 +196,7 @@ static void sciAddZoomGesture(UIView *view) {
     if (self.superview) sciAddZoomGesture((UIView *)self);
 }
 %end
+
+%ctor {
+    %init(IGFeedItemPagePhotoCell = NSClassFromString(@"_TtC18IGFeedItemPageCell23IGFeedItemPagePhotoCell") ?: NSClassFromString(@"IGFeedItemPagePhotoCell"));
+}

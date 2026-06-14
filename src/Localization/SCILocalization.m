@@ -3,138 +3,158 @@
 
 NSString *const SCILanguagePrefKey = @"sci_language";
 
-static NSBundle *gResourceBundle = nil;
-static NSBundle *gLanguageBundle = nil;
-static NSString *gLanguageBundleCode = nil;
+static NSBundle *gResourceBundle;
+static NSBundle *gLanguageBundle;
+static NSString *gLanguageCode;
+static NSString *gResolvedLanguageCode;
 static dispatch_once_t gResourceOnce;
 
+static NSString *const kSCIMissing = @"\x01SCI_MISSING\x01";
+
 NSString *SCILocalizationOverridePath(void) {
-    NSString *lib = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
-    return [lib stringByAppendingPathComponent:@"RyukGram.bundle"];
+	NSString *lib = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+	return [lib stringByAppendingPathComponent:@"RyukGram.bundle"];
 }
 
-static NSBundle *resolveResourceBundle(void) {
-    // 1) Sideload: cyan copies RyukGram.bundle into the app's resource root.
-    NSString *path = [[NSBundle mainBundle] pathForResource:@"RyukGram" ofType:@"bundle"];
+static BOOL SCIFileExists(NSString *path) {
+	return path.length && [NSFileManager.defaultManager fileExistsAtPath:path];
+}
 
-    // 2) Jailbreak: .deb drops the bundle into Library/Application Support.
-    if (!path) {
-        NSArray *fallbacks = @[
-            @"/var/jb/Library/Application Support/RyukGram.bundle",
-            @"/Library/Application Support/RyukGram.bundle",
-        ];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        for (NSString *p in fallbacks) {
-            if ([fm fileExistsAtPath:p]) { path = p; break; }
-        }
-    }
+static NSBundle *SCIResolveResourceBundle(void) {
+	NSString *path = [[NSBundle mainBundle] pathForResource:@"RyukGram" ofType:@"bundle"];
+	if (SCIFileExists(path)) return [NSBundle bundleWithPath:path];
 
-    // 3) Last resort: sibling of the loaded dylib (dev / Feather with loose files).
-    if (!path) {
-        Dl_info info;
-        if (dladdr((const void *)&resolveResourceBundle, &info) && info.dli_fname) {
-            NSString *dylibPath = [NSString stringWithUTF8String:info.dli_fname];
-            NSString *candidate = [[dylibPath stringByDeletingLastPathComponent]
-                                    stringByAppendingPathComponent:@"RyukGram.bundle"];
-            if ([[NSFileManager defaultManager] fileExistsAtPath:candidate]) path = candidate;
-        }
-    }
+	for (NSString *p in @[
+		@"/var/jb/Library/Application Support/RyukGram.bundle",
+		@"/Library/Application Support/RyukGram.bundle",
+		SCILocalizationOverridePath()
+	]) {
+		if (SCIFileExists(p)) return [NSBundle bundleWithPath:p];
+	}
 
-    return path ? [NSBundle bundleWithPath:path] : nil;
+	Dl_info info;
+	if (dladdr((const void *)&SCIResolveResourceBundle, &info) && info.dli_fname) {
+		NSString *dylib = [NSString stringWithUTF8String:info.dli_fname];
+		path = [[dylib stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"RyukGram.bundle"];
+		if (SCIFileExists(path)) return [NSBundle bundleWithPath:path];
+	}
+
+	return nil;
 }
 
 NSBundle *SCILocalizationBundle(void) {
-    dispatch_once(&gResourceOnce, ^{ gResourceBundle = resolveResourceBundle(); });
-    return gResourceBundle;
+	dispatch_once(&gResourceOnce, ^{
+		gResourceBundle = SCIResolveResourceBundle();
+	});
+	return gResourceBundle;
 }
 
-static NSString *preferredLanguageCode(NSBundle *resource) {
-    NSString *pref = [[NSUserDefaults standardUserDefaults] stringForKey:SCILanguagePrefKey];
-    if (pref.length && ![pref isEqualToString:@"system"]) return pref;
+static NSString *SCIPreferredLanguageCode(NSBundle *bundle) {
+	if (gResolvedLanguageCode.length) return gResolvedLanguageCode;
 
-    // Match iOS locale against the languages actually shipped in the bundle.
-    NSArray<NSString *> *shipped = [resource localizations];
-    NSArray<NSString *> *matches = [NSBundle preferredLocalizationsFromArray:shipped
-                                                      forPreferences:[NSLocale preferredLanguages]];
-    return matches.firstObject ?: @"en";
+	NSString *pref = [NSUserDefaults.standardUserDefaults stringForKey:SCILanguagePrefKey];
+	if (pref.length && ![pref isEqualToString:@"system"]) {
+		gResolvedLanguageCode = pref.copy;
+		return gResolvedLanguageCode;
+	}
+
+	NSMutableArray *localizations = [(bundle.localizations ?: @[]) mutableCopy];
+	[localizations removeObject:@"Base"];
+
+	NSArray *matches = [NSBundle preferredLocalizationsFromArray:localizations forPreferences:NSLocale.preferredLanguages];
+	NSString *code = matches.firstObject;
+
+	gResolvedLanguageCode = code.length ? code.copy : @"en";
+	return gResolvedLanguageCode;
 }
 
 NSString *SCIResolvedLanguageCode(void) {
-    NSBundle *b = SCILocalizationBundle();
-    return b ? preferredLanguageCode(b) : @"en";
+	NSBundle *bundle = SCILocalizationBundle();
+	if (!bundle) return @"en";
+
+	@synchronized (SCILanguagePrefKey) {
+		return SCIPreferredLanguageCode(bundle);
+	}
 }
 
-static NSBundle *activeLanguageBundle(void) {
-    NSBundle *resource = SCILocalizationBundle();
-    if (!resource) return nil;
+static NSBundle *SCILanguageBundleForCode(NSBundle *resource, NSString *code) {
+	NSString *overrideStrings = [[SCILocalizationOverridePath() stringByAppendingPathComponent:[code stringByAppendingString:@".lproj"]] stringByAppendingPathComponent:@"Localizable.strings"];
+	if (SCIFileExists(overrideStrings)) return [NSBundle bundleWithPath:overrideStrings.stringByDeletingLastPathComponent];
 
-    NSString *code = preferredLanguageCode(resource);
-    if (gLanguageBundle && [code isEqualToString:gLanguageBundleCode]) return gLanguageBundle;
+	NSString *lproj = [resource pathForResource:code ofType:@"lproj"];
+	if (!lproj.length && ![code isEqualToString:@"en"]) lproj = [resource pathForResource:@"en" ofType:@"lproj"];
 
-    // User-imported overrides take priority (writable Library dir).
-    NSString *overrideLproj = [[SCILocalizationOverridePath()
-        stringByAppendingPathComponent:[code stringByAppendingString:@".lproj"]]
-        stringByAppendingPathComponent:@"Localizable.strings"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:overrideLproj]) {
-        gLanguageBundle = [NSBundle bundleWithPath:[overrideLproj stringByDeletingLastPathComponent]];
-    } else {
-        NSString *lprojPath = [resource pathForResource:code ofType:@"lproj"];
-        if (!lprojPath) lprojPath = [resource pathForResource:@"en" ofType:@"lproj"];
-        gLanguageBundle = lprojPath ? [NSBundle bundleWithPath:lprojPath] : resource;
-    }
-    gLanguageBundleCode = [code copy];
-    return gLanguageBundle;
+	return lproj.length ? [NSBundle bundleWithPath:lproj] : resource;
+}
+
+static NSBundle *SCIActiveLanguageBundle(void) {
+	NSBundle *resource = SCILocalizationBundle();
+	if (!resource) return nil;
+
+	@synchronized (SCILanguagePrefKey) {
+		NSString *code = SCIPreferredLanguageCode(resource);
+		if (gLanguageBundle && [code isEqualToString:gLanguageCode]) return gLanguageBundle;
+
+		gLanguageCode = code.copy;
+		gLanguageBundle = SCILanguageBundleForCode(resource, code);
+		return gLanguageBundle;
+	}
 }
 
 NSString *SCILocalizedString(NSString *key, NSString *fallback) {
-    if (key.length == 0) return fallback ?: @"";
-    NSBundle *lang = activeLanguageBundle();
-    if (!lang) return fallback ?: key;
+	if (!key.length) return fallback ?: @"";
 
-    // NSBundle returns the key itself when missing (when `value` is nil) —
-    // that's our signal to fall back to the English source text.
-    NSString *value = [lang localizedStringForKey:key value:@"\x01SCI_MISSING\x01" table:nil];
-    if ([value isEqualToString:@"\x01SCI_MISSING\x01"]) return fallback ?: key;
-    return value;
+	NSBundle *bundle = SCIActiveLanguageBundle();
+	if (!bundle) return fallback ?: key;
+
+	NSString *value = [bundle localizedStringForKey:key value:kSCIMissing table:nil];
+	return [value isEqualToString:kSCIMissing] ? (fallback ?: key) : value;
+}
+
+static NSString *SCINativeLanguageName(NSString *code) {
+	NSLocale *locale = [NSLocale localeWithLocaleIdentifier:code];
+	NSString *name = [locale localizedStringForLocaleIdentifier:code] ?: [locale localizedStringForLanguageCode:code] ?: code;
+	if (!name.length) return code;
+	return [[name substringToIndex:1].uppercaseString stringByAppendingString:[name substringFromIndex:1]];
+}
+
+static void SCIAppendLanguagesFromPath(NSString *base, NSMutableArray *result, NSMutableSet *seen) {
+	if (!SCIFileExists(base)) return;
+
+	NSArray *items = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:base error:nil] sortedArrayUsingSelector:@selector(compare:)];
+	for (NSString *item in items) {
+		if (![item hasSuffix:@".lproj"]) continue;
+
+		NSString *code = item.stringByDeletingPathExtension;
+		if (!code.length || [code isEqualToString:@"Base"] || [seen containsObject:code]) continue;
+
+		NSString *strings = [[base stringByAppendingPathComponent:item] stringByAppendingPathComponent:@"Localizable.strings"];
+		if (!SCIFileExists(strings)) continue;
+
+		[seen addObject:code];
+		[result addObject:@{@"code": code, @"native": SCINativeLanguageName(code)}];
+	}
 }
 
 NSArray<NSDictionary<NSString *, NSString *> *> *SCIAvailableLanguages(void) {
-    NSMutableArray *result = [NSMutableArray array];
-    [result addObject:@{@"code": @"system", @"native": @"System"}];
-    [result addObject:@{@"code": @"en", @"native": @"English"}];
+	NSMutableArray *result = [@[
+		@{@"code": @"system", @"native": @"System"},
+		@{@"code": @"en", @"native": @"English"}
+	] mutableCopy];
 
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableSet *seen = [NSMutableSet setWithObject:@"en"];
+	NSMutableSet *seen = [NSMutableSet setWithObject:@"en"];
 
-    // Scan both shipped bundle + writable override dir for .lproj dirs.
-    NSMutableArray *searchPaths = [NSMutableArray array];
-    NSBundle *res = SCILocalizationBundle();
-    if (res) [searchPaths addObject:res.bundlePath];
-    NSString *overrides = SCILocalizationOverridePath();
-    if ([fm fileExistsAtPath:overrides]) [searchPaths addObject:overrides];
+	NSBundle *resource = SCILocalizationBundle();
+	if (resource.bundlePath.length) SCIAppendLanguagesFromPath(resource.bundlePath, result, seen);
+	SCIAppendLanguagesFromPath(SCILocalizationOverridePath(), result, seen);
 
-    for (NSString *base in searchPaths) {
-        NSArray *contents = [fm contentsOfDirectoryAtPath:base error:nil];
-        for (NSString *name in [contents sortedArrayUsingSelector:@selector(compare:)]) {
-            if (![name hasSuffix:@".lproj"]) continue;
-            NSString *code = [name stringByDeletingPathExtension];
-            if ([code isEqualToString:@"Base"] || [seen containsObject:code]) continue;
-            NSString *stringsPath = [[base stringByAppendingPathComponent:name]
-                                      stringByAppendingPathComponent:@"Localizable.strings"];
-            if (![fm fileExistsAtPath:stringsPath]) continue;
-            [seen addObject:code];
-
-            NSLocale *loc = [NSLocale localeWithLocaleIdentifier:code];
-            NSString *native = [loc localizedStringForLanguageCode:code] ?: code;
-            if (native.length) native = [[[native substringToIndex:1] uppercaseString]
-                                          stringByAppendingString:[native substringFromIndex:1]];
-            [result addObject:@{@"code": code, @"native": native}];
-        }
-    }
-    return result;
+	return result;
 }
 
 void SCILocalizationReset(void) {
-    gLanguageBundle = nil;
-    gLanguageBundleCode = nil;
+	@synchronized (SCILanguagePrefKey) {
+		gLanguageBundle = nil;
+		gLanguageCode = nil;
+		gResolvedLanguageCode = nil;
+	}
 }

@@ -1,103 +1,176 @@
 #import "../../Utils.h"
 
-%hook IGSundialPlaybackControlsTestConfiguration
-- (id)initWithLauncherSet:(id)set
-                     tapToPauseEnabled:(_Bool)tapPauseEnabled
-      combineSingleTapPlaybackControls:(_Bool)controls
-        isVideoPreviewThumbnailEnabled:(_Bool)previewThumbEnabled
-                minScrubberDurationSec:(long long)minSec
-         seekResumeScrubberCooldownSec:(double)seekSec
-          tapResumeScrubberCooldownSec:(double)tapSec
-    persistentScrubberMinVideoDuration:(long long)duration
-        isScrubberForShortVideoEnabled:(_Bool)shortScrubberEnabled
-{
-    _Bool userTapPauseEnabled = tapPauseEnabled;
-    if ([[SCIUtils getStringPref:@"reels_tap_control"] isEqualToString:@"pause"]) userTapPauseEnabled = true;
-    else if ([[SCIUtils getStringPref:@"reels_tap_control"] isEqualToString:@"mute"]) userTapPauseEnabled = false;
-
-    long long userMinSec = minSec;
-    long long userDuration = duration;
-    _Bool userShortScrubberEnabled = shortScrubberEnabled;
-    if ([SCIUtils getBoolPref:@"reels_show_scrubber"]) {
-        userMinSec = 0;
-        userDuration = 0;
-        userShortScrubberEnabled = true;
-    }
-
-    return %orig(set, userTapPauseEnabled, controls, previewThumbEnabled, userMinSec, seekSec, tapSec, userDuration, userShortScrubberEnabled);
-}
-%end
+extern BOOL sciStoryAudioBypass;
 
 static BOOL sciReelRefreshBypassing = NO;
+static BOOL sciReelRefreshAlertShowing = NO;
 
-%hook IGSundialFeedViewController
-- (void)_refreshReelsWithParamsForNetworkRequest:(NSInteger)arg1 userDidPullToRefresh:(BOOL)arg2 {
-    if ([SCIUtils getBoolPref:@"prevent_doom_scrolling"]) {
-        IGRefreshControl *rc = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
-        [self refreshControlDidEndFinishLoadingAnimation:rc];
-        return;
-    }
+#pragma mark - Prefs
 
-    if (![(UIViewController *)self isViewLoaded] || sciReelRefreshBypassing || ![SCIUtils getBoolPref:@"refresh_reel_confirm"]) {
-        %orig(arg1, arg2);
-        return;
-    }
-
-    // Reset the refresh control state so pull-to-refresh can trigger again
-    IGRefreshControl *rc = MSHookIvar<IGRefreshControl *>(self, "_refreshControl");
-    Ivar stateIvar = class_getInstanceVariable([rc class], "_refreshState");
-    if (stateIvar) {
-        ptrdiff_t off = ivar_getOffset(stateIvar);
-        *(NSInteger *)((char *)(__bridge void *)rc + off) = 0;
-    }
-    if ([rc respondsToSelector:@selector(endRefreshing)])
-        ((void(*)(id,SEL))objc_msgSend)(rc, @selector(endRefreshing));
-    [self refreshControlDidEndFinishLoadingAnimation:rc];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Refresh Reels?")
-                                                                   message:nil
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    __weak id weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Refresh") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
-        sciReelRefreshBypassing = YES;
-        SEL rSel = @selector(_refreshReelsWithParamsForNetworkRequest:userDidPullToRefresh:);
-        ((void(*)(id,SEL,NSInteger,BOOL))objc_msgSend)(weakSelf, rSel, arg1, arg2);
-        sciReelRefreshBypassing = NO;
-    }]];
-
-    UIViewController *presenter = (UIViewController *)self;
-    [presenter presentViewController:alert animated:YES completion:nil];
+static inline NSString *SCIReelsTapMode(void) {
+	NSString *mode = [SCIUtils getStringPref:@"reels_tap_control"];
+	return mode.length ? mode : nil;
 }
+
+static inline BOOL SCIReelsAutoUnmuteDisabled(void) {
+	return [SCIUtils getBoolPref:@"disable_auto_unmuting_reels"];
+}
+
+#pragma mark - Refresh helpers
+
+static inline IGRefreshControl *SCIReelsRefreshControl(id vc) {
+	if ([vc respondsToSelector:@selector(refreshControl)]) {
+		return ((IGRefreshControl *(*)(id, SEL))objc_msgSend)(vc, @selector(refreshControl));
+	}
+
+	return nil;
+}
+
+static void SCIReelsResetRefreshState(IGRefreshControl *rc) {
+	if (!rc) return;
+
+	Ivar stateIvar = class_getInstanceVariable([rc class], "_refreshState");
+	if (stateIvar) {
+		*(NSInteger *)((char *)(__bridge void *)rc + ivar_getOffset(stateIvar)) = 0;
+	}
+
+	if ([rc respondsToSelector:@selector(endRefreshing)]) {
+		((void (*)(id, SEL))objc_msgSend)(rc, @selector(endRefreshing));
+	}
+}
+
+static void SCIReelsEndRefresh(id vc) {
+	if (!vc) return;
+
+	if ([vc respondsToSelector:@selector(finishPullToRefreshLoading)]) {
+		((void (*)(id, SEL))objc_msgSend)(vc, @selector(finishPullToRefreshLoading));
+		return;
+	}
+
+	IGRefreshControl *rc = SCIReelsRefreshControl(vc);
+	SCIReelsResetRefreshState(rc);
+
+	if (rc && [vc respondsToSelector:@selector(refreshControlDidEndFinishLoadingAnimation:)]) {
+		((void (*)(id, SEL, id))objc_msgSend)(vc, @selector(refreshControlDidEndFinishLoadingAnimation:), rc);
+	}
+}
+
+#pragma mark - Playback controls config
+
+%hook IGSundialPlaybackControlsTestConfiguration
+
+- (id)initWithLauncherSet:(id)set
+	tapToPauseEnabled:(BOOL)tapToPauseEnabled
+	combineSingleTapPlaybackControls:(BOOL)controls
+	isVideoPreviewThumbnailEnabled:(BOOL)previewThumbEnabled
+	minScrubberDurationSec:(NSInteger)minSec
+	seekResumeScrubberCooldownSec:(CGFloat)seekSec
+	tapResumeScrubberCooldownSec:(CGFloat)tapSec
+	persistentScrubberMinVideoDuration:(NSInteger)duration
+	isScrubberForShortVideoEnabled:(BOOL)shortScrubberEnabled
+{
+	NSString *tapMode = SCIReelsTapMode();
+
+	if ([tapMode isEqualToString:@"pause"]) {
+		tapToPauseEnabled = YES;
+	} else if ([tapMode isEqualToString:@"mute"]) {
+		tapToPauseEnabled = NO;
+	}
+
+	if ([SCIUtils getBoolPref:@"reels_show_scrubber"]) {
+		minSec = 0;
+		duration = 0;
+		shortScrubberEnabled = YES;
+	}
+
+	return %orig(set, tapToPauseEnabled, controls, previewThumbEnabled, minSec, seekSec, tapSec, duration, shortScrubberEnabled);
+}
+
 %end
 
-// * Disable auto-unmuting reels
-// Blocks all paths that can unmute: hardware buttons, headphones,
-// mute switch, and the audio state announcer.
-%hook IGAudioStatusAnnouncer
-- (void)_didPressVolumeButton:(id)button {
-    if (![SCIUtils getBoolPref:@"disable_auto_unmuting_reels"]) {
-        %orig(button);
-    }
+#pragma mark - Reels refresh confirmation / doom-scroll prevention
+
+%hook IGSundialFeedViewController
+
+- (void)_refreshReelsWithParamsForNetworkRequest:(NSInteger)arg1 userDidPullToRefresh:(BOOL)arg2 {
+	if ([SCIUtils getBoolPref:@"prevent_doom_scrolling"]) {
+		SCIReelsEndRefresh(self);
+		return;
+	}
+
+	if (sciReelRefreshBypassing || ![SCIUtils getBoolPref:@"refresh_reel_confirm"]) {
+		%orig(arg1, arg2);
+		return;
+	}
+
+	UIViewController *presenter = (UIViewController *)self;
+
+	if (![presenter isViewLoaded] || sciReelRefreshAlertShowing || presenter.presentedViewController) {
+		SCIReelsEndRefresh(self);
+		return;
+	}
+
+	SCIReelsEndRefresh(self);
+	sciReelRefreshAlertShowing = YES;
+
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Refresh Reels?")
+		message:nil
+		preferredStyle:UIAlertControllerStyleAlert];
+
+	__weak id target = self;
+
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel")
+		style:UIAlertActionStyleCancel
+		handler:^(__unused UIAlertAction *action) {
+			sciReelRefreshAlertShowing = NO;
+		}]];
+
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Refresh")
+		style:UIAlertActionStyleDefault
+		handler:^(__unused UIAlertAction *action) {
+			__strong id strongTarget = target;
+			if (!strongTarget) { sciReelRefreshAlertShowing = NO; return; }
+			sciReelRefreshBypassing = YES;
+			((void (*)(id, SEL, NSInteger, BOOL))objc_msgSend)(strongTarget, @selector(_refreshReelsWithParamsForNetworkRequest:userDidPullToRefresh:), arg1, arg2);
+			sciReelRefreshBypassing = NO;
+			sciReelRefreshAlertShowing = NO;
+		}]];
+
+	[presenter presentViewController:alert animated:YES completion:nil];
 }
-- (void)_didUnplugHeadphones:(id)headphones {
-    if (![SCIUtils getBoolPref:@"disable_auto_unmuting_reels"]) {
-        %orig(headphones);
-    }
+
+%end
+
+#pragma mark - Disable auto-unmuting reels
+
+// Blocks video playback audio controller paths that can auto-unmute:
+// hardware volume buttons, mute switch changes, audio session deactivation,
+// and headphone unplug events.
+
+%hook IGVideoPlaybackAudioController
+
+- (void)_handleDidPressVolumeButtonNotification:(id)notification {
+	if (!SCIReelsAutoUnmuteDisabled()) {
+		%orig(notification);
+	}
 }
-- (void)_muteSwitchStateChanged:(id)changed {
-    extern BOOL sciStoryAudioBypass;
-    if (sciStoryAudioBypass || ![SCIUtils getBoolPref:@"disable_auto_unmuting_reels"]) {
-        %orig(changed);
-    }
+
+- (void)_handleMuteSwitchStateChanged {
+	if (sciStoryAudioBypass || !SCIReelsAutoUnmuteDisabled()) {
+		%orig;
+	}
 }
-// Block the announcer from broadcasting "audio enabled" state changes
-- (void)_announceForDeviceStateChangesIfNeededForAudioEnabled:(BOOL)enabled reason:(NSInteger)reason {
-    extern BOOL sciStoryAudioBypass;
-    BOOL pausePlayMode = [[SCIUtils getStringPref:@"reels_tap_control"] isEqualToString:@"pause"];
-    if ([SCIUtils getBoolPref:@"disable_auto_unmuting_reels"] && enabled && !pausePlayMode && !sciStoryAudioBypass) {
-        return;
-    }
-    %orig;
+
+- (void)_handleAudioSessionDeactivation {
+	if (!SCIReelsAutoUnmuteDisabled()) {
+		%orig;
+	}
 }
+
+- (void)_handleDidUnplugHeadphones {
+	if (!SCIReelsAutoUnmuteDisabled()) {
+		%orig;
+	}
+}
+
 %end

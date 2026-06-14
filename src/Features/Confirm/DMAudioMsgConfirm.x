@@ -1,25 +1,14 @@
 #import "../../Utils.h"
 
-// Legacy hook (for non ai voices interface)
-%hook IGDirectThreadViewController
-- (void)voiceRecordViewController:(id)arg1 didRecordAudioClipWithURL:(id)arg2 waveform:(id)arg3 duration:(CGFloat)arg4 entryPoint:(NSInteger)arg5 {
-    if ([SCIUtils getBoolPref:@"voice_message_confirm"]) {
-        NSLog(@"[SCInsta] DM audio message confirm triggered");
+extern void sciMarkActiveThreadSeenOnInteract(void);
 
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    } else {
-        return %orig;
-    }
-}
-%end
-
-// Workaround until I can figure out how to stop long press recording from automatically sending
-%hook IGDirectComposer
-- (void)_didLongPressVoiceMessage:(id)arg1 {
+%hook IGDirectThreadViewVoiceController
+- (void)voiceRecordViewController:(id)arg1 didRecordAudioClipWithURL:(id)arg2 waveform:(id)arg3 duration:(CGFloat)arg4 entryPoint:(NSInteger)arg5 aiVoiceEffectApplied:(id)arg6 aiVoiceEffectType:(id)arg7 sendButtonTypeTapped:(NSInteger)arg8 {
     if ([SCIUtils getBoolPref:@"voice_message_confirm"]) {
-        return;
+        [SCIUtils showConfirmation:^(void) { %orig; sciMarkActiveThreadSeenOnInteract(); } title:SCILocalized(@"Confirm voice messages")];
     } else {
-        return %orig;
+        %orig;
+        sciMarkActiveThreadSeenOnInteract();
     }
 }
 %end
@@ -28,11 +17,10 @@
 %hook _TtC20IGDirectAIVoiceUIKitP33_5754F7617E0D924F9A84EFA352BBD29A21CompactBarContentView
 - (void)didTapSend {
     if ([SCIUtils getBoolPref:@"voice_message_confirm"]) {
-        NSLog(@"[SCInsta] DM audio message confirm triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
+        [SCIUtils showConfirmation:^(void) { %orig; sciMarkActiveThreadSeenOnInteract(); } title:SCILocalized(@"Confirm voice messages")];
     } else {
-        return %orig;
+        %orig;
+        sciMarkActiveThreadSeenOnInteract();
     }
 }
 %end

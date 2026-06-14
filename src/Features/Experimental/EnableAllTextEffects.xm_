@@ -6,7 +6,7 @@
     %orig;
 
     if ([SCIUtils getBoolPref:@"enable_hidden_texteffectsstyles"]) {
-    
+
         // Clear previous option values
         [self.animationTypes removeAllObjects];
         [self.effectTypes removeAllObjects];

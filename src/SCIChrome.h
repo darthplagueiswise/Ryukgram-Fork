@@ -12,6 +12,18 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) UIView *contentContainer;
 @end
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/// YES if `field` is the secure-canvas helper owned by SCIChromeCanvas.
+/// Used by the Instants screenshot bypass to skip our own redaction fields.
+BOOL SCIChromeCanvasOwnsSecureField(UITextField *field);
+
+#ifdef __cplusplus
+}
+#endif
+
 // MARK: - SCIChromeButton
 
 @interface SCIChromeButton : UIButton
@@ -24,8 +36,16 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) CGFloat symbolPointSize;
 @property (nonatomic, copy) UIColor *iconTint;
 @property (nonatomic, copy) UIColor *bubbleColor;
-// Set `.image` for custom/baked images that the symbol API can't produce.
+/// `symbolName` is SF-only. For IG-styled glyphs use `setIconResource:` or
+/// assign `iconView.image` directly with a baked image.
 @property (nonatomic, strong, readonly) UIImageView *iconView;
+
+/// IG-styled glyph via `+[SCIIcon imageNamed:]`. Clears `symbolName`.
+- (void)setIconResource:(NSString *)resourceName pointSize:(CGFloat)pointSize;
+
+/// Capture-redacted host. Add overlay subviews (badges, counters) here instead
+/// of as direct button subviews so Hide UI on Capture redacts them too.
+@property (nonatomic, strong, readonly) UIView *captureContentView;
 
 - (instancetype)init NS_UNAVAILABLE;
 - (instancetype)initWithFrame:(CGRect)frame NS_UNAVAILABLE;

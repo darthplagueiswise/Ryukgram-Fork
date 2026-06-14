@@ -92,10 +92,9 @@ static void sciShowHDProfilePic(NSString *pk, NSString *caption, UIImage *fallba
         if (error || !response) {
             if (fallback) {
                 NSData *d = UIImageJPEGRepresentation(fallback, 1.0);
-                NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                    [NSString stringWithFormat:@"pfp_%@.jpg", pk]];
-                [d writeToFile:p atomically:YES];
-                [SCIMediaViewer showWithVideoURL:nil photoURL:[NSURL fileURLWithPath:p] caption:caption];
+                NSURL *p = [SCITempFiles claimWithExt:@"jpg" ttl:900 tag:[@"pfp_" stringByAppendingString:pk ?: @"x"]];
+                [d writeToFile:p.path atomically:YES];
+                [SCIMediaViewer showWithVideoURL:nil photoURL:p caption:caption];
             }
             return;
         }
@@ -118,10 +117,9 @@ static void sciShowHDProfilePic(NSString *pk, NSString *caption, UIImage *fallba
             [SCIMediaViewer showWithVideoURL:nil photoURL:[NSURL URLWithString:hdURL] caption:caption];
         } else if (fallback) {
             NSData *d = UIImageJPEGRepresentation(fallback, 1.0);
-            NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                [NSString stringWithFormat:@"pfp_%@.jpg", pk]];
-            [d writeToFile:p atomically:YES];
-            [SCIMediaViewer showWithVideoURL:nil photoURL:[NSURL fileURLWithPath:p] caption:caption];
+            NSURL *p = [SCITempFiles claimWithExt:@"jpg" ttl:900 tag:[@"pfp_" stringByAppendingString:pk ?: @"x"]];
+            [d writeToFile:p.path atomically:YES];
+            [SCIMediaViewer showWithVideoURL:nil photoURL:p caption:caption];
         }
     }];
 }
@@ -157,7 +155,7 @@ static void hook_present(id self, SEL _cmd, id vc, BOOL animated, id completion)
                 void (^handler)(void) = ^{ sciShowHDProfilePic(pk, caption, localPic); };
                 id action = ((InitFn)objc_msgSend)([actionCls alloc],
                     @selector(initWithTitle:subtitle:style:handler:accessibilityIdentifier:accessibilityLabel:),
-                    @"View profile picture", nil, (NSInteger)0, handler, nil, nil);
+                    SCILocalized(@"View profile picture"), nil, (NSInteger)0, handler, nil, nil);
 
                 if (action) {
                     NSMutableArray *newActions = [actions mutableCopy];

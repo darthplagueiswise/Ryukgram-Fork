@@ -1,586 +1,707 @@
 #import "SCISettingsViewController.h"
+#import "SCIWhatsNew.h"
+#import "../Features/Gating/SCIBulkGatingPresets.h"
+#import "../UI/SCIPopupChrome.h"
 #import "SCISearchBarStyler.h"
 #import "../Features/General/SCICacheManager.h"
 #import "../SCIImageCache.h"
+#import "../Tweak.h"
+#import "../UI/SCIColorPicker.h"
 
-static char rowStaticRef[] = "row";
+static char kSCIRowKey;
+
+#pragma mark - Language Picker
+
+@interface SCILanguagePickerViewController : UITableViewController
+@property (nonatomic, copy) void (^onPick)(NSString *code);
+@end
+
+@interface SCILanguagePickerViewController ()
+@property (nonatomic, copy) NSArray<NSDictionary<NSString *, NSString *> *> *languages;
+@property (nonatomic, copy) NSString *currentCode;
+@end
+
+@implementation SCILanguagePickerViewController
+
+- (instancetype)init {
+	if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
+		_languages = SCIAvailableLanguages();
+		_currentCode = [NSUserDefaults.standardUserDefaults stringForKey:SCILanguagePrefKey] ?: @"system";
+	}
+	return self;
+}
+
+- (void)viewDidLoad {
+	[super viewDidLoad];
+	self.title = SCILocalized(@"settings.language.title");
+	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(sciClose)];
+	UIColor *bg = [SCIPopupChrome backgroundColor];
+	self.view.backgroundColor = bg;
+	self.tableView.backgroundColor = bg;
+	[self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"lang"];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+	[super viewDidAppear:animated];
+	NSInteger idx = [self sciActiveIndex];
+	if (idx != NSNotFound) [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:idx inSection:0] atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+}
+
+- (NSInteger)sciActiveIndex {
+	for (NSUInteger i = 0; i < self.languages.count; i++)
+		if ([(self.languages[i][@"code"] ?: @"system") isEqualToString:self.currentCode]) return (NSInteger)i;
+	return NSNotFound;
+}
+
+- (void)sciClose { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 2; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return s == 0 ? (NSInteger)self.languages.count : 1; }
+
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"lang" forIndexPath:ip];
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	cell.detailTextLabel.text = nil;
+	cell.textLabel.textColor = UIColor.labelColor;
+	cell.textLabel.font = [UIFont systemFontOfSize:17.0];
+	cell.imageView.image = nil;
+	cell.tintColor = UIColor.systemBlueColor;
+
+	if (ip.section == 0) {
+		NSDictionary *lang = self.languages[ip.row];
+		NSString *code = lang[@"code"] ?: @"system";
+		NSString *native = [code isEqualToString:@"system"] ? SCILocalized(@"settings.language.system") : (lang[@"native"] ?: code);
+		NSString *english = nil;
+		if (![code isEqualToString:@"system"] && ![code isEqualToString:@"en"]) {
+			NSLocale *en = [NSLocale localeWithLocaleIdentifier:@"en"];
+			english = [en localizedStringForLocaleIdentifier:code] ?: [en localizedStringForLanguageCode:code];
+			if (english.length) english = [[[english substringToIndex:1] uppercaseString] stringByAppendingString:[english substringFromIndex:1]];
+			if ([english isEqualToString:native]) english = nil;
+		}
+		cell.textLabel.text = english.length ? [NSString stringWithFormat:@"%@  ·  %@", native, english] : native;
+		if ([code isEqualToString:self.currentCode]) {
+			cell.accessoryType = UITableViewCellAccessoryCheckmark;
+			cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+		}
+	} else {
+		cell.textLabel.text = SCILocalized(@"settings.language.help_translate");
+		cell.textLabel.textColor = UIColor.systemPinkColor;
+		cell.imageView.image = [UIImage systemImageNamed:@"heart.fill"];
+		cell.imageView.tintColor = UIColor.systemPinkColor;
+	}
+	return cell;
+}
+
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
+	return s == 0 ? [NSString stringWithFormat:@"%@  ·  %lu", SCILocalized(@"settings.language.available"), (unsigned long)self.languages.count] : nil;
+}
+
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+	[tv deselectRowAtIndexPath:ip animated:YES];
+	if (ip.section == 0) {
+		NSString *code = self.languages[ip.row][@"code"] ?: @"system";
+		void (^pick)(NSString *) = self.onPick;
+		[self dismissViewControllerAnimated:YES completion:^{ if (pick) pick(code); }];
+	} else {
+		NSURL *url = [NSURL URLWithString:SCIRepoTranslateURL];
+		if (url) [UIApplication.sharedApplication openURL:url options:@{} completionHandler:nil];
+	}
+}
+
+@end
+
+#pragma mark - Settings View Controller
 
 @interface SCISettingsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchControllerDelegate>
-
-@property (nonatomic, strong) UITableView *tableView;
-@property (nonatomic, copy) NSArray *sections;
-@property (nonatomic) BOOL reduceMargin;
-
+@property (nonatomic, strong, readwrite) UITableView *tableView;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, copy) NSArray<NSDictionary *> *sections;
+@property (nonatomic, copy) NSArray<NSDictionary *> *searchIndex;
 @property (nonatomic, copy) NSArray<NSDictionary *> *searchResults;
-@property (nonatomic) BOOL isRoot;
-
+@property (nonatomic, assign) BOOL reduceMargin;
+@property (nonatomic, assign) BOOL isRoot;
+@property (nonatomic, assign) BOOL searchBarStyled;
 @end
 
 @implementation SCISettingsViewController
 
-- (instancetype)initWithTitle:(NSString *)title sections:(NSArray *)sections reduceMargin:(BOOL)reduceMargin {
-    self = [super init];
-    
-    if (self) {
-        self.title = title;
-        self.reduceMargin = reduceMargin;
-        self.isRoot = reduceMargin;
-
-        // Hide dev-only sections in non-dev builds.
-        NSMutableArray *mutableSections = [sections mutableCopy];
-        
-        [mutableSections enumerateObjectsWithOptions:NSEnumerationReverse usingBlock:^(NSDictionary *section, NSUInteger index, BOOL *stop) {
-        
-            if ([section[@"header"] hasPrefix:@"_"] && [section[@"footer"] hasPrefix:@"_"]) {
-                if (![[SCIUtils IGVersionString] isEqualToString:@"0.0.0"]) {
-                    [mutableSections removeObjectAtIndex:index];
-                }
-            }
-
-            else if ([section[@"header"] isEqualToString:@"Experimental"]) {
-                if (![[SCIUtils IGVersionString] hasSuffix:@"-dev"]) {
-                    [mutableSections removeObjectAtIndex:index];
-                }
-            }
-            
-        }];
-        
-        self.sections = [mutableSections copy];
-    }
-    
-    
-    return self;
+- (instancetype)init {
+	return [self initWithTitle:[SCITweakSettings title] sections:[SCITweakSettings sections] reduceMargin:YES];
 }
 
-- (instancetype)init {
-    return [self initWithTitle:[SCITweakSettings title] sections:[SCITweakSettings sections] reduceMargin:YES];
+- (instancetype)initWithTitle:(NSString *)title sections:(NSArray *)sections reduceMargin:(BOOL)reduceMargin {
+	if (!(self = [super init])) return nil;
+	self.title = title;
+	self.reduceMargin = reduceMargin;
+	self.isRoot = reduceMargin;
+	self.sections = [self filteredSections:sections];
+	self.searchResults = @[];
+	if (self.isRoot) self.searchIndex = [self buildSearchIndexFromSections:self.sections breadcrumb:@""];
+	return self;
+}
+
+- (instancetype)initWithTitle:(NSString *)title {
+	return [self initWithTitle:title sections:@[] reduceMargin:NO];
+}
+
+- (void)applySettingSections:(NSArray *)sections {
+	self.sections = [self filteredSections:sections];
+	[self.tableView reloadData];
+}
+
+- (void)rebuildSections {}
+
++ (NSDictionary *)sectionWithHeader:(NSString *)header footer:(NSString *)footer rows:(NSArray<SCISetting *> *)rows {
+	NSMutableDictionary *d = [NSMutableDictionary dictionary];
+	if (header) d[@"header"] = header;
+	if (footer) d[@"footer"] = footer;
+	d[@"rows"] = rows ?: @[];
+	return d.copy;
+}
+
+- (NSArray<NSDictionary *> *)sciSearchableSettingsEntries {
+	if (!self.sections.count) [self rebuildSections];
+	NSMutableArray *out = [NSMutableArray array];
+	for (NSDictionary *section in self.sections) {
+		if (![section isKindOfClass:NSDictionary.class]) continue;
+		NSString *header = section[@"header"] ?: @"";
+		for (SCISetting *row in section[@"rows"]) {
+			if (![row isKindOfClass:SCISetting.class] || row.type == SCITableCellCustom) continue;
+			NSString *title = row.dynamicTitle ? row.dynamicTitle() : row.title;
+			id child = row.navViewController;
+			BOOL childSearchable = [child conformsToProtocol:@protocol(SCISettingsSearchable)];
+
+			if (title.length) {
+				NSString *sub = (row.dynamicSubtitle ? row.dynamicSubtitle() : row.subtitle) ?: @"";
+				NSMutableDictionary *e = [@{ @"title": title, @"subtitle": sub, @"section": header } mutableCopy];
+				if (childSearchable) e[@"target"] = child;
+				[out addObject:e];
+			}
+
+			if (childSearchable) {
+				NSString *prefix = title.length ? (header.length ? [NSString stringWithFormat:@"%@ › %@", header, title] : title) : header;
+				for (NSDictionary *ce in [(id<SCISettingsSearchable>)child sciSearchableSettingsEntries]) {
+					NSMutableDictionary *e = ce.mutableCopy;
+					NSString *cs = ce[@"section"] ?: @"";
+					e[@"section"] = cs.length ? (prefix.length ? [NSString stringWithFormat:@"%@ › %@", prefix, cs] : cs) : prefix;
+					if (!e[@"target"]) e[@"target"] = child;
+					[out addObject:e];
+				}
+			}
+		}
+	}
+	return out;
+}
+
+- (NSArray *)filteredSections:(NSArray *)sections {
+	NSMutableArray *out = [NSMutableArray array];
+	NSString *ver = [SCIUtils IGVersionString];
+	for (NSDictionary *section in sections) {
+		if (![section isKindOfClass:NSDictionary.class]) continue;
+		NSString *header = section[@"header"] ?: @"";
+		NSString *footer = section[@"footer"] ?: @"";
+		if ([header hasPrefix:@"_"] && [footer hasPrefix:@"_"] && ![ver isEqualToString:@"0.0.0"]) continue;
+		if ([header isEqualToString:@"Experimental"] && ![ver hasSuffix:@"-dev"]) continue;
+		[out addObject:section];
+	}
+	return out.copy;
+}
+
+- (NSArray<NSDictionary *> *)buildSearchIndexFromSections:(NSArray *)sections breadcrumb:(NSString *)breadcrumb {
+	NSMutableArray *out = [NSMutableArray array];
+	for (NSDictionary *section in sections) {
+		if (![section isKindOfClass:NSDictionary.class]) continue;
+		NSString *header = section[@"header"] ?: @"";
+		NSArray *rows = section[@"rows"];
+		NSString *sectionCrumb = breadcrumb.length && header.length ? [NSString stringWithFormat:@"%@ › %@", breadcrumb, header] : (header ?: breadcrumb);
+		for (SCISetting *row in rows) {
+			if (![row isKindOfClass:SCISetting.class]) continue;
+			[out addObject:@{
+				@"setting": row,
+				@"breadcrumb": sectionCrumb ?: @"",
+				@"haystack": [NSString stringWithFormat:@"%@ %@ %@", row.title ?: @"", row.subtitle ?: @"", sectionCrumb ?: @""]
+			}];
+			NSString *childCrumb = sectionCrumb.length ? [NSString stringWithFormat:@"%@ › %@", sectionCrumb, row.title ?: @""] : (row.title ?: @"");
+			if (row.navSections.count) {
+				[out addObjectsFromArray:[self buildSearchIndexFromSections:row.navSections breadcrumb:childCrumb]];
+			} else if ([row.navViewController conformsToProtocol:@protocol(SCISettingsSearchable)]) {
+				for (NSDictionary *child in [(id<SCISettingsSearchable>)row.navViewController sciSearchableSettingsEntries]) {
+					NSString *title = child[@"title"] ?: @"";
+					NSString *sub = child[@"subtitle"] ?: @"";
+					NSString *sec = child[@"section"] ?: @"";
+					UIViewController *target = child[@"target"] ?: row.navViewController;
+					NSString *entryCrumb = sec.length ? [NSString stringWithFormat:@"%@ › %@", childCrumb, sec] : childCrumb;
+					SCISetting *proxy = [SCISetting navigationCellWithTitle:title subtitle:@"" icon:row.icon viewController:target];
+					[out addObject:@{
+						@"setting": proxy,
+						@"breadcrumb": entryCrumb,
+						@"haystack": [NSString stringWithFormat:@"%@ %@ %@", title, sub, entryCrumb]
+					}];
+				}
+			}
+		}
+	}
+	return out.copy;
 }
 
 - (void)viewDidLoad {
-    [super viewDidLoad];
-
-    self.navigationController.navigationBar.prefersLargeTitles = NO;
-    self.view.backgroundColor = UIColor.systemBackgroundColor;
-
-    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
-    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.tableView.dataSource = self;
-    self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30 : -10, 0, 0, 0);
-    self.tableView.delegate = self;
-
-    [self.view addSubview:self.tableView];
-
-    if (self.isRoot) {
-        UISearchController *sc = [[UISearchController alloc] initWithSearchResultsController:nil];
-        sc.searchResultsUpdater = self;
-        sc.delegate = self;
-        sc.obscuresBackgroundDuringPresentation = NO;
-        sc.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
-        self.navigationItem.searchController = sc;
-        self.navigationItem.hidesSearchBarWhenScrolling = NO;
-        if (![SCIUtils getBoolPref:@"liquid_glass_buttons"]) {
-            self.definesPresentationContext = YES;
-        }
-        self.searchController = sc;
-
-        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
-            initWithBarButtonSystemItem:UIBarButtonSystemItemClose
-                                 target:self action:@selector(sciDismissSettings)];
-
-        UIImage *globe = [UIImage systemImageNamed:@"globe"];
-        UIBarButtonItem *langItem = [[UIBarButtonItem alloc] initWithImage:globe
-                                                                     style:UIBarButtonItemStylePlain
-                                                                    target:nil
-                                                                    action:nil];
-        langItem.menu = [self sciBuildLanguageMenu];
-        self.navigationItem.rightBarButtonItem = langItem;
-    }
-
-    // Pushed Advanced VC reloads the Clear cache row when size lands.
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(sciCacheSizeDidUpdate)
-                                                 name:SCICacheSizeDidUpdateNotification
-                                               object:nil];
+	[super viewDidLoad];
+	self.navigationController.navigationBar.prefersLargeTitles = NO;
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	[self setupTableView];
+	if (self.isRoot) [self setupRootNavigation];
+	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
+	[nc addObserver:self selector:@selector(sciCacheSizeDidUpdate) name:SCICacheSizeDidUpdateNotification object:nil];
+	[nc addObserver:self selector:@selector(sciReloadFromNotification) name:@"SCISettingsShouldReload" object:nil];
 }
 
-- (void)sciCacheSizeDidUpdate {
-    [self.tableView reloadData];
+- (void)sciReloadFromNotification {
+	CGPoint offset = self.tableView.contentOffset;
+	if (self.isRoot) self.sections = [self filteredSections:[SCITweakSettings sections]];
+	[self.tableView reloadData];
+	self.tableView.contentOffset = offset;
 }
 
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+- (void)setupTableView {
+	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	self.tableView.backgroundColor = self.view.backgroundColor;
+	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
+	self.tableView.dataSource = self;
+	self.tableView.delegate = self;
+	[self.view addSubview:self.tableView];
 }
 
-- (void)sciShowLanguageInfo {
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:SCILocalized(@"settings.language.title")
-                         message:SCILocalized(@"settings.language.english_only")
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"settings.language.ok") style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"settings.language.help_translate") style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *a) {
-        NSURL *url = [NSURL URLWithString:@"https://github.com/faroukbmiled/RyukGram#translating-ryukgram"];
-        if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (UIMenu *)sciBuildLanguageMenu {
-    NSString *current = [[NSUserDefaults standardUserDefaults] stringForKey:SCILanguagePrefKey] ?: @"system";
-    NSMutableArray<UIAction *> *actions = [NSMutableArray array];
-
-    for (NSDictionary<NSString *, NSString *> *lang in SCIAvailableLanguages()) {
-        NSString *code = lang[@"code"];
-        NSString *title = [code isEqualToString:@"system"]
-            ? SCILocalized(@"settings.language.system")
-            : lang[@"native"];
-
-        UIAction *action = [UIAction actionWithTitle:title
-                                                image:nil
-                                           identifier:nil
-                                              handler:^(UIAction * _Nonnull a) {
-            NSString *prev = [[NSUserDefaults standardUserDefaults] stringForKey:SCILanguagePrefKey] ?: @"system";
-            if ([prev isEqualToString:code]) return;
-            [[NSUserDefaults standardUserDefaults] setObject:code forKey:SCILanguagePrefKey];
-            SCILocalizationReset();
-            [self sciApplyLanguageChange];
-            // Most IG-side hooks cache their labels at load time, so a full
-            // restart is the only way to flip every menu/button cleanly.
-            [SCIUtils showRestartConfirmation];
-        }];
-        action.state = [code isEqualToString:current] ? UIMenuElementStateOn : UIMenuElementStateOff;
-        [actions addObject:action];
-    }
-
-    UIAction *help = [UIAction actionWithTitle:[NSString stringWithFormat:@"❤️ %@", SCILocalized(@"settings.language.help_translate")]
-                                          image:nil
-                                     identifier:nil
-                                        handler:^(__unused UIAction *a) {
-        NSURL *url = [NSURL URLWithString:@"https://github.com/faroukbmiled/RyukGram#translating-ryukgram"];
-        if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-    }];
-
-    return [UIMenu menuWithTitle:SCILocalized(@"settings.language.title")
-                        children:[actions arrayByAddingObject:help]];
-}
-
-- (void)sciApplyLanguageChange {
-    // Root title + search placeholder reflect the new language immediately.
-    self.title = SCILocalized(@"settings.title");
-    self.searchController.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
-    if (self.navigationItem.rightBarButtonItem.menu) {
-        self.navigationItem.rightBarButtonItem.menu = [self sciBuildLanguageMenu];
-    }
-    [self.tableView reloadData];
-
-    // Features watching for runtime label refreshes (IG menu items, overlay
-    // buttons, toasts) can subscribe to this to re-read their strings.
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SCILanguageDidChange" object:nil];
-}
-
-- (void)sciDismissSettings {
-    [self dismissViewControllerAnimated:YES completion:nil];
+- (void)setupRootNavigation {
+	UISearchController *sc = [[UISearchController alloc] initWithSearchResultsController:nil];
+	sc.searchResultsUpdater = self;
+	sc.delegate = self;
+	sc.obscuresBackgroundDuringPresentation = NO;
+	sc.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
+	self.searchController = sc;
+	self.navigationItem.searchController = sc;
+	self.navigationItem.hidesSearchBarWhenScrolling = NO;
+	self.definesPresentationContext = ![SCIUtils getBoolPref:@"liquid_glass_buttons"];
+	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(sciDismissSettings)];
+	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"globe"] style:UIBarButtonItemStylePlain target:self action:@selector(sciPresentLanguagePicker)];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    [self.tableView reloadData];
-    [self sciStyleSearchBar];
+	[super viewWillAppear:animated];
+	if (self.isRoot) self.sections = [self filteredSections:[SCITweakSettings sections]];
+	[self.tableView reloadData];
+	[self sciStyleSearchBar];
 }
 
-- (void)sciStyleSearchBar { [SCISearchBarStyler styleSearchBar:self.searchController.searchBar]; }
+- (void)viewDidLayoutSubviews {
+	[super viewDidLayoutSubviews];
+	if (!self.searchBarStyled) [self sciStyleSearchBar];
+}
 
-- (void)willPresentSearchController:(UISearchController *)searchController { [self sciStyleSearchBar]; }
-- (void)didPresentSearchController:(UISearchController *)searchController {
-    [self sciStyleSearchBar];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self sciStyleSearchBar];
-    });
+- (void)viewWillDisappear:(BOOL)animated {
+	[super viewWillDisappear:animated];
+	if (![SCIUtils getBoolPref:@"liquid_glass_buttons"] && self.searchController.isActive) self.searchController.active = NO;
+	if (self.isRoot) [self sciShowFirstRunAlertIfNeeded];
+}
+
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+
+#pragma mark - Language
+
+- (void)sciPresentLanguagePicker {
+	SCILanguagePickerViewController *picker = [SCILanguagePickerViewController new];
+	__weak typeof(self) weakSelf = self;
+	picker.onPick = ^(NSString *code) {
+		NSString *prev = [NSUserDefaults.standardUserDefaults stringForKey:SCILanguagePrefKey] ?: @"system";
+		if ([prev isEqualToString:code]) return;
+		[NSUserDefaults.standardUserDefaults setObject:code forKey:SCILanguagePrefKey];
+		SCILocalizationReset();
+		[weakSelf sciApplyLanguageChange];
+		[SCIUtils showRestartConfirmationWithTitle:SCILocalized(@"settings.language.restart.title") message:SCILocalized(@"settings.language.restart.message")];
+	};
+	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:picker];
+	nav.modalPresentationStyle = UIModalPresentationPageSheet;
+	if (@available(iOS 15.0, *)) {
+		UISheetPresentationController *sheet = nav.sheetPresentationController;
+		sheet.detents = @[UISheetPresentationControllerDetent.largeDetent, UISheetPresentationControllerDetent.mediumDetent];
+		sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+		sheet.prefersGrabberVisible = YES;
+		sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
+	}
+	[self presentViewController:nav animated:YES completion:nil];
+}
+
+- (void)sciApplyLanguageChange {
+	self.title = SCILocalized(@"settings.title");
+	self.searchController.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
+	self.sections = [self filteredSections:[SCITweakSettings sections]];
+	self.searchIndex = [self buildSearchIndexFromSections:self.sections breadcrumb:@""];
+	[self.tableView reloadData];
+	[NSNotificationCenter.defaultCenter postNotificationName:@"SCILanguageDidChange" object:nil];
+}
+
+#pragma mark - Events
+
+- (void)sciDismissSettings { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)sciCacheSizeDidUpdate { [self.tableView reloadData]; }
+
+- (void)sciStyleSearchBar {
+	if (!self.searchController.searchBar) return;
+	[SCISearchBarStyler styleSearchBar:self.searchController.searchBar];
+	self.searchBarStyled = YES;
+}
+
+- (void)willPresentSearchController:(UISearchController *)sc { self.searchBarStyled = NO; [self sciStyleSearchBar]; }
+
+- (void)didPresentSearchController:(UISearchController *)sc {
+	self.searchBarStyled = NO;
+	[self sciStyleSearchBar];
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		self.searchBarStyled = NO;
+		[self sciStyleSearchBar];
+	});
+}
+
+- (void)sciShowFirstRunAlertIfNeeded {
+	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+	if ([[d objectForKey:@"SCInstaFirstRun"] isEqualToString:SCIVersionString]) return;
+	[d setObject:SCIVersionString forKey:@"SCInstaFirstRun"];
+	UIViewController *presenter = self.presentingViewController;
+	if (!presenter) return;
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"settings.firstrun.title") message:SCILocalized(@"settings.firstrun.message") preferredStyle:UIAlertControllerStyleAlert];
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"settings.firstrun.ok") style:UIAlertActionStyleDefault handler:nil]];
+	[presenter presentViewController:alert animated:YES completion:nil];
 }
 
 #pragma mark - Search
 
-- (BOOL)isSearching {
-    return self.searchController.isActive && self.searchController.searchBar.text.length > 0;
+- (BOOL)isSearching { return self.searchController.isActive && self.searchController.searchBar.text.length > 0; }
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)sc {
+	NSString *q = sc.searchBar.text ?: @"";
+	if (!q.length) { self.searchResults = @[]; [self.tableView reloadData]; return; }
+	NSMutableArray *out = [NSMutableArray array];
+	NSStringCompareOptions opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+	for (NSDictionary *entry in self.searchIndex)
+		if ([(entry[@"haystack"] ?: @"") rangeOfString:q options:opts].location != NSNotFound) [out addObject:entry];
+	self.searchResults = out.copy;
+	[self.tableView reloadData];
 }
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *q = searchController.searchBar.text ?: @"";
-    if (q.length == 0) {
-        self.searchResults = @[];
-    } else {
-        NSMutableArray *out = [NSMutableArray array];
-        [self collectMatchingFromSections:self.sections breadcrumb:@"" query:q into:out];
-        self.searchResults = out;
-    }
-    [self.tableView reloadData];
+- (SCISetting *)settingForIndexPath:(NSIndexPath *)ip breadcrumbOut:(NSString **)outCrumb {
+	if ([self isSearching]) {
+		if (ip.row >= (NSInteger)self.searchResults.count) return nil;
+		NSDictionary *entry = self.searchResults[ip.row];
+		if (outCrumb) *outCrumb = entry[@"breadcrumb"];
+		return entry[@"setting"];
+	}
+	if (ip.section >= (NSInteger)self.sections.count) return nil;
+	NSArray *rows = self.sections[ip.section][@"rows"];
+	return ip.row >= (NSInteger)rows.count ? nil : rows[ip.row];
 }
 
-- (void)collectMatchingFromSections:(NSArray *)sections
-                         breadcrumb:(NSString *)breadcrumb
-                              query:(NSString *)q
-                               into:(NSMutableArray *)out
-{
-    for (id sectionObj in sections) {
-        if (![sectionObj isKindOfClass:[NSDictionary class]]) continue;
-        NSDictionary *section = sectionObj;
-        NSString *header = section[@"header"] ?: @"";
-        NSArray *rows = section[@"rows"];
-        for (id rowObj in rows) {
-            if (![rowObj isKindOfClass:[SCISetting class]]) continue;
-            SCISetting *row = rowObj;
+#pragma mark - UITableViewDataSource
 
-            NSString *titleHay = row.title ?: @"";
-            NSString *subHay   = row.subtitle ?: @"";
-            BOOL matches = [titleHay rangeOfString:q options:NSCaseInsensitiveSearch].location != NSNotFound
-                        || [subHay   rangeOfString:q options:NSCaseInsensitiveSearch].location != NSNotFound;
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return [self isSearching] ? 1 : self.sections.count; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return [self isSearching] ? self.searchResults.count : [self.sections[s][@"rows"] count]; }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s { return [self isSearching] ? nil : self.sections[s][@"footer"]; }
 
-            if (matches) {
-                NSMutableString *crumb = [NSMutableString string];
-                if (breadcrumb.length) [crumb appendString:breadcrumb];
-                if (header.length) {
-                    if (crumb.length) [crumb appendString:@" › "];
-                    [crumb appendString:header];
-                }
-                [out addObject:@{ @"setting": row, @"breadcrumb": crumb ?: @"" }];
-            }
-
-            if (row.navSections) {
-                NSString *child = breadcrumb.length
-                    ? [NSString stringWithFormat:@"%@ › %@", breadcrumb, row.title ?: @""]
-                    : (row.title ?: @"");
-                [self collectMatchingFromSections:row.navSections breadcrumb:child query:q into:out];
-            }
-        }
-    }
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
+	if ([self isSearching]) {
+		NSUInteger c = self.searchResults.count;
+		if (!c) return SCILocalized(@"No results");
+		return [NSString stringWithFormat:SCILocalized(c == 1 ? @"settings.results.one" : @"settings.results.many"), (unsigned long)c];
+	}
+	return self.sections[s][@"header"];
 }
 
-- (SCISetting *)settingForIndexPath:(NSIndexPath *)indexPath breadcrumbOut:(NSString **)outCrumb {
-    if ([self isSearching]) {
-        if (indexPath.row >= (NSInteger)self.searchResults.count) return nil;
-        NSDictionary *entry = self.searchResults[indexPath.row];
-        if (outCrumb) *outCrumb = entry[@"breadcrumb"];
-        return entry[@"setting"];
-    }
-    return self.sections[indexPath.section][@"rows"][indexPath.row];
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+	NSString *breadcrumb = nil;
+	SCISetting *row = [self settingForIndexPath:ip breadcrumbOut:&breadcrumb];
+	if (!row) return [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+
+	if (row.type == SCITableCellCustom && row.customCellProvider && ![self isSearching])
+		return row.customCellProvider(tv, ip);
+
+	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+	UIListContentConfiguration *config = cell.defaultContentConfiguration;
+	cell.accessoryView = nil;
+	cell.accessoryType = UITableViewCellAccessoryNone;
+	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+	cell.contentView.alpha = row.disabled ? 0.4 : 1.0;
+
+	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
+	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
+
+	NSString *rowSubtitle = row.dynamicSubtitle ? row.dynamicSubtitle() : row.subtitle;
+	NSString *subtitle = ([self isSearching] && breadcrumb.length) ? breadcrumb : rowSubtitle;
+	if (subtitle.length) {
+		config.secondaryText = subtitle;
+		config.textToSecondaryTextVerticalPadding = 4.5;
+	}
+
+	[self configureIconForRow:row config:config indexPath:ip tableView:tv];
+	config = [self configuredContent:config forCell:cell row:row indexPath:ip];
+	cell.contentConfiguration = config;
+	if (![self isSearching] && [self rowHasWhatsNew:row]) [self addWhatsNewDotToCell:cell];
+	return cell;
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    // Without this the search bar strands itself as a floating bar on return.
-    if (![SCIUtils getBoolPref:@"liquid_glass_buttons"] && self.searchController.isActive) {
-        self.searchController.active = NO;
-    }
-
-    if (![[[NSUserDefaults standardUserDefaults] objectForKey:@"SCInstaFirstRun"] isEqualToString:SCIVersionString]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"settings.firstrun.title")
-                                                                       message:SCILocalized(@"settings.firstrun.message")
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-
-        [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"settings.firstrun.ok")
-                                                  style:UIAlertActionStyleDefault
-                                                handler:nil]];
-        
-        UIViewController *presenter = self.presentingViewController;
-        [presenter presentViewController:alert animated:YES completion:nil];
-        
-        // Done with first-time setup for this version
-        [[NSUserDefaults standardUserDefaults] setValue:SCIVersionString forKey:@"SCInstaFirstRun"];
-    }
+- (BOOL)rowHasWhatsNew:(SCISetting *)row {
+	if ([SCIWhatsNew isUnseen:[SCIWhatsNew identifierForRow:row]]) return YES;
+	return row.navSections.count && [SCIWhatsNew sectionsHaveUnseen:row.navSections];
 }
 
-// MARK: - UITableViewDataSource
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSString *searchBreadcrumb = nil;
-    SCISetting *row = [self settingForIndexPath:indexPath breadcrumbOut:&searchBreadcrumb];
-    if (!row) return nil;
-    
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    UIListContentConfiguration *cellContentConfig = cell.defaultContentConfiguration;
-    
-    cellContentConfig.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
-
-    // Value1-style static row: trailing label on the right. Subtitle still
-    // renders below the title when both are set.
-    if (row.valueText.length && ![self isSearching]) {
-        UILabel *value = [UILabel new];
-        value.text = row.valueText;
-        value.font = [UIFont systemFontOfSize:16];
-        value.textColor = [UIColor secondaryLabelColor];
-        [value sizeToFit];
-        cell.accessoryView = value;
-    }
-    NSString *displaySubtitle = [self isSearching] && searchBreadcrumb.length ? searchBreadcrumb : row.subtitle;
-    if (displaySubtitle.length) {
-        cellContentConfig.secondaryText = displaySubtitle;
-        cellContentConfig.textToSecondaryTextVerticalPadding = 4.5;
-    }
-    
-    // Icon
-    if (row.icon != nil) {
-        cellContentConfig.image = [row.icon image];
-        cellContentConfig.imageProperties.tintColor = row.icon.color;
-    }
-    
-    // Image url
-    if (row.imageUrl != nil) {
-        [self loadImageFromURL:row.imageUrl atIndexPath:indexPath forTableView:tableView];
-        
-        cellContentConfig.imageToTextPadding = 14;
-    }
-    
-    switch (row.type) {
-        case SCITableCellStatic: {
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            break;
-        }
-            
-        case SCITableCellLink: {
-            cellContentConfig.textProperties.color = [UIColor systemBlueColor];
-            cellContentConfig.textProperties.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize
-                                                                      weight:UIFontWeightMedium];
-            
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-            
-            UIImageView *imageView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"safari"]];
-            imageView.tintColor = [UIColor systemGray3Color];
-            cell.accessoryView = imageView;
-            
-            break;
-        }
-            
-        case SCITableCellSwitch: {
-            UISwitch *toggle = [UISwitch new];
-            toggle.on = row.disabled ? NO : [[NSUserDefaults standardUserDefaults] boolForKey:row.defaultsKey];
-            toggle.onTintColor = [SCIUtils SCIColor_Primary];
-            toggle.enabled = !row.disabled;
-
-            objc_setAssociatedObject(toggle, rowStaticRef, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-            [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
-
-            cell.accessoryView = toggle;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            if (row.disabled) {
-                cell.contentView.alpha = 0.4;
-            }
-            break;
-        }
-            
-        case SCITableCellStepper: {
-            UIStepper *stepper = [UIStepper new];
-            stepper.minimumValue = row.min;
-            stepper.maximumValue = row.max;
-            stepper.stepValue = row.step;
-            stepper.value = [[NSUserDefaults standardUserDefaults] doubleForKey:row.defaultsKey];
-            
-            objc_setAssociatedObject(stepper, rowStaticRef, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            
-            [stepper addTarget:self
-                        action:@selector(stepperChanged:)
-              forControlEvents:UIControlEventValueChanged];
-            
-            // Template subtitle
-            if (row.subtitle.length) {
-                cellContentConfig.secondaryText = [self formatString:row.subtitle withValue:stepper.value label:row.label singularLabel:row.singularLabel];
-            }
-            
-            cell.accessoryView = stepper;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            break;
-        }
-            
-        case SCITableCellButton: {
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            break;
-        }
-            
-        case SCITableCellMenu: {
-            UIButton *menuButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            [menuButton setTitle:@"•••" forState:UIControlStateNormal];
-            menuButton.menu = [row menuForButton:menuButton];
-            menuButton.showsMenuAsPrimaryAction = YES;
-            menuButton.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize
-                                                           weight:UIFontWeightMedium];
-            
-            UIButtonConfiguration *config = menuButton.configuration ?: [UIButtonConfiguration plainButtonConfiguration];
-            menuButton.configuration.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-            menuButton.configuration = config;
-
-            [menuButton sizeToFit];
-
-            cell.accessoryView = menuButton;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            if (row.disabled) {
-                menuButton.enabled = NO;
-                cell.contentView.alpha = 0.4;
-            }
-            break;
-        }
-            
-        case SCITableCellNavigation: {
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            break;
-        }
-    }
-
-    if (row.titleColor) {
-        cellContentConfig.textProperties.color = row.titleColor;
-    }
-
-    cell.contentConfiguration = cellContentConfig;
-
-    return cell;
+- (void)addWhatsNewDotToCell:(UITableViewCell *)cell {
+	UIView *dot = [UIView new];
+	dot.translatesAutoresizingMaskIntoConstraints = NO;
+	dot.backgroundColor = UIColor.systemBlueColor;
+	dot.layer.cornerRadius = 3.5;
+	[cell.contentView addSubview:dot];
+	[NSLayoutConstraint activateConstraints:@[
+		[dot.widthAnchor constraintEqualToConstant:7.0],
+		[dot.heightAnchor constraintEqualToConstant:7.0],
+		[dot.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[dot.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:5.0],
+	]];
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if ([self isSearching]) return self.searchResults.count;
-    return [self.sections[section][@"rows"] count];
+- (void)configureIconForRow:(SCISetting *)row config:(UIListContentConfiguration *)config indexPath:(NSIndexPath *)ip tableView:(UITableView *)tv {
+	if (row.iconImage) {
+		config.image = row.iconImage;
+		config.imageToTextPadding = 14.0;
+	}
+	if (row.icon) {
+		config.image = [row.icon image];
+		config.imageProperties.tintColor = row.icon.color;
+	}
+	if (row.imageUrl) {
+		config.imageToTextPadding = 14.0;
+		[self loadImageFromURL:row.imageUrl atIndexPath:ip forTableView:tv];
+	}
+	if (row.bundleImageName.length) {
+		UIImage *img = [UIImage imageNamed:row.bundleImageName inBundle:SCILocalizationBundle() compatibleWithTraitCollection:nil];
+		if (!img) return;
+		config.image = img;
+		config.imageProperties.maximumSize = CGSizeMake(45.0, 45.0);
+		config.imageProperties.cornerRadius = 10.0;
+		config.imageToTextPadding = 14.0;
+	}
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if ([self isSearching]) {
-        NSUInteger n = self.searchResults.count;
-        if (n == 0) return SCILocalized(@"settings.results.none");
-        NSString *fmt = n == 1 ? SCILocalized(@"settings.results.one") : SCILocalized(@"settings.results.many");
-        return [NSString stringWithFormat:fmt, (unsigned long)n];
-    }
-    return self.sections[section][@"header"];
+- (UILabel *)valueLabel:(NSString *)text {
+	UILabel *l = UILabel.new;
+	l.text = text;
+	l.font = [UIFont systemFontOfSize:16.0];
+	l.textColor = UIColor.secondaryLabelColor;
+	[l sizeToFit];
+	return l;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if ([self isSearching]) return nil;
-    return self.sections[section][@"footer"];
+- (UIListContentConfiguration *)configuredContent:(UIListContentConfiguration *)config forCell:(UITableViewCell *)cell row:(SCISetting *)row indexPath:(NSIndexPath *)ip {
+	switch (row.type) {
+		case SCITableCellStatic: {
+			cell.selectionStyle = UITableViewCellSelectionStyleNone;
+			if (row.valueText.length && ![self isSearching]) cell.accessoryView = [self valueLabel:row.valueText];
+			break;
+		}
+		case SCITableCellLink: {
+			config.textProperties.color = UIColor.systemBlueColor;
+			config.textProperties.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
+			UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"safari"]];
+			icon.tintColor = UIColor.systemGray3Color;
+			cell.accessoryView = icon;
+			break;
+		}
+		case SCITableCellSwitch: {
+			UISwitch *t = UISwitch.new;
+			BOOL on = row.switchValueProvider ? row.switchValueProvider() : [NSUserDefaults.standardUserDefaults boolForKey:row.defaultsKey];
+			t.on = row.disabled ? NO : on;
+			t.onTintColor = [SCIUtils SCIColor_Primary];
+			t.enabled = !row.disabled;
+			objc_setAssociatedObject(t, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			[t addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+			cell.accessoryView = t;
+			cell.selectionStyle = UITableViewCellSelectionStyleNone;
+			break;
+		}
+		case SCITableCellStepper: {
+			UIStepper *s = UIStepper.new;
+			s.minimumValue = row.min;
+			s.maximumValue = row.max;
+			s.stepValue = row.step;
+			s.value = [NSUserDefaults.standardUserDefaults doubleForKey:row.defaultsKey];
+			objc_setAssociatedObject(s, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			[s addTarget:self action:@selector(stepperChanged:) forControlEvents:UIControlEventValueChanged];
+			if (row.subtitle.length) config.secondaryText = [self formatString:row.subtitle withValue:s.value label:row.label singularLabel:row.singularLabel];
+			cell.accessoryView = s;
+			cell.selectionStyle = UITableViewCellSelectionStyleNone;
+			break;
+		}
+		case SCITableCellButton:
+		case SCITableCellNavigation: {
+			NSString *valueText = row.dynamicValueText ? row.dynamicValueText() : row.valueText;
+			if (valueText.length && ![self isSearching]) cell.accessoryView = [self valueLabel:valueText];
+			else if (!row.hidesDisclosureIndicator) cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+			break;
+		}
+		case SCITableCellMenu: {
+			UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+			[b setTitle:@"•••" forState:UIControlStateNormal];
+			b.enabled = !row.disabled;
+			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
+			b.titleLabel.numberOfLines = 1;
+			b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+			SCIUIKit26ConfigureButton(b);
+			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
+			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+			b.configuration = bc;
+			b.menu = [row menuForButton:b];
+			b.showsMenuAsPrimaryAction = YES;
+			[b.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:156.0].active = YES;
+			[b sizeToFit];
+			cell.accessoryView = b;
+			cell.selectionStyle = UITableViewCellSelectionStyleNone;
+			break;
+		}
+		case SCITableCellColor:
+			cell.accessoryView = [SCIColorPicker swatchViewForKey:row.defaultsKey defaultColor:row.defaultColor];
+			break;
+		case SCITableCellCustom:
+			break;
+	}
+	return config;
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    if ([self isSearching]) return 1;
-    return self.sections.count;
+- (CGFloat)tableView:(UITableView *)tv heightForRowAtIndexPath:(NSIndexPath *)ip {
+	if ([self isSearching]) return UITableViewAutomaticDimension;
+	SCISetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
+	if (row.type == SCITableCellCustom && row.customHeight > 0) return row.customHeight;
+	return UITableViewAutomaticDimension;
 }
 
-// MARK: - UITableViewDelegate
+#pragma mark - UITableViewDelegate
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    SCISetting *row = [self settingForIndexPath:indexPath breadcrumbOut:NULL];
-    if (!row) return;
-
-    if (row.type == SCITableCellLink) {
-        [[UIApplication sharedApplication] openURL:row.url options:@{} completionHandler:nil];
-    }
-    else if (row.type == SCITableCellButton) {
-        if (row.action != nil) {
-            row.action();
-        }
-    }
-    else if (row.type == SCITableCellNavigation) {
-        if (row.navSections.count > 0) {
-            UIViewController *vc = [[SCISettingsViewController alloc] initWithTitle:row.title sections:row.navSections reduceMargin:NO];
-            vc.title = row.title;
-            [self.navigationController pushViewController:vc animated:YES];
-        }
-        else if (row.navViewController) {
-            [self.navigationController pushViewController:row.navViewController animated:YES];
-        }
-    }
-
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+- (void)tableView:(UITableView *)tv willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)ip {
+	if ([self isSearching]) return;
+	SCISetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
+	// Clears this row's own dot once seen; a nav cell's bubble-up dot is separate.
+	if (row) [SCIWhatsNew markSeen:[SCIWhatsNew identifierForRow:row]];
 }
 
-// MARK: - Actions
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+	SCISetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
+	if (!row || row.disabled) { [tv deselectRowAtIndexPath:ip animated:YES]; return; }
+	switch (row.type) {
+		case SCITableCellLink: if (row.url) [UIApplication.sharedApplication openURL:row.url options:@{} completionHandler:nil]; break;
+		case SCITableCellButton: if (row.action) row.action(); break;
+		case SCITableCellColor: [self presentColorPickerForRow:row indexPath:ip]; break;
+		case SCITableCellNavigation: [self pushNavigationForRow:row]; break;
+		default: break;
+	}
+	[tv deselectRowAtIndexPath:ip animated:YES];
+}
+
+- (void)presentColorPickerForRow:(SCISetting *)row indexPath:(NSIndexPath *)ip {
+	__weak typeof(self) weakSelf = self;
+	[SCIColorPicker presentFrom:self title:row.title defaultsKey:row.defaultsKey defaultColor:row.defaultColor onChange:^(__unused UIColor *color) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+		[self.tableView cellForRowAtIndexPath:ip].accessoryView = [SCIColorPicker swatchViewForKey:row.defaultsKey defaultColor:row.defaultColor];
+	}];
+}
+
+- (void)pushNavigationForRow:(SCISetting *)row {
+	if (row.navSections.count) {
+		[self.navigationController pushViewController:[[SCISettingsViewController alloc] initWithTitle:row.title sections:row.navSections reduceMargin:NO] animated:YES];
+		return;
+	}
+	if (row.navViewController) [self.navigationController pushViewController:row.navViewController animated:YES];
+}
+
+#pragma mark - Actions
 
 - (void)switchChanged:(UISwitch *)sender {
-    SCISetting *row = objc_getAssociatedObject(sender, rowStaticRef);
-    [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:row.defaultsKey];
-    
-    NSLog(@"Switch changed: %@", sender.isOn ? @"ON" : @"OFF");
-    
-    if (row.requiresRestart) {
-        [SCIUtils showRestartConfirmation];
-    }
-
-    if ([row.defaultsKey isEqualToString:@"hide_suggested_stories"]) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"SCISuggestedStoriesReload" object:nil];
-    }
+	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
+	if (row.switchAction) { row.switchAction(sender.isOn); return; }
+	if (!row.defaultsKey.length) return;
+	[NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:row.defaultsKey];
+	if (row.requiresRestart) [SCIUtils showRestartConfirmation];
+	if ([row.defaultsKey isEqualToString:@"hide_suggested_stories"])
+		[NSNotificationCenter.defaultCenter postNotificationName:@"SCISuggestedStoriesReload" object:nil];
+	if ([row.defaultsKey isEqualToString:@"show_fake_location_map_button"])
+		[NSNotificationCenter.defaultCenter postNotificationName:@"SCIFakeLocationMapBtnPrefChanged" object:nil];
+	if ([row.defaultsKey isEqualToString:@"adv_encoding_enabled"]) {
+		self.sections = [SCITweakSettings rebuildAdvancedEncodingSlotInSections:self.sections];
+		[self sciReloadFromNotification];
+	}
 }
 
 - (void)stepperChanged:(UIStepper *)sender {
-    SCISetting *row = objc_getAssociatedObject(sender, rowStaticRef);
-    [[NSUserDefaults standardUserDefaults] setDouble:sender.value forKey:row.defaultsKey];
-    
-    NSLog(@"Stepper changed: %f", sender.value);
-    
-    [self reloadCellForView:sender];
+	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
+	if (!row.defaultsKey.length) return;
+	[NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:row.defaultsKey];
+	[self reloadCellForView:sender animated:NO];
 }
 
 - (void)menuChanged:(UICommand *)command {
-    NSDictionary *properties = command.propertyList;
-    
-    [[NSUserDefaults standardUserDefaults] setValue:properties[@"value"] forKey:properties[@"defaultsKey"]];
-    
-    NSLog(@"Menu changed: %@", command.propertyList[@"value"]);
-    
-    [self reloadCellForView:command.sender animated:YES];
-    [self.tableView reloadData];
+	NSDictionary *props = [command.propertyList isKindOfClass:NSDictionary.class] ? command.propertyList : nil;
+	NSString *key = props[@"defaultsKey"];
+	id value = props[@"value"];
+	if (key.length && value) [NSUserDefaults.standardUserDefaults setValue:value forKey:key];
+	if ([key isEqualToString:@"sci_ig_wordmark_variant"] || [key isEqualToString:@"sci_ig_wordmark_mode"])
+		[SCIBulkGatingPresets applyIGWordmarkMode:[value isKindOfClass:NSString.class] ? value : @"off"];
+	[self sciReloadFromNotification];
 
-    if (properties[@"requiresRestart"]) {
-        [SCIUtils showRestartConfirmation];
-    }
+	NSString *pickerKey = props[@"presentColorPickerForKey"];
+	if (pickerKey.length) {
+		__weak typeof(self) weakSelf = self;
+		[SCIColorPicker presentFrom:self title:command.title defaultsKey:pickerKey defaultColor:UIColor.blackColor onChange:^(__unused UIColor *color) {
+			[weakSelf sciReloadFromNotification];
+		}];
+	}
+	if ([props[@"requiresRestart"] boolValue]) [SCIUtils showRestartConfirmation];
 }
 
-// MARK: - Helper
+#pragma mark - Helpers
 
 - (NSString *)formatString:(NSString *)template withValue:(double)value label:(NSString *)label singularLabel:(NSString *)singularLabel {
-    // Singular or plural labels
-    NSString *applicableLabel = fabs(value - 1.0) < 0.00001 ? singularLabel : label;
-    
-    // Force value to 0 to prevent it being -0
-    if (fabs(value) < 0.00001) {
-        value = 0.0;
-    }
-
-    // Get correct decimal value based on step value
-    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
-    formatter.numberStyle = NSNumberFormatterDecimalStyle;
-    formatter.minimumFractionDigits = 0;
-    formatter.maximumFractionDigits = [SCIUtils decimalPlacesInDouble:value];
-
-    NSString *stringValue = [formatter stringFromNumber:@(value)];
-
-    return [NSString stringWithFormat:template, stringValue, applicableLabel];
+	if (fabs(value) < 0.00001) value = 0.0;
+	NSString *unit = fabs(value - 1.0) < 0.00001 ? singularLabel : label;
+	static NSNumberFormatter *f;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ f = NSNumberFormatter.new; f.numberStyle = NSNumberFormatterDecimalStyle; f.minimumFractionDigits = 0; });
+	f.maximumFractionDigits = [SCIUtils decimalPlacesInDouble:value];
+	return [NSString stringWithFormat:template, [f stringFromNumber:@(value)] ?: @"0", unit ?: @""];
 }
 
 - (void)reloadCellForView:(UIView *)view animated:(BOOL)animated {
-    UITableViewCell *cell = (UITableViewCell *)view.superview;
-    while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
-        cell = (UITableViewCell *)cell.superview;
-    }
-    if (!cell) return;
-
-    NSIndexPath *indexPath = [self.tableView indexPathForCell:cell];
-    if (!indexPath) return;
-    
-    [self.tableView reloadRowsAtIndexPaths:@[indexPath]
-                          withRowAnimation:animated ? UITableViewRowAnimationAutomatic : UITableViewRowAnimationNone];
-}
-- (void)reloadCellForView:(UIView *)view {
-    [self reloadCellForView:view animated:NO];
+	UIView *cur = view;
+	while (cur && ![cur isKindOfClass:UITableViewCell.class]) cur = cur.superview;
+	if (!cur) return;
+	NSIndexPath *ip = [self.tableView indexPathForCell:(UITableViewCell *)cur];
+	if (ip) [self.tableView reloadRowsAtIndexPaths:@[ip] withRowAnimation:animated ? UITableViewRowAnimationAutomatic : UITableViewRowAnimationNone];
 }
 
-- (void)loadImageFromURL:(NSURL *)url atIndexPath:(NSIndexPath *)indexPath forTableView:(UITableView *)tableView
-{
-    if (!url) return;
-    [SCIImageCache loadImageFromURL:url completion:^(UIImage *image) {
-        if (!image) return;
-        UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-        if (!cell) return;
-        UIListContentConfiguration *config = (UIListContentConfiguration *)cell.contentConfiguration;
-        config.image = image;
-        config.imageProperties.maximumSize = CGSizeMake(45, 45);
-        config.imageProperties.cornerRadius = 22.5;
-        cell.contentConfiguration = config;
-    }];
+- (void)reloadCellForView:(UIView *)view { [self reloadCellForView:view animated:NO]; }
+
+- (void)loadImageFromURL:(NSURL *)url atIndexPath:(NSIndexPath *)ip forTableView:(UITableView *)tv {
+	if (!url) return;
+	[SCIImageCache loadImageFromURL:url completion:^(UIImage *image) {
+		if (!image) return;
+		dispatch_async(dispatch_get_main_queue(), ^{
+			UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+			if (!cell) return;
+			UIListContentConfiguration *config = (UIListContentConfiguration *)cell.contentConfiguration;
+			config.image = image;
+			config.imageProperties.maximumSize = CGSizeMake(45.0, 45.0);
+			config.imageProperties.cornerRadius = 22.5;
+			config.imageToTextPadding = 14.0;
+			cell.contentConfiguration = config;
+		});
+	}];
 }
 
 @end

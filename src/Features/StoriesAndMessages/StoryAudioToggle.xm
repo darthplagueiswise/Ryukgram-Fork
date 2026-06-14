@@ -5,6 +5,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import "StoryHelpers.h"
+#import "StoryMenuItems.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
@@ -137,40 +138,14 @@ static void new_announce(id self, SEL _cmd, BOOL enabled, NSInteger reason) {
     }
 }
 
-// ============ 3-dot menu item ============
-
-extern "C" NSArray *sciMaybeAppendStoryAudioMenuItem(NSArray *items) {
-    if (!sciActiveStoryViewerVC) return items;
-
-    BOOL looksLikeStoryHeader = NO;
-    for (id it in items) {
-        @try {
-            NSString *t = [NSString stringWithFormat:@"%@", [it valueForKey:@"title"] ?: @""];
-            if ([t isEqualToString:@"Report"] || [t isEqualToString:@"Mute"] ||
-                [t isEqualToString:@"Unfollow"] || [t isEqualToString:@"Follow"] ||
-                [t isEqualToString:@"Hide"]) { looksLikeStoryHeader = YES; break; }
-        } @catch (__unused id e) {}
-    }
-    if (!looksLikeStoryHeader) return items;
-
-    Class menuItemCls = NSClassFromString(@"IGDSMenuItem");
-    if (!menuItemCls) return items;
-
+// ============ story-menu entry ============
+// Shared provider; icon reflects current state, title is the action (mirrors StoryOverlayButtons).
+extern "C" SCIStoryMenuEntry *sciStoryAudioMenuEntry(void) {
+    if (!sciActiveStoryViewerVC) return nil;
     BOOL on = sciIGAudioEnabled();
     NSString *title = on ? SCILocalized(@"Mute story audio") : SCILocalized(@"Unmute story audio");
-    void (^handler)(void) = ^{ sciToggleStoryAudio(); };
-
-    id newItem = nil;
-    @try {
-        typedef id (*Init)(id, SEL, id, id, id);
-        newItem = ((Init)objc_msgSend)([menuItemCls alloc],
-            @selector(initWithTitle:image:handler:), title, nil, handler);
-    } @catch (__unused id e) {}
-
-    if (!newItem) return items;
-    NSMutableArray *newItems = [items mutableCopy];
-    [newItems addObject:newItem];
-    return [newItems copy];
+    NSString *symbol = on ? @"speaker.wave.2.fill" : @"speaker.slash.fill";
+    return [SCIStoryMenuEntry entryWithTitle:title symbol:symbol handler:^{ sciToggleStoryAudio(); }];
 }
 
 // ============ Ringer listener ============

@@ -1,601 +1,885 @@
 #import "SCIFFmpeg.h"
 #import "ActionButton/SCIMediaActions.h"
+#import "Utils.h"
+#import "SCITempFiles.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
-#import <libkern/OSAtomic.h>
+#import <stdatomic.h>
 
-static Class FFmpegKitClass = nil;
-static Class FFmpegSessionClass = nil;
-static Class ReturnCodeClass = nil;
-static BOOL sciFFmpegLoaded = NO;
-static BOOL sciFFmpegChecked = NO;
-
-// Cancellation state. All access to sciActiveURLSessions goes through sciCancelQueue.
-static volatile int32_t sciCancelRequested = 0;
-static NSHashTable<NSURLSession *> *sciActiveURLSessions = nil;
+static Class FFmpegKitClass;
+static Class FFprobeKitClass;
+static Class ReturnCodeClass;
+static BOOL sciFFmpegLoaded;
+static BOOL sciFFmpegChecked;
+static atomic_bool sciCancelRequested;
+static NSHashTable<NSURLSession *> *sciActiveURLSessions;
+static NSSet<NSString *> *sciEncoderSet;
+static dispatch_once_t sciEncoderOnce;
 
 static dispatch_queue_t sciCancelQueue(void) {
-    static dispatch_queue_t q;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        q = dispatch_queue_create("com.ryuk.scinsta.ffmpeg.cancel", DISPATCH_QUEUE_SERIAL);
-        sciActiveURLSessions = [NSHashTable weakObjectsHashTable];
-    });
-    return q;
+	static dispatch_queue_t q;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		q = dispatch_queue_create("com.ryuk.scinsta.ffmpeg.cancel", DISPATCH_QUEUE_SERIAL);
+		sciActiveURLSessions = [NSHashTable weakObjectsHashTable];
+		atomic_init(&sciCancelRequested, false);
+	});
+	return q;
 }
 
 static void sciRegisterSession(NSURLSession *session) {
-    if (!session) return;
-    dispatch_queue_t q = sciCancelQueue();
-    dispatch_sync(q, ^{ [sciActiveURLSessions addObject:session]; });
+	if (!session) return;
+	dispatch_sync(sciCancelQueue(), ^{ [sciActiveURLSessions addObject:session]; });
 }
 
 static void sciUnregisterSession(NSURLSession *session) {
-    if (!session) return;
-    dispatch_queue_t q = sciCancelQueue();
-    dispatch_sync(q, ^{ [sciActiveURLSessions removeObject:session]; });
+	if (!session) return;
+	dispatch_sync(sciCancelQueue(), ^{ [sciActiveURLSessions removeObject:session]; });
 }
 
 static NSArray<NSURLSession *> *sciActiveSessionsSnapshot(void) {
-    __block NSArray *out = @[];
-    dispatch_queue_t q = sciCancelQueue();
-    dispatch_sync(q, ^{ out = [sciActiveURLSessions allObjects] ?: @[]; });
-    return out;
+	__block NSArray *out = @[];
+	dispatch_sync(sciCancelQueue(), ^{ out = sciActiveURLSessions.allObjects ?: @[]; });
+	return out;
 }
 
-// Resolve the directory our dylib lives in (works for any injection method)
 static NSString *sciDylibDir(void) {
-    Dl_info info;
-    if (dladdr((void *)sciDylibDir, &info) && info.dli_fname) {
-        NSString *path = [[NSString stringWithUTF8String:info.dli_fname] stringByDeletingLastPathComponent];
-        return path;
-    }
-    return nil;
+	Dl_info info;
+	if (dladdr((void *)sciDylibDir, &info) && info.dli_fname) {
+		return [[NSString stringWithUTF8String:info.dli_fname] stringByDeletingLastPathComponent];
+	}
+	return nil;
+}
+
+static NSString *sciQuote(NSString *path) {
+	if (![path isKindOfClass:NSString.class] || !path.length) return @"''";
+	return [NSString stringWithFormat:@"'%@'", [path stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
+static NSError *sciError(NSInteger code, NSString *message) {
+	return [NSError errorWithDomain:@"SCIFFmpeg" code:code userInfo:@{NSLocalizedDescriptionKey: message ?: SCILocalized(@"Unknown error")}];
+}
+
+static NSString *sciSafeFileStem(NSString *stem) {
+	if (![stem isKindOfClass:NSString.class] || !stem.length) return [NSString stringWithFormat:@"sci_muxed_%@", NSUUID.UUID.UUIDString];
+	NSCharacterSet *bad = [NSCharacterSet characterSetWithCharactersInString:@"/:\\?%*|\"<>\n\r\t"];
+	NSArray *parts = [stem componentsSeparatedByCharactersInSet:bad];
+	NSString *clean = [[parts componentsJoinedByString:@"_"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+	return clean.length ? clean : [NSString stringWithFormat:@"sci_muxed_%@", NSUUID.UUID.UUIDString];
+}
+
+static BOOL sciSessionSuccess(id session, NSString **outputOut) {
+	if (!session) return NO;
+	NSString *output = nil;
+	id returnCode = nil;
+	SEL outSel = NSSelectorFromString(@"getOutput");
+	SEL rcSel = NSSelectorFromString(@"getReturnCode");
+	SEL okSel = NSSelectorFromString(@"isSuccess:");
+	if ([session respondsToSelector:outSel]) output = ((id(*)(id, SEL))objc_msgSend)(session, outSel);
+	if ([session respondsToSelector:rcSel]) returnCode = ((id(*)(id, SEL))objc_msgSend)(session, rcSel);
+	if (outputOut) *outputOut = output;
+	if (!ReturnCodeClass || !returnCode || ![ReturnCodeClass respondsToSelector:okSel]) return NO;
+	return ((BOOL(*)(id, SEL, id))objc_msgSend)(ReturnCodeClass, okSel, returnCode);
+}
+
+// FFmpegKit's Statistics getters return different numeric types across builds
+// (int ms vs double ms). Read whatever it is, as a double.
+static double sciCallDoubleGetter(id obj, NSString *selName) {
+	SEL sel = NSSelectorFromString(selName);
+	if (!obj || ![obj respondsToSelector:sel]) return 0;
+	NSMethodSignature *sig = [obj methodSignatureForSelector:sel];
+	if (!sig) return 0;
+	NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+	inv.selector = sel;
+	[inv invokeWithTarget:obj];
+	const char *t = sig.methodReturnType;
+	switch (t[0]) {
+		case 'i': { int v = 0; [inv getReturnValue:&v]; return v; }
+		case 'I': { unsigned v = 0; [inv getReturnValue:&v]; return v; }
+		case 'q': { long long v = 0; [inv getReturnValue:&v]; return v; }
+		case 'Q': { unsigned long long v = 0; [inv getReturnValue:&v]; return v; }
+		case 'l': { long v = 0; [inv getReturnValue:&v]; return v; }
+		case 'd': { double v = 0; [inv getReturnValue:&v]; return v; }
+		case 'f': { float v = 0; [inv getReturnValue:&v]; return v; }
+		default:  return 0;
+	}
+}
+
+static void sciPreloadFFmpegDeps(NSString *fwPath) {
+	NSString *fwDir = [[fwPath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+	NSArray *deps = @[@"libavutil", @"libswresample", @"libswscale", @"libavcodec", @"libavformat", @"libavfilter", @"libavdevice"];
+	NSFileManager *fm = NSFileManager.defaultManager;
+	for (NSString *dep in deps) {
+		NSString *path = [NSString stringWithFormat:@"%@/%@.framework/%@", fwDir, dep, dep];
+		if ([fm fileExistsAtPath:path]) dlopen(path.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+	}
+}
+
+static void sciPresentFFmpegDebug(NSArray *paths, NSArray *errors) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		NSMutableString *msg = [NSMutableString stringWithString:@"dlopen errors:\n"];
+		for (NSString *e in errors) [msg appendFormat:@"%@\n\n", e];
+		[msg appendString:@"\nTried paths:\n"];
+		NSFileManager *fm = NSFileManager.defaultManager;
+		for (NSString *p in paths) {
+			BOOL exists = [fm fileExistsAtPath:p];
+			[msg appendFormat:@"%@ %@\n", exists ? @"✓" : @"✗", p.lastPathComponent];
+			if (!exists) {
+				NSString *parent = p.stringByDeletingLastPathComponent;
+				NSString *grandparent = parent.stringByDeletingLastPathComponent;
+				[msg appendFormat:@"  dir: %@ %@\n  dir: %@ %@\n", [fm fileExistsAtPath:parent] ? @"✓" : @"✗", parent.lastPathComponent, [fm fileExistsAtPath:grandparent] ? @"✓" : @"✗", grandparent.lastPathComponent];
+			}
+		}
+		NSString *bundlePath = NSBundle.mainBundle.bundlePath;
+		NSArray *rootContents = [fm contentsOfDirectoryAtPath:bundlePath error:nil];
+		[msg appendString:@"\nApp bundle root:\n"];
+		for (NSString *item in rootContents) if ([item containsString:@"RyukGram"] || [item containsString:@"ffmpeg"] || [item containsString:@".bundle"]) [msg appendFormat:@"  %@\n", item];
+		NSString *fwPath = NSBundle.mainBundle.privateFrameworksPath;
+		NSArray *fwContents = [fm contentsOfDirectoryAtPath:fwPath error:nil];
+		[msg appendString:@"\nFrameworks/:\n"];
+		for (NSString *item in fwContents) if ([item containsString:@"ffmpeg"] || [item containsString:@"libav"] || [item containsString:@"libsw"] || [item containsString:@"RyukGram"]) [msg appendFormat:@"  %@\n", item];
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"FFmpegKit Debug") message:msg preferredStyle:UIAlertControllerStyleAlert];
+		NSString *copyMsg = msg.copy;
+		[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copy") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+			UIPasteboard.generalPasteboard.string = copyMsg;
+			SCINotifySuccess(SCI_NOTIF_GENERIC, SCILocalized(@"FFmpeg log copied"), nil);
+		}]];
+		[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"OK") style:UIAlertActionStyleCancel handler:nil]];
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+			UIViewController *root = UIApplication.sharedApplication.keyWindow.rootViewController;
+			while (root.presentedViewController) root = root.presentedViewController;
+			[root presentViewController:alert animated:YES completion:nil];
+		});
+	});
 }
 
 static void sciLoadFFmpegKit(void) {
-    if (sciFFmpegChecked) return;
-    sciFFmpegChecked = YES;
+	@synchronized([SCIFFmpeg class]) {
+		if (sciFFmpegChecked) return;
+		sciFFmpegChecked = YES;
+		NSMutableArray *paths = [NSMutableArray array];
+		NSString *dylibDir = sciDylibDir();
+		if (dylibDir.length) [paths addObject:[dylibDir stringByAppendingPathComponent:@"ffmpegkit.framework/ffmpegkit"]];
+		NSString *bundlePath = NSBundle.mainBundle.bundlePath;
+		NSString *frameworksPath = NSBundle.mainBundle.privateFrameworksPath;
+		[paths addObjectsFromArray:@[
+			[bundlePath stringByAppendingPathComponent:@"RyukGram.bundle/ffmpegkit.framework/ffmpegkit"],
+			[frameworksPath stringByAppendingPathComponent:@"ffmpegkit.framework/ffmpegkit"],
+			@"/var/jb/Library/Application Support/RyukGram.bundle/ffmpegkit.framework/ffmpegkit",
+			@"/var/jb/Library/MobileSubstrate/DynamicLibraries/ffmpegkit.framework/ffmpegkit",
+			@"/Library/Application Support/RyukGram.bundle/ffmpegkit.framework/ffmpegkit",
+			@"/Library/MobileSubstrate/DynamicLibraries/ffmpegkit.framework/ffmpegkit"
+		]];
+		NSFileManager *fm = NSFileManager.defaultManager;
+		void *handle = NULL;
+		NSMutableArray *errors = [NSMutableArray array];
+		for (NSString *fwPath in paths) {
+			if (![fm fileExistsAtPath:fwPath]) continue;
+			sciPreloadFFmpegDeps(fwPath);
+			handle = dlopen(fwPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
+			if (handle) { NSLog(@"[RyukGram] FFmpegKit loaded from %@", fwPath); break; }
+			const char *err = dlerror();
+			[errors addObject:[NSString stringWithFormat:@"%@\n%s", fwPath.lastPathComponent, err ?: "unknown"]];
+		}
+		if (!handle) {
+			NSLog(@"[RyukGram] FFmpegKit not available");
+			for (NSString *e in errors) NSLog(@"[RyukGram] dlopen: %@", e);
+			sciPresentFFmpegDebug(paths, errors);
+			return;
+		}
+		FFmpegKitClass = NSClassFromString(@"FFmpegKit");
+		FFprobeKitClass = NSClassFromString(@"FFprobeKit");
+		ReturnCodeClass = NSClassFromString(@"ReturnCode");
+		if (FFmpegKitClass) {
+			sciFFmpegLoaded = YES;
+			NSLog(@"[RyukGram] FFmpegKit ready");
+		} else {
+			NSLog(@"[RyukGram] FFmpegKit classes not found after dlopen");
+			dlclose(handle);
+		}
+	}
+}
 
-    NSMutableArray *paths = [NSMutableArray arrayWithArray:@[
-        // Sideload (Feather): .bundle copied to app root
-        [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"RyukGram.bundle/ffmpegkit.framework/ffmpegkit"],
-        // Sideload (cyan): injected into Frameworks/
-        [[[NSBundle mainBundle] privateFrameworksPath] stringByAppendingPathComponent:@"ffmpegkit.framework/ffmpegkit"],
-        // Jailbreak rootless
-        @"/var/jb/Library/Application Support/RyukGram.bundle/ffmpegkit.framework/ffmpegkit",
-        @"/var/jb/Library/MobileSubstrate/DynamicLibraries/ffmpegkit.framework/ffmpegkit",
-        // Jailbreak rootful
-        @"/Library/Application Support/RyukGram.bundle/ffmpegkit.framework/ffmpegkit",
-        @"/Library/MobileSubstrate/DynamicLibraries/ffmpegkit.framework/ffmpegkit",
-    ]];
+static BOOL sciMoveDownload(NSURL *location, NSString *path) {
+	if (!location || !path.length) return NO;
+	NSFileManager *fm = NSFileManager.defaultManager;
+	NSURL *dest = [NSURL fileURLWithPath:path];
+	[fm removeItemAtURL:dest error:nil];
+	if ([fm moveItemAtURL:location toURL:dest error:nil]) return YES;
+	[fm removeItemAtURL:dest error:nil];
+	return [fm copyItemAtURL:location toURL:dest error:nil];
+}
 
-    // Relative to our own dylib
-    NSString *dylibDir = sciDylibDir();
-    if (dylibDir) {
-        [paths insertObject:[dylibDir stringByAppendingPathComponent:@"ffmpegkit.framework/ffmpegkit"] atIndex:0];
-    }
+static BOOL sciDownloadToPath(NSURLSession *session, NSURL *url, NSString *path, BOOL (^cancelled)(void), void (^progress)(float)) {
+	if (!session || !url || !path.length) return NO;
+	dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+	__block BOOL ok = NO;
+	__block NSError *err = nil;
+	NSURLSessionDownloadTask *task = [session downloadTaskWithURL:url completionHandler:^(NSURL *loc, __unused NSURLResponse *resp, NSError *error) {
+		err = error;
+		if (!err && loc) ok = sciMoveDownload(loc, path);
+		dispatch_semaphore_signal(sem);
+	}];
+	[task resume];
+	while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC)) != 0) {
+		if (cancelled && cancelled()) { [task cancel]; return NO; }
+		if (progress && task.countOfBytesExpectedToReceive > 0) progress((float)task.countOfBytesReceived / (float)task.countOfBytesExpectedToReceive);
+	}
+	if (err) NSLog(@"[RyukGram] download error: %@", err.localizedDescription);
+	return ok;
+}
 
-    NSFileManager *fm = [NSFileManager defaultManager];
-    void *handle = NULL;
-    NSMutableArray *dlErrors = [NSMutableArray array];
-    for (NSString *fwPath in paths) {
-        if (![fm fileExistsAtPath:fwPath]) continue;
+// iOS kills VideoToolbox hardware sessions in the background (-12903); libx264 keeps
+// working. A VT session killed mid-encode can deadlock ffmpeg's flush and, since
+// ffmpeg executions are serialized in-process, block every later encode — so a VT
+// encode is cancelled pre-emptively on resign and watchdogged if it wedges anyway.
+static const NSTimeInterval kSCIMuxStallSeconds = 60.0;
 
-        // Preload deps (renamed _sci dir, original binary name)
-        NSString *fwDir = [[fwPath stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
-        NSArray *deps = @[@"libavutil", @"libswresample", @"libswscale",
-                          @"libavcodec", @"libavformat", @"libavfilter", @"libavdevice"];
-        for (NSString *dep in deps) {
-            // Try _sci first (sideload), then original (jailbreak)
-            NSString *sciPath = [NSString stringWithFormat:@"%@/%@_sci.framework/%@", fwDir, dep, dep];
-            NSString *origPath = [NSString stringWithFormat:@"%@/%@.framework/%@", fwDir, dep, dep];
-            if ([fm fileExistsAtPath:sciPath]) dlopen(sciPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
-            else if ([fm fileExistsAtPath:origPath]) dlopen(origPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
-        }
+typedef NS_ENUM(NSInteger, SCIMuxRun) { SCIMuxRunOK, SCIMuxRunFailed, SCIMuxRunStalled };
 
-        handle = dlopen(fwPath.UTF8String, RTLD_NOW | RTLD_GLOBAL);
-        if (handle) {
-            NSLog(@"[SCInsta] FFmpegKit loaded from %@", fwPath);
-            break;
-        }
-        const char *err = dlerror();
-        [dlErrors addObject:[NSString stringWithFormat:@"%@\n%s", [fwPath lastPathComponent], err ?: "unknown"]];
-    }
+static BOOL sciAppInBackground(void) {
+	__block UIApplicationState st = UIApplicationStateActive;
+	dispatch_block_t read = ^{ st = UIApplication.sharedApplication.applicationState; };
+	NSThread.isMainThread ? read() : dispatch_sync(dispatch_get_main_queue(), read);
+	return st == UIApplicationStateBackground;
+}
 
-    if (!handle) {
-        NSLog(@"[SCInsta] FFmpegKit not available");
-        for (NSString *e in dlErrors) NSLog(@"[SCInsta] dlopen: %@", e);
+static void sciNotifySoftwareFallback(void) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		SCINotifyInfo(SCI_NOTIF_GENERIC,
+			SCILocalized(@"Encoding in software"),
+			SCILocalized(@"Hardware encoder isn't available in the background — your quality settings were kept."));
+	});
+}
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSMutableString *msg = [NSMutableString stringWithString:@"dlopen errors:\n"];
-            for (NSString *e in dlErrors) [msg appendFormat:@"%@\n\n", e];
-            [msg appendString:@"\nTried paths:\n"];
-            NSFileManager *fm2 = [NSFileManager defaultManager];
-            for (NSString *p in paths) {
-                BOOL exists = [fm2 fileExistsAtPath:p];
-                [msg appendFormat:@"%@ %@\n", exists ? @"✓" : @"✗", [p lastPathComponent]];
-                if (!exists) {
-                    NSString *parent = [p stringByDeletingLastPathComponent];
-                    NSString *grandparent = [parent stringByDeletingLastPathComponent];
-                    [msg appendFormat:@"  dir: %@ %@\n  dir: %@ %@\n",
-                        [fm2 fileExistsAtPath:parent] ? @"✓" : @"✗", [parent lastPathComponent],
-                        [fm2 fileExistsAtPath:grandparent] ? @"✓" : @"✗", [grandparent lastPathComponent]];
-                }
-            }
-            NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
-            NSArray *rootContents = [fm2 contentsOfDirectoryAtPath:bundlePath error:nil];
-            [msg appendString:@"\nApp bundle root:\n"];
-            for (NSString *item in rootContents)
-                if ([item containsString:@"RyukGram"] || [item containsString:@"ffmpeg"] || [item containsString:@".bundle"])
-                    [msg appendFormat:@"  %@\n", item];
-            NSString *fwPath = [[NSBundle mainBundle] privateFrameworksPath];
-            NSArray *fwContents = [fm2 contentsOfDirectoryAtPath:fwPath error:nil];
-            [msg appendString:@"\nFrameworks/:\n"];
-            for (NSString *item in fwContents)
-                if ([item containsString:@"ffmpeg"] || [item containsString:@"libav"] || [item containsString:@"libsw"] || [item containsString:@"RyukGram"])
-                    [msg appendFormat:@"  %@\n", item];
+static BOOL sciOutputLooksLikeVTDeath(NSString *output) {
+	if (!output.length) return NO;
+	return [output containsString:@"-12903"]
+		|| [output containsString:@"cannot encode frame"]
+		|| [output containsString:@"Error submitting video frame"];
+}
 
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"FFmpegKit Debug")
-                message:msg preferredStyle:UIAlertControllerStyleAlert];
-            NSString *copyMsg = [msg copy];
-            [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copy") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                [UIPasteboard generalPasteboard].string = copyMsg;
-            }]];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                UIViewController *root = [UIApplication sharedApplication].keyWindow.rootViewController;
-                while (root.presentedViewController) root = root.presentedViewController;
-                [root presentViewController:alert animated:YES completion:nil];
-            });
-        });
-        return;
-    }
+// One synchronous ffmpeg run. cancelOnBackground cancels a VT encode the moment the app
+// deactivates, while the VT session is still valid, so ffmpeg exits cleanly. The log
+// scanner abandons after a short grace when VT-death lines appear anyway, and the
+// statistics watchdog (stallSeconds) backstops hangs that never print anything.
+static const NSTimeInterval kSCIVTDeathGraceSeconds = 5.0;
+static const NSTimeInterval kSCIRetryStartupStallSeconds = 20.0;
 
-    FFmpegKitClass = NSClassFromString(@"FFmpegKit");
-    FFmpegSessionClass = NSClassFromString(@"FFmpegSession");
-    ReturnCodeClass = NSClassFromString(@"ReturnCode");
+static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTimeInterval stallSeconds,
+								  void (^statsCallback)(id), void (^onSessionID)(long),
+								  NSString **outputOut, BOOL *bgKilledOut) {
+	__block BOOL ffSuccess = NO;
+	__block NSString *ffOutput = nil;
+	dispatch_semaphore_t ffSem = dispatch_semaphore_create(0);
+	void (^ffCallback)(id) = ^(id ffSession) {
+		ffSuccess = sciSessionSuccess(ffSession, &ffOutput);
+		dispatch_semaphore_signal(ffSem);
+	};
+	__block atomic_llong lastActivityMs;
+	atomic_init(&lastActivityMs, (long long)(NSDate.timeIntervalSinceReferenceDate * 1000.0));
+	void (^touch)(void) = ^{ atomic_store(&lastActivityMs, (long long)(NSDate.timeIntervalSinceReferenceDate * 1000.0)); };
+	void (^statsWrapper)(id) = ^(id stats) { touch(); if (statsCallback) statsCallback(stats); };
+	__block atomic_bool vtDied;
+	atomic_init(&vtDied, false);
+	void (^logCallback)(id) = ^(id logObj) {
+		SEL msgSel = NSSelectorFromString(@"getMessage");
+		if (![logObj respondsToSelector:msgSel]) return;
+		NSString *msg = ((id(*)(id, SEL))objc_msgSend)(logObj, msgSel);
+		if (sciOutputLooksLikeVTDeath(msg)) atomic_store(&vtDied, true);
+	};
+	__block atomic_llong sidShared;
+	atomic_init(&sidShared, 0);
+	__block atomic_bool bgKilled;
+	atomic_init(&bgKilled, false);
+	void (^cancelSession)(long) = ^(long s) {
+		SEL cancelSel = NSSelectorFromString(@"cancel:");
+		if (s && [FFmpegKitClass respondsToSelector:cancelSel]) {
+			@try { ((void(*)(id, SEL, long))objc_msgSend)(FFmpegKitClass, cancelSel, s); } @catch (__unused id e) {}
+		}
+	};
+	// Suspension freezes this thread but wall time keeps running — bump on resume so a
+	// healthy encode isn't misread as stalled.
+	id fgObserver = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) { touch(); }];
+	// Resign fires seconds before backgrounding, while the VT session is still valid —
+	// cancelling there lets ffmpeg exit cleanly before suspension can wedge it.
+	// DidEnterBackground covers an encode that starts while already inactive.
+	NSMutableArray *bgObservers = [NSMutableArray array];
+	if (cancelOnBackground) {
+		void (^bgKill)(NSNotification *) = ^(__unused NSNotification *n) {
+			if (atomic_exchange(&bgKilled, true)) return;
+			long s = (long)atomic_load(&sidShared);
+			NSLog(@"[SCInsta][FFmpeg] app deactivating — cancelling VT session %ld before the encoder dies", s);
+			cancelSession(s);
+		};
+		[bgObservers addObject:[NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:bgKill]];
+		[bgObservers addObject:[NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:bgKill]];
+	}
 
-    if (FFmpegKitClass) {
-        sciFFmpegLoaded = YES;
-        NSLog(@"[SCInsta] FFmpegKit ready");
-    } else {
-        NSLog(@"[SCInsta] FFmpegKit classes not found after dlopen");
-        dlclose(handle);
-    }
+	SEL statsSel = NSSelectorFromString(@"executeAsync:withCompleteCallback:withLogCallback:withStatisticsCallback:");
+	SEL asyncSel = NSSelectorFromString(@"executeAsync:withCompleteCallback:");
+	SEL sidSel = NSSelectorFromString(@"getSessionId");
+	long sid = 0;
+	BOOL watchable = NO;
+	if ([FFmpegKitClass respondsToSelector:statsSel]) {
+		id ffSession = ((id(*)(id, SEL, id, id, id, id))objc_msgSend)(FFmpegKitClass, statsSel, cmd, ffCallback, logCallback, statsWrapper);
+		if (ffSession && [ffSession respondsToSelector:sidSel]) sid = ((long(*)(id, SEL))objc_msgSend)(ffSession, sidSel);
+		watchable = YES;
+	} else if ([FFmpegKitClass respondsToSelector:asyncSel]) {
+		id ffSession = ((id(*)(id, SEL, id, id))objc_msgSend)(FFmpegKitClass, asyncSel, cmd, ffCallback);
+		if (ffSession && [ffSession respondsToSelector:sidSel]) sid = ((long(*)(id, SEL))objc_msgSend)(ffSession, sidSel);
+	} else {
+		[SCIFFmpeg executeCommand:cmd completion:^(BOOL ok, NSString *out) {
+			ffSuccess = ok;
+			ffOutput = out;
+			dispatch_semaphore_signal(ffSem);
+		}];
+	}
+	atomic_store(&sidShared, (long long)sid);
+	// Backgrounded in the launch window, before the sid was known — cancel now.
+	if (cancelOnBackground && atomic_load(&bgKilled)) cancelSession(sid);
+	if (onSessionID) onSessionID(sid);
+
+	SCIMuxRun result;
+	if (!watchable) {
+		dispatch_semaphore_wait(ffSem, DISPATCH_TIME_FOREVER);
+		result = ffSuccess ? SCIMuxRunOK : SCIMuxRunFailed;
+	} else {
+		double vtDeadAt = 0;
+		for (;;) {
+			if (dispatch_semaphore_wait(ffSem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC))) == 0) {
+				result = ffSuccess ? SCIMuxRunOK : SCIMuxRunFailed;
+				break;
+			}
+			double now = NSDate.timeIntervalSinceReferenceDate;
+			if (atomic_load(&vtDied)) {
+				if (!vtDeadAt) vtDeadAt = now;
+				else if (now - vtDeadAt > kSCIVTDeathGraceSeconds) {
+					cancelSession(sid);
+					NSLog(@"[SCInsta][FFmpeg] session %ld abandoned: encoder died, session won't exit", sid);
+					result = SCIMuxRunStalled;
+					break;
+				}
+			}
+			if (now * 1000.0 - atomic_load(&lastActivityMs) > stallSeconds * 1000.0) {
+				cancelSession(sid);
+				NSLog(@"[SCInsta][FFmpeg] session %ld abandoned: no statistics for %.0fs", sid, stallSeconds);
+				result = SCIMuxRunStalled;
+				break;
+			}
+		}
+	}
+	[NSNotificationCenter.defaultCenter removeObserver:fgObserver];
+	for (id obs in bgObservers) [NSNotificationCenter.defaultCenter removeObserver:obs];
+	if (outputOut) *outputOut = ffOutput;
+	if (bgKilledOut) *bgKilledOut = atomic_load(&bgKilled);
+	return result;
 }
 
 @implementation SCIFFmpeg
 
 + (BOOL)isAvailable {
-    sciLoadFFmpegKit();
-    return sciFFmpegLoaded;
+	sciLoadFFmpegKit();
+	return sciFFmpegLoaded;
 }
 
 + (BOOL)isCancelled {
-    return sciCancelRequested == 1;
+	return atomic_load(&sciCancelRequested);
 }
 
 + (void)cancelAll {
-    OSAtomicCompareAndSwap32(0, 1, &sciCancelRequested);
-
-    for (NSURLSession *s in sciActiveSessionsSnapshot()) {
-        @try { [s invalidateAndCancel]; } @catch (__unused id e) {}
-    }
-
-    // Class-level cancel stops any running FFmpeg session.
-    if (FFmpegKitClass) {
-        SEL cancelSel = NSSelectorFromString(@"cancel");
-        if ([FFmpegKitClass respondsToSelector:cancelSel]) {
-            @try { ((void(*)(id, SEL))objc_msgSend)(FFmpegKitClass, cancelSel); }
-            @catch (__unused id e) {}
-        }
-    }
-
-    // Grace period so the next download can proceed.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        OSAtomicCompareAndSwap32(1, 0, &sciCancelRequested);
-    });
+	atomic_store(&sciCancelRequested, true);
+	for (NSURLSession *s in sciActiveSessionsSnapshot()) {
+		@try { [s invalidateAndCancel]; } @catch (__unused id e) {}
+	}
+	if (FFmpegKitClass) {
+		SEL cancelSel = NSSelectorFromString(@"cancel");
+		if ([FFmpegKitClass respondsToSelector:cancelSel]) {
+			@try { ((void(*)(id, SEL))objc_msgSend)(FFmpegKitClass, cancelSel); } @catch (__unused id e) {}
+		}
+	}
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		atomic_store(&sciCancelRequested, false);
+	});
 }
 
-+ (void)executeCommand:(NSString *)command
-            completion:(void(^)(BOOL success, NSString *output))completion {
-    if (![self isAvailable]) {
-        if (completion) completion(NO, @"FFmpegKit not available");
-        return;
-    }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        @try {
-            SEL executeSel = NSSelectorFromString(@"execute:");
-            if (![FFmpegKitClass respondsToSelector:executeSel]) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (completion) completion(NO, @"FFmpegKit execute: not found");
-                });
-                return;
-            }
-
-            id session = ((id(*)(id, SEL, id))objc_msgSend)(FFmpegKitClass, executeSel, command);
-            if (!session) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (completion) completion(NO, @"FFmpegKit session nil");
-                });
-                return;
-            }
-
-            id returnCode = nil;
-            SEL rcSel = NSSelectorFromString(@"getReturnCode");
-            if ([session respondsToSelector:rcSel]) {
-                returnCode = ((id(*)(id, SEL))objc_msgSend)(session, rcSel);
-            }
-
-            BOOL success = NO;
-            if (ReturnCodeClass && returnCode) {
-                SEL isSuccessSel = NSSelectorFromString(@"isSuccess:");
-                if ([ReturnCodeClass respondsToSelector:isSuccessSel]) {
-                    success = ((BOOL(*)(id, SEL, id))objc_msgSend)(ReturnCodeClass, isSuccessSel, returnCode);
-                }
-            }
-
-            NSString *output = nil;
-            SEL outputSel = NSSelectorFromString(@"getOutput");
-            if ([session respondsToSelector:outputSel]) {
-                output = ((id(*)(id, SEL))objc_msgSend)(session, outputSel);
-            }
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completion) completion(success, output);
-            });
-        } @catch (NSException *e) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completion) completion(NO, [NSString stringWithFormat:@"Exception: %@", e.reason]);
-            });
-        }
-    });
++ (void)executeCommand:(NSString *)command completion:(void(^)(BOOL success, NSString *output))completion {
+	if (![self isAvailable]) { if (completion) completion(NO, @"FFmpegKit not available"); return; }
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		@try {
+			SEL executeSel = NSSelectorFromString(@"execute:");
+			if (![FFmpegKitClass respondsToSelector:executeSel]) {
+				dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(NO, @"FFmpegKit execute: not found"); });
+				return;
+			}
+			id session = ((id(*)(id, SEL, id))objc_msgSend)(FFmpegKitClass, executeSel, command);
+			NSString *output = nil;
+			BOOL success = sciSessionSuccess(session, &output);
+			dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(success, output ?: (session ? nil : @"FFmpegKit session nil")); });
+		} @catch (NSException *e) {
+			dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(NO, [NSString stringWithFormat:@"Exception: %@", e.reason]); });
+		}
+	});
 }
 
-+ (void)probeCommand:(NSString *)command
-          completion:(void(^)(BOOL success, NSString *output))completion {
-    if (![self isAvailable]) {
-        if (completion) completion(NO, @"FFmpegKit not available");
-        return;
-    }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        @try {
-            Class probeClass = NSClassFromString(@"FFprobeKit");
-            SEL executeSel = NSSelectorFromString(@"execute:");
-            if (!probeClass || ![probeClass respondsToSelector:executeSel]) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (completion) completion(NO, @"FFprobeKit not found");
-                });
-                return;
-            }
-
-            id session = ((id(*)(id, SEL, id))objc_msgSend)(probeClass, executeSel, command);
-            NSString *output = nil;
-            SEL outputSel = NSSelectorFromString(@"getOutput");
-            if (session && [session respondsToSelector:outputSel]) {
-                output = ((id(*)(id, SEL))objc_msgSend)(session, outputSel);
-            }
-
-            id returnCode = nil;
-            SEL rcSel = NSSelectorFromString(@"getReturnCode");
-            if (session && [session respondsToSelector:rcSel]) {
-                returnCode = ((id(*)(id, SEL))objc_msgSend)(session, rcSel);
-            }
-            BOOL success = NO;
-            if (ReturnCodeClass && returnCode) {
-                SEL isSuccessSel = NSSelectorFromString(@"isSuccess:");
-                if ([ReturnCodeClass respondsToSelector:isSuccessSel])
-                    success = ((BOOL(*)(id, SEL, id))objc_msgSend)(ReturnCodeClass, isSuccessSel, returnCode);
-            }
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completion) completion(success, output);
-            });
-        } @catch (NSException *e) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completion) completion(NO, e.reason);
-            });
-        }
-    });
++ (void)probeCommand:(NSString *)command completion:(void(^)(BOOL success, NSString *output))completion {
+	if (![self isAvailable]) { if (completion) completion(NO, @"FFmpegKit not available"); return; }
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		@try {
+			SEL executeSel = NSSelectorFromString(@"execute:");
+			if (!FFprobeKitClass || ![FFprobeKitClass respondsToSelector:executeSel]) {
+				dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(NO, @"FFprobeKit not found"); });
+				return;
+			}
+			id session = ((id(*)(id, SEL, id))objc_msgSend)(FFprobeKitClass, executeSel, command);
+			NSString *output = nil;
+			BOOL success = sciSessionSuccess(session, &output);
+			dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(success, output); });
+		} @catch (NSException *e) {
+			dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(NO, e.reason); });
+		}
+	});
 }
 
-+ (void)convertAudioAtPath:(NSString *)inputPath
-                  toFormat:(NSString *)format
-                   bitrate:(NSString *)bitrate
-                completion:(void(^)(NSURL *outputURL, NSError *error))completion {
-    if (![self isAvailable]) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"SCIFFmpeg" code:1
-                                                       userInfo:@{NSLocalizedDescriptionKey: @"FFmpegKit not available"}]);
-        return;
-    }
-
-    NSString *outputPath = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                            [NSString stringWithFormat:@"sci_audio_%@.%@", [[NSUUID UUID] UUIDString], format]];
-
-    NSString *codecFlag;
-    if ([format isEqualToString:@"mp3"]) {
-        codecFlag = [NSString stringWithFormat:@"-c:a libmp3lame -b:a %@", bitrate ?: @"192k"];
-    } else {
-        codecFlag = [NSString stringWithFormat:@"-c:a aac -b:a %@", bitrate ?: @"192k"];
-    }
-
-    NSString *cmd = [NSString stringWithFormat:
-                     @"-y -hide_banner -loglevel error -i '%@' -vn -map a %@ '%@'",
-                     inputPath, codecFlag, outputPath];
-
-    [self executeCommand:cmd completion:^(BOOL success, NSString *output) {
-        if (success && [[NSFileManager defaultManager] fileExistsAtPath:outputPath]) {
-            if (completion) completion([NSURL fileURLWithPath:outputPath], nil);
-        } else {
-            if (completion) completion(nil, [NSError errorWithDomain:@"SCIFFmpeg" code:4
-                userInfo:@{NSLocalizedDescriptionKey: output ?: @"Audio conversion failed"}]);
-        }
-    }];
++ (void)convertAudioAtPath:(NSString *)inputPath toFormat:(NSString *)format bitrate:(NSString *)bitrate completion:(void(^)(NSURL *outputURL, NSError *error))completion {
+	if (![self isAvailable]) { if (completion) completion(nil, sciError(1, @"FFmpegKit not available")); return; }
+	NSString *fmt = format.length ? format.lowercaseString : @"m4a";
+	NSString *outputPath = [SCITempFiles claimWithExt:fmt ttl:600 tag:@"audio"].path;
+	NSString *br = bitrate ?: @"192k";
+	NSString *codecFlag = [fmt isEqualToString:@"mp3"] ? [NSString stringWithFormat:@"-c:a libmp3lame -b:a %@", br] : [NSString stringWithFormat:@"-c:a aac -b:a %@", br];
+	NSString *cmd = [NSString stringWithFormat:@"-y -hide_banner -loglevel error -i %@ -vn -map a %@ %@", sciQuote(inputPath), codecFlag, sciQuote(outputPath)];
+	[self executeCommand:cmd completion:^(BOOL success, NSString *output) {
+		if (success && [NSFileManager.defaultManager fileExistsAtPath:outputPath]) {
+			if (completion) completion([NSURL fileURLWithPath:outputPath], nil);
+		} else {
+			if (completion) completion(nil, sciError(4, output ?: SCILocalized(@"Audio conversion failed")));
+		}
+	}];
 }
 
-+ (void)muxVideoURL:(NSURL *)videoURL
-            audioURL:(NSURL *)audioURL
-              preset:(NSString *)preset
-            progress:(void(^)(float progress, NSString *stage))progressBlock
-          completion:(void(^)(NSURL *outputURL, NSError *error))completion {
-    [self muxVideoURL:videoURL audioURL:audioURL preset:preset
-             progress:progressBlock completion:completion cancelOut:nil];
++ (void)muxVideoURL:(NSURL *)videoURL audioURL:(NSURL *)audioURL preset:(NSString *)preset progress:(void(^)(float progress, NSString *stage))progressBlock completion:(void(^)(NSURL *outputURL, NSError *error))completion {
+	[self muxVideoURL:videoURL audioURL:audioURL preset:preset progress:progressBlock completion:completion cancelOut:nil];
 }
 
-+ (void)muxVideoURL:(NSURL *)videoURL
-            audioURL:(NSURL *)audioURL
-              preset:(NSString *)preset
-            progress:(void(^)(float progress, NSString *stage))progressBlock
-          completion:(void(^)(NSURL *outputURL, NSError *error))completion
-           cancelOut:(void(^)(void (^cancelBlock)(void)))cancelOut {
-    if (![self isAvailable]) {
-        if (completion) completion(nil, [NSError errorWithDomain:@"SCIFFmpeg" code:1
-                                                       userInfo:@{NSLocalizedDescriptionKey: @"FFmpegKit not available"}]);
-        return;
-    }
++ (void)muxVideoURL:(NSURL *)videoURL audioURL:(NSURL *)audioURL preset:(NSString *)preset progress:(void(^)(float progress, NSString *stage))progressBlock completion:(void(^)(NSURL *outputURL, NSError *error))completion cancelOut:(void(^)(void (^cancelBlock)(void)))cancelOut {
+	if (![self isAvailable]) { if (completion) completion(nil, sciError(1, @"FFmpegKit not available")); return; }
+	__block BOOL completionCalled = NO;
+	void (^finish)(NSURL *, NSError *) = ^(NSURL *url, NSError *err) {
+		if (completionCalled) return;
+		completionCalled = YES;
+		dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(url, err); });
+	};
+	__block atomic_bool thisCancelled;
+	atomic_init(&thisCancelled, false);
+	__block NSURLSession *sessionRef = nil;
+	__block long ffmpegSidRef = 0;
+	BOOL (^cancelled)(void) = ^BOOL{ return atomic_load(&thisCancelled); };
+	void (^cancelSelf)(void) = ^{
+		atomic_store(&thisCancelled, true);
+		NSURLSession *s = sessionRef;
+		if (s) { @try { [s invalidateAndCancel]; } @catch (__unused id e) {} }
+		long sid = ffmpegSidRef;
+		SEL cancelSel = NSSelectorFromString(@"cancel:");
+		if (sid && FFmpegKitClass && [FFmpegKitClass respondsToSelector:cancelSel]) {
+			@try { ((void(*)(id, SEL, long))objc_msgSend)(FFmpegKitClass, cancelSel, sid); } @catch (__unused id e) {}
+		}
+	};
+	if (cancelOut) cancelOut(cancelSelf);
+	void (^report)(float, NSString *) = ^(float p, NSString *stage) {
+		if (!progressBlock || cancelled()) return;
+		dispatch_async(dispatch_get_main_queue(), ^{ progressBlock(p, stage); });
+	};
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		NSString *videoPath = [SCITempFiles claimWithExt:@"mp4" ttl:300 tag:@"video"].path;
+		NSString *audioPath = [SCITempFiles claimWithExt:@"m4a" ttl:300 tag:@"audio"].path;
+		NSString *stem = sciSafeFileStem([SCIMediaActions currentFilenameStem]);
+		__block NSString *outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+		NSError *(^cancelledError)(void) = ^NSError *{ return sciError(NSUserCancelledError, SCILocalized(@"Cancelled")); };
+		void (^cleanup)(BOOL removeOutput) = ^(BOOL removeOutput) {
+			NSFileManager *fm = NSFileManager.defaultManager;
+			[fm removeItemAtPath:videoPath error:nil];
+			[fm removeItemAtPath:audioPath error:nil];
+			if (removeOutput) [fm removeItemAtPath:outputPath error:nil];
+		};
+		NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+		cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+		cfg.timeoutIntervalForRequest = 30.0;
+		cfg.timeoutIntervalForResource = 300.0;
+		NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
+		sessionRef = session;
+		sciRegisterSession(session);
+		// Download fills 0…0.5, encoding fills 0.5…1.0.
+		report(0.0f, SCILocalized(@"Downloading video…"));
+		BOOL videoOK = sciDownloadToPath(session, videoURL, videoPath, cancelled, ^(float p) { report(p * 0.45f, SCILocalized(@"Downloading video…")); });
+		if (cancelled()) { sciUnregisterSession(session); [session invalidateAndCancel]; cleanup(YES); finish(nil, cancelledError()); return; }
+		if (!videoOK || ![NSFileManager.defaultManager fileExistsAtPath:videoPath]) { sciUnregisterSession(session); [session invalidateAndCancel]; cleanup(YES); finish(nil, sciError(2, SCILocalized(@"Failed to download video"))); return; }
+		report(0.45f, SCILocalized(@"Downloading audio…"));
+		BOOL hasAudio = audioURL != nil;
+		if (hasAudio) hasAudio = sciDownloadToPath(session, audioURL, audioPath, cancelled, nil) && [NSFileManager.defaultManager fileExistsAtPath:audioPath];
+		sciUnregisterSession(session);
+		[session invalidateAndCancel];
+		if (cancelled()) { cleanup(YES); finish(nil, cancelledError()); return; }
 
-    __block BOOL completionCalled = NO;
-    void (^finish)(NSURL *, NSError *) = ^(NSURL *url, NSError *err) {
-        if (completionCalled) return;
-        completionCalled = YES;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (completion) completion(url, err);
-        });
-    };
+		// Probe total duration so encode statistics map to a real %.
+		double durationMs = 0;
+		SEL probeSel = NSSelectorFromString(@"execute:");
+		if (FFprobeKitClass && [FFprobeKitClass respondsToSelector:probeSel]) {
+			NSString *pcmd = [NSString stringWithFormat:@"-v error -show_entries format=duration -of default=nw=1:nk=1 %@", sciQuote(videoPath)];
+			@try {
+				id ps = ((id(*)(id, SEL, id))objc_msgSend)(FFprobeKitClass, probeSel, pcmd);
+				NSString *pout = nil; sciSessionSuccess(ps, &pout);
+				durationMs = [[pout stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] doubleValue] * 1000.0;
+			} @catch (__unused id e) {}
+		}
 
-    // Per-call cancellation — scoped to this mux only.
-    __block volatile int32_t thisCancelled = 0;
-    __block NSURLSession *bgSessionRef = nil;
-    __block long ffmpegSidRef = 0;
-    BOOL (^isCancelledLocal)(void) = ^BOOL{ return thisCancelled == 1; };
+		report(0.5f, SCILocalized(@"Encoding…"));
+		NSDictionary *args = [self encodingArgsForFallbackPreset:preset];
+		NSString *vArgs = args[@"video"];
+		NSString *aArgs = args[@"audio"];
+		NSString *cArgs = args[@"container"];
+		NSString *fArgs = args[@"filter"];
+		BOOL vtPreferred = [vArgs containsString:@"h264_videotoolbox"];
+		NSString *swArgs = (vtPreferred && [self hasEncoder:@"libx264"]) ? [self softwareFallbackVideoArgsForPreset:preset] : nil;
+		// No -shortest: it can cut libx264's buffered tail before flush, freezing the
+		// last frame. Same-source DASH a/v are equal length, so both end together.
+		NSString *(^buildCmd)(NSString *, NSString *) = ^NSString *(NSString *v, NSString *outPath) {
+			return hasAudio
+				? [NSString stringWithFormat:@"-y -hide_banner -analyzeduration 100M -probesize 100M -fflags +genpts -i %@ -i %@ -map 0:v:0 -map 1:a:0 %@ %@ %@ %@ %@", sciQuote(videoPath), sciQuote(audioPath), fArgs, v, aArgs, cArgs, sciQuote(outPath)]
+				: [NSString stringWithFormat:@"-y -hide_banner -analyzeduration 100M -probesize 100M -fflags +genpts -i %@ %@ %@ %@ %@", sciQuote(videoPath), fArgs, v, cArgs, sciQuote(outPath)];
+		};
+		// Real encode % from the statistics callback: time processed / total duration.
+		void (^statsCallback)(id) = ^(id stats) {
+			double timeMs = sciCallDoubleGetter(stats, @"getTime");
+			if (durationMs > 0 && timeMs > 0) {
+				float enc = (float)MIN(1.0, MAX(0.0, timeMs / durationMs));
+				report(0.5f + 0.5f * enc, [NSString stringWithFormat:SCILocalized(@"Encoding %d%%"), (int)(enc * 100)]);
+			}
+		};
+		void (^onSID)(long) = ^(long sid) { ffmpegSidRef = sid; };
 
-    void (^cancelSelf)(void) = ^{
-        OSAtomicCompareAndSwap32(0, 1, &thisCancelled);
-        NSURLSession *s = bgSessionRef;
-        if (s) { @try { [s invalidateAndCancel]; } @catch (__unused id e) {} }
-        long sid = ffmpegSidRef;
-        if (sid && FFmpegKitClass) {
-            SEL cancelSel = NSSelectorFromString(@"cancel:");
-            if ([FFmpegKitClass respondsToSelector:cancelSel]) {
-                @try { ((void(*)(id, SEL, long))objc_msgSend)(FFmpegKitClass, cancelSel, sid); }
-                @catch (__unused id e) {}
-            }
-        }
-    };
-    if (cancelOut) cancelOut(cancelSelf);
+		// VT when foreground, software when backgrounded, software forced on the last try.
+		// Each retry gets a fresh output path — an abandoned session must never share a
+		// file with its retry. After a stalled attempt the next try gets a short startup
+		// watchdog so a poisoned execution queue fails fast instead of hanging.
+		NSString *ffOutput = nil;
+		SCIMuxRun run = SCIMuxRunFailed;
+		BOOL notifiedSW = NO;
+		NSTimeInterval stall = kSCIMuxStallSeconds;
+		for (int attempt = 0; attempt < 3; attempt++) {
+			BOOL wantSW = vtPreferred && swArgs && (attempt == 2 || sciAppInBackground());
+			NSString *v = wantSW ? swArgs : vArgs;
+			BOOL vt = !wantSW && vtPreferred;
+			if (wantSW && !notifiedSW) { notifiedSW = YES; sciNotifySoftwareFallback(); }
+			if (attempt > 0) {
+				outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+				report(0.5f, SCILocalized(@"Encoding…"));
+			}
+			BOOL bgKilled = NO;
+			run = sciRunMuxCommand(buildCmd(v, outputPath), vt, stall, statsCallback, onSID, &ffOutput, &bgKilled);
+			if (run == SCIMuxRunOK || cancelled()) break;
+			BOOL vtDeath = vt && (bgKilled || run == SCIMuxRunStalled || sciOutputLooksLikeVTDeath(ffOutput));
+			if (!vtDeath || !swArgs) break;
+			stall = (run == SCIMuxRunStalled) ? kSCIRetryStartupStallSeconds : kSCIMuxStallSeconds;
+			NSLog(@"[SCInsta][FFmpeg] VT encode died (attempt=%d run=%ld bgKilled=%d) — retrying", attempt + 1, (long)run, bgKilled);
+			// Let the fg/bg transition settle — a quick home-and-back re-picks hardware.
+			if (bgKilled) [NSThread sleepForTimeInterval:2.0];
+			if (cancelled()) break;
+		}
+		cleanup(NO);
+		if (cancelled()) { cleanup(YES); finish(nil, cancelledError()); return; }
+		if (run == SCIMuxRunOK && [NSFileManager.defaultManager fileExistsAtPath:outputPath]) finish([NSURL fileURLWithPath:outputPath], nil);
+		else { cleanup(YES); finish(nil, sciError(3, run == SCIMuxRunStalled ? SCILocalized(@"Video encoder locked up — restart Instagram to encode again") : (ffOutput ?: SCILocalized(@"FFmpeg mux failed")))); }
+	});
+}
 
-    void (^report)(float, NSString *) = ^(float p, NSString *s) {
-        if (!progressBlock || isCancelledLocal()) return;
-        dispatch_async(dispatch_get_main_queue(), ^{ progressBlock(p, s); });
-    };
++ (void)muxPhotoURL:(NSURL *)photoURL audioURL:(NSURL *)audioURL audioStartMs:(double)audioStartMs durationMs:(double)durationMs progress:(void(^)(float progress, NSString *stage))progressBlock completion:(void(^)(NSURL *outputURL, NSError *error))completion cancelOut:(void(^)(void (^cancelBlock)(void)))cancelOut {
+	if (![self isAvailable]) { if (completion) completion(nil, sciError(1, @"FFmpegKit not available")); return; }
+	__block BOOL completionCalled = NO;
+	void (^finish)(NSURL *, NSError *) = ^(NSURL *url, NSError *err) {
+		if (completionCalled) return;
+		completionCalled = YES;
+		dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(url, err); });
+	};
+	__block atomic_bool thisCancelled;
+	atomic_init(&thisCancelled, false);
+	__block NSURLSession *sessionRef = nil;
+	__block long ffmpegSidRef = 0;
+	BOOL (^cancelled)(void) = ^BOOL{ return atomic_load(&thisCancelled); };
+	void (^cancelSelf)(void) = ^{
+		atomic_store(&thisCancelled, true);
+		NSURLSession *s = sessionRef;
+		if (s) { @try { [s invalidateAndCancel]; } @catch (__unused id e) {} }
+		long sid = ffmpegSidRef;
+		SEL cancelSel = NSSelectorFromString(@"cancel:");
+		if (sid && FFmpegKitClass && [FFmpegKitClass respondsToSelector:cancelSel]) {
+			@try { ((void(*)(id, SEL, long))objc_msgSend)(FFmpegKitClass, cancelSel, sid); } @catch (__unused id e) {}
+		}
+	};
+	if (cancelOut) cancelOut(cancelSelf);
+	void (^report)(float, NSString *) = ^(float p, NSString *stage) {
+		if (!progressBlock || cancelled()) return;
+		dispatch_async(dispatch_get_main_queue(), ^{ progressBlock(p, stage); });
+	};
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		NSString *photoPath = [SCITempFiles claimWithExt:@"jpg" ttl:300 tag:@"photo"].path;
+		NSString *audioPath = [SCITempFiles claimWithExt:@"mp4" ttl:300 tag:@"audio"].path;
+		NSString *stem = sciSafeFileStem([SCIMediaActions currentFilenameStem]);
+		__block NSString *outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+		NSError *(^cancelledError)(void) = ^NSError *{ return sciError(NSUserCancelledError, SCILocalized(@"Cancelled")); };
+		void (^cleanup)(BOOL removeOutput) = ^(BOOL removeOutput) {
+			NSFileManager *fm = NSFileManager.defaultManager;
+			[fm removeItemAtPath:photoPath error:nil];
+			[fm removeItemAtPath:audioPath error:nil];
+			if (removeOutput) [fm removeItemAtPath:outputPath error:nil];
+		};
+		NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+		cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+		cfg.timeoutIntervalForRequest = 30.0;
+		cfg.timeoutIntervalForResource = 300.0;
+		NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
+		sessionRef = session;
+		sciRegisterSession(session);
+		report(0.0f, SCILocalized(@"Downloading…"));
+		BOOL photoOK = sciDownloadToPath(session, photoURL, photoPath, cancelled, ^(float p) { report(p * 0.2f, SCILocalized(@"Downloading…")); });
+		if (cancelled()) { sciUnregisterSession(session); [session invalidateAndCancel]; cleanup(YES); finish(nil, cancelledError()); return; }
+		if (!photoOK || ![NSFileManager.defaultManager fileExistsAtPath:photoPath]) { sciUnregisterSession(session); [session invalidateAndCancel]; cleanup(YES); finish(nil, sciError(2, SCILocalized(@"Download failed"))); return; }
+		report(0.2f, SCILocalized(@"Downloading audio…"));
+		BOOL audioOK = sciDownloadToPath(session, audioURL, audioPath, cancelled, ^(float p) { report(0.2f + p * 0.3f, SCILocalized(@"Downloading audio…")); });
+		sciUnregisterSession(session);
+		[session invalidateAndCancel];
+		if (cancelled()) { cleanup(YES); finish(nil, cancelledError()); return; }
+		if (!audioOK || ![NSFileManager.defaultManager fileExistsAtPath:audioPath]) { cleanup(YES); finish(nil, sciError(2, SCILocalized(@"Download failed"))); return; }
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *tmpDir = NSTemporaryDirectory();
-        // Intermediates stay UUID-named; the muxed output uses the stem.
-        NSString *videoPath = [tmpDir stringByAppendingPathComponent:
-                               [NSString stringWithFormat:@"sci_video_%@.mp4", [[NSUUID UUID] UUIDString]]];
-        NSString *audioPath = [tmpDir stringByAppendingPathComponent:
-                               [NSString stringWithFormat:@"sci_audio_%@.m4a", [[NSUUID UUID] UUIDString]]];
-        NSString *outStem = [SCIMediaActions currentFilenameStem]
-            ?: [NSString stringWithFormat:@"sci_muxed_%@", [[NSUUID UUID] UUIDString]];
-        NSString *outputPath = [tmpDir stringByAppendingPathComponent:
-                                [NSString stringWithFormat:@"%@.mp4", outStem]];
+		report(0.5f, SCILocalized(@"Encoding…"));
+		double durSec = MAX(1.0, durationMs / 1000.0);
+		double startSec = MAX(0.0, audioStartMs / 1000.0);
+		NSString *swVenc = @"-c:v libx264 -preset veryfast -crf 20 -tune stillimage";
+		NSString *venc = [self hasEncoder:@"h264_videotoolbox"] ? @"-c:v h264_videotoolbox -b:v 6M -allow_sw 1" : swVenc;
+		BOOL vtPreferred = [venc containsString:@"h264_videotoolbox"];
+		// 3fps: every frame is identical, more only slows the encode.
+		NSString *(^buildCmd)(NSString *, NSString *) = ^NSString *(NSString *v, NSString *outPath) {
+			return [NSString stringWithFormat:
+				@"-y -hide_banner -loop 1 -framerate 3 -i %@ -ss %.3f -i %@ -t %.3f -map 0:v:0 -map 1:a:0 "
+				@"-vf scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p %@ -c:a aac -b:a 192k -movflags +faststart %@",
+				sciQuote(photoPath), startSec, sciQuote(audioPath), durSec, v, sciQuote(outPath)];
+		};
+		void (^statsCallback)(id) = ^(id stats) {
+			double timeMs = sciCallDoubleGetter(stats, @"getTime");
+			if (timeMs > 0) {
+				float enc = (float)MIN(1.0, MAX(0.0, timeMs / durationMs));
+				report(0.5f + 0.5f * enc, [NSString stringWithFormat:SCILocalized(@"Encoding %d%%"), (int)(enc * 100)]);
+			}
+		};
+		void (^onSID)(long) = ^(long sid) { ffmpegSidRef = sid; };
 
-        NSError *(^cancelledError)(void) = ^NSError *{
-            return [NSError errorWithDomain:@"SCIFFmpeg" code:NSUserCancelledError
-                userInfo:@{NSLocalizedDescriptionKey: @"Cancelled"}];
-        };
+		NSString *ffOutput = nil;
+		SCIMuxRun run = SCIMuxRunFailed;
+		NSTimeInterval stall = kSCIMuxStallSeconds;
+		for (int attempt = 0; attempt < 3; attempt++) {
+			BOOL wantSW = vtPreferred && swVenc && (attempt == 2 || sciAppInBackground());
+			NSString *v = wantSW ? swVenc : venc;
+			BOOL vt = !wantSW && vtPreferred;
+			if (attempt > 0) {
+				outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+				report(0.5f, SCILocalized(@"Encoding…"));
+			}
+			BOOL bgKilled = NO;
+			run = sciRunMuxCommand(buildCmd(v, outputPath), vt, stall, statsCallback, onSID, &ffOutput, &bgKilled);
+			if (run == SCIMuxRunOK || cancelled()) break;
+			BOOL vtDeath = vt && (bgKilled || run == SCIMuxRunStalled || sciOutputLooksLikeVTDeath(ffOutput));
+			if (!vtDeath || !swVenc) break;
+			stall = (run == SCIMuxRunStalled) ? kSCIRetryStartupStallSeconds : kSCIMuxStallSeconds;
+			NSLog(@"[SCInsta][FFmpeg] VT photo encode died (attempt=%d run=%ld bgKilled=%d) — retrying", attempt + 1, (long)run, bgKilled);
+			if (bgKilled) [NSThread sleepForTimeInterval:2.0];
+			if (cancelled()) break;
+		}
+		cleanup(NO);
+		if (cancelled()) { cleanup(YES); finish(nil, cancelledError()); return; }
+		if (run == SCIMuxRunOK && [NSFileManager.defaultManager fileExistsAtPath:outputPath]) finish([NSURL fileURLWithPath:outputPath], nil);
+		else { cleanup(YES); finish(nil, sciError(3, run == SCIMuxRunStalled ? SCILocalized(@"Video encoder locked up — restart Instagram to encode again") : (ffOutput ?: SCILocalized(@"FFmpeg mux failed")))); }
+	});
+}
 
-        void (^cleanupTmp)(void) = ^{
-            NSFileManager *fm = [NSFileManager defaultManager];
-            [fm removeItemAtPath:videoPath error:nil];
-            [fm removeItemAtPath:audioPath error:nil];
-            [fm removeItemAtPath:outputPath error:nil];
-        };
++ (BOOL)hasEncoder:(NSString *)encoderName {
+	if (!encoderName.length) return NO;
+	dispatch_once(&sciEncoderOnce, ^{
+		if (![self isAvailable]) { sciEncoderSet = [NSSet set]; return; }
+		SEL executeSel = NSSelectorFromString(@"execute:");
+		if (![FFmpegKitClass respondsToSelector:executeSel]) { sciEncoderSet = [NSSet set]; return; }
+		NSMutableSet *set = [NSMutableSet set];
+		@try {
+			id session = ((id(*)(id, SEL, id))objc_msgSend)(FFmpegKitClass, executeSel, @"-hide_banner -encoders");
+			NSString *output = nil;
+			sciSessionSuccess(session, &output);
+			if (output.length) {
+				for (NSString *line in [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+					NSString *trimmed = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+					if (trimmed.length < 8) continue;
+					NSArray *parts = [trimmed componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+					if (parts.count < 2) continue;
+					NSString *flags = parts[0];
+					if (flags.length < 6) continue;
+					if (![flags hasPrefix:@"V"] && ![flags hasPrefix:@"A"] && ![flags hasPrefix:@"S"]) continue;
+					[set addObject:parts[1]];
+				}
+			}
+		} @catch (__unused id e) {}
+		sciEncoderSet = [set copy];
+	});
+	return [sciEncoderSet containsObject:encoderName];
+}
 
-        report(0.0, @"Downloading video...");
+// Background fallback: the user's encode settings translated onto libx264. Bitrate/CRF,
+// profile, level, tune, pix_fmt and fps cap carry over — only the preset is forced fast.
++ (NSString *)softwareFallbackVideoArgsForPreset:(NSString *)fallbackPreset {
+	NSMutableString *v = [NSMutableString stringWithString:@"-c:v libx264 -preset ultrafast"];
+	if (![SCIUtils getBoolPref:@"adv_encoding_enabled"]) {
+		NSString *preset = fallbackPreset.length ? fallbackPreset : [SCIUtils getStringPref:@"ffmpeg_encoding_speed"];
+		NSString *bv = @"8M";
+		if ([preset isEqualToString:@"max"]) bv = @"50M";
+		else if ([preset isEqualToString:@"fast"]) bv = @"20M";
+		else if ([preset isEqualToString:@"veryfast"]) bv = @"12M";
+		[v appendFormat:@" -b:v %@ -pix_fmt yuv420p", bv];
+		return v;
+	}
+	NSString *profile = [SCIUtils getStringPref:@"adv_h264_profile"];
+	if (profile.length) [v appendFormat:@" -profile:v %@", profile];
+	NSString *level = [SCIUtils getStringPref:@"adv_h264_level"];
+	if (level.length && ![level isEqualToString:@"auto"]) [v appendFormat:@" -level %@", level];
+	NSString *tune = [SCIUtils getStringPref:@"adv_tune"];
+	if (tune.length && ![tune isEqualToString:@"none"]) [v appendFormat:@" -tune %@", tune];
+	NSString *bitrate = [[SCIUtils getStringPref:@"adv_video_bitrate"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+	if (bitrate.length) [v appendFormat:@" -b:v %@", bitrate];
+	else {
+		NSString *crfStr = [SCIUtils getStringPref:@"adv_crf"];
+		NSInteger crf = crfStr.length ? crfStr.integerValue : 18;
+		if (crf < 0 || crf > 51) crf = 18;
+		[v appendFormat:@" -crf %ld", (long)crf];
+	}
+	NSString *pixFmt = [SCIUtils getStringPref:@"adv_pixel_format"];
+	[v appendFormat:@" -pix_fmt %@", pixFmt.length ? pixFmt : @"yuv420p"];
+	NSString *fps = [SCIUtils getStringPref:@"adv_fps"];
+	if (fps.length && ![fps isEqualToString:@"original"]) [v appendFormat:@" -r %@", fps];
+	return v;
+}
 
-        dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-        __block NSMutableData *videoAccum = [NSMutableData data];
-        __block NSError *videoErr = nil;
++ (NSDictionary<NSString *, NSString *> *)encodingArgsForFallbackPreset:(NSString *)fallbackPreset {
+	BOOL advanced = [SCIUtils getBoolPref:@"adv_encoding_enabled"];
+	if (!advanced) {
+		// Simple mode: preset menu drives bitrate on hardware h264. Tuned for IG source (8-12 Mbit).
+		NSString *preset = fallbackPreset.length ? fallbackPreset : [SCIUtils getStringPref:@"ffmpeg_encoding_speed"];
+		if (!preset.length) preset = @"ultrafast";
+		NSString *encFlags = @"-b:v 8M";
+		if ([preset isEqualToString:@"max"]) encFlags = @"-b:v 50M -profile:v high -level 5.1 -coder cabac";
+		else if ([preset isEqualToString:@"fast"]) encFlags = @"-b:v 20M";
+		else if ([preset isEqualToString:@"veryfast"]) encFlags = @"-b:v 12M";
+		return @{
+			@"video": [NSString stringWithFormat:@"-c:v h264_videotoolbox %@ -allow_sw 1", encFlags],
+			@"audio": @"-c:a copy",
+			@"container": @"-movflags +faststart",
+			@"filter": @"",
+		};
+	}
 
-        NSURLSession *bgSession = [NSURLSession sessionWithConfiguration:
-            [NSURLSessionConfiguration ephemeralSessionConfiguration]];
-        bgSessionRef = bgSession;
-        sciRegisterSession(bgSession);
+	// libx264 pix_fmt must match profile (yuv420p10le→high10, yuv422p→high422, yuv444p→high444).
+	// scale "-2:N" only downscales taller-than-target, even width.
+	NSString *codec = [SCIUtils getStringPref:@"adv_video_codec"];
+	if (!codec.length) codec = @"h264_videotoolbox";
+	if (![codec isEqualToString:@"h264_videotoolbox"] && ![self hasEncoder:codec]) {
+		NSLog(@"[SCInsta][FFmpeg] Encoder '%@' not available — falling back to h264_videotoolbox", codec);
+		static dispatch_once_t warnOnce;
+		dispatch_once(&warnOnce, ^{
+			dispatch_async(dispatch_get_main_queue(), ^{
+				SCINotifyWarning(SCI_NOTIF_GENERIC,
+					SCILocalized(@"Encoder unavailable"),
+					([NSString stringWithFormat:SCILocalized(@"'%@' is not in this FFmpegKit build — using hardware h264 instead."), codec]));
+			});
+		});
+		codec = @"h264_videotoolbox";
+	}
+	BOOL isHW = [codec isEqualToString:@"h264_videotoolbox"];
 
-        NSURLSessionDownloadTask *videoTask = [bgSession downloadTaskWithURL:videoURL
-            completionHandler:^(NSURL *loc, NSURLResponse *resp, NSError *err) {
-                videoErr = err;
-                if (loc) videoAccum = [[NSMutableData alloc] initWithContentsOfURL:loc];
-                dispatch_semaphore_signal(sem);
-            }];
-        [videoTask resume];
+	NSMutableString *video = [NSMutableString stringWithFormat:@"-c:v %@", codec];
 
-        while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC)) != 0) {
-            if (isCancelledLocal()) {
-                [videoTask cancel];
-                break;
-            }
-            int64_t received = videoTask.countOfBytesReceived;
-            int64_t expected = videoTask.countOfBytesExpectedToReceive;
-            if (expected > 0) {
-                float frac = (float)received / (float)expected;
-                report(frac * 0.8f, @"Downloading video...");
-            }
-        }
+	NSString *profile = [SCIUtils getStringPref:@"adv_h264_profile"];
+	if (profile.length) [video appendFormat:@" -profile:v %@", profile];
 
-        if (isCancelledLocal()) {
-            sciUnregisterSession(bgSession);
-            [bgSession invalidateAndCancel];
-            cleanupTmp();
-            finish(nil, cancelledError());
-            return;
-        }
+	NSString *level = [SCIUtils getStringPref:@"adv_h264_level"];
+	if (level.length && ![level isEqualToString:@"auto"]) [video appendFormat:@" -level %@", level];
 
-        if (!videoAccum.length) {
-            sciUnregisterSession(bgSession);
-            [bgSession invalidateAndCancel];
-            cleanupTmp();
-            NSString *desc = videoErr ? videoErr.localizedDescription : @"Empty response";
-            finish(nil, [NSError errorWithDomain:@"SCIFFmpeg" code:2
-                userInfo:@{NSLocalizedDescriptionKey:
-                    [NSString stringWithFormat:@"Failed to download video: %@", desc]}]);
-            return;
-        }
-        [videoAccum writeToFile:videoPath atomically:YES];
+	NSString *bitrate = [[SCIUtils getStringPref:@"adv_video_bitrate"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+	NSString *crfStr = [SCIUtils getStringPref:@"adv_crf"];
+	NSInteger crf = crfStr.length ? crfStr.integerValue : 18;
+	if (crf < 0 || crf > 51) crf = 18;
 
-        report(0.8f, @"Downloading audio...");
-        BOOL hasAudio = (audioURL != nil);
-        if (hasAudio) {
-            __block NSMutableData *audioAccum = nil;
-            __block NSURLSessionDownloadTask *audioTask = nil;
-            audioTask = [bgSession downloadTaskWithURL:audioURL
-                completionHandler:^(NSURL *loc, NSURLResponse *resp, NSError *err) {
-                    if (loc) audioAccum = [[NSMutableData alloc] initWithContentsOfURL:loc];
-                    dispatch_semaphore_signal(sem);
-                }];
-            [audioTask resume];
+	if (!isHW) {
+		NSString *preset = [SCIUtils getStringPref:@"adv_preset"];
+		if (!preset.length) preset = @"medium";
+		[video appendFormat:@" -preset %@", preset];
+		NSString *tune = [SCIUtils getStringPref:@"adv_tune"];
+		if (tune.length && ![tune isEqualToString:@"none"]) [video appendFormat:@" -tune %@", tune];
+		// User bitrate wins over CRF (default 18, visually lossless).
+		if (bitrate.length) [video appendFormat:@" -b:v %@", bitrate];
+		else [video appendFormat:@" -crf %ld", (long)crf];
+		NSString *pixFmt = [SCIUtils getStringPref:@"adv_pixel_format"];
+		if (!pixFmt.length) pixFmt = @"yuv420p";
+		[video appendFormat:@" -pix_fmt %@", pixFmt];
+	} else {
+		// VT always needs -b:v; fall back to 8M when blank.
+		[video appendFormat:@" -b:v %@", bitrate.length ? bitrate : @"8M"];
+		[video appendFormat:@" -crf %ld", (long)crf];
+		[video appendString:@" -allow_sw 1"];
+		NSString *pixFmt = [SCIUtils getStringPref:@"adv_pixel_format"];
+		if (pixFmt.length && ![pixFmt isEqualToString:@"yuv420p"]) {
+			static dispatch_once_t pixWarn;
+			NSString *picked = pixFmt;
+			dispatch_once(&pixWarn, ^{
+				dispatch_async(dispatch_get_main_queue(), ^{
+					SCINotifyWarning(SCI_NOTIF_GENERIC,
+						SCILocalized(@"Pixel format ignored"),
+						([NSString stringWithFormat:SCILocalized(@"Hardware (VideoToolbox) only supports yuv420p — '%@' was ignored. Switch to Software (libx264) to use it."), picked]));
+				});
+			});
+		}
+	}
 
-            while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC)) != 0) {
-                if (isCancelledLocal()) { [audioTask cancel]; break; }
-            }
+	// Output frame-rate cap (applies to both encoders).
+	NSString *fps = [SCIUtils getStringPref:@"adv_fps"];
+	if (fps.length && ![fps isEqualToString:@"original"]) [video appendFormat:@" -r %@", fps];
 
-            if (isCancelledLocal()) {
-                sciUnregisterSession(bgSession);
-                [bgSession invalidateAndCancel];
-                cleanupTmp();
-                finish(nil, cancelledError());
-                return;
-            }
+	NSString *audioCodec = [SCIUtils getStringPref:@"adv_audio_codec"];
+	if (!audioCodec.length) audioCodec = @"copy";
+	NSMutableString *audio = [NSMutableString stringWithFormat:@"-c:a %@", audioCodec];
+	if (![audioCodec isEqualToString:@"copy"]) {
+		NSString *abr = [SCIUtils getStringPref:@"adv_audio_bitrate"];
+		if (abr.length) [audio appendFormat:@" -b:a %@", abr];
+		NSString *channels = [SCIUtils getStringPref:@"adv_audio_channels"];
+		if ([channels isEqualToString:@"stereo"]) [audio appendString:@" -ac 2"];
+		else if ([channels isEqualToString:@"mono"]) [audio appendString:@" -ac 1"];
+		NSString *ar = [SCIUtils getStringPref:@"adv_audio_samplerate"];
+		if (ar.length && ![ar isEqualToString:@"original"]) [audio appendFormat:@" -ar %@", ar];
+	}
 
-            if (audioAccum.length) {
-                [audioAccum writeToFile:audioPath atomically:YES];
-            } else {
-                hasAudio = NO;
-            }
-        }
+	NSString *maxRes = [SCIUtils getStringPref:@"adv_max_resolution"];
+	NSString *filter = @"";
+	if (maxRes.length && ![maxRes isEqualToString:@"original"]) {
+		filter = [NSString stringWithFormat:@"-vf scale=-2:%@", maxRes];
+	}
 
-        sciUnregisterSession(bgSession);
-        [bgSession invalidateAndCancel];
+	NSMutableString *container = [NSMutableString stringWithString:[SCIUtils getBoolPref:@"adv_faststart"] ? @"-movflags +faststart" : @""];
+	if ([SCIUtils getBoolPref:@"adv_strip_metadata"]) {
+		if (container.length) [container appendString:@" "];
+		[container appendString:@"-map_metadata -1"];
+	}
 
-        report(0.9f, @"Encoding...");
-
-        // Encoding speed → videotoolbox bitrate
-        NSString *encFlags;
-        if ([preset isEqualToString:@"max"]) {
-            encFlags = @"-b:v 50M -profile:v high -level 5.1 -coder cabac";
-        } else if ([preset isEqualToString:@"fast"]) {
-            encFlags = @"-b:v 20M";
-        } else if ([preset isEqualToString:@"veryfast"]) {
-            encFlags = @"-b:v 12M";
-        } else {
-            encFlags = @"-b:v 8M -realtime 1";
-        }
-
-        NSString *cmd;
-        if (hasAudio) {
-            cmd = [NSString stringWithFormat:
-                   @"-y -hide_banner "
-                   @"-analyzeduration 1M -probesize 1M -fflags +genpts "
-                   @"-i '%@' -i '%@' "
-                   @"-map 0:v:0 -map 1:a:0 "
-                   @"-c:a copy -c:v h264_videotoolbox %@ -allow_sw 1 "
-                   @"-movflags +faststart -shortest '%@'",
-                   videoPath, audioPath, encFlags, outputPath];
-        } else {
-            cmd = [NSString stringWithFormat:
-                   @"-y -hide_banner "
-                   @"-analyzeduration 1M -probesize 1M -fflags +genpts "
-                   @"-i '%@' "
-                   @"-c:v h264_videotoolbox %@ -allow_sw 1 "
-                   @"-movflags +faststart '%@'",
-                   videoPath, encFlags, outputPath];
-        }
-
-        // executeAsync returns the session synchronously so we can capture its id
-        // for per-session cancel.
-        __block BOOL ffSuccess = NO;
-        __block NSString *ffOutput = nil;
-        dispatch_semaphore_t ffSem = dispatch_semaphore_create(0);
-
-        id (^ffCallback)(id) = ^id(id session) {
-            SEL rcSel = NSSelectorFromString(@"getReturnCode");
-            if ([session respondsToSelector:rcSel]) {
-                id rc = ((id(*)(id, SEL))objc_msgSend)(session, rcSel);
-                if (ReturnCodeClass && rc) {
-                    SEL isSuccessSel = NSSelectorFromString(@"isSuccess:");
-                    if ([ReturnCodeClass respondsToSelector:isSuccessSel])
-                        ffSuccess = ((BOOL(*)(id, SEL, id))objc_msgSend)(ReturnCodeClass, isSuccessSel, rc);
-                }
-            }
-            SEL outSel = NSSelectorFromString(@"getOutput");
-            if ([session respondsToSelector:outSel])
-                ffOutput = ((id(*)(id, SEL))objc_msgSend)(session, outSel);
-            dispatch_semaphore_signal(ffSem);
-            return nil;
-        };
-
-        SEL asyncSel = NSSelectorFromString(@"executeAsync:withCompleteCallback:");
-        if ([FFmpegKitClass respondsToSelector:asyncSel]) {
-            id session = ((id(*)(id, SEL, id, id))objc_msgSend)(FFmpegKitClass, asyncSel, cmd, ffCallback);
-            SEL sidSel = NSSelectorFromString(@"getSessionId");
-            if (session && [session respondsToSelector:sidSel]) {
-                ffmpegSidRef = ((long(*)(id, SEL))objc_msgSend)(session, sidSel);
-            }
-            dispatch_semaphore_wait(ffSem, DISPATCH_TIME_FOREVER);
-        } else {
-            // Fallback: synchronous execute (coarse cancel only).
-            [SCIFFmpeg executeCommand:cmd completion:^(BOOL ok, NSString *out) {
-                ffSuccess = ok; ffOutput = out; dispatch_semaphore_signal(ffSem);
-            }];
-            dispatch_semaphore_wait(ffSem, DISPATCH_TIME_FOREVER);
-        }
-
-        NSFileManager *fm = [NSFileManager defaultManager];
-        [fm removeItemAtPath:videoPath error:nil];
-        [fm removeItemAtPath:audioPath error:nil];
-
-        if (isCancelledLocal()) {
-            [fm removeItemAtPath:outputPath error:nil];
-            finish(nil, cancelledError());
-            return;
-        }
-
-        if (ffSuccess && [fm fileExistsAtPath:outputPath]) {
-            finish([NSURL fileURLWithPath:outputPath], nil);
-        } else {
-            [fm removeItemAtPath:outputPath error:nil];
-            finish(nil, [NSError errorWithDomain:@"SCIFFmpeg" code:3
-                userInfo:@{NSLocalizedDescriptionKey: ffOutput ?: @"FFmpeg mux failed"}]);
-        }
-    });
+	return @{
+		@"video": [video copy],
+		@"audio": [audio copy],
+		@"container": container,
+		@"filter": filter,
+	};
 }
 
 @end

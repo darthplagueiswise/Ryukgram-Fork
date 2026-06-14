@@ -1,15 +1,17 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 
-// Disable story data source
 %hook IGMainStoryTrayDataSource
-- (id)initWithUserSession:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"hide_stories_tray"]) {
-        NSLog(@"[SCInsta] Hiding story tray");
+- (BOOL)isEmpty {
+    if ([SCIUtils getBoolPref:@"hide_stories_tray"]) return YES;
+    return %orig;
+}
+%end
 
-        return nil;
-    }
-    
+// Expiring-soon stories tray has its own fetch path.
+%hook IGStoryExpiringSoonTrayFetcher
+- (BOOL)fetchTray {
+    if ([SCIUtils getBoolPref:@"hide_stories_tray"]) return NO;
     return %orig;
 }
 %end

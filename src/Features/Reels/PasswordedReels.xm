@@ -1,5 +1,6 @@
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import "../../SCIChrome.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -95,24 +96,18 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
 %new - (void)sciAddButtons {
     if ([self viewWithTag:SCI_PW_BTN_TAG]) return;
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightBold];
-
-    UIButton *unlockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    SCIChromeButton *unlockBtn = [[SCIChromeButton alloc] initWithSymbol:@"lock.open.fill" pointSize:18.0 diameter:40.0];
     unlockBtn.tag = SCI_PW_BTN_TAG;
-    [unlockBtn setImage:[UIImage systemImageNamed:@"lock.open.fill" withConfiguration:config] forState:UIControlStateNormal];
-    unlockBtn.tintColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
-    unlockBtn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5];
-    unlockBtn.layer.cornerRadius = 20;
+    unlockBtn.iconTint = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
+    unlockBtn.bubbleColor = [UIColor colorWithWhite:0.0 alpha:0.5];
     unlockBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [unlockBtn addTarget:self action:@selector(sciUnlockTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:unlockBtn];
 
-    UIButton *eyeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    SCIChromeButton *eyeBtn = [[SCIChromeButton alloc] initWithSymbol:@"eye.fill" pointSize:18.0 diameter:40.0];
     eyeBtn.tag = SCI_PW_BTN_TAG + 1;
-    [eyeBtn setImage:[UIImage systemImageNamed:@"eye.fill" withConfiguration:config] forState:UIControlStateNormal];
-    eyeBtn.tintColor = [UIColor whiteColor];
-    eyeBtn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5];
-    eyeBtn.layer.cornerRadius = 20;
+    eyeBtn.iconTint = [UIColor whiteColor];
+    eyeBtn.bubbleColor = [UIColor colorWithWhite:0.0 alpha:0.5];
     eyeBtn.translatesAutoresizingMaskIntoConstraints = NO;
     [eyeBtn addTarget:self action:@selector(sciShowPasswordTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:eyeBtn];
@@ -177,13 +172,9 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
     }
 
     [[UIPasteboard generalPasteboard] setString:password];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Password")
-                                                                  message:password
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copied!") style:UIAlertActionStyleCancel handler:nil]];
-    UIViewController *topVC = topMostController();
-    if (topVC) [topVC presentViewController:alert animated:YES completion:nil];
+    SCINotifySuccess(SCI_NOTIF_COPY_PASSWORD,
+                     [NSString stringWithFormat:SCILocalized(@"Copied %@"), password],
+                     nil);
 }
 
 %end

@@ -1,7 +1,10 @@
-// Story seen-receipt blocking. Legacy + Sundial uploads are Swift-dispatched
-// via a `networker` ivar — we cache the uploaders at init and nil the ivar
-// while the active owner is blocked. `keep_seen_visual_local` ON runs orig
-// (local stores update, server blocked). OFF skips orig (full block).
+// Story seen-receipt blocking. Lets IG's natural pipeline run for visual
+// state and filters server uploads at IGStorySeenState construction —
+// every `/media/seen/` request body is built from one of those snapshots,
+// so dropping blocked-owner keys at construction prevents the receipt
+// reaching the wire across all flush paths (mid-session, dismiss, restart).
+// Per-PK allow-set (`sciAllowedSeenPKs`) lets the eye button slot one
+// explicit media into the same batch flush.
 
 #import "StoryHelpers.h"
 #import "SCIStoryInteractionPipeline.h"
@@ -12,338 +15,388 @@
 
 BOOL sciSeenBypassActive = NO;
 BOOL sciAdvanceBypassActive = NO;
-BOOL sciStorySeenToggleEnabled = NO; // toggle-mode session bypass
+BOOL sciStorySeenToggleEnabled = NO;
 NSMutableSet *sciAllowedSeenPKs = nil;
 
 extern BOOL sciIsCurrentStoryOwnerExcluded(void);
 extern BOOL sciIsObjectStoryOwnerExcluded(id obj);
 
-static void sciStateRestore(void); // fwd — used by VC hook above its definition
+static inline BOOL sciToggleAllowsSeen(void) {
+	return [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"] && sciStorySeenToggleEnabled;
+}
 
-static BOOL sciStorySeenToggleBypass(void) {
-    return [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"] && sciStorySeenToggleEnabled;
+static inline NSString *sciString(id value) {
+	return value ? [NSString stringWithFormat:@"%@", value] : nil;
+}
+
+static Ivar sciFindIvar(Class cls, const char *name) {
+	for (Class c = cls; c; c = class_getSuperclass(c)) {
+		Ivar ivar = class_getInstanceVariable(c, name);
+		if (ivar) return ivar;
+	}
+	return NULL;
 }
 
 void sciAllowSeenForPK(id media) {
-    if (!media) return;
-    id pk = sciCall(media, @selector(pk));
-    if (!pk) return;
-    if (!sciAllowedSeenPKs) sciAllowedSeenPKs = [NSMutableSet set];
-    [sciAllowedSeenPKs addObject:[NSString stringWithFormat:@"%@", pk]];
+	NSString *pk = sciString(sciCall(media, @selector(pk)));
+	if (!pk.length) return;
+	if (!sciAllowedSeenPKs) sciAllowedSeenPKs = [NSMutableSet set];
+	[sciAllowedSeenPKs addObject:pk];
+}
+
+static BOOL sciIsMediaPKAllowed(NSString *pk) {
+	return pk.length > 0 && sciAllowedSeenPKs.count > 0 && [sciAllowedSeenPKs containsObject:pk];
 }
 
 static BOOL sciIsPKAllowed(id media) {
-    if (!media || !sciAllowedSeenPKs || sciAllowedSeenPKs.count == 0) return NO;
-    id pk = sciCall(media, @selector(pk));
-    if (!pk) return NO;
-    NSString *pkStr = [NSString stringWithFormat:@"%@", pk];
-    if (![sciAllowedSeenPKs containsObject:pkStr]) return NO;
-    if ([SCIExcludedStoryUsers isFeatureEnabled] && ![SCIExcludedStoryUsers isUserPKExcluded:pkStr])
-        return NO;
-    return YES;
+	if (!media) return NO;
+	return sciIsMediaPKAllowed(sciString(sciCall(media, @selector(pk))));
 }
 
-// ============ Feature gates ============
-
-static BOOL sciShouldBlockSeenNetwork(void) {
-    if (sciSeenBypassActive) return NO;
-    if (sciStorySeenToggleBypass()) return NO;
-    if (sciIsCurrentStoryOwnerExcluded()) return NO;
-    return [SCIUtils getBoolPref:@"no_seen_receipt"];
+static NSString *sciExtractOwnerPKFromItem(id item) {
+	if (!item) return nil;
+	@try {
+		id reelPK = sciCall(item, NSSelectorFromString(@"reelPk"));
+		if (reelPK) return [reelPK description];
+		id media = sciCall(item, @selector(media)) ?: item;
+		id user = sciCall(media, @selector(user)) ?: sciCall(media, @selector(owner));
+		if (!user) return nil;
+		Ivar pkIvar = sciFindIvar([user class], "_pk");
+		id pk = pkIvar ? object_getIvar(user, pkIvar) : sciCall(user, @selector(pk));
+		return pk ? [pk description] : nil;
+	} @catch (__unused id e) { return nil; }
 }
+
+static BOOL sciShouldBlockOwnerPK(NSString *ownerPK) {
+	if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return NO;
+	if (sciSeenBypassActive || sciToggleAllowsSeen()) return NO;
+	if (![SCIExcludedStoryUsers isFeatureEnabled]) return YES;
+	return ownerPK.length && ![SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
+}
+
+// ============ Visual gates ============
 
 static BOOL sciShouldBlockSeenVisual(void) {
-    if (sciSeenBypassActive) return NO;
-    if (sciStorySeenToggleBypass()) return NO;
-    if (sciIsCurrentStoryOwnerExcluded()) return NO;
-    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return NO;
-    return ![SCIUtils getBoolPref:@"keep_seen_visual_local"];
+	if (![SCIUtils getBoolPref:@"no_seen_receipt"] || [SCIUtils getBoolPref:@"keep_seen_visual_local"]) return NO;
+	if (sciSeenBypassActive || sciToggleAllowsSeen()) return NO;
+	return !sciIsCurrentStoryOwnerExcluded();
 }
 
-// Per-instance gate — tray/item/ring models may not match the active VC.
 static BOOL sciShouldBlockSeenVisualForObj(id obj) {
-    if (sciSeenBypassActive) return NO;
-    if (sciStorySeenToggleBypass()) return NO;
-    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return NO;
-    if ([SCIUtils getBoolPref:@"keep_seen_visual_local"]) return NO;
-    if (sciIsObjectStoryOwnerExcluded(obj)) return NO;
-    return YES;
+	if (![SCIUtils getBoolPref:@"no_seen_receipt"] || [SCIUtils getBoolPref:@"keep_seen_visual_local"]) return NO;
+	if (sciSeenBypassActive || sciToggleAllowsSeen()) return NO;
+	return !sciIsObjectStoryOwnerExcluded(obj);
 }
 
-// ============ Legacy network-upload hooks (pre-Sundial fallback) ============
-%hook IGStorySeenStateUploader
-- (void)uploadSeenStateWithMedia:(id)arg1 {
-    if (!sciSeenBypassActive && sciShouldBlockSeenNetwork() && !sciIsPKAllowed(arg1)) return;
-    %orig;
-}
-- (void)uploadSeenState {
-    if (!sciSeenBypassActive && sciShouldBlockSeenNetwork()) return;
-    %orig;
-}
-- (void)_uploadSeenState:(id)arg1 {
-    if (!sciSeenBypassActive && sciShouldBlockSeenNetwork() && !sciIsPKAllowed(arg1)) return;
-    %orig;
-}
-- (void)sendSeenReceipt:(id)arg1 {
-    if (!sciSeenBypassActive && sciShouldBlockSeenNetwork() && !sciIsPKAllowed(arg1)) return;
-    %orig;
-}
-%end
-
-// ============ Visual-seen hooks + auto-advance ============
+// ============ Visual-seen hooks ============
 
 %hook IGStoryFullscreenSectionController
-- (void)markItemAsSeen:(id)arg1 { if (sciShouldBlockSeenVisual() && !sciIsPKAllowed(arg1)) return; %orig; }
-- (void)_markItemAsSeen:(id)arg1 { if (sciShouldBlockSeenVisual() && !sciIsPKAllowed(arg1)) return; %orig; }
-- (void)storySeenStateDidChange:(id)arg1 { if (sciShouldBlockSeenVisual()) return; %orig; }
-- (void)markCurrentItemAsSeen { if (sciShouldBlockSeenVisual()) return; %orig; }
-- (void)sendSeenRequestForCurrentItem { if (sciShouldBlockSeenNetwork()) return; %orig; }
+
+- (void)markItemAsSeen:(id)arg1 {
+	if (sciShouldBlockSeenVisual() && !sciIsPKAllowed(arg1)) return;
+	%orig;
+}
+
+- (void)_markItemAsSeen:(id)arg1 {
+	if (sciShouldBlockSeenVisual() && !sciIsPKAllowed(arg1)) return;
+	%orig;
+}
+
+- (void)storySeenStateDidChange:(id)arg1 {
+	if (sciShouldBlockSeenVisual()) return;
+	%orig;
+}
+
+- (void)markCurrentItemAsSeen {
+	if (sciShouldBlockSeenVisual()) return;
+	%orig;
+}
+
 - (void)storyPlayerMediaViewDidPlayToEnd:(id)arg1 {
-    if (!sciAdvanceBypassActive && [SCIUtils getBoolPref:@"stop_story_auto_advance"]) return;
-    %orig;
+	if (!sciAdvanceBypassActive && [SCIUtils getBoolPref:@"stop_story_auto_advance"]) return;
+	%orig;
 }
+
 - (void)advanceToNextReelForAutoScroll {
-    if (!sciAdvanceBypassActive && [SCIUtils getBoolPref:@"stop_story_auto_advance"]) return;
-    %orig;
+	if (!sciAdvanceBypassActive && [SCIUtils getBoolPref:@"stop_story_auto_advance"]) return;
+	%orig;
 }
+
 %end
 
 %hook IGStoryTrayViewModel
-- (void)markAsSeen { if (sciShouldBlockSeenVisualForObj(self)) return; %orig; }
-- (void)setHasUnseenMedia:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(YES); return; } %orig; }
-- (BOOL)hasUnseenMedia { if (sciShouldBlockSeenVisualForObj(self)) return YES; return %orig; }
-- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
-- (BOOL)isSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
+
+- (void)markAsSeen {
+	if (sciShouldBlockSeenVisualForObj(self)) return;
+	%orig;
+}
+
+- (void)setHasUnseenMedia:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisualForObj(self)) {
+		%orig(YES);
+		return;
+	}
+	%orig;
+}
+
+- (BOOL)hasUnseenMedia {
+	return sciShouldBlockSeenVisualForObj(self) ? YES : %orig;
+}
+
+- (void)setIsSeen:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisualForObj(self)) {
+		%orig(NO);
+		return;
+	}
+	%orig;
+}
+
+- (BOOL)isSeen {
+	return sciShouldBlockSeenVisualForObj(self) ? NO : %orig;
+}
+
 %end
 
 %hook IGStoryItem
-- (void)setHasSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
-- (BOOL)hasSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
+
+- (void)setHasSeen:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisualForObj(self)) {
+		%orig(NO);
+		return;
+	}
+	%orig;
+}
+
+- (BOOL)hasSeen {
+	return sciShouldBlockSeenVisualForObj(self) ? NO : %orig;
+}
+
 %end
 
 %hook IGStoryGradientRingView
-- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (void)setSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (void)updateRingForSeenState:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
+
+- (void)setIsSeen:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisual()) {
+		%orig(NO);
+		return;
+	}
+	%orig;
+}
+
+- (void)setSeen:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisual()) {
+		%orig(NO);
+		return;
+	}
+	%orig;
+}
+
+- (void)updateRingForSeenState:(BOOL)arg1 {
+	if (sciShouldBlockSeenVisual()) {
+		%orig(NO);
+		return;
+	}
+	%orig;
+}
+
 %end
 
-// ============ Active story VC tracking ============
+// ============ Active story VC tracking + dismiss flush ============
+
+static NSHashTable *sciPendingStores = nil;
+
+static id (*sciOrigPendingStoreInit)(id, SEL, id, id, id, BOOL);
+static id sciNewPendingStoreInit(id self, SEL _cmd, id sessionPK, id uploader, id fileMgr, BOOL bgTask) {
+	id result = sciOrigPendingStoreInit(self, _cmd, sessionPK, uploader, fileMgr, bgTask);
+	if (result) {
+		if (!sciPendingStores) sciPendingStores = [NSHashTable weakObjectsHashTable];
+		[sciPendingStores addObject:result];
+	}
+	return result;
+}
+
+// Force-fire each cached IGStoryPendingSeenStateStore's `_uploadTimer`
+// (an FBTimer) so an eye-press immediately followed by dismiss still
+// flushes within the session instead of waiting for the next launch.
+static void sciFlushPendingStores(void) {
+	if (!sciPendingStores) return;
+	SEL fbFire = NSSelectorFromString(@"_fireTheTimer");
+	for (id store in sciPendingStores.allObjects) {
+		@try {
+			Ivar t = sciFindIvar([store class], "_uploadTimer");
+			if (!t) continue;
+			id timer = object_getIvar(store, t);
+			if (timer && [timer respondsToSelector:fbFire]) {
+				((void(*)(id, SEL))objc_msgSend)(timer, fbFire);
+			}
+		} @catch (__unused id e) {}
+	}
+}
 
 __weak UIViewController *sciActiveStoryVC = nil;
 
 %hook IGStoryViewerViewController
+
 - (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    sciActiveStoryVC = self;
+	%orig;
+	sciActiveStoryVC = self;
 }
+
 - (void)viewWillDisappear:(BOOL)animated {
-    if (sciActiveStoryVC == (UIViewController *)self) sciActiveStoryVC = nil;
-    sciStateRestore();
-    %orig;
+	if (sciActiveStoryVC == (UIViewController *)self) sciActiveStoryVC = nil;
+	if ([SCIUtils getBoolPref:@"no_seen_receipt"] && sciAllowedSeenPKs.count > 0) {
+		sciFlushPendingStores();
+	}
+	%orig;
 }
-- (void)fullscreenSectionController:(id)arg1 didMarkItemAsSeen:(id)arg2 {
-    if (sciShouldBlockSeenVisual() && !sciIsPKAllowed(arg2)) return;
-    %orig;
-}
+
 %end
 
-// ============ Networker-ivar swap (v425+ split-mode) ============
+// ============ Mark-seen delegate hook ============
+//
+// Visual-local mode runs orig (visual updates locally, server upload gets
+// filtered at IGStorySeenState construction). Hard-block mode skips orig
+// so IG's local state never marks seen.
 
-static __weak id sciLegacyUploader = nil;   // IGStorySeenStateUploader
-static __weak id sciSundialManager = nil;   // IGSundialSeenStateManager
+typedef void (*SCIOrigDelegateMarkSeen)(id, SEL, id, id);
 
-static id (*orig_pendingStoreInit)(id, SEL, id, id, id, BOOL);
-static id new_pendingStoreInit(id self, SEL _cmd, id sessionPK, id uploader, id fileMgr, BOOL bgTask) {
-    if (uploader) sciLegacyUploader = uploader;
-    return orig_pendingStoreInit(self, _cmd, sessionPK, uploader, fileMgr, bgTask);
+static void sciHandleDelegateMarkSeen(SCIOrigDelegateMarkSeen orig, id self, SEL _cmd, id ctrl, id item) {
+	if (!orig) return;
+
+	if (sciSeenBypassActive || sciToggleAllowsSeen() || ![SCIUtils getBoolPref:@"no_seen_receipt"]) {
+		orig(self, _cmd, ctrl, item);
+		return;
+	}
+
+	NSString *ownerPK = sciExtractOwnerPKFromItem(item);
+	if (!sciShouldBlockOwnerPK(ownerPK)) {
+		orig(self, _cmd, ctrl, item);
+		return;
+	}
+
+	if ([SCIUtils getBoolPref:@"keep_seen_visual_local"]) {
+		orig(self, _cmd, ctrl, item);
+	}
 }
 
-static id (*orig_sundialMgrInit)(id, SEL, id, id, id, id);
-static id new_sundialMgrInit(id self, SEL _cmd, id networker, id diskMgr, id launcherSet, id announcer) {
-    id res = orig_sundialMgrInit(self, _cmd, networker, diskMgr, launcherSet, announcer);
-    if (res) sciSundialManager = res;
-    return res;
+static SCIOrigDelegateMarkSeen orig_delegateViewer = NULL;
+static SCIOrigDelegateMarkSeen orig_delegateUpdater = NULL;
+static SCIOrigDelegateMarkSeen orig_delegateViewModel = NULL;
+static SCIOrigDelegateMarkSeen orig_delegateManager = NULL;
+
+static void new_delegateViewer(id self, SEL _cmd, id ctrl, id item) {
+	sciHandleDelegateMarkSeen(orig_delegateViewer, self, _cmd, ctrl, item);
 }
 
-// Swap each cached uploader's networker ivar; saved dict is used to restore.
-static NSDictionary *sciSwapNetworkers(id newNetworker) {
-    NSMutableDictionary *saved = [NSMutableDictionary dictionary];
-    @try {
-        id legacy = sciLegacyUploader;
-        if (legacy) {
-            Ivar iv = class_getInstanceVariable([legacy class], "_networker");
-            if (iv) {
-                id old = object_getIvar(legacy, iv);
-                if (old) saved[@"legacy"] = old;
-                object_setIvar(legacy, iv, newNetworker);
-            }
-        }
-        id mgr = sciSundialManager;
-        if (mgr) {
-            for (NSString *ivName in @[@"seenStateUploader", @"seenStateUploaderDeprecated"]) {
-                Ivar mgrIv = class_getInstanceVariable([mgr class], [ivName UTF8String]);
-                if (!mgrIv) continue;
-                id up = object_getIvar(mgr, mgrIv);
-                if (!up) continue;
-                Ivar netIv = class_getInstanceVariable([up class], "networker");
-                if (!netIv) continue;
-                id oldNet = object_getIvar(up, netIv);
-                if (oldNet) saved[ivName] = oldNet;
-                object_setIvar(up, netIv, newNetworker);
-            }
-        }
-    } @catch (__unused id e) {}
-    return saved;
+static void new_delegateUpdater(id self, SEL _cmd, id ctrl, id item) {
+	sciHandleDelegateMarkSeen(orig_delegateUpdater, self, _cmd, ctrl, item);
 }
 
-static void sciRestoreNetworkers(NSDictionary *saved) {
-    @try {
-        id legacy = sciLegacyUploader;
-        if (legacy && saved[@"legacy"]) {
-            Ivar iv = class_getInstanceVariable([legacy class], "_networker");
-            if (iv) object_setIvar(legacy, iv, saved[@"legacy"]);
-        }
-        id mgr = sciSundialManager;
-        if (mgr) {
-            for (NSString *ivName in @[@"seenStateUploader", @"seenStateUploaderDeprecated"]) {
-                if (!saved[ivName]) continue;
-                Ivar mgrIv = class_getInstanceVariable([mgr class], [ivName UTF8String]);
-                if (!mgrIv) continue;
-                id up = object_getIvar(mgr, mgrIv);
-                if (!up) continue;
-                Ivar netIv = class_getInstanceVariable([up class], "networker");
-                if (netIv) object_setIvar(up, netIv, saved[ivName]);
-            }
-        }
-    } @catch (__unused id e) {}
+static void new_delegateViewModel(id self, SEL _cmd, id ctrl, id item) {
+	sciHandleDelegateMarkSeen(orig_delegateViewModel, self, _cmd, ctrl, item);
 }
 
-// Idempotent block/restore. Guard prevents double-swap clobbering the saved originals.
-static BOOL sciNetBlocked = NO;
-static NSDictionary *sciNetSaved = nil;
-
-static void sciStateBlock(void) {
-    if (sciNetBlocked) return;
-    sciNetSaved = sciSwapNetworkers(nil);
-    sciNetBlocked = YES;
+static void new_delegateManager(id self, SEL _cmd, id ctrl, id item) {
+	sciHandleDelegateMarkSeen(orig_delegateManager, self, _cmd, ctrl, item);
 }
 
-static void sciStateRestore(void) {
-    if (!sciNetBlocked) return;
-    sciRestoreNetworkers(sciNetSaved);
-    sciNetSaved = nil;
-    sciNetBlocked = NO;
+// ============ Seen-state filter ============
+//
+// Dict key encodes the media identity itself:
+//   "<innerMediaId>_<mediaOwnerPK>_<reelOwnerPK>"
+// First two segments form the full mediaPK that `sciAllowedSeenPKs`
+// stores. Values are timestamp tuples (`<takenAt>_<seenAt>`); we never
+// look inside them.
+
+static id sciFilterSeenContainer(id container) {
+	if (![container isKindOfClass:[NSDictionary class]]) return container;
+	NSDictionary *dict = (NSDictionary *)container;
+	if (!dict.count) return dict;
+
+	NSMutableDictionary *out = [NSMutableDictionary dictionary];
+	for (NSString *key in dict) {
+		NSArray *segs = [key componentsSeparatedByString:@"_"];
+		NSString *ownerPK = segs.lastObject;
+		NSString *mediaPK = segs.count >= 2
+			? [NSString stringWithFormat:@"%@_%@", segs[0], segs[1]]
+			: key;
+
+		if (!sciShouldBlockOwnerPK(ownerPK)) {
+			out[key] = dict[key];
+			continue;
+		}
+		if (sciAllowedSeenPKs.count && [sciAllowedSeenPKs containsObject:mediaPK]) {
+			out[key] = dict[key];
+		}
+	}
+	return out;
 }
 
-static NSString *sciExtractOwnerPKFromItem(id item) {
-    NSString *pk = nil;
-    @try {
-        id reelPk = [item respondsToSelector:@selector(reelPk)] ? [item performSelector:@selector(reelPk)] : nil;
-        if (reelPk) pk = [reelPk description];
-        if (!pk) {
-            id media = [item respondsToSelector:@selector(media)] ? [item performSelector:@selector(media)] : item;
-            id user = [media respondsToSelector:@selector(user)] ? [media performSelector:@selector(user)] : nil;
-            if (!user) user = [media respondsToSelector:@selector(owner)] ? [media performSelector:@selector(owner)] : nil;
-            if (user) {
-                Ivar pkIvar = NULL;
-                for (Class c = [user class]; c && !pkIvar; c = class_getSuperclass(c))
-                    pkIvar = class_getInstanceVariable(c, "_pk");
-                if (pkIvar) pk = [object_getIvar(user, pkIvar) description];
-            }
-        }
-    } @catch (__unused id e) {}
-    return pk;
+%hook IGStorySeenState
+
+- (id)initWithReelSeenDictionary:(id)reel
+              liveSeenDictionary:(id)live
+           reelSkippedDictionary:(id)reelSkipped
+           liveSkippedDictionary:(id)liveSkipped
+                 containerModule:(id)mod
+                    pushCategory:(id)cat
+                    forceSeenIds:(id)forceSeen {
+	if ([SCIUtils getBoolPref:@"no_seen_receipt"] && !sciSeenBypassActive && !sciToggleAllowsSeen()) {
+		reel        = sciFilterSeenContainer(reel);
+		live        = sciFilterSeenContainer(live);
+		reelSkipped = sciFilterSeenContainer(reelSkipped);
+		liveSkipped = sciFilterSeenContainer(liveSkipped);
+	}
+	return %orig(reel, live, reelSkipped, liveSkipped, mod, cat, forceSeen);
 }
 
-// Mark-seen delegate: restore on non-blocked owners, block + run orig on
-// blocked owners when split-mode is on, skip orig when it's off.
-static void (*orig_delegateMarkSeen)(id, SEL, id, id);
-static void new_delegateMarkSeen(id self, SEL _cmd, id ctrl, id item) {
-    if (sciSeenBypassActive) { sciStateRestore(); orig_delegateMarkSeen(self, _cmd, ctrl, item); return; }
-    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) { sciStateRestore(); orig_delegateMarkSeen(self, _cmd, ctrl, item); return; }
-
-    NSString *ownerPK = sciExtractOwnerPKFromItem(item);
-    BOOL shouldBlock;
-    if ([SCIExcludedStoryUsers isFeatureEnabled])
-        shouldBlock = ownerPK.length && ![SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
-    else
-        shouldBlock = YES;
-
-    if (!shouldBlock) {
-        sciStateRestore();
-        orig_delegateMarkSeen(self, _cmd, ctrl, item);
-        return;
-    }
-
-    if (![SCIUtils getBoolPref:@"keep_seen_visual_local"]) {
-        sciStateRestore();
-        return;
-    }
-
-    sciStateBlock();
-    @try { orig_delegateMarkSeen(self, _cmd, ctrl, item); }
-    @catch (__unused id e) { sciStateRestore(); }
-}
+%end
 
 // ============ Like → mark-seen side effects ============
 
 static void (*orig_didLikeSundial)(id, SEL, id);
 static void new_didLikeSundial(id self, SEL _cmd, id pk) {
-    orig_didLikeSundial(self, _cmd, pk);
-    sciStoryInteractionSideEffects(SCIStoryInteractionLike);
+	if (orig_didLikeSundial) orig_didLikeSundial(self, _cmd, pk);
+	sciStoryInteractionSideEffects(SCIStoryInteractionLike);
 }
 
 static void (*orig_overlaySetIsLiked)(id, SEL, BOOL, BOOL);
 static void new_overlaySetIsLiked(id self, SEL _cmd, BOOL isLiked, BOOL animated) {
-    orig_overlaySetIsLiked(self, _cmd, isLiked, animated);
-    if (isLiked) sciStoryInteractionSideEffects(SCIStoryInteractionLike);
+	if (orig_overlaySetIsLiked) orig_overlaySetIsLiked(self, _cmd, isLiked, animated);
+	if (isLiked) sciStoryInteractionSideEffects(SCIStoryInteractionLike);
 }
 
 static void (*orig_likeButtonSetIsLiked)(id, SEL, BOOL, BOOL);
 static void new_likeButtonSetIsLiked(id self, SEL _cmd, BOOL isLiked, BOOL animated) {
-    orig_likeButtonSetIsLiked(self, _cmd, isLiked, animated);
-    if (isLiked) sciStoryInteractionSideEffects(SCIStoryInteractionLike);
+	if (orig_likeButtonSetIsLiked) orig_likeButtonSetIsLiked(self, _cmd, isLiked, animated);
+	if (isLiked) sciStoryInteractionSideEffects(SCIStoryInteractionLike);
+}
+
+static void sciHookIfExists(Class cls, SEL sel, IMP replacement, IMP *original) {
+	if (cls && class_getInstanceMethod(cls, sel)) {
+		MSHookMessageEx(cls, sel, replacement, original);
+	}
 }
 
 %ctor {
-    Class overlayCtl = NSClassFromString(@"IGSundialViewerControlsOverlayController");
-    if (overlayCtl) {
-        SEL didLike = NSSelectorFromString(@"didLikeSundialWithMediaPK:");
-        if (class_getInstanceMethod(overlayCtl, didLike))
-            MSHookMessageEx(overlayCtl, didLike, (IMP)new_didLikeSundial, (IMP *)&orig_didLikeSundial);
-        SEL setLiked = @selector(setIsLiked:animated:);
-        if (class_getInstanceMethod(overlayCtl, setLiked))
-            MSHookMessageEx(overlayCtl, setLiked, (IMP)new_overlaySetIsLiked, (IMP *)&orig_overlaySetIsLiked);
-    }
+	%init(IGStoryGradientRingView = NSClassFromString(@"_TtC13IGRingViewKit23IGStoryGradientRingView") ?: NSClassFromString(@"IGStoryGradientRingView"));
 
-    Class likeBtn = NSClassFromString(@"IGSundialViewerUFI.IGSundialLikeButton");
-    if (likeBtn) {
-        SEL setLiked = @selector(setIsLiked:animated:);
-        if (class_getInstanceMethod(likeBtn, setLiked))
-            MSHookMessageEx(likeBtn, setLiked, (IMP)new_likeButtonSetIsLiked, (IMP *)&orig_likeButtonSetIsLiked);
-    }
+	Class overlayController = NSClassFromString(@"IGSundialViewerControlsOverlayController");
+	SEL setLikedSel = @selector(setIsLiked:animated:);
 
-    Class pending = NSClassFromString(@"IGStoryPendingSeenStateStore");
-    SEL pendingSel = NSSelectorFromString(@"initWithUserSessionPK:uploader:fileManager:uploadInBackgroundTask:");
-    if (pending && class_getInstanceMethod(pending, pendingSel))
-        MSHookMessageEx(pending, pendingSel, (IMP)new_pendingStoreInit, (IMP *)&orig_pendingStoreInit);
+	sciHookIfExists(overlayController, NSSelectorFromString(@"didLikeSundialWithMediaPK:"), (IMP)new_didLikeSundial, (IMP *)&orig_didLikeSundial);
+	sciHookIfExists(overlayController, setLikedSel, (IMP)new_overlaySetIsLiked, (IMP *)&orig_overlaySetIsLiked);
+	sciHookIfExists(NSClassFromString(@"IGSundialViewerUFI.IGSundialLikeButton"), setLikedSel, (IMP)new_likeButtonSetIsLiked, (IMP *)&orig_likeButtonSetIsLiked);
 
-    Class sundialMgr = NSClassFromString(@"_TtC23IGSundialSeenStateSwift25IGSundialSeenStateManager");
-    SEL mgrSel = NSSelectorFromString(@"initWithNetworker:diskManager:launcherSet:seenStateManagerAnnouncer:");
-    if (sundialMgr && class_getInstanceMethod(sundialMgr, mgrSel))
-        MSHookMessageEx(sundialMgr, mgrSel, (IMP)new_sundialMgrInit, (IMP *)&orig_sundialMgrInit);
+	// Mark-seen delegate. Each class needs its own orig pointer — sharing
+	// one across hooks lets a later registration clobber an earlier IMP.
+	SEL delegateSel = NSSelectorFromString(@"fullscreenSectionController:didMarkItemAsSeen:");
+	sciHookIfExists(NSClassFromString(@"IGStoryViewerViewController"), delegateSel, (IMP)new_delegateViewer, (IMP *)&orig_delegateViewer);
+	sciHookIfExists(NSClassFromString(@"IGStoryViewerUpdater"),         delegateSel, (IMP)new_delegateUpdater, (IMP *)&orig_delegateUpdater);
+	sciHookIfExists(NSClassFromString(@"IGStoryFullscreenViewModel"),   delegateSel, (IMP)new_delegateViewModel, (IMP *)&orig_delegateViewModel);
+	sciHookIfExists(NSClassFromString(@"IGStoriesManager"),             delegateSel, (IMP)new_delegateManager, (IMP *)&orig_delegateManager);
 
-    // Mark-as-seen delegate; extras are forward-compat candidates.
-    for (NSString *clsName in @[
-        @"IGStoryViewerViewController",
-        @"IGStoryViewerUpdater",
-        @"IGStoryFullscreenViewModel",
-        @"IGStoriesManager",
-    ]) {
-        Class cls = NSClassFromString(clsName);
-        if (!cls) continue;
-        SEL delegateSel = NSSelectorFromString(@"fullscreenSectionController:didMarkItemAsSeen:");
-        if (class_getInstanceMethod(cls, delegateSel))
-            MSHookMessageEx(cls, delegateSel, (IMP)new_delegateMarkSeen, (IMP *)&orig_delegateMarkSeen);
-    }
+	sciHookIfExists(NSClassFromString(@"_TtC26IGStoryPendingSeenStateKit28IGStoryPendingSeenStateStore") ?: NSClassFromString(@"IGStoryPendingSeenStateStore"),
+		NSSelectorFromString(@"initWithUserSessionPK:uploader:fileManager:uploadInBackgroundTask:"),
+		(IMP)sciNewPendingStoreInit, (IMP *)&sciOrigPendingStoreInit);
 }

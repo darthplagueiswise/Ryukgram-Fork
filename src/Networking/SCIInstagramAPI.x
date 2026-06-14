@@ -121,6 +121,17 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
     sciPerformRequest(sciBuildRequest(method, url, body), completion);
 }
 
++ (void)downloadAuthorizedURL:(NSURL *)url
+                   completion:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
+    if (!url) { if (completion) completion(nil, nil, nil); return; }
+    NSMutableURLRequest *req = sciBuildRequest(@"GET", url, nil);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            if (completion) completion(data, response, error);
+        }];
+    [task resume];
+}
+
 // ============ Friendships ============
 
 + (void)followUserPK:(NSString *)pk completion:(SCIAPICompletion)completion {
@@ -139,6 +150,14 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
                      completion:completion];
 }
 
++ (void)removeFollowerPK:(NSString *)pk completion:(SCIAPICompletion)completion {
+    if (!pk.length) { if (completion) completion(nil, nil); return; }
+    [self sendRequestWithMethod:@"POST"
+                           path:[NSString stringWithFormat:@"friendships/remove_follower/%@/", pk]
+                           body:@{@"user_id": pk}
+                     completion:completion];
+}
+
 + (void)fetchFriendshipStatusesForPKs:(NSArray<NSString *> *)pks
                            completion:(SCIAPIStatusesCompletion)completion {
     if (!pks.count) { if (completion) completion(nil, nil); return; }
@@ -151,6 +170,27 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
         if ([s isKindOfClass:[NSDictionary class]]) statuses = s;
         if (completion) completion(statuses, error);
     }];
+}
+
+// ============ Media ============
+
++ (void)fetchMediaInfoForMediaId:(NSString *)mediaId completion:(SCIAPICompletion)completion {
+    if (!mediaId.length) { if (completion) completion(nil, nil); return; }
+    [self sendRequestWithMethod:@"GET"
+                           path:[NSString stringWithFormat:@"media/%@/info/", mediaId]
+                           body:nil
+                     completion:completion];
+}
+
++ (void)fetchMediaInfosForMediaIds:(NSArray<NSString *> *)mediaIds
+                         completion:(SCIAPICompletion)completion {
+    if (!mediaIds.count) { if (completion) completion(nil, nil); return; }
+    NSString *ids = [mediaIds componentsJoinedByString:@","];
+    NSString *encoded = [ids stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    [self sendRequestWithMethod:@"GET"
+                           path:[NSString stringWithFormat:@"media/infos/?media_ids=%@", encoded]
+                           body:nil
+                     completion:completion];
 }
 
 @end

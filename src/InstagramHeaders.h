@@ -1,7 +1,6 @@
 #import <Foundation/Foundation.h>
 #include <objc/NSObject.h>
 #import <UIKit/UIKit.h>
-#import "../modules/JGProgressHUD/JGProgressHUD.h"
 
 #ifdef __cplusplus
 #define _Bool bool
@@ -43,6 +42,9 @@
 @interface IGExploreGridViewController : IGViewController
 @end
 
+@interface IGDirectGIFViewController : IGViewController
+@end
+
 @interface IGExploreViewController : IGViewController
 @end
 
@@ -60,6 +62,10 @@
 @end
 
 @interface IGTabBarController : UIViewController
+- (NSArray *)allTabBarSurfaces;
+- (id)selectedTabBarSurface;
+- (void)setSelectedTabBarSurface:(id)surface animated:(BOOL)animated;
+- (void)setSelectedTabBarSurface:(id)surface animated:(BOOL)animated animateIndicator:(BOOL)animateIndicator;
 @end
 
 @interface IGTableViewCell: UITableViewCell
@@ -92,11 +98,18 @@
 
 @interface IGBaseMedia : NSObject
 @property (retain, nonatomic) id explorePostInFeed;
+@property (readonly, nonatomic) NSString *pk;
 @end
 
 @interface IGMedia : IGBaseMedia
 @property(readonly) IGVideo *video;
 @property(readonly) IGPhoto *photo;
+- (id)mediaOverlay;
+- (id)mediaOverlayInfo; // sensitive/integrity cover descriptor (IGAPIMediaOverlayPayloadSchema)
+@end
+
+@interface IGSundialFeedInitialState : NSObject
+- (IGMedia *)initialVideo;
 @end
 
 @interface IGPostItem : NSObject
@@ -129,7 +142,6 @@
 {
     IGImageView *_profilePictureView;
 }
-@property (nonatomic, strong) JGProgressHUD *hud;
 - (void)addHandleLongPress; // new
 - (void)handleLongPress:(UILongPressGestureRecognizer *)sender; // new
 @end
@@ -197,6 +209,8 @@
 @end
 
 @interface IGStoryVideoView : UIView
+@property (nonatomic, readonly) IGMedia *item;
+@property (readonly, nonatomic) IGMedia *videoURLProvider;
 @property (nonatomic, weak, readwrite) IGStoryFullscreenSectionController *captionDelegate;
 
 - (void)addLongPressGestureRecognizer; // new
@@ -212,6 +226,8 @@
 @property (nonatomic, weak, readwrite) id gestureDelegate;
 - (id)gestureDelegate;
 - (void)addLongPressGestureRecognizer; // new
+- (BOOL)isSecretStoryCurrentlyBlurred;
+- (void)showSecretStoryBlur:(BOOL)show animated:(BOOL)animated;
 @end
 
 @interface IGDirectVisualMessageViewerController : UIViewController
@@ -230,12 +246,14 @@
 @property BOOL followsCurrentUser;
 @end
 
-@interface IGFollowController : NSObject 
+@interface IGFollowController : NSObject
 @property IGUser *user;
 @end
 
+@class IGStyledString;
 @interface IGCoreTextView : UIView
 @property(nonatomic, strong) NSString *text;
+@property(copy, nonatomic) IGStyledString *styledString;
 - (void)addHandleLongPress; // new
 - (void)handleLongPress:(UILongPressGestureRecognizer *)sender; // new
 @end
@@ -255,6 +273,19 @@
 @interface IGStyledString : NSObject
 @property (retain, nonatomic) NSMutableAttributedString *attributedString;
 - (void)appendString:(id)arg1;
+- (void)setColor:(UIColor *)color range:(NSRange)range;
+@end
+
+@interface IGDirectMessageBubbleView : UIView
+@end
+
+@interface IGDirectTextMessageBubbleView : UIView
+@end
+
+@interface IGDirectThreadThemeOverridesVariant : NSObject
+@end
+
+@interface IGGradientView : UIView
 @end
 
 @interface IGInstagramAppDelegate : NSObject <UIApplicationDelegate>
@@ -281,6 +312,9 @@
 - (id)title;
 @end
 
+@interface IGDirectInboxViewController : UIViewController
+@end
+
 @interface IGSearchResultViewModel : NSObject
 - (id)title;
 - (NSUInteger)itemType;
@@ -289,6 +323,7 @@
 @interface IGDirectShareRecipient : NSObject
 - (NSString *)threadName;
 - (BOOL)isBroadcastChannel;
+- (NSString *)threadID; // new
 @end
 
 @interface IGDirectRecipientCellViewModel : NSObject
@@ -296,7 +331,29 @@
 - (NSInteger)sectionType;
 @end
 
+// Share-sheet recipient list view controller — hosts the IGListAdapter.
+@interface IGDirectRecipientListViewController : UIViewController
+@end
+
 @interface IGDirectInboxSearchAIAgentsSuggestedPromptRowCell : UIView
+@end
+
+// IG inbox top nav header (Swift class, demangled name).
+@interface IGDirectInboxNavigationHeaderView : UIView
+@end
+
+// Share-sheet "Send to group chat" facepile button + its bottom-buttons container.
+@interface _TtC12IGShareSheet45IGShareSheetCreateOrSendToGroupFacepileButton : UIView
+@end
+@interface _TtC12IGShareSheet38IGShareSheetBottomButtonsViewContainer : UIView
+@end
+
+// Reels: friends-tab avatar bubbles + floating social-context overlay.
+@interface _TtC32IGSundialFriendsLaneEntryPointUI30IGFriendsLaneEntryPointTabView : UIControl
+@end
+@interface IGStoryFacepileView : UIView
+@end
+@interface _TtC25IGFloatingSocialContextUI39IGFloatingSocialContextMediaOverlayView : UIView
 @end
 
 @interface IGDSSegmentedPillBarView : UIView
@@ -311,8 +368,16 @@
 @interface IGHomeFeedHeaderView : UIView
 @end
 
-@interface IGHomeFeedHeaderViewController
+@interface IGHomeFeedHeaderViewController : UIViewController
 - (void)headerDidLongPressLogo:(id)arg1;
+@end
+
+// Trailing-cluster button (+, heart, DM) in IGHomeFeedHeaderView.
+@interface IGBadgeButton : UIControl
+@end
+
+// IG's NSMutableURLRequest subclass.
+@interface IGURLRequest : NSMutableURLRequest
 @end
 
 @interface IGSearchBarDonutButton : UIView
@@ -380,10 +445,38 @@
 @end
 
 @interface IGStoryTextEntryViewController : UIViewController
-- (void)textViewControllerDidUpdateWithColor:(id)color colorSource:(NSInteger)source;
+- (void)textViewControllerDidUpdateWithColor:(id)color colorSource:(NSInteger)source; // pre-433
+- (void)textEntryControls:(id)controls didSelectColor:(id)color;                       // 433+
 @end
 
+// Drive a QuickSnap Instants next/prev switch at `loc` (impl in InstantsCaptureConfirm.xm).
+#ifdef __cplusplus
+extern "C"
+#endif
+void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc);
+
 @interface IGStoryColorPaletteView : UIView
+@end
+
+// Color wheel button on sticker editors; tap fires ValueChanged, hosts read currentColor.
+@interface IGStoryColorPaletteWheel : UIControl
+- (void)addLongPressGestureRecognizer; // new
+@end
+
+// Scheme-based variant (Add Yours, prompt, editing-header surfaces); hosts read currentColorScheme.
+@interface IGStoryColorPaletteGradientWheel : UIControl
+- (id)currentColorScheme;
+@end
+
+@interface IGGradient : NSObject
+- (instancetype)initWithColors:(NSArray *)colors;
+@end
+
+@interface IGGradientColorScheme : NSObject
+- (instancetype)initWithGradient:(IGGradient *)gradient
+             compatibleTextColor:(UIColor *)textColor
+    compatibleSecondaryTextColor:(UIColor *)secondaryTextColor
+                     accentColor:(UIColor *)accentColor;
 @end
 
 @interface IGProfilePictureImageView : UIView
@@ -417,9 +510,16 @@
 //                IGSundialClearMode.IGSundialClearedOverlayView
 // Hooked via %hook with mangled names — see EnhancedPlayback.xm
 
+@interface IGUFIButton : NSObject
+@property (nonatomic, setter=setEDR:) BOOL edr;
+@property (retain, nonatomic) UIColor *overrideTintColor;
+@end
+
 @interface IGSundialViewerVerticalUFI : UIView
 - (void)_didTapLikeButton:(id)arg1;
 - (void)_didTapRepostButton:(id)arg1;
+@property (readonly, nonatomic) IGUFIButton *ufiLikeButton;
+
 @end
 
 @interface IGMainAppSurfaceIntent : NSObject
@@ -438,6 +538,10 @@
 
 @interface IGDirectThreadViewDrawingViewController : UIViewController
 - (void)drawingControls:controls didSelectColor:color;
+@end
+
+// DM thread title view — hosts username + "Active …" subtitle.
+@interface IGDirectLeftAlignedTitleView : UIView
 @end
 
 @interface IGSundialViewerNavigationBarOld : UIView
@@ -462,24 +566,34 @@
 @interface IGNotesCreationFeatureSupportModel : NSObject
 @end
 
+// Pando-backed immutable on v423+ — mutate via the all-fields init only.
 @interface IGNotesCustomThemeCreationModel : NSObject
-+ (id)defaultModelForExpressiveEmojiType:(id)arg1;
+- (instancetype)initWithBackgroundColor:(UIColor *)backgroundColor
+               gradientBackgroundColors:(NSArray *)gradientBackgroundColors
+                              textColor:(UIColor *)textColor
+                     secondaryTextColor:(UIColor *)secondaryTextColor
+                            customEmoji:(id)customEmoji
+                        customizationId:(NSString *)customizationId
+                     usedGeneratedTheme:(BOOL)usedGeneratedTheme
+                         activationType:(NSInteger)activationType;
+@property (nonatomic, readonly) UIColor *backgroundColor;
+@property (nonatomic, readonly) NSArray *gradientBackgroundColors;
+@property (nonatomic, readonly) UIColor *textColor;
+@property (nonatomic, readonly) UIColor *secondaryTextColor;
+@property (nonatomic, readonly) id customEmoji;
+@property (nonatomic, readonly) NSString *customizationId;
+@property (nonatomic, readonly) BOOL usedGeneratedTheme;
+@property (nonatomic, readonly) NSInteger activationType;
 @end
 
 @interface IGDirectNotesComposerViewController : UIViewController
 - (void)notesBubbleEditorViewControllerDidUpdateWithCustomThemeCreationModel:(id)model;
 @end
 
-@interface _TtC20IGDirectNotesUISwift41IGDirectNotesBubbleEditorColorPaletteView : UIView
-@property (nonatomic, copy) UIColor *backgroundColor; // new
-@property (nonatomic, copy) UIColor *textColor; // new
-@property (nonatomic, copy) NSString *emojiText; // new
-
-- (void)presentColorPicker:(NSString *)target; // new
-- (void)applySCICustomTheme:(NSString *)target; // new
+@interface _TtC26IGNotesBubbleCreationSwift41IGDirectNotesBubbleEditorColorPaletteView : UIView
 @end
 
-@interface _TtC20IGDirectNotesUISwift39IGDirectNotesBubbleEditorViewController : UIViewController
+@interface _TtC26IGNotesBubbleCreationSwift39IGDirectNotesBubbleEditorViewController : UIViewController
 @property (nonatomic) IGDirectNotesComposerViewController *delegate;
 @end
 
@@ -499,6 +613,10 @@
 @interface IGCommentThreadViewController : UIViewController
 @end
 
+// Comment composer input bar — found via IG strings scan ("IGCommentComposerView", "commentComposerView:didTapStickerEntryButton:")
+@interface IGCommentComposerView : UIView
+@end
+
 @interface IGSeeAllItemConfiguration : NSObject
 @property (readonly, nonatomic) long long destination;
 @end
@@ -507,6 +625,7 @@
 @end
 
 @interface IGDSMenuItem : NSObject
+@property (copy, nonatomic) NSString *title;
 @end
 
 @interface IGDirectAudioWaveform : NSObject
@@ -519,6 +638,9 @@
 - (void)markLastMessageAsSeen;
 - (id)voiceController;
 - (id)messageSenderFeatureController;
+@end
+
+@interface IGDirectThreadViewVoiceController : NSObject
 @end
 
 @interface IGDirectMessageSenderFeatureController : NSObject
@@ -544,18 +666,53 @@
 @property (readonly, nonatomic) IGCreationActionBarButton *button;
 @end
 
-// Call buttons in DM thread header. Coordinator owns _audioCallButton / _videoCallButton
-// (both IGDirectCallButton) and forwards taps to _didTapAudioButton: / _didTapVideoButton:.
-// Discovered by dumping the thread VC view hierarchy for IGDirectCallButton.
-@interface IGDirectThreadCallButtonsCoordinator : NSObject @end
+@interface IGStatButton : UIView {
+	UILabel *_countLabel;
+}
+@end
+
+@interface _TtC23IGProfileHeaderIdentity38IGProfileHeaderStatButtonContainerView : UIView {
+	IGStatButton *$__lazy_storage_$_followersButton;
+	IGStatButton *postCountButton;
+}
+@end
+
+// DM-header call buttons. Old layout: coordinator owns audio/video IGDirectCallButtons.
+// Newer A/B: a joint button opens an IGDSMenu (buttonMenuItems) routed via
+// -_didTapButtonWithCallType:.
+@interface IGDirectThreadCallButtonsCoordinator : NSObject
+- (id)buttonMenuItems;
+@end
 @interface IGDirectCallButton : UIView @end
+@interface IGDirectJointCallButton : UIButton @end
+
+// Builds the DM thread's right-side nav items; the newer A/B renders a single
+// consolidated calling button (_consolidatedCallingButton) that opens the call menu.
+@interface IGDirectThreadViewRightBarButtonsFeatureController : NSObject
+- (id)createRightBarButtonItems;
+@end
 
 // IG's UINavigationBar subclass — hosts the iOS 26 liquid-glass platter layout.
 @interface IGNavigationBar : UINavigationBar @end
 
-// Story tray list adapter — drives data source updates for the home feed tray.
+@interface IGDirectThreadThemePickerViewController : UIViewController @end
+
+// DM thread background. Mangled name `_TtC28IGDirectThreadBackgroundView28...`.
+// Superclass is IGBaseView, not UIImageView — image goes in private `_imageView` ivar,
+// so `self.image =` is a no-op. Inject custom backgrounds via a child UIImageView.
+@interface IGDirectThreadBackgroundView : UIView @end
+
+@interface IGDirectThreadBackgroundImageView : UIView @end
+
+// UIKit-private keyboard classes — OLED keyboard theme.
+@interface UIKBBackdropView : UIView @end
+@interface UIKBKeyplaneChargedView : UIView @end
+
+// IGListKit adapter — used across feed tray, share sheet, etc.
 @interface IGListAdapter : NSObject
 - (void)performUpdatesAnimated:(BOOL)animated completion:(void (^)(BOOL))completion;
+- (id)objectAtSection:(NSInteger)section; // new
+- (id)dataSource; // new
 @end
 
 // Reels/feed video cell — used for long-press zoom gesture attachment.
@@ -700,4 +857,71 @@ typedef FLEXAlertAction * _Nonnull (^FLEXAlertActionHandler)(void(^handler)(NSAr
 @interface IGLiveCommentsContainerViewController : UIViewController
 - (void)setIsHidden:(BOOL)hidden;
 - (void)setDisabled:(BOOL)disabled;
+@end
+
+// Story/reel sticker views — data accessors resolved at runtime.
+@interface IGQuizStickerView : UIView
+@end
+
+@interface IGPollStickerView : UIView
+@end
+
+@interface IGPollStickerV2View : UIView
+@end
+
+@interface IGSliderStickerView : UIView
+@end
+
+// Photo sticker picker — preferredMediaTypes is an array of PHAssetMediaType numbers.
+@interface IGStickerGalleryViewController : UIViewController
+@end
+
+// Composer sticker tray data source — hooked to inject the quiz model.
+@interface IGStoryStickerDataSourceImpl : NSObject
+- (NSArray *)items;
+@end
+
+@interface IGQuizStickerTrayModel : NSObject
+@property (nonatomic) BOOL isBoostEligible;
+@property (nonatomic, copy) id stickerSection;
+@property (nonatomic, copy) NSArray *prompts;
+@end
+
+// Reveal/Secret sticker — blur story until viewer DMs the author.
+@interface IGSecretStickerTrayModel : NSObject
+@property (nonatomic, copy) id stickerSection;
+@end
+
+// Swift class _TtC15IGSecretSticker26IGSecretStickerOverlayView — bound at runtime.
+@interface IGSecretStickerOverlayView : UIView
+- (void)setPreviewBlurEnabled:(BOOL)enabled;
+@end
+
+// Swift class _TtC25IGMagicModExperimentation30IGGenAIRestyleExperimentHelper.
+@interface IGGenAIRestyleExperimentHelper : NSObject
++ (BOOL)isRevealStickerEnabledWithLauncherSet:(id)set;
++ (BOOL)isRevealStickerConsumptionEnabledWithLauncherSet:(id)set;
+@end
+
+// Reels audio detail. Swift class _TtC16IGAudioPageSwift26IGAudioPageHeaderActionBar — share/save header bar.
+@interface IGAudioPageHeaderActionBar : UIView
+@end
+
+// Reels audio detail VC — owns _audioAsset / _music / _originalAudio.
+@interface IGAudioPageViewController : UIViewController
+@end
+
+// Quick-reaction emoji button under an Instant. UIControl with a `text` ivar
+// holding the emoji glyph. Found via runtime view dump.
+@interface IGBouncyTextButton : UIControl
+@end
+
+// Bloks-served feed netego. _viewStateItemType ivar discriminates the unit
+// (no public getter): 251 = Meta AI "Try free AI creation tools".
+@interface IGBloksFeedUnitModel : NSObject
+@end
+
+// Followers/Following list (IGListKit). objectsForListAdapter: feeds the rows.
+@interface IGFollowListViewController : UIViewController
+- (NSArray *)objectsForListAdapter:(id)adapter;
 @end

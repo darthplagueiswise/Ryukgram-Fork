@@ -1,4 +1,4 @@
-// Hide the trending-searches pill bar under the explore search bar.
+// Hide the trending-searches pill bar inside the search-typeahead screen.
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
@@ -19,7 +19,8 @@
 %end
 
 %ctor {
-    if ([SCIUtils getBoolPref:@"hide_trending_searches"]) {
+    if ([SCIUtils getBoolPref:@"hide_trending_searches"] ||
+        [SCIUtils getBoolPref:@"messages_only"]) {
         %init(HideTrendingSearchesGroup);
     }
 }

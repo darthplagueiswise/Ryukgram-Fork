@@ -12,29 +12,40 @@
     %orig;
     if (![SCIUtils getBoolPref:@"profile_note_copy"]) return;
 
+    UIView *view = (UIView *)self;
+
     // Only add once
     static const NSInteger kCopyGestureTag = 99791;
-    for (UIGestureRecognizer *gr in self.gestureRecognizers) {
+    for (UIGestureRecognizer *gr in view.gestureRecognizers) {
         if (gr.view.tag == kCopyGestureTag) return;
     }
-    self.tag = kCopyGestureTag;
+    view.tag = kCopyGestureTag;
 
     UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
         initWithTarget:self action:@selector(sciCopyNoteLongPress:)];
     lp.minimumPressDuration = 0.5;
-    [self addGestureRecognizer:lp];
+    [view addGestureRecognizer:lp];
 }
 
 %new - (void)sciCopyNoteLongPress:(UILongPressGestureRecognizer *)gesture {
     if (gesture.state != UIGestureRecognizerStateBegan) return;
 
-    Ivar textIvar = class_getInstanceVariable([self class], "_noteText");
-    if (!textIvar) return;
-    NSString *text = object_getIvar(self, textIvar);
+    // noteText is a Swift String ivar (value type, unreadable via object_getIvar).
+    // Read the displayed text off the notesTextView label instead.
+    Ivar labelIvar = class_getInstanceVariable([self class], "notesTextView");
+    if (!labelIvar) return;
+    UILabel *label = object_getIvar(self, labelIvar);
+    if (![label isKindOfClass:[UILabel class]]) return;
+
+    NSString *text = label.attributedText.string;
     if (!text.length) return;
 
     [[UIPasteboard generalPasteboard] setString:text];
-    [SCIUtils showToastForDuration:1.5 title:SCILocalized(@"Note copied")];
+    SCINotifySuccess(SCI_NOTIF_COPY_NOTE, SCILocalized(@"Note copied"), nil);
 }
 
 %end
+
+%ctor {
+    %init(IGDirectNotesThoughtBubbleView = NSClassFromString(@"_TtC30IGDirectNotesThoughtBubbleView30IGDirectNotesThoughtBubbleView") ?: NSClassFromString(@"IGDirectNotesThoughtBubbleView"));
+}

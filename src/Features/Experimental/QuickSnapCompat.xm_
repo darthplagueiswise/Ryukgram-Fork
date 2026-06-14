@@ -1,0 +1,359 @@
+// Force-enable QuickSnap (Instants) surfaces. Gate: igt_quicksnap.
+// WORK-IN-PROGRESS — heavy NSLog probing on. Strip once user confirms working.
+
+#import "../../Utils.h"
+#import <objc/runtime.h>
+#import <substrate.h>
+
+#define IGT_LOG(fmt, ...) NSLog((@"[SCInsta][QSForce] " fmt), ##__VA_ARGS__)
+
+#pragma mark - Trampolines (all log on entry)
+
+#define BOOL_ARG1_YES(fn) \
+    static BOOL (*orig_##fn)(id, SEL, id) = NULL; \
+    static BOOL new_##fn(id self, SEL _cmd, id a) { \
+        IGT_LOG(@"+%@ arg=%@ -> YES (was: would-call-orig)", NSStringFromSelector(_cmd), a); \
+        return YES; \
+    }
+
+#define BOOL_ARG2_YES(fn) \
+    static BOOL (*orig_##fn)(id, SEL, id, id) = NULL; \
+    static BOOL new_##fn(id self, SEL _cmd, id a, id b) { \
+        IGT_LOG(@"+%@ a=%@ b=%@ -> YES", NSStringFromSelector(_cmd), a, b); \
+        return YES; \
+    }
+
+#define BOOL_ARG0_YES(fn) \
+    static BOOL (*orig_##fn)(id, SEL) = NULL; \
+    static BOOL new_##fn(id self, SEL _cmd) { \
+        IGT_LOG(@"-[%@ %@] -> YES", NSStringFromClass(object_getClass(self)), NSStringFromSelector(_cmd)); \
+        return YES; \
+    }
+
+#define BOOL_ARG0_NO(fn) \
+    static BOOL (*orig_##fn)(id, SEL) = NULL; \
+    static BOOL new_##fn(id self, SEL _cmd) { \
+        IGT_LOG(@"-[%@ %@] -> NO", NSStringFromClass(object_getClass(self)), NSStringFromSelector(_cmd)); \
+        return NO; \
+    }
+
+BOOL_ARG1_YES(h_isQSEnabled)
+BOOL_ARG1_YES(h_isQSEnabledInbox)
+BOOL_ARG1_YES(h_shouldEnableBadging)
+BOOL_ARG1_YES(h_isCornerStackTransitionNuxEnabled)
+BOOL_ARG1_YES(h_isEnabledStickyCameraOnSwipe)
+BOOL_ARG1_YES(h_shouldShowRecapNux)
+BOOL_ARG1_YES(h_shouldShowRecapStoryCta)
+BOOL_ARG1_YES(h_shouldShowArchiveIconBadge)
+BOOL_ARG1_YES(h_shouldShowCreateInstantCta)
+BOOL_ARG1_YES(h_isVideoCaptureEnabled)
+BOOL_ARG1_YES(h_isVideoAudioEnabled)
+BOOL_ARG1_YES(h_isVideoAudioConsumptionEnabled)
+BOOL_ARG1_YES(h_areFiltersEnabled)
+BOOL_ARG1_YES(h_isBottomsheetCustomAudienceEnabled)
+BOOL_ARG1_YES(h_isNewGTMDialogEnabled)
+BOOL_ARG1_YES(h_isNewGTMFlyoutAnimationEnabled)
+BOOL_ARG1_YES(h_isOneYearArchiveEnabled)
+BOOL_ARG1_YES(h_isMentioningEnabled)
+BOOL_ARG1_YES(h_isArchiveDetailGestureFixEnabled)
+BOOL_ARG1_YES(h_presentArchiveFromButton)
+
+BOOL_ARG2_YES(h_shouldShowConsumptionNux)
+BOOL_ARG2_YES(h_shouldShowCreationNux)
+BOOL_ARG2_YES(h_shouldShowVideoNuxOnPeekTap)
+BOOL_ARG2_YES(h_shouldShowWalkthroughConsumptionNux)
+
+BOOL_ARG0_YES(d_shouldShowTryInstants)
+BOOL_ARG0_YES(d_isEligibleForPeek)
+BOOL_ARG0_YES(d_isQuicksnapRecap)
+BOOL_ARG0_YES(d_hasQuicksnapRecapMedia)
+BOOL_ARG0_YES(d_isInstantsRecapVideo)
+
+BOOL_ARG0_NO(s_isHiddenByServer)
+BOOL_ARG0_NO(s__isHiddenByServer)
+
+// IGQuickSnapService: force hasAvailableSnaps=YES — the real upstream blocker.
+// Inbox asks this; NO means "no header" regardless of every experiment gate.
+static BOOL (*orig_qss_hasAvailable)(id, SEL) = NULL;
+static BOOL new_qss_hasAvailable(id self, SEL _cmd) {
+    BOOL r = orig_qss_hasAvailable ? orig_qss_hasAvailable(self, _cmd) : NO;
+    IGT_LOG(@"-[QSService hasAvailableSnaps] orig=%d -> 1 (forced)", r);
+    return YES;
+}
+static BOOL (*orig_qss_isFetching)(id, SEL) = NULL;
+static BOOL new_qss_isFetching(id self, SEL _cmd) {
+    BOOL r = orig_qss_isFetching ? orig_qss_isFetching(self, _cmd) : NO;
+    IGT_LOG(@"-[QSService isFetching] -> %d", r);
+    return r;
+}
+
+// Trace whether key inbox-related classes are ever instantiated. If init
+// never fires after opening DMs, the UI is gated by upstream Swift logic
+// our objc hooks can't reach.
+static void traceInit(NSString *cn) {
+    Class cls = NSClassFromString(cn);
+    if (!cls) { IGT_LOG(@"trace: %@ MISSING", cn); return; }
+    SEL s = @selector(init);
+    Method m = class_getInstanceMethod(cls, s);
+    if (!m) { IGT_LOG(@"trace: -[%@ init] MISSING", cn); return; }
+    IMP origImp = method_getImplementation(m);
+    NSString *name = [cn copy];
+    IMP wrapper = imp_implementationWithBlock(^id(id self2){
+        id r = ((id (*)(id, SEL))origImp)(self2, s);
+        IGT_LOG(@"INIT-TRACE %@ on instance %@", name, NSStringFromClass(object_getClass(r ?: self2)));
+        return r;
+    });
+    method_setImplementation(m, wrapper);
+    IGT_LOG(@"trace install: -[%@ init] OK", cn);
+}
+
+#pragma mark - Hook helpers (log success/fail)
+
+static BOOL hookClassMethodL(NSString *cn, NSString *sn, IMP impl, IMP *orig) {
+    Class cls = NSClassFromString(cn);
+    if (!cls) { IGT_LOG(@"hookClass: class %@ MISSING", cn); return NO; }
+    Class meta = object_getClass(cls);
+    SEL sel = NSSelectorFromString(sn);
+    if (!class_getInstanceMethod(meta, sel)) {
+        IGT_LOG(@"hookClass: +[%@ %@] MISSING", cn, sn);
+        return NO;
+    }
+    MSHookMessageEx(meta, sel, impl, orig);
+    IGT_LOG(@"hookClass: +[%@ %@] OK", cn, sn);
+    return YES;
+}
+
+static BOOL hookInstanceL(NSString *cn, NSString *sn, IMP impl, IMP *orig) {
+    Class cls = NSClassFromString(cn);
+    if (!cls) { IGT_LOG(@"hookInst: class %@ MISSING", cn); return NO; }
+    SEL sel = NSSelectorFromString(sn);
+    if (!class_getInstanceMethod(cls, sel)) {
+        IGT_LOG(@"hookInst: -[%@ %@] MISSING", cn, sn);
+        return NO;
+    }
+    MSHookMessageEx(cls, sel, impl, orig);
+    IGT_LOG(@"hookInst: -[%@ %@] OK", cn, sn);
+    return YES;
+}
+
+static void hookInstanceAcrossL(NSArray<NSString *> *classes, NSString *sn, IMP impl, IMP *orig) {
+    SEL sel = NSSelectorFromString(sn);
+    for (NSString *cn in classes) {
+        Class cls = NSClassFromString(cn);
+        if (!cls) continue;
+        if (!class_getInstanceMethod(cls, sel)) continue;
+        MSHookMessageEx(cls, sel, impl, orig);
+        IGT_LOG(@"hookInst(across): -[%@ %@] OK", cn, sn);
+    }
+}
+
+#pragma mark - Probe — list every Instants/QuickSnap class + BOOL methods
+
+static void probeClasses(void) {
+    unsigned int n = 0;
+    Class *list = objc_copyClassList(&n);
+    IGT_LOG(@"probe: %u total classes loaded", n);
+    int qs = 0, ins = 0;
+    for (unsigned int i = 0; i < n; i++) {
+        Class cls = list[i];
+        const char *cn = class_getName(cls);
+        if (!cn) continue;
+        if (!(strstr(cn, "QuickSnap") || strstr(cn, "Quicksnap") ||
+              strstr(cn, "Instants") || strstr(cn, "Instant"))) continue;
+        IGT_LOG(@"probe class: %s", cn);
+        if (strstr(cn, "QuickSnap") || strstr(cn, "Quicksnap")) qs++; else ins++;
+
+        unsigned int mcount = 0;
+        Method *methods = class_copyMethodList(cls, &mcount);
+        for (unsigned int j = 0; j < mcount; j++) {
+            const char *sn = sel_getName(method_getName(methods[j]));
+            const char *te = method_getTypeEncoding(methods[j]);
+            if (te && te[0] == 'B') IGT_LOG(@"  -[%s %s] B%s", cn, sn, te+1);
+        }
+        if (methods) free(methods);
+
+        Class meta = object_getClass(cls);
+        Method *cmethods = class_copyMethodList(meta, &mcount);
+        for (unsigned int j = 0; j < mcount; j++) {
+            const char *sn = sel_getName(method_getName(cmethods[j]));
+            const char *te = method_getTypeEncoding(cmethods[j]);
+            if (te && te[0] == 'B') IGT_LOG(@"  +[%s %s] B%s", cn, sn, te+1);
+        }
+        if (cmethods) free(cmethods);
+    }
+    IGT_LOG(@"probe done. quicksnap=%d instants=%d", qs, ins);
+    if (list) free(list);
+}
+
+#pragma mark - IGQuickSnapService server-hide bypass
+
+static void (*orig_qss_init)(id, SEL) = NULL;
+static id new_qss_init(id self, SEL _cmd) {
+    id ret = ((id (*)(id, SEL))orig_qss_init)(self, _cmd);
+    IGT_LOG(@"QSService init -> %p", ret);
+    if (ret) {
+        SEL clr = NSSelectorFromString(@"clearHiddenByServerStatus");
+        if ([ret respondsToSelector:clr]) {
+            ((void (*)(id, SEL))objc_msgSend)(ret, clr);
+            IGT_LOG(@"QSService clearHiddenByServerStatus called");
+        }
+        Ivar iv = class_getInstanceVariable(object_getClass(ret), "_isHiddenByServer");
+        if (iv) {
+            ptrdiff_t off = ivar_getOffset(iv);
+            *((BOOL *)((uint8_t *)(__bridge void *)ret + off)) = NO;
+            IGT_LOG(@"QSService _isHiddenByServer ivar zeroed (offset=%td)", off);
+        } else {
+            IGT_LOG(@"QSService _isHiddenByServer ivar NOT FOUND");
+        }
+        // Kick a real fetch so the snap stack populates if user has any
+        // snaps server-side. Without this, hasAvailableSnaps=YES (forced)
+        // would render an empty stack.
+        __weak id w = ret;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            id s = w;
+            if (!s) return;
+            SEL fetch = NSSelectorFromString(@"fetchInitialQuickSnaps");
+            if ([s respondsToSelector:fetch]) {
+                ((void (*)(id, SEL))objc_msgSend)(s, fetch);
+                IGT_LOG(@"QSService fetchInitialQuickSnaps kicked");
+            }
+        });
+    }
+    return ret;
+}
+
+static void (*orig_qss_addListener)(id, SEL, id) = NULL;
+static void new_qss_addListener(id self, SEL _cmd, id listener) {
+    Ivar iv = class_getInstanceVariable(object_getClass(self), "_isHiddenByServer");
+    if (iv) {
+        ptrdiff_t off = ivar_getOffset(iv);
+        *((BOOL *)((uint8_t *)(__bridge void *)self + off)) = NO;
+    }
+    IGT_LOG(@"QSService addListener: %@", listener);
+    if (orig_qss_addListener) orig_qss_addListener(self, _cmd, listener);
+
+    // Kick a real fetch the first time anyone subscribes so the snap stack
+    // populates if user has real snaps. init never fires (service is a
+    // preexisting singleton built before our ctor) so this is the earliest
+    // hook point we have on the live instance.
+    static dispatch_once_t kickOnce;
+    __weak id w = self;
+    dispatch_once(&kickOnce, ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            id s = w;
+            if (!s) return;
+            SEL fetch = NSSelectorFromString(@"fetchInitialQuickSnaps");
+            if ([s respondsToSelector:fetch]) {
+                ((void (*)(id, SEL))objc_msgSend)(s, fetch);
+                IGT_LOG(@"QSService fetchInitialQuickSnaps kicked (via addListener path)");
+            }
+            SEL clr = NSSelectorFromString(@"clearHiddenByServerStatus");
+            if ([s respondsToSelector:clr]) {
+                ((void (*)(id, SEL))objc_msgSend)(s, clr);
+                IGT_LOG(@"QSService clearHiddenByServerStatus called (via addListener path)");
+            }
+        });
+    });
+}
+
+#pragma mark - ctor
+
+%ctor {
+    BOOL pref = [SCIUtils getBoolPref:@"igt_quicksnap"];
+    IGT_LOG(@"ctor fired. igt_quicksnap=%d", pref);
+    if (!pref) return;
+
+    // Probe runs delayed so dyld finishes loading IG modules.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        probeClasses();
+    });
+
+    NSString *helper = @"_TtC26IGQuickSnapExperimentation32IGQuickSnapExperimentationHelper";
+
+    hookClassMethodL(helper, @"isQuicksnapEnabled:",                 (IMP)new_h_isQSEnabled,                       (IMP *)&orig_h_isQSEnabled);
+    hookClassMethodL(helper, @"isQuicksnapEnabledInInbox:",          (IMP)new_h_isQSEnabledInbox,                  (IMP *)&orig_h_isQSEnabledInbox);
+    hookClassMethodL(helper, @"shouldEnableBadging:",                (IMP)new_h_shouldEnableBadging,               (IMP *)&orig_h_shouldEnableBadging);
+    hookClassMethodL(helper, @"isCornerStackTransitionNuxEnabled:",  (IMP)new_h_isCornerStackTransitionNuxEnabled, (IMP *)&orig_h_isCornerStackTransitionNuxEnabled);
+    hookClassMethodL(helper, @"isEnabledStickyCameraOnSwipe:",       (IMP)new_h_isEnabledStickyCameraOnSwipe,      (IMP *)&orig_h_isEnabledStickyCameraOnSwipe);
+    hookClassMethodL(helper, @"shouldShowRecapNux:",                 (IMP)new_h_shouldShowRecapNux,                (IMP *)&orig_h_shouldShowRecapNux);
+    hookClassMethodL(helper, @"shouldShowRecapStoryCta:",            (IMP)new_h_shouldShowRecapStoryCta,           (IMP *)&orig_h_shouldShowRecapStoryCta);
+    hookClassMethodL(helper, @"shouldShowArchiveIconBadge:",         (IMP)new_h_shouldShowArchiveIconBadge,        (IMP *)&orig_h_shouldShowArchiveIconBadge);
+    hookClassMethodL(helper, @"shouldShowCreateInstantCta:",         (IMP)new_h_shouldShowCreateInstantCta,        (IMP *)&orig_h_shouldShowCreateInstantCta);
+    hookClassMethodL(helper, @"isVideoCaptureEnabled:",              (IMP)new_h_isVideoCaptureEnabled,             (IMP *)&orig_h_isVideoCaptureEnabled);
+    hookClassMethodL(helper, @"isVideoAudioEnabled:",                (IMP)new_h_isVideoAudioEnabled,               (IMP *)&orig_h_isVideoAudioEnabled);
+    hookClassMethodL(helper, @"isVideoAudioConsumptionEnabled:",     (IMP)new_h_isVideoAudioConsumptionEnabled,    (IMP *)&orig_h_isVideoAudioConsumptionEnabled);
+    hookClassMethodL(helper, @"areFiltersEnabled:",                  (IMP)new_h_areFiltersEnabled,                 (IMP *)&orig_h_areFiltersEnabled);
+    hookClassMethodL(helper, @"isBottomsheetCustomAudienceEnabled:", (IMP)new_h_isBottomsheetCustomAudienceEnabled,(IMP *)&orig_h_isBottomsheetCustomAudienceEnabled);
+    hookClassMethodL(helper, @"isNewGTMDialogEnabled:",              (IMP)new_h_isNewGTMDialogEnabled,             (IMP *)&orig_h_isNewGTMDialogEnabled);
+    hookClassMethodL(helper, @"isNewGTMFlyoutAnimationEnabled:",     (IMP)new_h_isNewGTMFlyoutAnimationEnabled,    (IMP *)&orig_h_isNewGTMFlyoutAnimationEnabled);
+    hookClassMethodL(helper, @"isOneYearArchiveEnabled:",            (IMP)new_h_isOneYearArchiveEnabled,           (IMP *)&orig_h_isOneYearArchiveEnabled);
+    hookClassMethodL(helper, @"isMentioningEnabled:",                (IMP)new_h_isMentioningEnabled,               (IMP *)&orig_h_isMentioningEnabled);
+    hookClassMethodL(helper, @"isArchiveDetailGestureFixEnabled:",   (IMP)new_h_isArchiveDetailGestureFixEnabled,  (IMP *)&orig_h_isArchiveDetailGestureFixEnabled);
+    hookClassMethodL(helper, @"presentArchiveFromButton:",           (IMP)new_h_presentArchiveFromButton,          (IMP *)&orig_h_presentArchiveFromButton);
+
+    hookClassMethodL(helper, @"shouldShowConsumptionNux:sessionUserDefaults:",            (IMP)new_h_shouldShowConsumptionNux,            (IMP *)&orig_h_shouldShowConsumptionNux);
+    hookClassMethodL(helper, @"shouldShowCreationNux:sessionUserDefaults:",               (IMP)new_h_shouldShowCreationNux,               (IMP *)&orig_h_shouldShowCreationNux);
+    hookClassMethodL(helper, @"shouldShowVideoNuxOnPeekTap:sessionUserDefaults:",         (IMP)new_h_shouldShowVideoNuxOnPeekTap,         (IMP *)&orig_h_shouldShowVideoNuxOnPeekTap);
+    hookClassMethodL(helper, @"shouldShowWalkthroughConsumptionNux:sessionUserDefaults:", (IMP)new_h_shouldShowWalkthroughConsumptionNux, (IMP *)&orig_h_shouldShowWalkthroughConsumptionNux);
+
+    NSString *instantsDelegate = @"_TtC18IGInstantsDelegate22IGInstantsDelegateImpl";
+    hookInstanceL(instantsDelegate, @"shouldShowTryInstants", (IMP)new_d_shouldShowTryInstants, (IMP *)&orig_d_shouldShowTryInstants);
+
+    NSArray *snapClasses = @[
+        @"IGInstantGestureRecognizer",
+        @"IGAPIQuickSnapData",
+        @"XDTQuickSnapData",
+        @"IGAPIQuicksnapRecapMediaInfo",
+        @"XDTQuicksnapRecapMediaInfo",
+        @"IGQuickSnapData",
+    ];
+    hookInstanceAcrossL(snapClasses, @"isEligibleForPeek",        (IMP)new_d_isEligibleForPeek,       (IMP *)&orig_d_isEligibleForPeek);
+    hookInstanceAcrossL(snapClasses, @"isQuicksnapRecap",         (IMP)new_d_isQuicksnapRecap,        (IMP *)&orig_d_isQuicksnapRecap);
+    hookInstanceAcrossL(snapClasses, @"hasQuicksnapRecapMedia",   (IMP)new_d_hasQuicksnapRecapMedia,  (IMP *)&orig_d_hasQuicksnapRecapMedia);
+    hookInstanceAcrossL(snapClasses, @"isInstantsRecapVideo",     (IMP)new_d_isInstantsRecapVideo,    (IMP *)&orig_d_isInstantsRecapVideo);
+
+    // Trace which inbox-related QS UI classes ever init after DM open.
+    // Names taken verbatim from the runtime probe log (Swift dot form is
+    // accepted by NSClassFromString on this runtime).
+    NSArray *traceClasses = @[
+        @"IGQuickSnapHeaderController.IGQuickSnapHeaderController",
+        @"IGQuickSnapHeaderController.IGQuickSnapHeaderView",
+        @"IGQuickSnapInitialSetupController.IGQuickSnapInitialSetupController",
+        @"IGQuickSnapWidgetMerchandising.IGInstantsWidgetMerchandisingPillView",
+        @"IGInstantsDelegate.IGInstantsDelegateImpl",
+        @"IGQuickSnapDataSource.IGQuickSnapDataSource",
+        @"IGQuickSnapRefresher.IGQuickSnapRefresher",
+        @"IGQuickSnapServiceListenerImpl.IGQuickSnapServiceListenerImpl",
+        @"IGQuickSnapAlternatingContainerModeListenerImpl.IGQuickSnapAlternatingContainerModeListenerImpl",
+        @"IGQuickSnapViewSnapFetchController.IGQuickSnapViewSnapFetchController",
+        @"IGQuickSnapNotesNuxEligibilityUpdater.IGQuickSnapNotesNuxEligibilityUpdater",
+    ];
+    for (NSString *cn in traceClasses) traceInit(cn);
+
+    NSString *svc = @"_TtC18IGQuickSnapService18IGQuickSnapService";
+    Class svcCls = NSClassFromString(svc);
+    if (svcCls) {
+        SEL initSel = @selector(init);
+        if (class_getInstanceMethod(svcCls, initSel)) {
+            MSHookMessageEx(svcCls, initSel, (IMP)new_qss_init, (IMP *)&orig_qss_init);
+            IGT_LOG(@"hookInst: -[%@ init] OK", svc);
+        }
+        SEL addSel = NSSelectorFromString(@"addListener:");
+        if (class_getInstanceMethod(svcCls, addSel)) {
+            MSHookMessageEx(svcCls, addSel, (IMP)new_qss_addListener, (IMP *)&orig_qss_addListener);
+            IGT_LOG(@"hookInst: -[%@ addListener:] OK", svc);
+        }
+        hookInstanceL(svc, @"isHiddenByServer",  (IMP)new_s_isHiddenByServer,  (IMP *)&orig_s_isHiddenByServer);
+        hookInstanceL(svc, @"_isHiddenByServer", (IMP)new_s__isHiddenByServer, (IMP *)&orig_s__isHiddenByServer);
+        hookInstanceL(svc, @"hasAvailableSnaps", (IMP)new_qss_hasAvailable,   (IMP *)&orig_qss_hasAvailable);
+        hookInstanceL(svc, @"isFetching",        (IMP)new_qss_isFetching,     (IMP *)&orig_qss_isFetching);
+    } else {
+        IGT_LOG(@"hookInst: %@ MISSING", svc);
+    }
+
+    // Brute-force net — covers any class we miss (Swift renames, secondary
+    // gating helpers, etc). Only zero-arg BOOL methods.
+}

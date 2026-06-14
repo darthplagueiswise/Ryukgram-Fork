@@ -1,5 +1,6 @@
 #import "SCIExcludedStoryUsers.h"
 #import "../../Utils.h"
+#import "../../SCIAccountScopedDefaults.h"
 
 #define SCI_STORY_EXCL_KEY @"excluded_story_users"
 #define SCI_STORY_INCL_KEY @"included_story_users"
@@ -19,13 +20,13 @@
 }
 
 + (NSArray<NSDictionary *> *)allEntries {
-    return [[NSUserDefaults standardUserDefaults] arrayForKey:[self activeKey]] ?: @[];
+    return [SCIAccountScopedDefaults arrayForKey:[self activeKey]] ?: @[];
 }
 
 + (NSUInteger)count { return [self allEntries].count; }
 
 + (void)saveAll:(NSArray *)entries {
-    [[NSUserDefaults standardUserDefaults] setObject:entries forKey:[self activeKey]];
+    [SCIAccountScopedDefaults setObject:entries forKey:[self activeKey]];
 }
 
 + (NSDictionary *)entryForPK:(NSString *)pk {

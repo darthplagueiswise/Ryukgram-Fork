@@ -5,550 +5,616 @@
 #import "ActionButton/SCIMediaActions.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
-#import <objc/message.h>
 
-// MARK: - Row cell
+static NSString * const kSCIQualityCellId = @"SCIQualityCell";
+
+static inline UIImage *SCIQualityIcon(NSString *name, CGFloat size) {
+	return [UIImage systemImageNamed:name withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:size weight:UIImageSymbolWeightMedium]];
+}
+
+static inline NSString *SCIQualityBandwidth(NSInteger bandwidth) {
+	if (bandwidth <= 0) return @"";
+	return bandwidth >= 1000000 ? [NSString stringWithFormat:@"%.1f Mbps", bandwidth / 1000000.0] : [NSString stringWithFormat:@"%ld Kbps", (long)(bandwidth / 1000)];
+}
+
+static inline NSString *SCIQualityFileSize(long long bytes) {
+	if (bytes <= 0) return @"";
+	NSByteCountFormatter *fmt = [NSByteCountFormatter new];
+	fmt.countStyle = NSByteCountFormatterCountStyleFile;
+	fmt.allowedUnits = bytes >= 1024 * 1024 ? NSByteCountFormatterUseMB : NSByteCountFormatterUseKB;
+	return [fmt stringFromByteCount:bytes];
+}
+
+static inline NSString *SCIQualityAppendInfo(NSString *info, NSString *extra) {
+	if (!extra.length) return info ?: @"";
+	if (!info.length) return extra;
+	return [NSString stringWithFormat:@"%@ • %@", info, extra];
+}
+
+static inline NSString *SCIQualityCodec(NSString *codecs, NSString *fallback) {
+	if (!codecs.length) return fallback ?: @"";
+	return [codecs componentsSeparatedByString:@"."].firstObject ?: codecs;
+}
+
+static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
+	NSFileManager *fm = NSFileManager.defaultManager;
+	for (NSString *path in paths) {
+		if (path.length) [fm removeItemAtPath:path error:nil];
+	}
+}
 
 @interface _SCIQualityCell : UITableViewCell
-@property (nonatomic, strong) UIButton *playButton;
+@property (nonatomic, strong) UIButton *iconButton;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *subtitleLabel;
 @property (nonatomic, strong) UIButton *menuButton;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
+- (void)setTitle:(NSString *)title subtitle:(NSString *)subtitle icon:(UIImage *)icon menu:(UIMenu *)menu;
+- (void)setLoading:(BOOL)loading;
 @end
 
 @implementation _SCIQualityCell
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
-    self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
-    if (!self) return nil;
+	self = [super initWithStyle:style reuseIdentifier:reuseIdentifier];
+	if (!self) return nil;
 
-    self.selectionStyle = UITableViewCellSelectionStyleDefault;
-    self.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+	self.selectionStyle = UITableViewCellSelectionStyleDefault;
+	self.backgroundColor = SCIUIKit26PanelFillColor();
 
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    _playButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_playButton setImage:[UIImage systemImageNamed:@"play.fill" withConfiguration:cfg] forState:UIControlStateNormal];
-    _playButton.tintColor = [UIColor labelColor];
-    _playButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_playButton];
+	_iconButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	_iconButton.tintColor = UIColor.labelColor;
+	_iconButton.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.contentView addSubview:_iconButton];
 
-    _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    _spinner.translatesAutoresizingMaskIntoConstraints = NO;
-    _spinner.hidesWhenStopped = YES;
-    [self.contentView addSubview:_spinner];
+	_spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+	_spinner.hidesWhenStopped = YES;
+	_spinner.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.contentView addSubview:_spinner];
 
-    _titleLabel = [UILabel new];
-    _titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
-    _titleLabel.textColor = [UIColor labelColor];
-    _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_titleLabel];
+	_titleLabel = [UILabel new];
+	_titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
+	_titleLabel.textColor = UIColor.labelColor;
+	_titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.contentView addSubview:_titleLabel];
 
-    _subtitleLabel = [UILabel new];
-    _subtitleLabel.font = [UIFont systemFontOfSize:11];
-    _subtitleLabel.textColor = [UIColor secondaryLabelColor];
-    _subtitleLabel.numberOfLines = 1;
-    _subtitleLabel.adjustsFontSizeToFitWidth = YES;
-    _subtitleLabel.minimumScaleFactor = 0.85;
-    _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_subtitleLabel];
+	_subtitleLabel = [UILabel new];
+	_subtitleLabel.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightRegular];
+	_subtitleLabel.textColor = UIColor.secondaryLabelColor;
+	_subtitleLabel.numberOfLines = 1;
+	_subtitleLabel.adjustsFontSizeToFitWidth = YES;
+	_subtitleLabel.minimumScaleFactor = 0.82;
+	_subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.contentView addSubview:_subtitleLabel];
 
-    UIImageSymbolConfiguration *menuCfg = [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIFontWeightMedium];
-    _menuButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_menuButton setImage:[UIImage systemImageNamed:@"ellipsis.circle" withConfiguration:menuCfg] forState:UIControlStateNormal];
-    _menuButton.tintColor = [UIColor secondaryLabelColor];
-    _menuButton.translatesAutoresizingMaskIntoConstraints = NO;
-    _menuButton.showsMenuAsPrimaryAction = YES;
-    [self.contentView addSubview:_menuButton];
+	_menuButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	_menuButton.tintColor = UIColor.secondaryLabelColor;
+	_menuButton.showsMenuAsPrimaryAction = YES;
+	_menuButton.translatesAutoresizingMaskIntoConstraints = NO;
+	[_menuButton setImage:SCIQualityIcon(@"ellipsis.circle", 18.0) forState:UIControlStateNormal];
+	[self.contentView addSubview:_menuButton];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [_playButton.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14],
-        [_playButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [_playButton.widthAnchor constraintEqualToConstant:32],
-        [_playButton.heightAnchor constraintEqualToConstant:32],
+	[NSLayoutConstraint activateConstraints:@[
+		[_iconButton.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14.0],
+		[_iconButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+		[_iconButton.widthAnchor constraintEqualToConstant:34.0],
+		[_iconButton.heightAnchor constraintEqualToConstant:34.0],
 
-        [_spinner.centerXAnchor constraintEqualToAnchor:_playButton.centerXAnchor],
-        [_spinner.centerYAnchor constraintEqualToAnchor:_playButton.centerYAnchor],
+		[_spinner.centerXAnchor constraintEqualToAnchor:_iconButton.centerXAnchor],
+		[_spinner.centerYAnchor constraintEqualToAnchor:_iconButton.centerYAnchor],
 
-        [_titleLabel.leadingAnchor constraintEqualToAnchor:_playButton.trailingAnchor constant:12],
-        [_titleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:10],
+		[_menuButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10.0],
+		[_menuButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
+		[_menuButton.widthAnchor constraintEqualToConstant:34.0],
+		[_menuButton.heightAnchor constraintEqualToConstant:34.0],
 
-        [_subtitleLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
-        [_subtitleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:2],
-        [_subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_menuButton.leadingAnchor constant:-8],
+		[_titleLabel.leadingAnchor constraintEqualToAnchor:_iconButton.trailingAnchor constant:12.0],
+		[_titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_menuButton.leadingAnchor constant:-8.0],
+		[_titleLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:9.0],
 
-        [_menuButton.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10],
-        [_menuButton.centerYAnchor constraintEqualToAnchor:self.contentView.centerYAnchor],
-        [_menuButton.widthAnchor constraintEqualToConstant:32],
-        [_menuButton.heightAnchor constraintEqualToConstant:32],
-    ]];
+		[_subtitleLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+		[_subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_menuButton.leadingAnchor constant:-8.0],
+		[_subtitleLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:3.0],
+		[_subtitleLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-9.0]
+	]];
 
-    return self;
+	return self;
+}
+
+- (void)prepareForReuse {
+	[super prepareForReuse];
+	[self.iconButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+	self.iconButton.tag = 0;
+	self.iconButton.hidden = NO;
+	self.menuButton.hidden = NO;
+	self.menuButton.menu = nil;
+	self.accessoryType = UITableViewCellAccessoryNone;
+	[self setLoading:NO];
+}
+
+- (void)setTitle:(NSString *)title subtitle:(NSString *)subtitle icon:(UIImage *)icon menu:(UIMenu *)menu {
+	self.titleLabel.text = title ?: @"";
+	self.subtitleLabel.text = subtitle ?: @"";
+	[self.iconButton setImage:icon forState:UIControlStateNormal];
+	self.menuButton.menu = menu;
+	self.menuButton.hidden = menu == nil;
 }
 
 - (void)setLoading:(BOOL)loading {
-    if (loading) {
-        self.playButton.hidden = YES;
-        [self.spinner startAnimating];
-    } else {
-        [self.spinner stopAnimating];
-        self.playButton.hidden = NO;
-    }
+	self.iconButton.hidden = loading;
+	loading ? [self.spinner startAnimating] : [self.spinner stopAnimating];
 }
 
 @end
 
-// MARK: - Sheet VC
-
 @interface _SCIQualitySheetVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UIButton *closeButton;
 @property (nonatomic, strong) NSArray<SCIDashRepresentation *> *videoReps;
 @property (nonatomic, strong) SCIDashRepresentation *audioRep;
 @property (nonatomic, strong) NSURL *standardURL;
+@property (nonatomic, strong) NSURL *photoURL;
 @property (nonatomic, strong) id mediaRef;
 @property (nonatomic, assign) DownloadAction saveAction;
 @property (nonatomic, assign) BOOL hasAudio;
-@property (nonatomic, strong) NSURL *photoURL;
 @property (nonatomic, copy) void (^onPickStandard)(void);
 @property (nonatomic, copy) void (^onPickHD)(SCIDashRepresentation *video, SCIDashRepresentation *audio);
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *sizeCache;
+@property (nonatomic, strong) NSMutableSet<NSString *> *sizeLoading;
+@property (nonatomic, strong) NSMutableIndexSet *loadingVideoRows;
 @end
 
 @implementation _SCIQualitySheetVC
 
 - (void)viewDidLoad {
-    [super viewDidLoad];
+	[super viewDidLoad];
+	SCIUIKit26ConfigureViewController(self);
+	SCIUIKit26ConfigureTableView(self.tableView);
 
-    // Match the expanded-sheet grey so the initial state doesn't look glass-transparent.
-    UIColor *sheetGrey = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithRed:0.11 green:0.11 blue:0.12 alpha:1.0]
-            : [UIColor colorWithRed:0.95 green:0.95 blue:0.97 alpha:1.0];
-    }];
-    self.view.backgroundColor = sheetGrey;
-    self.view.opaque = YES;
+	self.sizeCache = [NSMutableDictionary dictionary];
+	self.sizeLoading = [NSMutableSet set];
+	self.loadingVideoRows = [NSMutableIndexSet indexSet];
 
-    UIView *solidCard = [UIView new];
-    solidCard.backgroundColor = sheetGrey;
-    solidCard.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:solidCard];
-    [self.view sendSubviewToBack:solidCard];
-    [NSLayoutConstraint activateConstraints:@[
-        [solidCard.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [solidCard.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-        [solidCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [solidCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-    ]];
+	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
 
-    self.titleLabel = [UILabel new];
-    self.titleLabel.text = SCILocalized(@"Download Quality");
-    self.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
-    self.titleLabel.textColor = [UIColor labelColor];
-    self.titleLabel.textAlignment = NSTextAlignmentCenter;
-    self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.titleLabel];
+	self.titleLabel = [UILabel new];
+	self.titleLabel.text = SCILocalized(@"Download Quality");
+	self.titleLabel.font = [UIFont systemFontOfSize:18.0 weight:UIFontWeightSemibold];
+	self.titleLabel.textColor = UIColor.labelColor;
+	self.titleLabel.textAlignment = NSTextAlignmentCenter;
+	self.titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.view addSubview:self.titleLabel];
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.dataSource = self;
-    self.tableView.delegate = self;
-    self.tableView.backgroundColor = [UIColor clearColor];
-    self.tableView.rowHeight = 56;
-    self.tableView.sectionHeaderTopPadding = 8;
-    [self.tableView registerClass:[_SCIQualityCell class] forCellReuseIdentifier:@"q"];
-    [self.view addSubview:self.tableView];
+	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+	self.tableView.dataSource = self;
+	self.tableView.delegate = self;
+	self.tableView.rowHeight = 58.0;
+	self.tableView.backgroundColor = UIColor.clearColor;
+	self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+	self.tableView.sectionHeaderTopPadding = 8.0;
+	[self.tableView registerClass:_SCIQualityCell.class forCellReuseIdentifier:kSCIQualityCellId];
+	[self.view addSubview:self.tableView];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [self.titleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.titleLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:14],
+	[NSLayoutConstraint activateConstraints:@[
+		[self.titleLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:24.0],
+		[self.titleLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
 
-        [self.tableView.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:8],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
+		[self.tableView.topAnchor constraintEqualToAnchor:self.titleLabel.bottomAnchor constant:8.0],
+		[self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+		[self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+		[self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+	]];
 }
 
-- (void)dismiss { [self dismissViewControllerAnimated:YES completion:nil]; }
-
-// MARK: - Table
-// Sections: Standard, HD, optional Audio, optional Extras (photo). Audio
-// appears before Extras when both are present.
-
-- (BOOL)_hasExtrasSection { return self.photoURL != nil; }
-- (BOOL)_hasAudioSection  { return self.audioRep.url != nil; }
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
-    NSInteger n = 2;
-    if ([self _hasExtrasSection]) n++;
-    if ([self _hasAudioSection])  n++;
-    return n;
-}
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 1;
-    if (section == 1) return (NSInteger)self.videoReps.count;
-    return 1;
+- (BOOL)hasAudioSection {
+	return self.audioRep.url != nil;
 }
 
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
-    if (section == 0) return @"Standard";
-    if (section == 1) return @"HD";
-    if (section == 2 && [self _hasAudioSection]) return SCILocalized(@"Audio");
-    return SCILocalized(@"Extras");
+- (BOOL)hasPhotoSection {
+	return self.photoURL != nil;
 }
 
-- (UIImage *)_playIconSilent:(BOOL)silent {
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    NSString *name = silent ? @"play.slash.fill" : @"play.fill";
-    return [UIImage systemImageNamed:name withConfiguration:cfg];
+- (BOOL)isAudioSection:(NSInteger)section {
+	return section == 2 && self.hasAudioSection;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    _SCIQualityCell *cell = [tv dequeueReusableCellWithIdentifier:@"q" forIndexPath:ip];
-    [cell setLoading:NO];
+- (BOOL)isPhotoSection:(NSInteger)section {
+	return section == 2 + (self.hasAudioSection ? 1 : 0);
+}
 
-    BOOL silent = !self.hasAudio;
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+	return 2 + (self.hasAudioSection ? 1 : 0) + (self.hasPhotoSection ? 1 : 0);
+}
 
-    if (ip.section == 0) {
-        cell.titleLabel.text = SCILocalized(@"Standard");
-        cell.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-        cell.subtitleLabel.text = silent
-            ? SCILocalized(@"720p • progressive • silent")
-            : SCILocalized(@"720p • progressive • fastest");
-        cell.playButton.hidden = (self.standardURL == nil);
-        cell.menuButton.hidden = (self.standardURL == nil);
-        [cell.playButton setImage:[self _playIconSilent:silent] forState:UIControlStateNormal];
-        cell.accessoryType = UITableViewCellAccessoryNone;
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+	return section == 1 ? self.videoReps.count : 1;
+}
 
-        cell.playButton.tag = -1;
-        [cell.playButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
-        [cell.playButton addTarget:self action:@selector(playStandardPreview:) forControlEvents:UIControlEventTouchUpInside];
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+	if (section == 0) return SCILocalized(@"Standard");
+	if (section == 1) return SCILocalized(@"HD");
+	if ([self isAudioSection:section]) return SCILocalized(@"Audio");
+	return SCILocalized(@"Extras");
+}
 
-        cell.menuButton.menu = [self menuForStandard];
-    } else if (ip.section == 1) {
-        SCIDashRepresentation *rep = self.videoReps[ip.row];
-        cell.accessoryType = UITableViewCellAccessoryNone;
-        cell.playButton.hidden = NO;
-        cell.menuButton.hidden = NO;
-        [cell.playButton setImage:[self _playIconSilent:silent] forState:UIControlStateNormal];
+- (UIImage *)previewIcon {
+	return SCIQualityIcon(self.hasAudio ? @"play.fill" : @"play.slash.fill", 18.0);
+}
 
-        NSString *label = rep.qualityLabel ?: @"";
-        if (rep.height > 0) {
-            NSInteger shortSide = MIN(rep.width, rep.height);
-            if (shortSide > 0) label = [NSString stringWithFormat:@"%ldp", (long)shortSide];
-        }
+- (NSString *)qualityLabelForRep:(SCIDashRepresentation *)rep {
+	if (rep.width > 0 && rep.height > 0) return [NSString stringWithFormat:@"%ldp", (long)MIN(rep.width, rep.height)];
+	return rep.qualityLabel.length ? rep.qualityLabel : SCILocalized(@"HD");
+}
 
-        NSString *bw = rep.bandwidth > 1000000
-            ? [NSString stringWithFormat:@"%.1f Mbps", rep.bandwidth / 1000000.0]
-            : [NSString stringWithFormat:@"%ld Kbps", (long)(rep.bandwidth / 1000)];
-        cell.titleLabel.text = [NSString stringWithFormat:@"%@ • %@", label, bw];
-        cell.titleLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
+- (NSString *)subtitleForRep:(SCIDashRepresentation *)rep {
+	NSMutableArray *parts = [NSMutableArray array];
 
-        NSMutableArray *parts = [NSMutableArray array];
-        if (rep.width > 0 && rep.height > 0)
-            [parts addObject:[NSString stringWithFormat:@"%ld×%ld", (long)rep.width, (long)rep.height]];
-        if (rep.frameRate > 0)
-            [parts addObject:[NSString stringWithFormat:@"%.0ffps", rep.frameRate]];
-        if (rep.codecs.length) {
-            NSString *codec = [[rep.codecs componentsSeparatedByString:@"."] firstObject] ?: rep.codecs;
-            [parts addObject:codec];
-        }
-        if (silent) [parts addObject:SCILocalized(@"silent")];
-        cell.subtitleLabel.text = [parts componentsJoinedByString:@" • "];
+	if (rep.width > 0 && rep.height > 0)
+		[parts addObject:[NSString stringWithFormat:@"%ld×%ld", (long)rep.width, (long)rep.height]];
 
-        cell.playButton.tag = ip.row;
-        [cell.playButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
-        [cell.playButton addTarget:self action:@selector(playPreview:) forControlEvents:UIControlEventTouchUpInside];
+	if (rep.frameRate > 0)
+		[parts addObject:[NSString stringWithFormat:@"%.0ffps", rep.frameRate]];
 
-        cell.menuButton.menu = [self menuForRow:ip.row videoRep:rep];
-    } else {
-        BOOL isAudio = (ip.section == 2 && [self _hasAudioSection]);
-        BOOL isPhoto = !isAudio;
+	if (rep.codecs.length)
+		[parts addObject:SCIQualityCodec(rep.codecs, rep.codecs)];
 
-        cell.accessoryType = UITableViewCellAccessoryNone;
-        cell.playButton.hidden = NO;
-        cell.menuButton.hidden = YES;
-        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
+	if (!self.hasAudio)
+		[parts addObject:SCILocalized(@"silent")];
 
-        if (isPhoto) {
-            cell.titleLabel.text = SCILocalized(@"Photo");
-            cell.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-            cell.subtitleLabel.text = SCILocalized(@"Raw image (no audio, no video)");
-            [cell.playButton setImage:[UIImage systemImageNamed:@"photo" withConfiguration:cfg] forState:UIControlStateNormal];
-        } else if (isAudio) {
-            cell.titleLabel.text = SCILocalized(@"Audio only");
-            cell.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-            NSString *codec = self.audioRep.codecs.length
-                ? [[self.audioRep.codecs componentsSeparatedByString:@"."] firstObject]
-                : @"m4a";
-            NSString *bw = self.audioRep.bandwidth > 0
-                ? [NSString stringWithFormat:@"%ld Kbps", (long)(self.audioRep.bandwidth / 1000)]
-                : @"";
-            cell.subtitleLabel.text = [@[codec, bw] componentsJoinedByString:@" • "];
-            [cell.playButton setImage:[UIImage systemImageNamed:@"music.note" withConfiguration:cfg] forState:UIControlStateNormal];
-        }
+	return [parts componentsJoinedByString:@" • "];
+}
 
-        cell.playButton.tag = -2;
-        [cell.playButton removeTarget:self action:NULL forControlEvents:UIControlEventTouchUpInside];
-    }
-    return cell;
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
+	_SCIQualityCell *cell = [tableView dequeueReusableCellWithIdentifier:kSCIQualityCellId forIndexPath:ip];
+	SCIUIKit26ConfigureTableCell(cell);
+	[cell.iconButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+
+	if (ip.section == 0) {
+		NSString *subtitle = self.hasAudio ? SCILocalized(@"720p • progressive • fastest") : SCILocalized(@"720p • progressive • silent");
+		subtitle = SCIQualityAppendInfo(subtitle, [self sizeTextForURL:self.standardURL]);
+		[cell setTitle:SCILocalized(@"Standard") subtitle:subtitle icon:self.previewIcon menu:[self menuForStandard]];
+		cell.iconButton.hidden = self.standardURL == nil;
+		cell.iconButton.tag = -1;
+		[cell.iconButton addTarget:self action:@selector(playStandardPreview) forControlEvents:UIControlEventTouchUpInside];
+		return cell;
+	}
+
+	if (ip.section == 1) {
+		SCIDashRepresentation *rep = self.videoReps[ip.row];
+		NSString *bandwidth = SCIQualityBandwidth(rep.bandwidth);
+		NSString *title = bandwidth.length ? [NSString stringWithFormat:@"%@ • %@", [self qualityLabelForRep:rep], bandwidth] : [self qualityLabelForRep:rep];
+
+		NSString *subtitle = [self subtitleForRep:rep];
+		subtitle = SCIQualityAppendInfo(subtitle, [self combinedSizeTextForVideo:rep.url audio:self.audioRep.url]);
+
+		[cell setTitle:title subtitle:subtitle icon:self.previewIcon menu:[self menuForVideoRep:rep]];
+		cell.iconButton.tag = ip.row;
+		[cell.iconButton addTarget:self action:@selector(playPreview:) forControlEvents:UIControlEventTouchUpInside];
+		[cell setLoading:[self.loadingVideoRows containsIndex:ip.row]];
+		return cell;
+	}
+
+	if ([self isAudioSection:ip.section]) {
+		NSMutableArray *parts = [NSMutableArray array];
+		NSString *codec = SCIQualityCodec(self.audioRep.codecs, @"m4a");
+		NSString *bandwidth = SCIQualityBandwidth(self.audioRep.bandwidth);
+
+		if (codec.length) [parts addObject:codec];
+		if (bandwidth.length) [parts addObject:bandwidth];
+
+		NSString *subtitle = parts.count ? [parts componentsJoinedByString:@" • "] : @"m4a";
+		subtitle = SCIQualityAppendInfo(subtitle, [self sizeTextForURL:self.audioRep.url]);
+
+		[cell setTitle:SCILocalized(@"Audio only") subtitle:subtitle icon:SCIQualityIcon(@"music.note", 18.0) menu:nil];
+
+		return cell;
+	}
+
+	NSString *subtitle = SCIQualityAppendInfo(SCILocalized(@"Raw image"), [self sizeTextForURL:self.photoURL]);
+	[cell setTitle:SCILocalized(@"Photo") subtitle:subtitle icon:SCIQualityIcon(@"photo", 18.0) menu:nil];
+	return cell;
 }
 
 - (UIMenu *)menuForStandard {
-    NSURL *url = self.standardURL;
-    if (!url) return nil;
-    UIAction *copy = [UIAction actionWithTitle:SCILocalized(@"Copy video URL")
-                                         image:[UIImage systemImageNamed:@"video.fill"]
-                                    identifier:nil
-                                       handler:^(__unused UIAction *a) {
-        [UIPasteboard generalPasteboard].string = url.absoluteString;
-    }];
-    return [UIMenu menuWithTitle:@"" children:@[copy]];
+	if (!self.standardURL) return nil;
+
+	NSURL *url = self.standardURL;
+	UIAction *copy = [UIAction actionWithTitle:SCILocalized(@"Copy video URL") image:SCIQualityIcon(@"video.fill", 18.0) identifier:nil handler:^(__unused UIAction *action) {
+		UIPasteboard.generalPasteboard.string = url.absoluteString;
+		SCINotifySuccess(SCI_NOTIF_COPY_QUALITY_URL, SCILocalized(@"Copied video URL"), nil);
+	}];
+
+	return [UIMenu menuWithTitle:@"" children:@[copy]];
 }
 
-- (void)playStandardPreview:(UIButton *)sender {
-    NSURL *url = self.standardURL;
-    if (!url) return;
-    AVPlayerViewController *playerVC = [AVPlayerViewController new];
-    playerVC.player = [AVPlayer playerWithURL:url];
-    playerVC.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    [self presentViewController:playerVC animated:YES completion:^{ [playerVC.player play]; }];
+- (UIMenu *)menuForVideoRep:(SCIDashRepresentation *)rep {
+	NSURL *videoURL = rep.url;
+	NSURL *audioURL = self.audioRep.url;
+
+	UIAction *copyVideo = [UIAction actionWithTitle:SCILocalized(@"Copy video URL") image:SCIQualityIcon(@"video.fill", 18.0) identifier:nil handler:^(__unused UIAction *action) {
+		if (!videoURL) return;
+		UIPasteboard.generalPasteboard.string = videoURL.absoluteString;
+		SCINotifySuccess(SCI_NOTIF_COPY_QUALITY_URL, SCILocalized(@"Copied video URL"), nil);
+	}];
+
+	UIAction *copyInfo = [UIAction actionWithTitle:SCILocalized(@"Copy quality info") image:SCIQualityIcon(@"info.circle", 18.0) identifier:nil handler:^(__unused UIAction *action) {
+		NSString *info = [NSString stringWithFormat:@"%@ — %ld×%ld — %@", [self qualityLabelForRep:rep], (long)rep.width, (long)rep.height, SCIQualityBandwidth(rep.bandwidth)];
+		UIPasteboard.generalPasteboard.string = info;
+		SCINotifySuccess(SCI_NOTIF_COPY_QUALITY_URL, SCILocalized(@"Copied quality info"), nil);
+	}];
+
+	NSMutableArray *items = [NSMutableArray arrayWithObjects:copyVideo, copyInfo, nil];
+
+	if (audioURL) {
+		UIAction *copyAudio = [UIAction actionWithTitle:SCILocalized(@"Copy audio URL") image:SCIQualityIcon(@"waveform", 18.0) identifier:nil handler:^(__unused UIAction *action) {
+			UIPasteboard.generalPasteboard.string = audioURL.absoluteString;
+			SCINotifySuccess(SCI_NOTIF_COPY_AUDIO_URL, SCILocalized(@"Copied audio URL"), nil);
+		}];
+
+		[items insertObject:copyAudio atIndex:1];
+	}
+
+	return [UIMenu menuWithTitle:@"" children:items];
 }
 
-- (UIMenu *)menuForRow:(NSInteger)row videoRep:(SCIDashRepresentation *)videoRep {
-    NSURL *vURL = videoRep.url;
-    NSURL *aURL = self.audioRep.url;
-
-    UIAction *copyV = [UIAction actionWithTitle:SCILocalized(@"Copy video URL")
-                                          image:[UIImage systemImageNamed:@"video.fill"]
-                                     identifier:nil
-                                        handler:^(__unused UIAction *a) {
-        if (vURL) [UIPasteboard generalPasteboard].string = vURL.absoluteString;
-    }];
-
-    NSMutableArray *items = [NSMutableArray arrayWithObject:copyV];
-    if (aURL) {
-        UIAction *copyA = [UIAction actionWithTitle:SCILocalized(@"Copy audio URL")
-                                              image:[UIImage systemImageNamed:@"waveform"]
-                                         identifier:nil
-                                            handler:^(__unused UIAction *a) {
-            [UIPasteboard generalPasteboard].string = aURL.absoluteString;
-        }];
-        [items addObject:copyA];
-    }
-
-    UIAction *copyMPD = [UIAction actionWithTitle:SCILocalized(@"Copy quality info")
-                                            image:[UIImage systemImageNamed:@"info.circle"]
-                                       identifier:nil
-                                          handler:^(__unused UIAction *a) {
-        NSString *info = [NSString stringWithFormat:@"%ldp — %ld×%ld — %.1f Mbps",
-                          (long)MIN(videoRep.width, videoRep.height),
-                          (long)videoRep.width, (long)videoRep.height,
-                          videoRep.bandwidth / 1000000.0];
-        [UIPasteboard generalPasteboard].string = info;
-    }];
-    [items addObject:copyMPD];
-
-    return [UIMenu menuWithTitle:@"" children:items];
+- (void)playStandardPreview {
+	if (!self.standardURL) return;
+	[self presentPlayerWithURL:self.standardURL];
 }
-
-// MARK: - Selection
-
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    [self dismissViewControllerAnimated:YES completion:^{
-        if (ip.section == 0) {
-            if (self.onPickStandard) self.onPickStandard();
-        } else if (ip.section == 1) {
-            SCIDashRepresentation *rep = self.videoReps[ip.row];
-            if (self.onPickHD) self.onPickHD(rep, self.audioRep);
-        } else {
-            BOOL isAudio = (ip.section == 2 && [self _hasAudioSection]);
-            if (isAudio) {
-                [SCIMediaActions downloadAudioOnlyForMedia:self.mediaRef action:self.saveAction];
-            } else if (self.photoURL) {
-                [SCIMediaActions downloadPhotoOnlyForMedia:self.mediaRef action:self.saveAction];
-            }
-        }
-    }];
-}
-
-// MARK: - Preview
 
 - (void)playPreview:(UIButton *)sender {
-    NSInteger idx = sender.tag;
-    if (idx < 0 || idx >= (NSInteger)self.videoReps.count) return;
+	NSInteger idx = sender.tag;
+	if (idx < 0 || idx >= (NSInteger)self.videoReps.count) return;
 
-    _SCIQualityCell *cell = (_SCIQualityCell *)[self.tableView cellForRowAtIndexPath:
-        [NSIndexPath indexPathForRow:idx inSection:1]];
-    [cell setLoading:YES];
+	[self.loadingVideoRows addIndex:idx];
+	NSIndexPath *ip = [NSIndexPath indexPathForRow:idx inSection:1];
+	[( _SCIQualityCell *)[self.tableView cellForRowAtIndexPath:ip] setLoading:YES];
 
-    SCIDashRepresentation *videoRep = self.videoReps[idx];
-    NSURL *videoURL = videoRep.url;
-    NSURL *audioURL = self.audioRep.url;
+	SCIDashRepresentation *videoRep = self.videoReps[idx];
+	NSURL *videoURL = videoRep.url;
+	NSURL *audioURL = self.audioRep.url;
 
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *tmp = NSTemporaryDirectory();
-        NSString *vPath = [tmp stringByAppendingPathComponent:
-            [NSString stringWithFormat:@"sci_preview_v_%@.mp4", [[NSUUID UUID] UUIDString]]];
-        NSString *aPath = [tmp stringByAppendingPathComponent:
-            [NSString stringWithFormat:@"sci_preview_a_%@.m4a", [[NSUUID UUID] UUIDString]]];
-        NSString *oPath = [tmp stringByAppendingPathComponent:
-            [NSString stringWithFormat:@"sci_preview_%@.mp4", [[NSUUID UUID] UUIDString]]];
+	if (!videoURL) {
+		[self restorePlayButton:idx];
+		return;
+	}
 
-        NSData *vData = [NSURLConnection sendSynchronousRequest:
-            [NSURLRequest requestWithURL:videoURL] returningResponse:nil error:nil];
-        if (!vData.length) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [self restorePlayButton:idx]; });
-            return;
-        }
-        [vData writeToFile:vPath atomically:YES];
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		NSString *vPath = [SCITempFiles claimWithExt:@"mp4" ttl:300 tag:@"q_v"].path;
+		NSString *aPath = [SCITempFiles claimWithExt:@"m4a" ttl:300 tag:@"q_a"].path;
+		NSString *oPath = [SCITempFiles claimWithExt:@"mp4" ttl:1800 tag:@"q_o"].path;
 
-        NSString *cmd;
-        if (audioURL) {
-            NSData *aData = [NSURLConnection sendSynchronousRequest:
-                [NSURLRequest requestWithURL:audioURL] returningResponse:nil error:nil];
-            if (aData.length) {
-                [aData writeToFile:aPath atomically:YES];
-                cmd = [NSString stringWithFormat:
-                    @"-y -hide_banner "
-                    @"-analyzeduration 1M -probesize 1M -fflags +genpts "
-                    @"-i '%@' -i '%@' -map 0:v:0 -map 1:a:0 "
-                    @"-c:a copy -c:v h264_videotoolbox -b:v 8M -realtime 1 -allow_sw 1 "
-                    @"-movflags +faststart -shortest '%@'",
-                    vPath, aPath, oPath];
-            } else {
-                cmd = [NSString stringWithFormat:
-                    @"-y -hide_banner "
-                    @"-analyzeduration 1M -probesize 1M -fflags +genpts "
-                    @"-i '%@' -c:v h264_videotoolbox -b:v 8M -realtime 1 -allow_sw 1 "
-                    @"-movflags +faststart '%@'",
-                    vPath, oPath];
-            }
-        } else {
-            cmd = [NSString stringWithFormat:
-                @"-y -hide_banner "
-                @"-analyzeduration 1M -probesize 1M -fflags +genpts "
-                @"-i '%@' -c:v h264_videotoolbox -b:v 8M -realtime 1 -allow_sw 1 "
-                @"-movflags +faststart '%@'",
-                vPath, oPath];
-        }
+		NSData *videoData = [NSData dataWithContentsOfURL:videoURL];
+		if (!videoData.length || ![videoData writeToFile:vPath atomically:YES]) {
+			SCIRemoveFiles(@[vPath, aPath, oPath]);
+			[self restorePlayButton:idx];
+			return;
+		}
 
-        [SCIFFmpeg executeCommand:cmd completion:^(BOOL success, NSString *output) {
-            [[NSFileManager defaultManager] removeItemAtPath:vPath error:nil];
-            [[NSFileManager defaultManager] removeItemAtPath:aPath error:nil];
+		BOOL hasAudioFile = NO;
+		if (audioURL) {
+			NSData *audioData = [NSData dataWithContentsOfURL:audioURL];
+			hasAudioFile = audioData.length && [audioData writeToFile:aPath atomically:YES];
+		}
 
-            if (success && [[NSFileManager defaultManager] fileExistsAtPath:oPath]) {
-                AVPlayerViewController *playerVC = [AVPlayerViewController new];
-                playerVC.player = [AVPlayer playerWithURL:[NSURL fileURLWithPath:oPath]];
-                playerVC.modalPresentationStyle = UIModalPresentationOverFullScreen;
-                [self presentViewController:playerVC animated:YES completion:^{
-                    [playerVC.player play];
-                }];
-            }
-            [self restorePlayButton:idx];
-        }];
-    });
+		NSDictionary *args = [SCIFFmpeg encodingArgsForFallbackPreset:nil];
+		NSString *vArgs = args[@"video"];
+		NSString *aArgs = args[@"audio"];
+		NSString *cArgs = args[@"container"];
+		NSString *fArgs = args[@"filter"];
+		NSString *cmd = hasAudioFile
+			? [NSString stringWithFormat:@"-y -hide_banner -analyzeduration 100M -probesize 100M -fflags +genpts -i '%@' -i '%@' -map 0:v:0 -map 1:a:0 %@ %@ %@ %@ -shortest '%@'", vPath, aPath, fArgs, vArgs, aArgs, cArgs, oPath]
+			: [NSString stringWithFormat:@"-y -hide_banner -analyzeduration 100M -probesize 100M -fflags +genpts -i '%@' %@ %@ %@ '%@'", vPath, fArgs, vArgs, cArgs, oPath];
+
+		[SCIFFmpeg executeCommand:cmd completion:^(BOOL success, __unused NSString *output) {
+			SCIRemoveFiles(@[vPath, aPath]);
+
+			dispatch_async(dispatch_get_main_queue(), ^{
+				if (success && [NSFileManager.defaultManager fileExistsAtPath:oPath])
+					[self presentPlayerWithURL:[NSURL fileURLWithPath:oPath]];
+
+				[self restorePlayButton:idx];
+			});
+		}];
+	});
+}
+
+- (void)presentPlayerWithURL:(NSURL *)url {
+	AVPlayerViewController *playerVC = [AVPlayerViewController new];
+	playerVC.player = [AVPlayer playerWithURL:url];
+	playerVC.modalPresentationStyle = UIModalPresentationOverFullScreen;
+
+	[self presentViewController:playerVC animated:YES completion:^{
+		[playerVC.player play];
+	}];
 }
 
 - (void)restorePlayButton:(NSInteger)idx {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        _SCIQualityCell *cell = (_SCIQualityCell *)[self.tableView cellForRowAtIndexPath:
-            [NSIndexPath indexPathForRow:idx inSection:1]];
-        [cell setLoading:NO];
-    });
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[self.loadingVideoRows removeIndex:idx];
+		NSIndexPath *ip = [NSIndexPath indexPathForRow:idx inSection:1];
+		[( _SCIQualityCell *)[self.tableView cellForRowAtIndexPath:ip] setLoading:NO];
+	});
 }
 
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
+	[tableView deselectRowAtIndexPath:ip animated:YES];
+
+	[self dismissViewControllerAnimated:YES completion:^{
+		if (ip.section == 0) {
+			if (self.onPickStandard) self.onPickStandard();
+			return;
+		}
+
+		if (ip.section == 1) {
+			if (ip.row < (NSInteger)self.videoReps.count && self.onPickHD)
+				self.onPickHD(self.videoReps[ip.row], self.audioRep);
+			return;
+		}
+
+		if ([self isAudioSection:ip.section])
+			[SCIMediaActions downloadAudioOnlyForMedia:self.mediaRef action:self.saveAction];
+		else if (self.photoURL)
+			[SCIMediaActions downloadPhotoOnlyForMedia:self.mediaRef action:self.saveAction];
+	}];
+}
+- (NSString *)sizeTextForURL:(NSURL *)url {
+	if (!url.absoluteString.length) return @"";
+
+	NSNumber *cached = self.sizeCache[url.absoluteString];
+	if (cached) {
+		long long bytes = cached.longLongValue;
+		return bytes > 0 ? SCIQualityFileSize(bytes) : SCILocalized(@"Size unknown");
+	}
+
+	[self fetchSizeForURL:url];
+	return SCILocalized(@"calculating size…");
+}
+
+- (NSString *)combinedSizeTextForVideo:(NSURL *)videoURL audio:(NSURL *)audioURL {
+	NSString *videoKey = videoURL.absoluteString;
+	NSString *audioKey = audioURL.absoluteString;
+
+	if (!videoKey.length) return @"";
+
+	NSNumber *videoSize = self.sizeCache[videoKey];
+	NSNumber *audioSize = audioKey.length ? self.sizeCache[audioKey] : @(0);
+
+	if (!videoSize) [self fetchSizeForURL:videoURL];
+	if (audioKey.length && !audioSize) [self fetchSizeForURL:audioURL];
+
+	if (!videoSize || (audioKey.length && !audioSize))
+		return SCILocalized(@"calculating size…");
+
+	long long v = videoSize.longLongValue;
+	long long a = audioSize.longLongValue;
+
+	if (v <= 0 || a < 0)
+		return SCILocalized(@"Size unknown");
+
+	return SCIQualityFileSize(v + a);
+}
+
+- (void)fetchSizeForURL:(NSURL *)url {
+	NSString *key = url.absoluteString;
+	if (!key.length || self.sizeCache[key] || [self.sizeLoading containsObject:key]) return;
+
+	[self.sizeLoading addObject:key];
+
+	NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+	req.HTTPMethod = @"HEAD";
+	req.timeoutInterval = 8.0;
+	req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+
+	NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(__unused NSData *data, NSURLResponse *response, __unused NSError *error) {
+		long long bytes = response.expectedContentLength;
+		if (bytes <= 0 && [response isKindOfClass:NSHTTPURLResponse.class]) {
+			NSString *length = ((NSHTTPURLResponse *)response).allHeaderFields[@"Content-Length"];
+			bytes = length.longLongValue;
+		}
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			self.sizeCache[key] = @(bytes > 0 ? bytes : -1);
+			[self.sizeLoading removeObject:key];
+			[self.tableView reloadData];
+		});
+	}];
+
+	[task resume];
+}
 @end
-
-
-// MARK: - Public API
 
 @implementation SCIQualityPicker
 
-+ (BOOL)pickQualityForMedia:(id)media
-                   fromView:(UIView *)sourceView
-                     action:(DownloadAction)action
-                     picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked
-                   fallback:(void(^)(void))fallback {
-    if (!media) { if (fallback) fallback(); return NO; }
++ (BOOL)pickQualityForMedia:(id)media fromView:(UIView *)sourceView action:(DownloadAction)action picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked fallback:(void(^)(void))fallback {
+	if (!media || ![SCIUtils getBoolPref:@"enhance_download_quality"] || ![SCIFFmpeg isAvailable]) {
+		if (fallback) fallback();
+		return NO;
+	}
 
-    BOOL prefOn = [SCIUtils getBoolPref:@"enhance_download_quality"];
-    BOOL ffmpegOK = [SCIFFmpeg isAvailable];
-    if (!prefOn || !ffmpegOK) { if (fallback) fallback(); return NO; }
+	NSURL *standardURL = [SCIUtils getVideoUrlForMedia:(IGMedia *)media];
+	if (!standardURL) {
+		if (fallback) fallback();
+		return NO;
+	}
 
-    BOOL isVideo = ([SCIUtils getVideoUrlForMedia:(IGMedia *)media] != nil);
-    if (!isVideo) { if (fallback) fallback(); return NO; }
+	NSString *manifest = [SCIDashParser dashManifestForMedia:media];
+	if (!manifest.length) {
+		if (fallback) fallback();
+		return NO;
+	}
 
-    NSString *manifest = [SCIDashParser dashManifestForMedia:media];
-    if (!manifest.length) { if (fallback) fallback(); return NO; }
+	// Some media carry the manifest as a URL, not inline XML — fetch it first.
+	if ([manifest hasPrefix:@"http"]) {
+		NSURL *manifestURL = [NSURL URLWithString:manifest];
+		if (!manifestURL) {
+			if (fallback) fallback();
+			return NO;
+		}
 
-    NSArray<SCIDashRepresentation *> *allReps = [SCIDashParser parseManifest:manifest];
-    NSArray<SCIDashRepresentation *> *videoReps = [SCIDashParser videoRepresentations:allReps];
-    SCIDashRepresentation *audioRep = [SCIDashParser bestAudioFromRepresentations:allReps];
-    if (!videoReps.count) { if (fallback) fallback(); return NO; }
+		NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:manifestURL];
+		req.timeoutInterval = 10.0;
+		[[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:^(NSData *data, __unused NSURLResponse *response, __unused NSError *error) {
+			NSString *xml = data.length ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[self continueWithManifest:xml standardURL:standardURL media:media fromView:sourceView action:action picked:picked fallback:fallback];
+			});
+		}] resume];
+		return YES;
+	}
 
-    NSString *qualityPref = [SCIUtils getStringPref:@"default_video_quality"];
-    if (!qualityPref.length) qualityPref = @"always_ask";
-
-    if ([qualityPref isEqualToString:@"always_ask"]) {
-        NSURL *standardURL = [SCIUtils getVideoUrlForMedia:(IGMedia *)media];
-        [self showSheetWithVideoReps:videoReps
-                            audioRep:audioRep
-                         standardURL:standardURL
-                               media:media
-                              action:action
-                              picked:picked
-                            fallback:fallback];
-    } else {
-        SCIVideoQuality q = SCIVideoQualityHighest;
-        if ([qualityPref isEqualToString:@"medium"]) q = SCIVideoQualityMedium;
-        else if ([qualityPref isEqualToString:@"low"]) q = SCIVideoQualityLowest;
-
-        SCIDashRepresentation *videoRep = [SCIDashParser representationForQuality:q fromRepresentations:allReps];
-        if (picked) picked(videoRep, audioRep);
-    }
-    return YES;
+	return [self continueWithManifest:manifest standardURL:standardURL media:media fromView:sourceView action:action picked:picked fallback:fallback];
 }
 
-+ (void)showSheetWithVideoReps:(NSArray<SCIDashRepresentation *> *)videoReps
-                      audioRep:(SCIDashRepresentation *)audioRep
-                   standardURL:(NSURL *)standardURL
-                         media:(id)media
-                        action:(DownloadAction)action
-                        picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked
-                      fallback:(void(^)(void))fallback {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        _SCIQualitySheetVC *vc = [_SCIQualitySheetVC new];
-        vc.videoReps = videoReps;
-        vc.audioRep = audioRep;
-        vc.standardURL = standardURL;
-        vc.mediaRef = media;
-        vc.saveAction = action;
-        // DASH truth: audio exists iff the manifest parsed an audio rep.
-        vc.hasAudio = (audioRep.url != nil);
-        vc.photoURL = [SCIUtils getPhotoUrlForMedia:(IGMedia *)media];
-        vc.onPickStandard = fallback;
-        vc.onPickHD = picked;
++ (BOOL)continueWithManifest:(NSString *)manifest standardURL:(NSURL *)standardURL media:(id)media fromView:(UIView *)sourceView action:(DownloadAction)action picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked fallback:(void(^)(void))fallback {
+	NSArray<SCIDashRepresentation *> *allReps = [SCIDashParser parseManifest:manifest];
+	NSArray<SCIDashRepresentation *> *videoReps = [SCIDashParser videoRepresentations:allReps];
+	SCIDashRepresentation *audioRep = [SCIDashParser bestAudioFromRepresentations:allReps];
 
-        vc.modalPresentationStyle = UIModalPresentationPageSheet;
+	if (!videoReps.count) {
+		if (fallback) fallback();
+		return NO;
+	}
 
-        if (@available(iOS 15.0, *)) {
-            UISheetPresentationController *sheetPC = vc.sheetPresentationController;
-            sheetPC.detents = @[
-                UISheetPresentationControllerDetent.mediumDetent,
-                UISheetPresentationControllerDetent.largeDetent,
-            ];
-            SEL grabberSel = NSSelectorFromString(@"setPrefersGrabberIndicator:");
-            if ([sheetPC respondsToSelector:grabberSel]) {
-                ((void(*)(id,SEL,BOOL))objc_msgSend)(sheetPC, grabberSel, YES);
-            }
-            sheetPC.prefersScrollingExpandsWhenScrolledToEdge = YES;
-        }
+	NSString *qualityPref = [SCIUtils getStringPref:@"default_video_quality"] ?: @"always_ask";
 
-        [topMostController() presentViewController:vc animated:YES completion:nil];
-    });
+	if ([qualityPref isEqualToString:@"always_ask"]) {
+		[self showSheetWithVideoReps:videoReps audioRep:audioRep standardURL:standardURL media:media action:action picked:picked fallback:fallback];
+		return YES;
+	}
+
+	SCIVideoQuality quality = SCIVideoQualityHighest;
+	if ([qualityPref isEqualToString:@"medium"]) quality = SCIVideoQualityMedium;
+	else if ([qualityPref isEqualToString:@"low"]) quality = SCIVideoQualityLowest;
+
+	SCIDashRepresentation *videoRep = [SCIDashParser representationForQuality:quality fromRepresentations:allReps];
+	if (picked) picked(videoRep, audioRep);
+	return YES;
+}
+
++ (void)showSheetWithVideoReps:(NSArray<SCIDashRepresentation *> *)videoReps audioRep:(SCIDashRepresentation *)audioRep standardURL:(NSURL *)standardURL media:(id)media action:(DownloadAction)action picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked fallback:(void(^)(void))fallback {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		_SCIQualitySheetVC *vc = [_SCIQualitySheetVC new];
+		vc.videoReps = videoReps ?: @[];
+		vc.audioRep = audioRep;
+		vc.standardURL = standardURL;
+		vc.mediaRef = media;
+		vc.saveAction = action;
+		vc.hasAudio = audioRep.url != nil;
+		vc.photoURL = [SCIUtils getPhotoUrlForMedia:(IGMedia *)media];
+		vc.onPickStandard = fallback;
+		vc.onPickHD = picked;
+		vc.modalPresentationStyle = UIModalPresentationPageSheet;
+
+		UISheetPresentationController *sheet = vc.sheetPresentationController;
+		if (sheet) {
+			sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+			sheet.prefersGrabberVisible = YES;
+			sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
+		}
+
+		[topMostController() presentViewController:vc animated:YES completion:nil];
+	});
 }
 
 @end

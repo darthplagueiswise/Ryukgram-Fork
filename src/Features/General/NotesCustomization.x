@@ -1,293 +1,402 @@
+#import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import "../../SCIChrome.h"
+#import "../../UI/SCIColorPickerSheet.h"
+#import <objc/runtime.h>
 
-static char targetStaticRef[] = "target";
+// Notes bubble editor: inject Background / Text / Emoji buttons above the
+// palette. Each opens the shared color picker (or an emoji prompt) and writes
+// back through the composer's theme model.
 
-%hook IGDirectNotesCreationView
-- (id)initWithViewModel:(id)model
-         featureSupport:(IGNotesCreationFeatureSupportModel *)support
-  presentationAnimation:(id)animation
- composerUpdateListener:(id)listener
-               delegate:(id)delegate
-             layoutType:(long long)type
-            userSession:(id)session
-{
-    if ([SCIUtils getBoolPref:@"enable_notes_customization"]) {
-
-        // enableAnimatedEmojisInCreation
-        @try {
-            [support setValue:@(YES) forKey:@"enableAnimatedEmojisInCreation"];
-        }
-        @catch (NSException *exception) {
-            NSLog(@"[SCInsta] WARNING: %@\n\nFull object: %@", exception.reason, support);
-        }
-
-        // enableBubbleCustomization
-        @try {
-            [support setValue:@(YES) forKey:@"enableBubbleCustomization"];
-        }
-        @catch (NSException *exception) {
-            NSLog(@"[SCInsta] WARNING: %@\n\nFull object: %@", exception.reason, support);
-        }
-
-        // enableRandomThemeGenerator
-        @try {
-            [support setValue:@(YES) forKey:@"enableRandomThemeGenerator"];
-        }
-        @catch (NSException *exception) {
-            NSLog(@"[SCInsta] WARNING: %@\n\nFull object: %@", exception.reason, support);
-        }
-        
-    }
-
-    return %orig(model, support, animation, listener, delegate, type, session);
-}
-%end
-
-// Demangled name: IGDirectNotesUISwift.IGDirectNotesBubbleEditorColorPaletteView
-%hook _TtC20IGDirectNotesUISwift41IGDirectNotesBubbleEditorColorPaletteView
-%property (nonatomic, copy) UIColor *backgroundColor;
-%property (nonatomic, copy) UIColor *textColor;
-%property (nonatomic, copy) NSString *emojiText;
-
-- (void)didMoveToWindow {
-    %orig;
-
-    if (![SCIUtils getBoolPref:@"custom_note_themes"]) return;
-    
-    // Inject buttons once in view lifecycle
-    static char didInjectButtons;
-    if (objc_getAssociatedObject(self, &didInjectButtons)) {
-        return;
-    }
-
-    __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        __strong typeof(weakSelf) self = weakSelf;
-        if (!self || !self.window) {
-            return;
-        }
-
-        UIView *container = self.superview ?: self.window;
-        if (!container) {
-            return;
-        }
-
-        // Button config
-        UIButtonConfiguration *config = [UIButtonConfiguration tintedButtonConfiguration];
-        config.background.cornerRadius = 12.0;
-        config.cornerStyle = UIButtonConfigurationCornerStyleFixed;
-        config.contentInsets = NSDirectionalEdgeInsetsMake(13.7, 10, 13.7, 10);
-
-
-        // Left button
-        UIButton *leftButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        leftButton.configuration = config;
-        leftButton.translatesAutoresizingMaskIntoConstraints = NO;
-        leftButton.tintColor = [SCIUtils SCIColor_Primary];
-
-        NSMutableAttributedString *attrTitleLeft = [[NSMutableAttributedString alloc] initWithString:@"Background"];
-        [attrTitleLeft addAttribute:NSFontAttributeName
-                          value:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]
-                          range:NSMakeRange(0, attrTitleLeft.length)
-        ];
-        [leftButton setAttributedTitle:attrTitleLeft forState:UIControlStateNormal];
-        [leftButton sizeToFit];
-
-        [leftButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            [self presentColorPicker:@"Background"];
-        }] forControlEvents:UIControlEventTouchUpInside];
-
-        // Middle button
-        UIButton *middleButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        middleButton.configuration = config;
-        middleButton.translatesAutoresizingMaskIntoConstraints = NO;
-        middleButton.tintColor = [SCIUtils SCIColor_Primary];
-
-        NSMutableAttributedString *attrTitleMiddle = [[NSMutableAttributedString alloc] initWithString:@"Text"];
-        [attrTitleMiddle addAttribute:NSFontAttributeName
-                          value:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]
-                          range:NSMakeRange(0, attrTitleMiddle.length)
-        ];
-        [middleButton setAttributedTitle:attrTitleMiddle forState:UIControlStateNormal];
-        [middleButton sizeToFit];
-
-        [middleButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            [self presentColorPicker:@"Text"];
-        }] forControlEvents:UIControlEventTouchUpInside];
-
-        // Right button
-        UIButton *rightButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        rightButton.configuration = config;
-        rightButton.translatesAutoresizingMaskIntoConstraints = NO;
-        rightButton.tintColor = [SCIUtils SCIColor_Primary];
-
-        NSMutableAttributedString *attrTitleRight = [[NSMutableAttributedString alloc] initWithString:@"Emoji"];
-        [attrTitleRight addAttribute:NSFontAttributeName
-                          value:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]
-                          range:NSMakeRange(0, attrTitleRight.length)
-        ];
-        [rightButton setAttributedTitle:attrTitleRight forState:UIControlStateNormal];
-        [rightButton sizeToFit];
-
-        [rightButton addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Enter Emoji Text")
-                                                                           message:SCILocalized(@"Click the Apply button after this to see the emoji")
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            
-            [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-                textField.placeholder = SCILocalized(@"Type emoji...");
-            }];
-            
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                      style:UIAlertActionStyleDefault
-                                                    handler:^(UIAlertAction *action) {
-                self.emojiText = alert.textFields[0].text;
-                [self applySCICustomTheme:@"Emoji"];
-            }]];
-            
-            [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel")
-                                                      style:UIAlertActionStyleCancel
-                                                    handler:nil]];
-            
-            UIViewController *vc = [SCIUtils nearestViewControllerForView:self];
-            [vc presentViewController:alert animated:YES completion:nil];
-        }] forControlEvents:UIControlEventTouchUpInside];
-
-
-        // Create stack view
-        UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[leftButton, middleButton, rightButton]];
-        stack.axis = UILayoutConstraintAxisHorizontal;
-        stack.spacing = 15.0;
-        stack.alignment = UIStackViewAlignmentCenter;
-        stack.distribution = UIStackViewDistributionFillEqually;
-
-        // Find max height among arranged subviews
-        CGFloat maxHeight = 0.0;
-        for (UIView *subview in stack.arrangedSubviews) {
-            maxHeight = MAX(maxHeight, subview.bounds.size.height);
-        }
-
-        // Manual frame with side padding
-        CGFloat bottomMargin = 15.0;
-        
-        CGRect viewFrame = [self convertRect:self.bounds toView:container];
-        CGFloat y = CGRectGetMinY(viewFrame) - maxHeight - bottomMargin;
-        CGFloat width = container.bounds.size.width - stack.spacing * 2;
-
-        stack.frame = CGRectMake(stack.spacing, y, width, maxHeight);
-
-        [stack layoutIfNeeded];
-        [container addSubview:stack];
-
-        objc_setAssociatedObject(
-            self,
-            &didInjectButtons,
-            @YES,
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC
-        );
-    });
-}
-
-%new - (void)presentColorPicker:(NSString *)target {
-    UIColorPickerViewController *colorPickerController = [[UIColorPickerViewController alloc] init];
-
-    colorPickerController.delegate = (id<UIColorPickerViewControllerDelegate>)self; // cast to suppress warnings
-    colorPickerController.title = [NSString stringWithFormat:@"%@ color", target];
-    colorPickerController.modalPresentationStyle = UIModalPresentationPopover;
-    colorPickerController.supportsAlpha = NO;
-
-    // Show last picked color for type
-    if ([target isEqualToString:@"Background"]) {
-        colorPickerController.selectedColor = self.backgroundColor;
-    }
-    else if ([target isEqualToString:@"Text"]) {
-        colorPickerController.selectedColor = self.textColor;
-    }
-    
-    UIViewController *presentingVC = [SCIUtils nearestViewControllerForView:self];
-    
-    if (presentingVC != nil) {
-        [presentingVC presentViewController:colorPickerController animated:YES completion:nil];
-    }
-
-    // Save which color target to update 
-    objc_setAssociatedObject(
-        presentingVC,
-        &targetStaticRef,
-        target,
-        OBJC_ASSOCIATION_RETAIN_NONATOMIC
-    );
-}
-
-// UIColorPickerViewControllerDelegate Protocol
-%new - (void)colorPickerViewController:(UIColorPickerViewController *)viewController
-                        didSelectColor:(UIColor *)color
-                          continuously:(BOOL)continuously
-{
-    _TtC20IGDirectNotesUISwift41IGDirectNotesBubbleEditorColorPaletteView *bubbleEditorVC = [SCIUtils nearestViewControllerForView:self];
-    
-    NSString *target = objc_getAssociatedObject(bubbleEditorVC, &targetStaticRef);
-    if (!target) return;
-    
-    // Update saved color target
-    if ([target isEqualToString:@"Background"]) {
-        self.backgroundColor = color;
-    }
-    else if ([target isEqualToString:@"Text"]) {
-        self.textColor = color;
-    }
-
-    [self applySCICustomTheme:target];
+typedef NS_ENUM(NSInteger, SCINoteColorMode) {
+	SCINoteColorModeBackground = 0,
+	SCINoteColorModeText,
 };
 
-%new - (void)applySCICustomTheme:(NSString *)target {
-    // Get notes composer vc
-    _TtC20IGDirectNotesUISwift39IGDirectNotesBubbleEditorViewController *parentVC = [SCIUtils nearestViewControllerForView:self];
-    if (!parentVC) return;
+@interface _TtC26IGNotesBubbleCreationSwift39IGDirectNotesBubbleEditorViewController (SCINotes)
+- (void)sciOpenColorSheetMode:(SCINoteColorMode)mode;
+- (void)sciOpenEmojiPrompt;
+@end
 
-    IGDirectNotesComposerViewController *composerVC = parentVC.delegate;
-    if (!composerVC) return;
+#pragma mark - Shared prefs
 
-    // Get current theme model
-    IGNotesCustomThemeCreationModel *model = [composerVC valueForKey:@"_selectedCustomThemeCreationModel"];
-    if (!model) {
-        // Create new note theme model
-        model = [[%c(IGNotesCustomThemeCreationModel) alloc] init];
-        if (!model) return;
-    }
-
-    //SCILog(@"Current note theme model: %@", model);
-    [model setValue:[composerVC valueForKey:@"_composerText"] forKey:@"customEmoji"];
-
-    // Update saved color target
-    if ([target isEqualToString:@"Background"]) {
-        [model setValue:self.backgroundColor forKey:@"backgroundColor"];
-    }
-    else if ([target isEqualToString:@"Text"]) {
-        [model setValue:self.textColor forKey:@"textColor"];
-        [model setValue:self.textColor forKey:@"secondaryTextColor"];  
-    }
-
-    // Always set emoji to prevent it being overwritten
-    [model setValue:self.emojiText forKey:@"customEmoji"];  
-
-    //SCILog(@"Updated note theme model: %@", model);
-
-    // Apply custom notes theme
-    [composerVC notesBubbleEditorViewControllerDidUpdateWithCustomThemeCreationModel:model];
-
-    // Enable apply/cancel buttons
-    UIView *parentVCView = [parentVC view];
-    if (!parentVCView) return;
-
-    NSArray<UIView *> *parentVCSubviews = [parentVCView subviews];
-    if (!parentVCSubviews) return;
-
-    [parentVCSubviews enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-        if ([obj isKindOfClass:%c(IGDSBottomButtonsView)]) {
-            [obj setPrimaryButtonEnabled:YES];
-            [obj setSecondaryButtonEnabled:YES];
-        }
-    }];
+static inline BOOL SCINotesFlagFlipEnabled(void) {
+	return [SCIUtils getBoolPref:@"custom_note_themes"] || [SCIUtils getBoolPref:@"enable_notes_customization"];
 }
+
+static inline BOOL SCINotesButtonsEnabled(void) {
+	return [SCIUtils getBoolPref:@"custom_note_themes"];
+}
+
+#pragma mark - Force-flip IG feature flags
+
+%hook IGDirectNotesCreationView
+
+- (id)initWithViewModel:(id)model
+		 featureSupport:(IGNotesCreationFeatureSupportModel *)support
+  presentationAnimation:(id)animation
+ composerUpdateListener:(id)listener
+			   delegate:(id)delegate
+			 layoutType:(long long)type
+			userSession:(id)session {
+	if (SCINotesFlagFlipEnabled()) {
+		@try { [support setValue:@YES forKey:@"enableAnimatedEmojisInCreation"]; } @catch (__unused NSException *e) {}
+		@try { [support setValue:@YES forKey:@"enableBubbleCustomization"]; } @catch (__unused NSException *e) {}
+		@try { [support setValue:@YES forKey:@"enableThemesEditButton"]; } @catch (__unused NSException *e) {}
+		@try { [support setValue:@YES forKey:@"enableThemesNavEntrypointButton"]; } @catch (__unused NSException *e) {}
+	}
+
+	return %orig(model, support, animation, listener, delegate, type, session);
+}
+
+%end
+
+#pragma mark - Helpers
+
+static id SCIKVC(id obj, NSString *key) {
+	if (!obj || !key.length) return nil;
+
+	@try {
+		return [obj valueForKey:key];
+	} @catch (__unused NSException *e) {
+		return nil;
+	}
+}
+
+static _TtC26IGNotesBubbleCreationSwift39IGDirectNotesBubbleEditorViewController *SCIBubbleEditorVCForView(UIView *view) {
+	UIViewController *vc = [SCIUtils nearestViewControllerForView:view];
+
+	while (vc) {
+		if ([vc isKindOfClass:%c(_TtC26IGNotesBubbleCreationSwift39IGDirectNotesBubbleEditorViewController)])
+			return (id)vc;
+
+		vc = vc.parentViewController ?: vc.presentingViewController;
+	}
+
+	return nil;
+}
+
+static IGDirectNotesComposerViewController *SCIComposerForEditor(UIViewController *editor) {
+	id delegate = [editor respondsToSelector:@selector(delegate)] ? [(id)editor delegate] : nil;
+	return [delegate isKindOfClass:%c(IGDirectNotesComposerViewController)] ? delegate : nil;
+}
+
+static IGNotesCustomThemeCreationModel *SCICurrentThemeModel(IGDirectNotesComposerViewController *composer) {
+	return SCIKVC(composer, @"_selectedCustomThemeCreationModel");
+}
+
+// Pando theme model is immutable — rebuild via the all-fields init, copying
+// every existing field plus the override(s).
+static IGNotesCustomThemeCreationModel *SCIBuildThemeModel(IGDirectNotesComposerViewController *composer,
+														   UIColor *bgOverride,
+														   UIColor *textOverride,
+														   NSString *emojiOverride,
+														   BOOL applyBg,
+														   BOOL applyText,
+														   BOOL applyEmoji) {
+	Class K = %c(IGNotesCustomThemeCreationModel);
+	if (!K) return nil;
+
+	IGNotesCustomThemeCreationModel *prev = SCICurrentThemeModel(composer);
+
+	UIColor *bg = SCIKVC(prev, @"backgroundColor");
+	NSArray *grad = SCIKVC(prev, @"gradientBackgroundColors");
+	UIColor *text = SCIKVC(prev, @"textColor");
+	UIColor *secondaryText = SCIKVC(prev, @"secondaryTextColor");
+	id emoji = SCIKVC(prev, @"customEmoji");
+	NSString *customizationId = SCIKVC(prev, @"customizationId");
+	BOOL usedGeneratedTheme = [SCIKVC(prev, @"usedGeneratedTheme") boolValue];
+	NSInteger activationType = [SCIKVC(prev, @"activationType") integerValue];
+
+	if (applyBg) {
+		bg = bgOverride;
+		grad = nil;
+	}
+
+	if (applyText) {
+		text = textOverride;
+		secondaryText = textOverride ?: secondaryText;
+	}
+
+	if (applyEmoji)
+		emoji = emojiOverride;
+
+	bg = bg ?: UIColor.systemPinkColor;
+	text = text ?: UIColor.whiteColor;
+	secondaryText = secondaryText ?: text;
+
+	return [[K alloc] initWithBackgroundColor:bg
+					 gradientBackgroundColors:grad
+									textColor:text
+						   secondaryTextColor:secondaryText
+								  customEmoji:emoji
+							  customizationId:customizationId
+						   usedGeneratedTheme:usedGeneratedTheme
+							   activationType:activationType];
+}
+
+static IGNotesCustomThemeCreationModel *SCIThemeModelByOverridingColor(IGDirectNotesComposerViewController *composer,
+																	   SCINoteColorMode mode,
+																	   UIColor *newColor) {
+	BOOL applyBg = mode == SCINoteColorModeBackground;
+	BOOL applyText = mode == SCINoteColorModeText;
+
+	return SCIBuildThemeModel(composer,
+							  applyBg ? newColor : nil,
+							  applyText ? newColor : nil,
+							  nil,
+							  applyBg,
+							  applyText,
+							  NO);
+}
+
+static IGNotesCustomThemeCreationModel *SCIThemeModelByOverridingEmoji(IGDirectNotesComposerViewController *composer,
+																	   NSString *emoji) {
+	return SCIBuildThemeModel(composer, nil, nil, emoji, NO, NO, YES);
+}
+
+static void SCIWalkSubviews(UIView *view, void (^block)(UIView *subview)) {
+	if (!view || !block) return;
+
+	for (UIView *sub in view.subviews) {
+		block(sub);
+		SCIWalkSubviews(sub, block);
+	}
+}
+
+static void SCIEnableBottomButtons(UIViewController *parentVC) {
+	if (!parentVC.view) return;
+
+	Class bottomButtonsClass = %c(IGDSBottomButtonsView);
+	if (!bottomButtonsClass) return;
+
+	SCIWalkSubviews(parentVC.view, ^(UIView *subview) {
+		if (![subview isKindOfClass:bottomButtonsClass]) return;
+
+		IGDSBottomButtonsView *buttons = (id)subview;
+		[buttons setPrimaryButtonEnabled:YES];
+		[buttons setSecondaryButtonEnabled:YES];
+	});
+}
+
+static UIButton *SCIMakeNoteButton(NSString *title) {
+	UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+	button.translatesAutoresizingMaskIntoConstraints = NO;
+	button.tintColor = [SCIUtils SCIColor_Primary];
+
+	UIButtonConfiguration *config = UIButtonConfiguration.tintedButtonConfiguration;
+	config.cornerStyle = UIButtonConfigurationCornerStyleFixed;
+	config.background.cornerRadius = 12.0;
+	config.contentInsets = NSDirectionalEdgeInsetsMake(12.0, 10.0, 12.0, 10.0);
+
+	NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:title ?: @""];
+	[attr addAttribute:NSFontAttributeName
+				 value:[UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold]
+				 range:NSMakeRange(0, attr.length)];
+
+	[button setAttributedTitle:attr forState:UIControlStateNormal];
+	button.configuration = config;
+
+	return button;
+}
+
+// Wrap the button in a chrome canvas so Hide UI on Capture redacts it; taps
+// still reach the button.
+static UIView *SCIWrapNoteButtonInChrome(UIButton *button) {
+	SCIChromeCanvas *canvas = [SCIChromeCanvas new];
+	canvas.translatesAutoresizingMaskIntoConstraints = NO;
+
+	UIView *host = canvas.contentContainer;
+	button.translatesAutoresizingMaskIntoConstraints = NO;
+	[host addSubview:button];
+
+	[NSLayoutConstraint activateConstraints:@[
+		[button.leadingAnchor constraintEqualToAnchor:host.leadingAnchor],
+		[button.trailingAnchor constraintEqualToAnchor:host.trailingAnchor],
+		[button.topAnchor constraintEqualToAnchor:host.topAnchor],
+		[button.bottomAnchor constraintEqualToAnchor:host.bottomAnchor]
+	]];
+
+	return canvas;
+}
+
+static char kSCINoteBgColorKey;
+static char kSCINoteTextColorKey;
+static char kSCINoteEmojiKey;
+static char kSCINoteStackKey;
+
+#pragma mark - Bubble editor VC handlers
+
+%hook _TtC26IGNotesBubbleCreationSwift39IGDirectNotesBubbleEditorViewController
+
+%new
+- (void)sciOpenColorSheetMode:(SCINoteColorMode)mode {
+	UIColor *saved = objc_getAssociatedObject(self, mode == SCINoteColorModeText ? &kSCINoteTextColorKey : &kSCINoteBgColorKey);
+	UIColor *initial = saved ?: (mode == SCINoteColorModeText ? UIColor.whiteColor : UIColor.systemPinkColor);
+
+	__weak typeof(self) weakSelf = self;
+	SCIColorPickerSheet *picker = [SCIColorPickerSheet sheetWithMode:SCIColorPickerSheetModeSolid
+														  startColor:initial
+															endColor:nil
+														applyHandler:^(__unused SCIColorPickerSheetMode pickerMode, UIColor *primary, __unused UIColor *secondary) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self || !primary) return;
+
+		IGDirectNotesComposerViewController *composer = SCIComposerForEditor((UIViewController *)self);
+		if (!composer) return;
+
+		IGNotesCustomThemeCreationModel *model = SCIThemeModelByOverridingColor(composer, mode, primary);
+		if (!model) return;
+
+		objc_setAssociatedObject(self,
+								 mode == SCINoteColorModeText ? &kSCINoteTextColorKey : &kSCINoteBgColorKey,
+								 primary,
+								 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+		[composer notesBubbleEditorViewControllerDidUpdateWithCustomThemeCreationModel:model];
+		SCIEnableBottomButtons((UIViewController *)self);
+	}];
+
+	[picker presentFromViewController:(UIViewController *)self];
+}
+
+%new
+- (void)sciOpenEmojiPrompt {
+	NSString *saved = objc_getAssociatedObject(self, &kSCINoteEmojiKey);
+
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Enter emoji")
+																   message:SCILocalized(@"Type an emoji to use as the note bubble icon.")
+															preferredStyle:UIAlertControllerStyleAlert];
+
+	[alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+		tf.placeholder = SCILocalized(@"Emoji");
+		tf.text = saved ?: @"";
+	}];
+
+	__weak typeof(self) weakSelf = self;
+	UIAlertAction *apply = [UIAlertAction actionWithTitle:SCILocalized(@"Apply")
+													style:UIAlertActionStyleDefault
+												  handler:^(__unused UIAlertAction *action) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
+		NSString *text = alert.textFields.firstObject.text ?: @"";
+		IGDirectNotesComposerViewController *composer = SCIComposerForEditor((UIViewController *)self);
+		if (!composer) return;
+
+		IGNotesCustomThemeCreationModel *model = SCIThemeModelByOverridingEmoji(composer, text);
+		if (!model) return;
+
+		objc_setAssociatedObject(self, &kSCINoteEmojiKey, text, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+		[composer notesBubbleEditorViewControllerDidUpdateWithCustomThemeCreationModel:model];
+		SCIEnableBottomButtons((UIViewController *)self);
+	}];
+
+	[alert addAction:apply];
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+
+	[self presentViewController:alert animated:YES completion:nil];
+}
+
+%end
+
+#pragma mark - Palette injection
+
+static UIStackView *SCINotesButtonStackForPalette(UIView *palette) {
+	return objc_getAssociatedObject(palette, &kSCINoteStackKey);
+}
+
+static void SCIPositionNotesButtonStack(UIView *palette) {
+	UIStackView *stack = SCINotesButtonStackForPalette(palette);
+	UIView *container = stack.superview;
+	if (!palette.window || !stack || !container) return;
+
+	CGRect paletteFrame = [palette convertRect:palette.bounds toView:container];
+
+	CGFloat margin = 15.0;
+	CGFloat height = 44.0;
+	CGFloat width = MAX(0.0, container.bounds.size.width - margin * 2.0);
+	CGFloat y = CGRectGetMinY(paletteFrame) - height - margin;
+
+	stack.frame = CGRectMake(margin, y, width, height);
+}
+
+static void SCIInjectNotesButtonsIfNeeded(UIView *palette) {
+	if (!SCINotesButtonsEnabled() || !palette.window) return;
+	if (SCINotesButtonStackForPalette(palette)) {
+		SCIPositionNotesButtonStack(palette);
+		return;
+	}
+
+	UIView *container = palette.superview ?: palette.window;
+	if (!container) return;
+
+	UIButton *bgButton = SCIMakeNoteButton(SCILocalized(@"Background"));
+	UIButton *textButton = SCIMakeNoteButton(SCILocalized(@"Text"));
+	UIButton *emojiButton = SCIMakeNoteButton(SCILocalized(@"Emoji"));
+
+	__weak UIView *weakPalette = palette;
+
+	[bgButton addAction:[UIAction actionWithHandler:^(__unused UIAction *action) {
+		UIView *strongPalette = weakPalette;
+		[SCIBubbleEditorVCForView(strongPalette) sciOpenColorSheetMode:SCINoteColorModeBackground];
+	}] forControlEvents:UIControlEventTouchUpInside];
+
+	[textButton addAction:[UIAction actionWithHandler:^(__unused UIAction *action) {
+		UIView *strongPalette = weakPalette;
+		[SCIBubbleEditorVCForView(strongPalette) sciOpenColorSheetMode:SCINoteColorModeText];
+	}] forControlEvents:UIControlEventTouchUpInside];
+
+	[emojiButton addAction:[UIAction actionWithHandler:^(__unused UIAction *action) {
+		UIView *strongPalette = weakPalette;
+		[SCIBubbleEditorVCForView(strongPalette) sciOpenEmojiPrompt];
+	}] forControlEvents:UIControlEventTouchUpInside];
+
+	UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+		SCIWrapNoteButtonInChrome(bgButton),
+		SCIWrapNoteButtonInChrome(textButton),
+		SCIWrapNoteButtonInChrome(emojiButton)
+	]];
+
+	stack.axis = UILayoutConstraintAxisHorizontal;
+	stack.spacing = 10.0;
+	stack.alignment = UIStackViewAlignmentFill;
+	stack.distribution = UIStackViewDistributionFillEqually;
+	stack.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin;
+
+	[container addSubview:stack];
+	objc_setAssociatedObject(palette, &kSCINoteStackKey, stack, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	SCIPositionNotesButtonStack(palette);
+}
+
+#pragma mark - Palette: inject 3-button row
+
+%hook _TtC26IGNotesBubbleCreationSwift41IGDirectNotesBubbleEditorColorPaletteView
+
+- (void)didMoveToWindow {
+	%orig;
+
+	if (!SCINotesButtonsEnabled()) {
+		[SCINotesButtonStackForPalette(self) removeFromSuperview];
+		objc_setAssociatedObject(self, &kSCINoteStackKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		return;
+	}
+
+	if (!self.window) return;
+
+	__weak typeof(self) weakSelf = self;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		__strong typeof(weakSelf) self = weakSelf;
+		if (self) SCIInjectNotesButtonsIfNeeded(self);
+	});
+}
+
+- (void)layoutSubviews {
+	%orig;
+	if (SCINotesButtonsEnabled())
+		SCIPositionNotesButtonStack(self);
+}
+
 %end

@@ -1,742 +1,819 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
+#import "../../SCIChrome.h"
 #import "SCIExcludedThreads.h"
+#import "SCIDirectUserResolver.h"
+#import "../DeletedMessages/SCIDeletedMessagesCapture.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
+#import <stdatomic.h>
 
-// Keep-deleted messages.
-//
-// Pipeline: each iris delta is per-thread, so its threadId is stashed in TLS
-// while the orig handler runs. The IGDirectMessageUpdate alloc hook stamps
-// new updates with that tid. At apply time we classify each update; remote
-// unsends get their _removeMessages_messageKeys cleared in place so IG's
-// applicator runs but removes nothing.
-//
-// _removeMessages_reason: 0 = unsend, 2 = delete-for-you.
+#define SCI_SENDER_MAP_MAX			3000
+#define SCI_CONTENT_MAP_MAX			2500
+#define SCI_PRESERVED_MAX			200
+#define SCI_PRESERVED_IDS_KEY		@"SCIPreservedMsgIdsByPk"
+#define SCI_PRESERVED_LEGACY_KEY	@"SCIPreservedMsgIds"
+#define SCI_PRESERVED_TAG			1399
 
-// ============ STATE ============
+static atomic_int sciLocalDeleteInProgress = 0;
 
-#define SCI_SENDER_MAP_MAX        4000
-#define SCI_CONTENT_CLASSES_MAX   4000
-#define SCI_PENDING_MAX           500
-#define SCI_PRESERVED_MAX         200
-#define SCI_PRESERVED_IDS_KEY     @"SCIPreservedMsgIds"
-#define SCI_PRESERVED_TAG         1399
-
-static NSString * const kSCIDeltaTidTLSKey = @"SCI.currentDeltaTid";
-static const void *kSCIUpdateThreadIdKey = &kSCIUpdateThreadIdKey;
-
-static BOOL                                            sciLocalDeleteInProgress = NO;
-static NSMutableArray                                 *sciPendingUpdates        = nil;
-static NSMutableDictionary<NSString *, NSDate *>      *sciDeleteForYouKeys      = nil;
-static NSMutableSet                                   *sciPreservedIds          = nil;
-static NSMutableDictionary<NSString *, NSString *>    *sciMessageContentClasses = nil;
-static NSMutableDictionary<NSString *, NSString *>    *sciSenderPkBySid         = nil;
-static NSMutableSet<NSString *>                       *sciPendingLocalSids      = nil;
+static NSMutableDictionary<NSString *, NSDate *> *sciDeleteForYouKeys;
+static NSMutableSet<NSString *> *sciPendingLocalSids;
+static NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *sciPreservedByPk;
+static NSMutableDictionary<NSString *, NSString *> *sciSenderPkBySid;
+static NSMutableDictionary<NSString *, NSString *> *sciSenderNameBySid;
+static NSMutableDictionary<NSString *, NSString *> *sciContentClassBySid;
 
 static void sciUpdateCellIndicator(id cell);
 
-// ============ HELPERS ============
+#pragma mark - Prefs / runtime helpers
 
-static NSString *sciGetCurrentDeltaTid(void) {
-    return [NSThread currentThread].threadDictionary[kSCIDeltaTidTLSKey];
+static inline BOOL sciKeepOn(void) { return [SCIUtils getBoolPref:@"keep_deleted_message"]; }
+static inline BOOL sciLogOn(void) { return [SCIUtils getBoolPref:@"deleted_messages_log_enabled"]; }
+static inline BOOL sciIndicatorOn(void) { return [SCIUtils getBoolPref:@"indicate_unsent_messages"]; }
+
+static id sciIvar(id obj, const char *name) {
+	if (!obj || !name) return nil;
+	for (Class c = [obj class]; c; c = class_getSuperclass(c)) {
+		Ivar iv = class_getInstanceVariable(c, name);
+		if (!iv) continue;
+		@try { return object_getIvar(obj, iv); }
+		@catch (__unused id e) { return nil; }
+	}
+	return nil;
 }
 
-static void sciSetCurrentDeltaTid(NSString *tid) {
-    NSMutableDictionary *td = [NSThread currentThread].threadDictionary;
-    if (tid) td[kSCIDeltaTidTLSKey] = tid;
-    else     [td removeObjectForKey:kSCIDeltaTidTLSKey];
+static void sciSetIvar(id obj, const char *name, id value) {
+	if (!obj || !name) return;
+	for (Class c = [obj class]; c; c = class_getSuperclass(c)) {
+		Ivar iv = class_getInstanceVariable(c, name);
+		if (!iv) continue;
+		@try { object_setIvar(obj, iv, value); } @catch (__unused id e) {}
+		return;
+	}
 }
 
-static BOOL sciKeepDeletedEnabled() {
-    return [SCIUtils getBoolPref:@"keep_deleted_message"];
+static long long sciIntIvar(id obj, const char *name, long long fallback) {
+	if (!obj || !name) return fallback;
+	for (Class c = [obj class]; c; c = class_getSuperclass(c)) {
+		Ivar iv = class_getInstanceVariable(c, name);
+		if (!iv) continue;
+
+		@try {
+			ptrdiff_t off = ivar_getOffset(iv);
+			return *(long long *)((char *)(__bridge void *)obj + off);
+		} @catch (__unused id e) {
+			return fallback;
+		}
+	}
+	return fallback;
 }
 
-static BOOL sciIndicateUnsentEnabled() {
-    return [SCIUtils getBoolPref:@"indicate_unsent_messages"];
+static id sciKVC(id obj, NSString *key) {
+	if (!obj || !key.length) return nil;
+	@try {
+		id v = [obj valueForKey:key];
+		return v == NSNull.null ? nil : v;
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
-NSMutableSet *sciGetPreservedIds() {
-    if (!sciPreservedIds) {
-        NSArray *saved = [[NSUserDefaults standardUserDefaults] arrayForKey:SCI_PRESERVED_IDS_KEY];
-        sciPreservedIds = saved ? [NSMutableSet setWithArray:saved] : [NSMutableSet set];
-    }
-    return sciPreservedIds;
+static NSString *sciString(id v) {
+	if ([v isKindOfClass:NSString.class]) return [(NSString *)v length] ? v : nil;
+	if ([v isKindOfClass:NSNumber.class]) return [(NSNumber *)v stringValue];
+	return nil;
 }
 
-static void sciSavePreservedIds() {
-    NSMutableSet *ids = sciGetPreservedIds();
-    while (ids.count > SCI_PRESERVED_MAX)
-        [ids removeObject:[ids anyObject]];
-    [[NSUserDefaults standardUserDefaults] setObject:[ids allObjects] forKey:SCI_PRESERVED_IDS_KEY];
+static NSString *sciFirstIvarString(id obj, NSArray<NSString *> *names) {
+	for (NSString *n in names) {
+		NSString *s = sciString(sciIvar(obj, n.UTF8String));
+		if (s.length) return s;
+	}
+	return nil;
 }
 
-void sciClearPreservedIds() {
-    [sciGetPreservedIds() removeAllObjects];
-    [[NSUserDefaults standardUserDefaults] removeObjectForKey:SCI_PRESERVED_IDS_KEY];
+#pragma mark - Message ids / metadata
+
+static NSString *sciServerIdFromKey(id key) {
+	return sciFirstIvarString(key, @[@"_messageServerId", @"_serverId"]);
 }
 
-static NSMutableSet<NSString *> *sciGetPendingLocalSids() {
-    if (!sciPendingLocalSids) sciPendingLocalSids = [NSMutableSet set];
-    return sciPendingLocalSids;
+static NSString *sciServerIdFromMetadata(id meta) {
+	NSString *sid = sciFirstIvarString(meta, @[@"_serverId", @"_messageServerId"]);
+	return sid.length ? sid : sciServerIdFromKey(sciIvar(meta, "_key"));
 }
 
-static NSMutableDictionary<NSString *, NSString *> *sciGetSenderMap() {
-    if (!sciSenderPkBySid) sciSenderPkBySid = [NSMutableDictionary dictionary];
-    return sciSenderPkBySid;
+static NSString *sciServerIdFromMessage(id message) {
+	NSString *sid = sciServerIdFromMetadata(sciIvar(message, "_metadata"));
+	return sid.length ? sid : sciServerIdFromMetadata(message);
 }
 
-static void sciTrackSenderPk(NSString *sid, NSString *pk) {
-    if (!sid.length || !pk.length) return;
-    NSMutableDictionary *m = sciGetSenderMap();
-    m[sid] = pk;
-    if (m.count > SCI_SENDER_MAP_MAX) {
-        NSArray *keys = [m allKeys];
-        for (NSUInteger i = 0; i < keys.count / 10; i++) [m removeObjectForKey:keys[i]];
-    }
+static NSString *sciSenderPkFromMessage(id message) {
+	id meta = sciIvar(message, "_metadata");
+	NSString *pk = sciString(sciIvar(meta, "_senderPk"));
+	return pk.length ? pk : sciString(sciIvar(message, "_senderPk"));
 }
 
-static NSMutableDictionary<NSString *, NSString *> *sciGetContentClasses() {
-    if (!sciMessageContentClasses) sciMessageContentClasses = [NSMutableDictionary dictionary];
-    return sciMessageContentClasses;
+// Live message from the thread cache — covers sids the session-only sender maps never saw.
+static id sciCachedMessageForSid(id applicator, NSString *sid, NSString *threadId) {
+	if (!sid.length || !threadId.length) return nil;
+
+	@try {
+		id cache = sciIvar(applicator, "_cache");
+		SEL sel = NSSelectorFromString(@"threadClientStateForThreadId:");
+		if (!cache || ![cache respondsToSelector:sel]) return nil;
+
+		id state = ((id (*)(id, SEL, id))objc_msgSend)(cache, sel, threadId);
+		id messageSet = sciIvar(state, "_threadMessageSet");
+		id dict = sciIvar(messageSet, "_messagesByServerId");
+		return [dict isKindOfClass:NSDictionary.class] ? dict[sid] : nil;
+	} @catch (__unused id e) {}
+
+	return nil;
 }
 
-static void sciTrackInsertedMessage(NSString *sid, NSString *className) {
-    if (!sid.length || !className.length) return;
-    NSMutableDictionary *map = sciGetContentClasses();
-    map[sid] = className;
-    if (map.count > SCI_CONTENT_CLASSES_MAX) {
-        NSArray *keys = [map allKeys];
-        for (NSUInteger i = 0; i < keys.count / 10; i++) [map removeObjectForKey:keys[i]];
-    }
+static NSString *sciCellServerId(id cell) {
+	id vm = sciIvar(cell, "_viewModel");
+
+	if (!vm && [cell respondsToSelector:@selector(viewModel)]) {
+		@try { vm = ((id (*)(id, SEL))objc_msgSend)(cell, @selector(viewModel)); }
+		@catch (__unused id e) {}
+	}
+
+	id meta = nil;
+	SEL sel = NSSelectorFromString(@"messageMetadata");
+	if ([vm respondsToSelector:sel]) {
+		@try { meta = ((id (*)(id, SEL))objc_msgSend)(vm, sel); }
+		@catch (__unused id e) {}
+	}
+
+	return sciServerIdFromMetadata(meta);
 }
 
-static BOOL sciIsReactionRelatedMessage(NSString *sid) {
-    if (!sid.length) return NO;
-    NSString *className = sciGetContentClasses()[sid];
-    if (!className.length) return NO;
-    return [className containsString:@"Reaction"] ||
-           [className containsString:@"ActionLog"] ||
-           [className containsString:@"reaction"] ||
-           [className containsString:@"actionLog"];
+#pragma mark - Small stores
+
+static void sciTrimMap(NSMutableDictionary *map, NSUInteger max) {
+	if (map.count <= max) return;
+
+	NSArray *keys = map.allKeys;
+	NSUInteger drop = MAX((NSUInteger)1, keys.count / 10);
+	for (NSUInteger i = 0; i < drop && i < keys.count; i++) {
+		[map removeObjectForKey:keys[i]];
+	}
 }
 
-// Walks IGWindow.userSession.user trying common pk field names. Cached.
-static NSString *sciCurrentUserPk() {
-    static NSString *cached = nil;
-    if (cached) return cached;
-    @try {
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            id session = nil;
-            @try { session = [w valueForKey:@"userSession"]; } @catch (__unused id e) {}
-            if (!session) continue;
-            id user = nil;
-            @try { user = [session valueForKey:@"user"]; } @catch (__unused id e) {}
-            if (!user) continue;
-            for (NSString *key in @[@"pk", @"instagramUserID", @"instagramUserId", @"userID", @"userId", @"identifier"]) {
-                @try {
-                    id v = [user valueForKey:key];
-                    if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) {
-                        cached = [v copy];
-                        return cached;
-                    }
-                    if ([v isKindOfClass:[NSNumber class]]) {
-                        cached = [[(NSNumber *)v stringValue] copy];
-                        return cached;
-                    }
-                } @catch (__unused id e) {}
-            }
-        }
-    } @catch (__unused id e) {}
-    return nil;
+static NSMutableDictionary<NSString *, NSString *> *sciSenderPkMap(void) {
+	if (!sciSenderPkBySid) sciSenderPkBySid = NSMutableDictionary.dictionary;
+	return sciSenderPkBySid;
 }
 
-static NSString *sciExtractServerId(id key) {
-    @try {
-        Ivar sidIvar = class_getInstanceVariable([key class], "_messageServerId");
-        if (sidIvar) {
-            NSString *sid = object_getIvar(key, sidIvar);
-            if ([sid isKindOfClass:[NSString class]] && sid.length > 0) return sid;
-        }
-    } @catch(id e) {}
-    return nil;
+static NSMutableDictionary<NSString *, NSString *> *sciSenderNameMap(void) {
+	if (!sciSenderNameBySid) sciSenderNameBySid = NSMutableDictionary.dictionary;
+	return sciSenderNameBySid;
 }
 
-// ============ IRIS DELTA STAMPING ============
-
-static NSString *sciDeltaThreadId(id delta) {
-    @try {
-        id payload = [delta valueForKey:@"payload"];
-        if (!payload) return nil;
-        Ivar tdIvar = class_getInstanceVariable([payload class], "_threadDeltaPayload");
-        id threadDelta = tdIvar ? object_getIvar(payload, tdIvar) : nil;
-        if (!threadDelta) return nil;
-        return [threadDelta valueForKey:@"threadId"];
-    } @catch (__unused id e) { return nil; }
+static NSMutableDictionary<NSString *, NSString *> *sciContentClassMap(void) {
+	if (!sciContentClassBySid) sciContentClassBySid = NSMutableDictionary.dictionary;
+	return sciContentClassBySid;
 }
 
-static void (*orig_handleIrisDeltas)(id self, SEL _cmd, NSArray *deltas);
-static void new_handleIrisDeltas(id self, SEL _cmd, NSArray *deltas) {
-    if (!deltas || deltas.count == 0) { orig_handleIrisDeltas(self, _cmd, deltas); return; }
-    for (id delta in deltas) {
-        sciSetCurrentDeltaTid(sciDeltaThreadId(delta));
-        @try { orig_handleIrisDeltas(self, _cmd, @[delta]); } @catch (__unused id e) {}
-        sciSetCurrentDeltaTid(nil);
-    }
+static void sciTrackInMap(NSMutableDictionary<NSString *, NSString *> *map,
+						  NSString *sid,
+						  NSString *value,
+						  NSUInteger max) {
+	if (!sid.length || !value.length) return;
+	map[sid] = value;
+	sciTrimMap(map, max);
 }
 
-// Some IG paths bypass the top-level handler and call the per-thread variant.
-static void (*orig_handleIrisDeltasGrouped)(id self, SEL _cmd, NSArray *deltas);
-static void new_handleIrisDeltasGrouped(id self, SEL _cmd, NSArray *deltas) {
-    if (!deltas || deltas.count == 0) { orig_handleIrisDeltasGrouped(self, _cmd, deltas); return; }
-    sciSetCurrentDeltaTid(sciDeltaThreadId(deltas.firstObject));
-    @try { orig_handleIrisDeltasGrouped(self, _cmd, deltas); } @catch (__unused id e) {}
-    sciSetCurrentDeltaTid(nil);
+static NSMutableSet<NSString *> *sciPendingLocalSet(void) {
+	if (!sciPendingLocalSids) sciPendingLocalSids = NSMutableSet.set;
+	return sciPendingLocalSids;
 }
 
-// ============ ALLOC TRACKING ============
+static void sciTrackMessage(id message) {
+	NSString *sid = sciServerIdFromMessage(message);
+	if (!sid.length) return;
 
-static id (*orig_msgUpdate_alloc)(id self, SEL _cmd);
-static id new_msgUpdate_alloc(id self, SEL _cmd) {
-    id instance = orig_msgUpdate_alloc(self, _cmd);
-    if (instance && sciKeepDeletedEnabled()) {
-        NSString *tid = sciGetCurrentDeltaTid();
-        if (tid) {
-            objc_setAssociatedObject(instance, kSCIUpdateThreadIdKey, tid,
-                                     OBJC_ASSOCIATION_COPY_NONATOMIC);
-        }
-        if (!sciPendingUpdates) sciPendingUpdates = [NSMutableArray array];
-        @synchronized(sciPendingUpdates) {
-            [sciPendingUpdates addObject:instance];
-            while (sciPendingUpdates.count > SCI_PENDING_MAX)
-                [sciPendingUpdates removeObjectAtIndex:0];
-        }
-    }
-    return instance;
+	NSString *pk = sciSenderPkFromMessage(message);
+	if (pk.length) sciTrackInMap(sciSenderPkMap(), sid, pk, SCI_SENDER_MAP_MAX);
+
+	sciTrackInMap(sciContentClassMap(), sid, NSStringFromClass([message class]), SCI_CONTENT_MAP_MAX);
 }
 
-// ============ REMOTE UNSEND DETECTION ============
-
-static void sciPruneStaleDeleteForYouKeys() {
-    if (!sciDeleteForYouKeys) return;
-    NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-10.0];
-    for (NSString *k in [sciDeleteForYouKeys allKeys]) {
-        if ([sciDeleteForYouKeys[k] compare:cutoff] == NSOrderedAscending)
-            [sciDeleteForYouKeys removeObjectForKey:k];
-    }
+static BOOL sciIsReactionOrActionLog(NSString *sid) {
+	NSString *cls = sid.length ? sciContentClassMap()[sid] : nil;
+	return [cls localizedCaseInsensitiveContainsString:@"reaction"] ||
+		   [cls localizedCaseInsensitiveContainsString:@"actionlog"];
 }
 
-// Clear the keys ivar in place — IG's later apply iterates an empty list.
-static void sciNeuterRemoveUpdate(id update) {
-    @try {
-        Ivar ivar = class_getInstanceVariable([update class], "_removeMessages_messageKeys");
-        if (ivar) object_setIvar(update, ivar, nil);
-    } @catch (__unused id e) {}
+#pragma mark - Owner / preserved ids
+
+static NSString *sciUserPK(id user) {
+	return sciDirectUserResolverPKFromUser(user);
 }
 
-static void sciProcessOneUpdate(id update, NSMutableSet<NSString *> *preserved) {
-    @try {
-        Ivar removeIvar = class_getInstanceVariable([update class], "_removeMessages_messageKeys");
-        if (!removeIvar) return;
-        NSArray *keys = object_getIvar(update, removeIvar);
-        if (!keys || keys.count == 0) return;
-
-        long long reason = -1;
-        Ivar reasonIvar = class_getInstanceVariable([update class], "_removeMessages_reason");
-        if (reasonIvar) {
-            ptrdiff_t off = ivar_getOffset(reasonIvar);
-            reason = *(long long *)((char *)(__bridge void *)update + off);
-        }
-
-        // reason 2 = delete-for-you. Track keys so the reason=0 follow-up
-        // (if any) can be recognised and let through.
-        if (reason == 2) {
-            NSDate *now = [NSDate date];
-            for (id key in keys) {
-                NSString *sid = sciExtractServerId(key);
-                if (sid) sciDeleteForYouKeys[sid] = now;
-            }
-            return;
-        }
-
-        if (reason != 0) return;
-
-        // Per-sid intent: sids the user just locally removed via a hooked
-        // mutation processor. Exact, raceless. Consumed on match.
-        {
-            NSMutableSet *pending = sciGetPendingLocalSids();
-            BOOL anyIntent = NO;
-            for (id key in keys) {
-                NSString *sid = sciExtractServerId(key);
-                if (sid && [pending containsObject:sid]) { anyIntent = YES; break; }
-            }
-            if (anyIntent) {
-                for (id key in keys) {
-                    NSString *sid = sciExtractServerId(key);
-                    if (sid) [pending removeObject:sid];
-                }
-                return;
-            }
-        }
-
-        if (sciLocalDeleteInProgress) return;
-
-        // Delete-for-you follow-up: any tracked key → let the whole batch through.
-        BOOL anyMatched = NO;
-        for (id key in keys) {
-            NSString *sid = sciExtractServerId(key);
-            if (sid && sciDeleteForYouKeys[sid]) { anyMatched = YES; break; }
-        }
-        if (anyMatched) {
-            for (id key in keys) {
-                NSString *sid = sciExtractServerId(key);
-                if (sid) [sciDeleteForYouKeys removeObjectForKey:sid];
-            }
-            return;
-        }
-
-        // Real remote unsend — preserve, skipping reactions/action-logs and
-        // any message recorded as sent by the current user.
-        NSString *myPk = sciCurrentUserPk();
-        for (id key in keys) {
-            NSString *sid = sciExtractServerId(key);
-            if (!sid) continue;
-            if (sciIsReactionRelatedMessage(sid)) continue;
-            NSString *senderPk = sciGetSenderMap()[sid];
-            if (senderPk && myPk && [senderPk isEqualToString:myPk]) continue;
-            [sciGetPreservedIds() addObject:sid];
-            [preserved addObject:sid];
-        }
-    } @catch (__unused id e) {}
+static NSString *sciOwnerPkFromApplicator(id applicator) {
+	return sciUserPK(sciIvar(applicator, "_user"));
 }
 
-// Classify and neuter every pending update stamped with `tid`. Excluded
-// threads are passed through untouched.
-static NSSet<NSString *> *sciNeuterAndPreserveForThread(NSString *tid) {
-    NSMutableSet<NSString *> *preserved = [NSMutableSet set];
-    if (!sciPendingUpdates || tid.length == 0) return preserved;
-    if (!sciDeleteForYouKeys) sciDeleteForYouKeys = [NSMutableDictionary dictionary];
-    sciPruneStaleDeleteForYouKeys();
+static NSString *sciUsernameFromUser(id user) {
+	if (!user) return nil;
 
-    BOOL excluded = [SCIExcludedThreads shouldKeepDeletedBeBlockedForThreadId:tid];
+	id fc = sciIvar(user, "_fieldCache");
+	if ([fc isKindOfClass:NSDictionary.class]) {
+		NSString *u = sciString(fc[@"username"]);
+		if (u.length) return u;
+	}
 
-    @synchronized(sciPendingUpdates) {
-        NSMutableArray *remaining = [NSMutableArray array];
-        for (id update in sciPendingUpdates) {
-            NSString *stamp = objc_getAssociatedObject(update, kSCIUpdateThreadIdKey);
-            if (![stamp isEqualToString:tid]) {
-                [remaining addObject:update];
-                continue;
-            }
-            if (excluded) continue;
-            NSUInteger before = preserved.count;
-            sciProcessOneUpdate(update, preserved);
-            if (preserved.count > before) sciNeuterRemoveUpdate(update);
-        }
-        [sciPendingUpdates setArray:remaining];
-    }
-    if (preserved.count > 0) sciSavePreservedIds();
-    return preserved;
+	return sciString(sciKVC(user, @"username"));
 }
 
-// ============ CACHE UPDATE HOOK ============
-
-static void sciShowUnsentToast() {
-    UIView *hostView = [UIApplication sharedApplication].keyWindow;
-    if (!hostView) return;
-
-    UIView *pill = [[UIView alloc] init];
-    pill.backgroundColor = [UIColor colorWithRed:0.85 green:0.15 blue:0.15 alpha:0.95];
-    pill.layer.cornerRadius = 18;
-    pill.layer.shadowColor = [UIColor blackColor].CGColor;
-    pill.layer.shadowOpacity = 0.4;
-    pill.layer.shadowOffset = CGSizeMake(0, 2);
-    pill.layer.shadowRadius = 8;
-    pill.translatesAutoresizingMaskIntoConstraints = NO;
-    pill.alpha = 0;
-
-    UILabel *label = [[UILabel alloc] init];
-    label.text = SCILocalized(@"A message was unsent");
-    label.textColor = [UIColor whiteColor];
-    label.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-    label.textAlignment = NSTextAlignmentCenter;
-    label.translatesAutoresizingMaskIntoConstraints = NO;
-    [pill addSubview:label];
-    [hostView addSubview:pill];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [pill.topAnchor constraintEqualToAnchor:hostView.safeAreaLayoutGuide.topAnchor constant:8],
-        [pill.centerXAnchor constraintEqualToAnchor:hostView.centerXAnchor],
-        [pill.heightAnchor constraintEqualToConstant:36],
-        [label.centerXAnchor constraintEqualToAnchor:pill.centerXAnchor],
-        [label.centerYAnchor constraintEqualToAnchor:pill.centerYAnchor],
-        [label.leadingAnchor constraintEqualToAnchor:pill.leadingAnchor constant:20],
-        [label.trailingAnchor constraintEqualToAnchor:pill.trailingAnchor constant:-20],
-    ]];
-
-    [UIView animateWithDuration:0.3 animations:^{ pill.alpha = 1; }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [UIView animateWithDuration:0.3 animations:^{ pill.alpha = 0; } completion:^(BOOL f) {
-            [pill removeFromSuperview];
-        }];
-    });
+static NSString *sciOwnerUsernameFromApplicator(id applicator) {
+	return sciUsernameFromUser(sciIvar(applicator, "_user"));
 }
 
-static void sciRefreshVisibleCellIndicators() {
-    Class cellClass = NSClassFromString(@"IGDirectMessageCell");
-    if (!cellClass) return;
-    UIWindow *window = [UIApplication sharedApplication].keyWindow;
-    NSMutableArray *stack = [NSMutableArray arrayWithObject:window];
-    while (stack.count > 0) {
-        UIView *v = stack.lastObject;
-        [stack removeLastObject];
-        if ([v isKindOfClass:cellClass]) {
-            sciUpdateCellIndicator(v);
-            continue;
-        }
-        for (UIView *sub in v.subviews) [stack addObject:sub];
-    }
+static NSString *sciCurrentUserPk(void) {
+	@try {
+		for (UIWindow *w in UIApplication.sharedApplication.windows) {
+			id session = sciKVC(w, @"userSession");
+			NSString *pk = sciUserPK(sciKVC(session, @"user"));
+			if (pk.length) return pk;
+		}
+	} @catch (__unused id e) {}
+	return nil;
 }
 
-static void (*orig_applyUpdates)(id self, SEL _cmd, id updates, id completion, id userAccess);
-static void new_applyUpdates(id self, SEL _cmd, id updates, id completion, id userAccess) {
-    if (!sciKeepDeletedEnabled()) {
-        orig_applyUpdates(self, _cmd, updates, completion, userAccess);
-        return;
-    }
+static NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *sciPreservedStore(void) {
+	if (sciPreservedByPk) return sciPreservedByPk;
 
-    NSMutableSet<NSString *> *preserved = [NSMutableSet set];
-    if ([updates isKindOfClass:[NSArray class]]) {
-        for (id tu in (NSArray *)updates) {
-            NSString *tid = nil;
-            @try { tid = [tu valueForKey:@"threadId"]; } @catch (__unused id e) {}
-            if (tid.length == 0) continue;
-            NSSet *p = sciNeuterAndPreserveForThread(tid);
-            if (p.count > 0) [preserved unionSet:p];
-        }
-    }
+	sciPreservedByPk = NSMutableDictionary.dictionary;
 
-    orig_applyUpdates(self, _cmd, updates, completion, userAccess);
+	NSDictionary *saved = [NSUserDefaults.standardUserDefaults dictionaryForKey:SCI_PRESERVED_IDS_KEY];
+	if ([saved isKindOfClass:NSDictionary.class]) {
+		for (NSString *pk in saved) {
+			NSArray *arr = [saved[pk] isKindOfClass:NSArray.class] ? saved[pk] : nil;
+			if (arr.count) sciPreservedByPk[pk] = [NSMutableSet setWithArray:arr];
+		}
+	}
 
-    if (preserved.count > 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            sciRefreshVisibleCellIndicators();
-            if ([SCIUtils getBoolPref:@"unsent_message_toast"]) sciShowUnsentToast();
-        });
-    }
+	NSArray *legacy = [NSUserDefaults.standardUserDefaults arrayForKey:SCI_PRESERVED_LEGACY_KEY];
+	NSString *currentPk = legacy.count ? sciCurrentUserPk() : nil;
+	if (legacy.count && currentPk.length) {
+		NSMutableSet *bucket = sciPreservedByPk[currentPk] ?: NSMutableSet.set;
+		[bucket addObjectsFromArray:legacy];
+		sciPreservedByPk[currentPk] = bucket;
+		[NSUserDefaults.standardUserDefaults removeObjectForKey:SCI_PRESERVED_LEGACY_KEY];
+	}
+
+	return sciPreservedByPk;
 }
 
-// ============ LOCAL DELETE TRACKING ============
+static NSMutableSet<NSString *> *sciBucket(NSString *pk, BOOL create) {
+	if (!pk.length) return nil;
 
-// Hooked on the unsend mutation processor. Reads target sids straight off
-// _messageKeys for the per-sid intent path; the time-window flag stays as
-// a safety net for any sid the extraction may miss.
-static void (*orig_removeMutation_execute)(id self, SEL _cmd, id handler, id pkg);
-static void new_removeMutation_execute(id self, SEL _cmd, id handler, id pkg) {
-    @try {
-        Ivar mkIvar = class_getInstanceVariable([self class], "_messageKeys");
-        id keys = mkIvar ? object_getIvar(self, mkIvar) : nil;
-        if ([keys isKindOfClass:[NSArray class]]) {
-            static const char *kSidNames[] = {"_serverId", "_messageServerId"};
-            for (id k in (NSArray *)keys) {
-                NSString *sid = nil;
-                for (int ni = 0; ni < 2; ni++) {
-                    Ivar sidIvar = class_getInstanceVariable([k class], kSidNames[ni]);
-                    if (sidIvar) {
-                        id v = object_getIvar(k, sidIvar);
-                        if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) {
-                            sid = v; break;
-                        }
-                    }
-                }
-                if (sid) [sciGetPendingLocalSids() addObject:sid];
-            }
-        }
-    } @catch (__unused id e) {}
+	NSMutableDictionary *store = sciPreservedStore();
+	NSMutableSet *bucket = store[pk];
 
-    sciLocalDeleteInProgress = YES;
-    orig_removeMutation_execute(self, _cmd, handler, pkg);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        sciLocalDeleteInProgress = NO;
-    });
+	if (!bucket && create) {
+		bucket = NSMutableSet.set;
+		store[pk] = bucket;
+	}
+	return bucket;
 }
 
-// Sweeps every IGDirect*Outgoing*MutationProcessor and wraps its execute.
-// IGDirectGenericOutgoingMutationProcessor is the empirical DFY signal —
-// it fires for "Delete for you" but not for sends (sends use the *GraphQL*
-// or NonMedia variants). Other classes are wrapped only when their name
-// suggests removal, as a defensive net. Each class gets its own block so
-// origImp is captured per-class.
-static void sciHookAllRemovalMutationProcessors(void) {
-    unsigned int count = 0;
-    Class *all = objc_copyClassList(&count);
-    if (!all) return;
-    SEL execSel = NSSelectorFromString(@"executeWithResultHandler:accessoryPackage:");
-    Class baseUnsend = NSClassFromString(@"IGDirectMessageOutgoingUpdateRemoveMessagesMutationProcessor");
-    for (unsigned int i = 0; i < count; i++) {
-        Class c = all[i];
-        const char *cn = class_getName(c);
-        if (!cn) continue;
-        if (c == baseUnsend) continue;
-        if (strstr(cn, "MutationProcessor") == NULL) continue;
-        if (strstr(cn, "IGDirect") == NULL) continue;
-        if (strstr(cn, "Outgoing") == NULL) continue;
-        Method m = class_getInstanceMethod(c, execSel);
-        if (!m) continue;
-
-        BOOL isDfySignal = (strcmp(cn, "IGDirectGenericOutgoingMutationProcessor") == 0);
-        BOOL looksLikeRemoval = (strstr(cn, "Remove") != NULL ||
-                                 strstr(cn, "Delete") != NULL ||
-                                 strstr(cn, "Hide")   != NULL ||
-                                 strstr(cn, "Visibility") != NULL);
-        if (!isDfySignal && !looksLikeRemoval) continue;
-
-        __block IMP origImp = method_getImplementation(m);
-        IMP newImp = imp_implementationWithBlock(^(id self, id handler, id pkg) {
-            sciLocalDeleteInProgress = YES;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                sciLocalDeleteInProgress = NO;
-            });
-            ((void(*)(id, SEL, id, id))origImp)(self, execSel, handler, pkg);
-        });
-        IMP prev = class_replaceMethod(c, execSel, newImp, method_getTypeEncoding(m));
-        if (prev) origImp = prev;
-    }
-    free(all);
+NSMutableSet *sciGetPreservedIds(void) {
+	NSString *pk = sciCurrentUserPk();
+	return pk.length ? (sciBucket(pk, YES) ?: NSMutableSet.set) : NSMutableSet.set;
 }
 
-// ============ VISUAL INDICATOR ============
+static void sciSavePreservedIds(void) {
+	NSMutableDictionary *out = NSMutableDictionary.dictionary;
 
-static NSString * _Nullable sciGetCellServerId(id cell) {
-    @try {
-        Ivar vmIvar = class_getInstanceVariable([cell class], "_viewModel");
-        if (!vmIvar) return nil;
-        id vm = object_getIvar(cell, vmIvar);
-        if (!vm) return nil;
+	for (NSString *pk in sciPreservedStore()) {
+		NSMutableSet *set = sciPreservedByPk[pk];
 
-        SEL metaSel = NSSelectorFromString(@"messageMetadata");
-        if (![vm respondsToSelector:metaSel]) return nil;
-        id meta = ((id(*)(id,SEL))objc_msgSend)(vm, metaSel);
-        if (!meta) return nil;
+		while (set.count > SCI_PRESERVED_MAX) {
+			[set removeObject:set.anyObject];
+		}
 
-        Ivar keyIvar = class_getInstanceVariable([meta class], "_key");
-        if (!keyIvar) return nil;
-        id keyObj = object_getIvar(meta, keyIvar);
-        if (!keyObj) return nil;
+		if (set.count) out[pk] = set.allObjects;
+	}
 
-        Ivar sidIvar = class_getInstanceVariable([keyObj class], "_serverId");
-        if (!sidIvar) return nil;
-        NSString *serverId = object_getIvar(keyObj, sidIvar);
-        return [serverId isKindOfClass:[NSString class]] ? serverId : nil;
-    } @catch(id e) {}
-    return nil;
+	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+	if (out.count) [d setObject:out forKey:SCI_PRESERVED_IDS_KEY];
+	else [d removeObjectForKey:SCI_PRESERVED_IDS_KEY];
+}
+
+void sciClearPreservedIds(void) {
+	NSString *pk = sciCurrentUserPk();
+	if (!pk.length) return;
+
+	[sciPreservedStore() removeObjectForKey:pk];
+	sciSavePreservedIds();
+}
+
+#pragma mark - Delete-for-you / local delete tracking
+
+static void sciPruneDeleteForYouKeys(void) {
+	if (!sciDeleteForYouKeys.count) return;
+
+	NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-10.0];
+	for (NSString *sid in sciDeleteForYouKeys.allKeys) {
+		if ([sciDeleteForYouKeys[sid] compare:cutoff] == NSOrderedAscending) {
+			[sciDeleteForYouKeys removeObjectForKey:sid];
+		}
+	}
+}
+
+static BOOL sciKeysIntersectSet(NSArray *keys, NSSet *set) {
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length && [set containsObject:sid]) return YES;
+	}
+	return NO;
+}
+
+static void sciRemoveKeysFromSet(NSArray *keys, NSMutableSet *set) {
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length) [set removeObject:sid];
+	}
+}
+
+static BOOL sciKeysMarkedDeleteForYou(NSArray *keys) {
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length && sciDeleteForYouKeys[sid]) return YES;
+	}
+	return NO;
+}
+
+static void sciRemoveDeleteForYouKeys(NSArray *keys) {
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length) [sciDeleteForYouKeys removeObjectForKey:sid];
+	}
+}
+
+static void sciTrackDeleteForYouKeys(NSArray *keys) {
+	if (!sciDeleteForYouKeys) sciDeleteForYouKeys = NSMutableDictionary.dictionary;
+
+	NSDate *now = NSDate.date;
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length) sciDeleteForYouKeys[sid] = now;
+	}
+}
+
+static void sciTrackPendingLocalKeys(NSArray *keys) {
+	NSMutableSet *pending = sciPendingLocalSet();
+
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (sid.length) [pending addObject:sid];
+	}
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		sciRemoveKeysFromSet(keys, pending);
+	});
+}
+
+#pragma mark - Update extraction
+
+static void sciCaptureMessagesFromUpdate(id update, NSString *ownerPk, NSString *threadId) {
+	NSSet *preserved = sciLogOn() ? sciGetPreservedIds() : nil;
+
+	for (NSString *ivar in @[@"_insertMessages", @"_replaceMessages_messages"]) {
+		NSArray *messages = sciIvar(update, ivar.UTF8String);
+		if (![messages isKindOfClass:NSArray.class]) continue;
+
+		for (id m in messages) {
+			sciTrackMessage(m);
+			sciDMCaptureNoteInsert(m);
+
+			@try {
+				if (preserved.count) {
+					NSString *sid = sciServerIdFromMessage(m);
+					if (sid.length && [preserved containsObject:sid]) {
+						sciDMCaptureNotePreservedMessage(m, ownerPk, threadId);
+					}
+				}
+			} @catch (__unused id e) {}
+		}
+	}
+}
+
+static void sciCaptureEditsFromUpdate(id update, NSString *ownerPk, NSString *threadId) {
+	if (!sciLogOn()) return;
+
+	NSString *sid = sciString(sciIvar(update, "_mutateMessage_messageId"));
+	id mut = sciIvar(update, "_mutateMessage_contentMutation");
+	if (sid.length && mut) {
+		sciDMCaptureNoteEdit(sid, mut, ownerPk, threadId);
+		sciDMCaptureNoteReaction(sid, mut, ownerPk, threadId);
+	}
+
+	NSArray *pairs = sciIvar(update, "_mutateMultipleMessages_contentMutations");
+	if (![pairs isKindOfClass:NSArray.class]) return;
+
+	for (id pair in pairs) {
+		NSString *psid = sciString(sciIvar(pair, "_messageId")) ?: sciString(sciKVC(pair, @"messageId"));
+		id pmut = sciIvar(pair, "_contentMutation") ?: sciKVC(pair, @"contentMutation");
+		if (psid.length && pmut) {
+			sciDMCaptureNoteEdit(psid, pmut, ownerPk, threadId);
+			sciDMCaptureNoteReaction(psid, pmut, ownerPk, threadId);
+		}
+	}
+}
+
+static id sciMessageUpdateFromThreadUpdate(id threadUpdate) {
+	return sciIvar(threadUpdate, "_messageUpdate") ?: sciKVC(threadUpdate, @"messageUpdate");
+}
+
+static NSString *sciThreadIdFromCacheUpdate(id cacheUpdate) {
+	NSString *tid = sciString(sciKVC(cacheUpdate, @"threadId"));
+	if (tid.length) return tid;
+
+	tid = sciString(sciIvar(cacheUpdate, "_threadId"));
+	if (tid.length) return tid;
+
+	return sciString(sciIvar(sciIvar(cacheUpdate, "_threadUpdate"), "_removeThread_threadId"));
+}
+
+static NSArray *sciThreadUpdatesFromCacheUpdate(id cacheUpdate) {
+	id updates = sciKVC(cacheUpdate, @"threadUpdates");
+	if ([updates isKindOfClass:NSArray.class]) return updates;
+
+	id single = sciIvar(cacheUpdate, "_threadUpdate");
+	return single ? @[single] : @[];
+}
+
+#pragma mark - Processing
+
+static BOOL sciProcessMessageUpdate(id update,
+									NSString *ownerPk,
+									NSString *threadId,
+									id applicator,
+									BOOL keepEnabled,
+									BOOL logEnabled,
+									NSMutableSet<NSString *> *preserved) {
+	if (!update || !ownerPk.length) return NO;
+
+	// Capture is best-effort and must never prevent the keep-deleted logic below from running.
+	@try {
+		sciCaptureMessagesFromUpdate(update, ownerPk, threadId);
+		sciCaptureEditsFromUpdate(update, ownerPk, threadId);
+	} @catch (__unused id e) {}
+
+	NSArray *keys = sciIvar(update, "_removeMessages_messageKeys");
+	if (![keys isKindOfClass:NSArray.class] || !keys.count) return NO;
+
+	long long reason = sciIntIvar(update, "_removeMessages_reason", -1);
+
+	if (reason == 2) {
+		sciTrackDeleteForYouKeys(keys);
+		return NO;
+	}
+
+	if (reason != 0) return NO;
+
+	NSMutableSet *pending = sciPendingLocalSet();
+	if (sciKeysIntersectSet(keys, pending)) {
+		sciRemoveKeysFromSet(keys, pending);
+		return NO;
+	}
+
+	if (atomic_load(&sciLocalDeleteInProgress) > 0) return NO;
+
+	if (sciKeysMarkedDeleteForYou(keys)) {
+		sciRemoveDeleteForYouKeys(keys);
+		return NO;
+	}
+
+	NSMutableArray *unsendKeys = NSMutableArray.array;
+	NSMutableSet *bucket = keepEnabled ? sciBucket(ownerPk, YES) : nil;
+
+	for (id key in keys) {
+		NSString *sid = sciServerIdFromKey(key);
+		if (!sid.length || sciIsReactionOrActionLog(sid)) continue;
+
+		NSString *senderPk = sciSenderPkMap()[sid];
+		if (!senderPk.length) {
+			senderPk = sciSenderPkFromMessage(sciCachedMessageForSid(applicator, sid, threadId));
+			if (senderPk.length) sciTrackInMap(sciSenderPkMap(), sid, senderPk, SCI_SENDER_MAP_MAX);
+		}
+		if (senderPk.length && [senderPk isEqualToString:ownerPk]) continue;
+
+		[unsendKeys addObject:key];
+
+		if (keepEnabled) {
+			[bucket addObject:sid];
+			[preserved addObject:sid];
+		}
+	}
+
+	if (!unsendKeys.count) return NO;
+
+	// Log capture only. This does not preserve the message bubble.
+	if (logEnabled) sciDMCaptureNoteRemoveKeys(unsendKeys, applicator, ownerPk, threadId);
+
+	// Only block IG's remove mutation when keep-deleted is enabled.
+	if (keepEnabled) {
+		sciSetIvar(update, "_removeMessages_messageKeys", nil);
+		return YES;
+	}
+
+	return NO;
+}
+
+static NSSet<NSString *> *sciProcessCacheUpdate(id cacheUpdate, NSString *ownerPk, id applicator, BOOL keepEnabled, BOOL logEnabled) {
+	NSMutableSet *preserved = NSMutableSet.set;
+	NSString *threadId = sciThreadIdFromCacheUpdate(cacheUpdate);
+
+	if (!cacheUpdate || !threadId.length || [SCIExcludedThreads shouldKeepDeletedBeBlockedForThreadId:threadId]) return preserved;
+
+	if (!sciDeleteForYouKeys) sciDeleteForYouKeys = NSMutableDictionary.dictionary;
+	sciPruneDeleteForYouKeys();
+
+	for (id tu in sciThreadUpdatesFromCacheUpdate(cacheUpdate)) {
+		id msgUpdate = sciMessageUpdateFromThreadUpdate(tu);
+		if (msgUpdate) {
+			sciProcessMessageUpdate(msgUpdate, ownerPk, threadId, applicator, keepEnabled, logEnabled, preserved);
+		}
+	}
+
+	return preserved;
+}
+
+#pragma mark - Toast / indicator
+
+static NSString *sciUnsentText(NSString *sender, NSString *deleter) {
+	if (sender.length && deleter.length) {
+		return [sender isEqualToString:deleter]
+			? [NSString stringWithFormat:SCILocalized(@"%@ unsent a message"), sender]
+			: [NSString stringWithFormat:SCILocalized(@"%@ unsent a message from %@"), deleter, sender];
+	}
+	if (sender.length) return [NSString stringWithFormat:SCILocalized(@"Message from %@ was unsent"), sender];
+	if (deleter.length) return [NSString stringWithFormat:SCILocalized(@"%@ unsent a message"), deleter];
+	return SCILocalized(@"A message was unsent");
+}
+
+static void sciShowUnsentToast(NSString *sender, NSString *ownerAccount) {
+	NSString *body = sciUnsentText(sender, sender);
+	SCINotify(SCI_NOTIF_UNSENT_MESSAGE,
+			  ownerAccount.length ? ownerAccount : body,
+			  ownerAccount.length ? body : nil,
+			  @"trash.fill",
+			  SCINotificationToneError);
+}
+
+static UIView *sciAccessoryWrapper(UIView *view) {
+	for (UIView *cur = view; cur && cur.superview; cur = cur.superview) {
+		CGSize s = cur.frame.size;
+		if (s.width >= 32.0 && s.width <= 64.0 && fabs(s.width - s.height) < 6.0) return cur;
+	}
+	return view;
+}
+
+static void sciSetTrailingAccessoriesHidden(id cell, BOOL hidden) {
+	NSArray *views = sciIvar(cell, "_tappableAccessoryViews");
+	if (![views isKindOfClass:NSArray.class]) return;
+
+	for (UIView *v in views) {
+		if (![v isKindOfClass:UIView.class]) continue;
+
+		UIView *wrap = sciAccessoryWrapper(v);
+		wrap.hidden = hidden;
+		if (wrap != v) v.hidden = hidden;
+	}
 }
 
 static BOOL sciCellIsPreserved(id cell) {
-    NSString *sid = sciGetCellServerId(cell);
-    return sid && [sciGetPreservedIds() containsObject:sid];
-}
-
-// Closest squarish ancestor (32-60pt, ~equal w/h) — the visible button wrapper.
-static UIView *sciFindAccessoryWrapper(UIView *view) {
-    UIView *cur = view;
-    while (cur && cur.superview) {
-        CGRect f = cur.frame;
-        if (f.size.width >= 32 && f.size.width <= 60 &&
-            fabs(f.size.width - f.size.height) < 4) {
-            return cur;
-        }
-        cur = cur.superview;
-    }
-    return view;
-}
-
-// Hide trailing action buttons on preserved cells — they don't work and
-// overlap the "Unsent" label.
-static void sciSetTrailingButtonsHidden(UIView *cell, BOOL hidden) {
-    if (!cell) return;
-    Ivar accIvar = class_getInstanceVariable([cell class], "_tappableAccessoryViews");
-    if (!accIvar) return;
-    id accViews = object_getIvar(cell, accIvar);
-    if (![accViews isKindOfClass:[NSArray class]]) return;
-    for (UIView *v in (NSArray *)accViews) {
-        if (![v isKindOfClass:[UIView class]]) continue;
-        UIView *wrapper = sciFindAccessoryWrapper(v);
-        wrapper.hidden = hidden;
-        if (wrapper != v) v.hidden = hidden;
-    }
-}
-
-static void (*orig_addTappableAccessoryView)(id self, SEL _cmd, id view);
-static void new_addTappableAccessoryView(id self, SEL _cmd, id view) {
-    orig_addTappableAccessoryView(self, _cmd, view);
-    if (sciIndicateUnsentEnabled() && sciCellIsPreserved(self)) {
-        if ([view isKindOfClass:[UIView class]]) {
-            UIView *wrapper = sciFindAccessoryWrapper((UIView *)view);
-            wrapper.hidden = YES;
-            if (wrapper != view) ((UIView *)view).hidden = YES;
-        }
-    }
+	NSString *sid = sciCellServerId(cell);
+	return sid.length && [sciGetPreservedIds() containsObject:sid];
 }
 
 static void sciUpdateCellIndicator(id cell) {
-    UIView *view = (UIView *)cell;
-    UIView *oldIndicator = [view viewWithTag:SCI_PRESERVED_TAG];
-    Ivar bubbleIvar = class_getInstanceVariable([cell class], "_messageContentContainerView");
-    UIView *bubble = bubbleIvar ? object_getIvar(cell, bubbleIvar) : nil;
+	if (![cell isKindOfClass:UIView.class]) return;
 
-    if (!sciIndicateUnsentEnabled()) {
-        if (oldIndicator) [oldIndicator removeFromSuperview];
-        sciSetTrailingButtonsHidden(view, NO);
-        return;
-    }
+	UIView *view = cell;
+	UIView *old = [view viewWithTag:SCI_PRESERVED_TAG];
 
-    NSString *serverId = sciGetCellServerId(cell);
-    BOOL isPreserved = serverId && [sciGetPreservedIds() containsObject:serverId];
+	if (!sciIndicatorOn() || !sciCellIsPreserved(cell)) {
+		if (old) [old removeFromSuperview];
+		sciSetTrailingAccessoriesHidden(cell, NO);
+		return;
+	}
 
-    if (!isPreserved) {
-        if (oldIndicator) [oldIndicator removeFromSuperview];
-        sciSetTrailingButtonsHidden(view, NO);
-        return;
-    }
+	sciSetTrailingAccessoriesHidden(cell, YES);
+	if (old) return;
 
-    sciSetTrailingButtonsHidden(view, YES);
-    if (oldIndicator) return;
+	UIView *parent = sciIvar(cell, "_messageContentContainerView") ?: view;
 
-    UIView *parent = bubble ?: view;
-    UILabel *label = [[UILabel alloc] init];
-    label.tag = SCI_PRESERVED_TAG;
-    label.text = SCILocalized(@"Unsent");
-    label.font = [UIFont italicSystemFontOfSize:10];
-    label.textColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:0.9];
-    label.translatesAutoresizingMaskIntoConstraints = NO;
-    [parent addSubview:label];
+	SCIChromeLabel *label = [[SCIChromeLabel alloc] initWithText:SCILocalized(@"Unsent")];
+	label.tag = SCI_PRESERVED_TAG;
+	label.font = [UIFont italicSystemFontOfSize:10.0];
+	label.textColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:0.9];
+	[parent addSubview:label];
 
-    [NSLayoutConstraint activateConstraints:@[
-        [label.leadingAnchor constraintEqualToAnchor:parent.trailingAnchor constant:4],
-        [label.centerYAnchor constraintEqualToAnchor:parent.centerYAnchor],
-    ]];
+	[NSLayoutConstraint activateConstraints:@[
+		[label.leadingAnchor constraintEqualToAnchor:parent.trailingAnchor constant:4.0],
+		[label.centerYAnchor constraintEqualToAnchor:parent.centerYAnchor],
+	]];
 }
 
-static void (*orig_configureCell)(id self, SEL _cmd, id vm, id ringSpec, id launcherSet);
+static void sciRefreshVisibleCellIndicators(void) {
+	if (!sciIndicatorOn()) return;
+
+	Class cls = NSClassFromString(@"IGDirectMessageCell");
+	UIWindow *window = UIApplication.sharedApplication.keyWindow;
+	if (!cls || !window) return;
+
+	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:window];
+
+	while (stack.count) {
+		UIView *v = stack.lastObject;
+		[stack removeLastObject];
+
+		if ([v isKindOfClass:cls]) {
+			sciUpdateCellIndicator(v);
+			continue;
+		}
+
+		for (UIView *sub in v.subviews) [stack addObject:sub];
+	}
+}
+
+#pragma mark - Hooks
+
+static void (*orig_applyUpdates)(id, SEL, id, id, id);
+static void new_applyUpdates(id self, SEL _cmd, id updates, id completion, id userAccess) {
+	sciDirectUserResolverSetActiveApplicator(self);
+
+	BOOL keepEnabled = sciKeepOn();
+	BOOL logEnabled = sciLogOn();
+
+	if (!keepEnabled && !logEnabled) {
+		orig_applyUpdates(self, _cmd, updates, completion, userAccess);
+		return;
+	}
+
+	NSString *ownerPk = sciOwnerPkFromApplicator(self);
+	NSMutableSet *preserved = NSMutableSet.set;
+
+	if (ownerPk.length && [updates isKindOfClass:NSArray.class]) {
+		for (id update in (NSArray *)updates) {
+			NSSet *set = sciProcessCacheUpdate(update, ownerPk, self, keepEnabled, logEnabled);
+			if (set.count) [preserved unionSet:set];
+		}
+	}
+
+	if (preserved.count) sciSavePreservedIds();
+
+	orig_applyUpdates(self, _cmd, updates, completion, userAccess);
+
+	if (!preserved.count) return;
+
+	NSString *sid = preserved.anyObject;
+	NSString *senderName = sid.length ? sciSenderNameMap()[sid] : nil;
+	NSString *senderPk = sid.length ? sciSenderPkMap()[sid] : nil;
+
+	if (!senderName.length && senderPk.length) {
+		senderName = sciUsernameFromUser(sciDirectUserResolverUserForPK(senderPk));
+		if (senderName.length) sciTrackInMap(sciSenderNameMap(), sid, senderName, SCI_SENDER_MAP_MAX);
+	}
+
+	NSString *currentPk = sciCurrentUserPk();
+	BOOL foreground = currentPk.length && [currentPk isEqualToString:ownerPk];
+	BOOL toastOn = [SCIUtils getBoolPref:@"unsent_message_toast"];
+	NSString *ownerName = foreground ? nil : sciOwnerUsernameFromApplicator(self);
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (foreground) sciRefreshVisibleCellIndicators();
+		if (toastOn) sciShowUnsentToast(senderName, ownerName);
+	});
+}
+
+static void (*orig_removeMutationExecute)(id, SEL, id, id);
+static void new_removeMutationExecute(id self, SEL _cmd, id handler, id pkg) {
+	NSArray *keys = sciIvar(self, "_messageKeys");
+	if ([keys isKindOfClass:NSArray.class] && keys.count) {
+		sciTrackPendingLocalKeys(keys);
+	}
+
+	atomic_fetch_add(&sciLocalDeleteInProgress, 1);
+	orig_removeMutationExecute(self, _cmd, handler, pkg);
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		atomic_fetch_sub(&sciLocalDeleteInProgress, 1);
+	});
+}
+
+static void (*orig_configureCell)(id, SEL, id, id, id);
 static void new_configureCell(id self, SEL _cmd, id vm, id ringSpec, id launcherSet) {
-    orig_configureCell(self, _cmd, vm, ringSpec, launcherSet);
-    // Capture serverId -> senderPk for every configured cell so the apply
-    // hook can identify "from me" messages and skip preserving them.
-    @try {
-        Ivar vmIvar = class_getInstanceVariable([self class], "_viewModel");
-        id vmObj = vmIvar ? object_getIvar(self, vmIvar) : nil;
-        SEL metaSel = NSSelectorFromString(@"messageMetadata");
-        id meta = (vmObj && [vmObj respondsToSelector:metaSel])
-                  ? ((id(*)(id,SEL))objc_msgSend)(vmObj, metaSel) : nil;
-        if (meta) {
-            Ivar keyIvar = class_getInstanceVariable([meta class], "_key");
-            id keyObj = keyIvar ? object_getIvar(meta, keyIvar) : nil;
-            Ivar sidIvar = keyObj ? class_getInstanceVariable([keyObj class], "_serverId") : NULL;
-            NSString *sid = sidIvar ? object_getIvar(keyObj, sidIvar) : nil;
+	orig_configureCell(self, _cmd, vm, ringSpec, launcherSet);
 
-            Ivar pkIvar = class_getInstanceVariable([meta class], "_senderPk");
-            id pk = pkIvar ? object_getIvar(meta, pkIvar) : nil;
-            if ([sid isKindOfClass:[NSString class]] && [pk isKindOfClass:[NSString class]]) {
-                sciTrackSenderPk(sid, pk);
-            }
-        }
-    } @catch (__unused id e) {}
-    sciUpdateCellIndicator(self);
+	NSString *sid = sciCellServerId(self);
+	if (sid.length) {
+		SEL sel = NSSelectorFromString(@"messageMetadata");
+		id meta = nil;
+
+		if ([vm respondsToSelector:sel]) {
+			@try { meta = ((id (*)(id, SEL))objc_msgSend)(vm, sel); }
+			@catch (__unused id e) {}
+		}
+
+		NSString *pk = sciString(sciIvar(meta, "_senderPk"));
+		if (pk.length) sciTrackInMap(sciSenderPkMap(), sid, pk, SCI_SENDER_MAP_MAX);
+	}
+
+	sciUpdateCellIndicator(self);
 }
 
-static void (*orig_cellLayoutSubviews)(id self, SEL _cmd);
+static void (*orig_cellLayoutSubviews)(id, SEL);
 static void new_cellLayoutSubviews(id self, SEL _cmd) {
-    orig_cellLayoutSubviews(self, _cmd);
-    sciUpdateCellIndicator(self);
+	orig_cellLayoutSubviews(self, _cmd);
+	if (sciIndicatorOn()) sciUpdateCellIndicator(self);
 }
 
-// ============ ACTION LOG TRACKING ============
+static id (*orig_actionLogInit)(id, SEL, id, id, id, id, id, BOOL, BOOL, id);
+static id new_actionLogInit(id self, SEL _cmd, id message, id title, id attrs, id parts, id type, BOOL collapsible, BOOL hidden, id genAI) {
+	id result = orig_actionLogInit(self, _cmd, message, title, attrs, parts, type, collapsible, hidden, genAI);
 
-// IGDirectThreadActionLog is the local model for "X liked a message" rows.
-// Recording the message id lets the unsend path skip these as bookkeeping.
-static id (*orig_actionLogFullInit)(id, SEL, id, id, id, id, id, BOOL, BOOL, id);
-static id new_actionLogFullInit(id self, SEL _cmd,
-                                 id message, id title, id textAttributes, id textParts,
-                                 id actionLogType, BOOL collapsible, BOOL hidden, id genAIMetadata) {
-    id result = orig_actionLogFullInit(self, _cmd, message, title, textAttributes, textParts,
-                                        actionLogType, collapsible, hidden, genAIMetadata);
-    @try {
-        SEL midSel = @selector(messageId);
-        if ([result respondsToSelector:midSel]) {
-            id mid = ((id(*)(id, SEL))objc_msgSend)(result, midSel);
-            if ([mid isKindOfClass:[NSString class]]) {
-                sciTrackInsertedMessage(mid, @"IGDirectThreadActionLog");
-            }
-        }
-    } @catch(id e) {}
-    return result;
+	@try {
+		SEL sel = @selector(messageId);
+		if ([result respondsToSelector:sel]) {
+			NSString *sid = sciString(((id (*)(id, SEL))objc_msgSend)(result, sel));
+			if (sid.length) sciTrackInMap(sciContentClassMap(), sid, @"IGDirectThreadActionLog", SCI_CONTENT_MAP_MAX);
+		}
+	} @catch (__unused id e) {}
+
+	return result;
 }
 
-// ============ RUNTIME HOOKS ============
+static void sciHook(Class cls, SEL sel, IMP imp, IMP *orig) {
+	if (cls && class_getInstanceMethod(cls, sel)) {
+		MSHookMessageEx(cls, sel, imp, orig);
+	}
+}
+
+#pragma mark - Visual (view-once) on-open capture
+
+static void (*orig_visualViewerDidAppear)(id, SEL, BOOL);
+static void new_visualViewerDidAppear(id self, SEL _cmd, BOOL animated) {
+	orig_visualViewerDidAppear(self, _cmd, animated);
+	if (!sciLogOn()) return;
+
+	@try {
+		// viewer._dataSource._dataSource._currentMessage = IGDirectVisualMessage
+		id ds = sciIvar(self, "_dataSource");
+		id playlist = sciIvar(ds, "_dataSource");
+		id vmsg = sciIvar(playlist, "_currentMessage") ?: sciIvar(self, "_initialVisualMessage");
+
+		id attr = sciIvar(self, "_attributionDelegate");
+		id meta = sciIvar(attr, "_contextIdentifier");
+
+		sciDMCaptureVisualMessageOnOpen(vmsg, meta, sciCurrentUserPk());
+	} @catch (__unused id e) {}
+}
 
 %ctor {
-    Class actionLogCls = NSClassFromString(@"IGDirectThreadActionLog");
-    if (actionLogCls) {
-        SEL fullInit = NSSelectorFromString(@"initWithMessage:title:textAttributes:textParts:actionLogType:collapsible:hidden:genAIMetadata:");
-        if (class_getInstanceMethod(actionLogCls, fullInit))
-            MSHookMessageEx(actionLogCls, fullInit, (IMP)new_actionLogFullInit, (IMP *)&orig_actionLogFullInit);
-    }
+	sciHook(NSClassFromString(@"IGDirectCacheUpdatesApplicator"),
+			NSSelectorFromString(@"_applyThreadUpdates:completion:userAccess:"),
+			(IMP)new_applyUpdates,
+			(IMP *)&orig_applyUpdates);
 
-    Class msgUpdateClass = NSClassFromString(@"IGDirectMessageUpdate");
-    if (msgUpdateClass) {
-        MSHookMessageEx(object_getClass(msgUpdateClass), @selector(alloc),
-                        (IMP)new_msgUpdate_alloc, (IMP *)&orig_msgUpdate_alloc);
-    }
+	sciHook(NSClassFromString(@"IGDirectMessageOutgoingUpdateRemoveMessagesMutationProcessor"),
+			NSSelectorFromString(@"executeWithResultHandler:accessoryPackage:"),
+			(IMP)new_removeMutationExecute,
+			(IMP *)&orig_removeMutationExecute);
 
-    Class cacheClass = NSClassFromString(@"IGDirectCacheUpdatesApplicator");
-    if (cacheClass) {
-        SEL sel = NSSelectorFromString(@"_applyThreadUpdates:completion:userAccess:");
-        if (class_getInstanceMethod(cacheClass, sel))
-            MSHookMessageEx(cacheClass, sel, (IMP)new_applyUpdates, (IMP *)&orig_applyUpdates);
-    }
+	Class cellCls = NSClassFromString(@"IGDirectMessageCell");
+	sciHook(cellCls,
+			NSSelectorFromString(@"configureWithViewModel:ringViewSpecFactory:launcherSet:"),
+			(IMP)new_configureCell,
+			(IMP *)&orig_configureCell);
+	sciHook(cellCls,
+			@selector(layoutSubviews),
+			(IMP)new_cellLayoutSubviews,
+			(IMP *)&orig_cellLayoutSubviews);
 
-    Class irisClass = NSClassFromString(@"IGDirectRealtimeIrisDeltaHandler");
-    if (irisClass) {
-        SEL sel1 = NSSelectorFromString(@"handleIrisDeltas:");
-        if (class_getInstanceMethod(irisClass, sel1))
-            MSHookMessageEx(irisClass, sel1,
-                            (IMP)new_handleIrisDeltas, (IMP *)&orig_handleIrisDeltas);
+	sciHook(NSClassFromString(@"IGDirectThreadActionLog"),
+			NSSelectorFromString(@"initWithMessage:title:textAttributes:textParts:actionLogType:collapsible:hidden:genAIMetadata:"),
+			(IMP)new_actionLogInit,
+			(IMP *)&orig_actionLogInit);
 
-        SEL sel2 = NSSelectorFromString(@"_handleIrisDeltasGroupedByThread:");
-        if (class_getInstanceMethod(irisClass, sel2))
-            MSHookMessageEx(irisClass, sel2,
-                            (IMP)new_handleIrisDeltasGrouped, (IMP *)&orig_handleIrisDeltasGrouped);
-    }
+	sciHook(NSClassFromString(@"IGDirectVisualMessageViewerController"),
+			@selector(viewDidAppear:),
+			(IMP)new_visualViewerDidAppear,
+			(IMP *)&orig_visualViewerDidAppear);
 
-    Class cellClass = NSClassFromString(@"IGDirectMessageCell");
-    if (cellClass) {
-        SEL configSel = NSSelectorFromString(@"configureWithViewModel:ringViewSpecFactory:launcherSet:");
-        if (class_getInstanceMethod(cellClass, configSel))
-            MSHookMessageEx(cellClass, configSel,
-                            (IMP)new_configureCell, (IMP *)&orig_configureCell);
-
-        SEL layoutSel = @selector(layoutSubviews);
-        MSHookMessageEx(cellClass, layoutSel,
-                        (IMP)new_cellLayoutSubviews, (IMP *)&orig_cellLayoutSubviews);
-
-        SEL addAccSel = NSSelectorFromString(@"_addTappableAccessoryView:");
-        if (class_getInstanceMethod(cellClass, addAccSel))
-            MSHookMessageEx(cellClass, addAccSel,
-                            (IMP)new_addTappableAccessoryView, (IMP *)&orig_addTappableAccessoryView);
-    }
-
-    Class removeMutationClass = NSClassFromString(@"IGDirectMessageOutgoingUpdateRemoveMessagesMutationProcessor");
-    if (removeMutationClass) {
-        SEL execSel = NSSelectorFromString(@"executeWithResultHandler:accessoryPackage:");
-        if (class_getInstanceMethod(removeMutationClass, execSel))
-            MSHookMessageEx(removeMutationClass, execSel,
-                            (IMP)new_removeMutation_execute, (IMP *)&orig_removeMutation_execute);
-    }
-
-    sciHookAllRemovalMutationProcessors();
-
-    if (![SCIUtils getBoolPref:@"indicate_unsent_messages"]) {
-        sciClearPreservedIds();
-    }
+	if (!sciIndicatorOn()) {
+		sciPreservedByPk = NSMutableDictionary.dictionary;
+		[NSUserDefaults.standardUserDefaults removeObjectForKey:SCI_PRESERVED_IDS_KEY];
+		[NSUserDefaults.standardUserDefaults removeObjectForKey:SCI_PRESERVED_LEGACY_KEY];
+	}
 }

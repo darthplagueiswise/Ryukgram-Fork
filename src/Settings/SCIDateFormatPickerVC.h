@@ -6,3 +6,10 @@
 + (NSString *)currentFormatExample;
 
 @end
+
+/// Editor for one saved custom date-format template.
+@interface SCIDateFormatCustomVC : UIViewController <UITableViewDataSource, UITableViewDelegate, UITextFieldDelegate>
+
+- (instancetype)initWithEntryID:(NSString *)entryID;
+
+@end

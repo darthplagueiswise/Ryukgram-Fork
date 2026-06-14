@@ -1,4 +1,4 @@
-#import <UIKit/UIKit.h>
+#import "SCISettingsViewController.h"
 
-@interface SCIFakeLocationSettingsVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@interface SCIFakeLocationSettingsVC : SCISettingsViewController
 @end

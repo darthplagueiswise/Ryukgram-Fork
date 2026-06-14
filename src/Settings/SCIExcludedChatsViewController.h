@@ -1,4 +1,6 @@
 #import <UIKit/UIKit.h>
+#import "../UI/SCIIDListViewController.h"
 
-@interface SCIExcludedChatsViewController : UIViewController <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
+@interface SCIExcludedChatsViewController : SCIIDListViewController
+- (instancetype)init;
 @end

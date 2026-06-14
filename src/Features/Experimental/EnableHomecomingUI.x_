@@ -13,7 +13,7 @@
 }
 %end
 
-%hook IGTabBarViewControllerManager 
+%hook IGTabBarViewControllerManager
  - (_Bool)_isHomecomingEnabled {
     return true;
 }

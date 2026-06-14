@@ -22,6 +22,11 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 // `@username_context_yyyyMMdd_HHmmss` (sanitized). UUID fallback on failure.
 + (NSString *)filenameStemForMedia:(nullable id)media contextLabel:(NSString *)ctxLabel;
 
+// Same shape, raw inputs — for features without an IGMedia (DM voice, notes,
+// disappearing media). Empty username falls back to "media".
++ (NSString *)filenameStemForUsername:(nullable NSString *)username
+                          contextLabel:(NSString *)ctxLabel;
+
 // "feed" / "reels" / "stories".
 + (NSString *)contextLabelForContext:(SCIActionContext)ctx;
 
@@ -41,8 +46,20 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 /// Ordered children of a carousel IGMedia. Empty array for non-carousels.
 + (NSArray *)carouselChildrenForMedia:(id)media;
 
+/// Lets a media provider return a child page while keeping the carousel reachable for bulk actions.
++ (void)stashCarouselParentMedia:(nullable id)parent onView:(UIView *)view;
+
 /// YES if the media has an audio track (`has_audio` fieldCache == 1).
 + (BOOL)mediaHasAudio:(id)media;
+
+/// YES if the post (or its carousel parent) carries a downloadable music track.
++ (BOOL)mediaHasMusic:(id)media parentMedia:(nullable id)parentMedia;
+
+/// Download photo + attached music, trim to the post's play window, mux into
+/// a video. `action` is saveToPhotos or saveToGallery.
++ (void)downloadPhotoWithMusicForMedia:(id)media
+                           parentMedia:(nullable id)parentMedia
+                                action:(DownloadAction)action;
 
 /// Download the raw photo URL, skipping any video route.
 + (void)downloadPhotoOnlyForMedia:(id)media action:(DownloadAction)action;
@@ -73,6 +90,9 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 /// Download the best URL for the media and save to Photos (respects album pref).
 + (void)downloadAndSaveMedia:(id)media;
 
+/// Download the best URL and save to the RyukGram gallery only (skips Photos).
++ (void)downloadAndSaveMediaToGallery:(id)media fromView:(nullable UIView *)sourceView;
+
 /// Copy the direct CDN URL for the media to the clipboard.
 + (void)copyURLForMedia:(id)media;
 
@@ -94,6 +114,17 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 /// Download every child of a carousel and save to Photos.
 + (void)downloadAllAndSaveMedia:(id)carouselMedia;
 
+/// Download every child of a carousel and copy each one into the RyukGram
+/// gallery (skips Photos). Honors source from `ctx`.
++ (void)downloadAllAndSaveMediaToGallery:(id)carouselMedia context:(SCIActionContext)ctx;
+
+/// Save an array of already-downloaded local file URLs into the gallery,
+/// updating the shared download pill with per-file progress. Per-file
+/// metadata array is optional; falls back to defaultMetadata when shorter.
++ (void)bulkSaveFilesToGallery:(NSArray<NSURL *> *)files
+                  perFileMetadata:(nullable NSArray<id> *)perFileMetadata
+                  defaultMetadata:(nullable id)defaultMetadata;
+
 /// Copy newline-joined CDN URLs for every child of a carousel.
 + (void)copyAllURLsForMedia:(id)carouselMedia;
 
@@ -101,20 +132,32 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 
 // MARK: - Bulk URL download helpers
 
-/// Download an array of URLs in parallel, show pill, call done with file URLs.
+/// Download an array of URLs in parallel as one download-manager job, call done
+/// with the downloaded file URLs. `username` (nullable) labels the manager card.
 + (void)bulkDownloadURLs:(NSArray<NSURL *> *)urls
                    title:(NSString *)title
+                username:(nullable NSString *)username
                     done:(void(^)(NSArray<NSURL *> *fileURLs))done;
 
 /// Save an array of local file URLs to Photos (sequential, respects album pref).
 + (void)bulkSaveFiles:(NSArray<NSURL *> *)files;
 
-/// Build the full action menu for the given context + media + default tap.
-/// If `defaultTap` is provided and non-menu, the builder may reorder or skip
-/// its matching leaf so it's visible in the full menu.
 + (NSArray<SCIAction *> *)actionsForContext:(SCIActionContext)ctx
                                       media:(nullable id)media
                                    fromView:(UIView *)sourceView;
+
+// `includeDisabled:YES` keeps menu-disabled actions in the result. Default-tap
+// fire uses this so a bound action keeps working even when hidden from the menu.
++ (NSArray<SCIAction *> *)actionsForContext:(SCIActionContext)ctx
+                                      media:(nullable id)media
+                                   fromView:(UIView *)sourceView
+                            includeDisabled:(BOOL)includeDisabled;
+
+// Fire the handler whose actionID matches `aid`. Returns YES if anything ran.
++ (BOOL)executeActionForContext:(SCIActionContext)ctx
+                       actionID:(NSString *)aid
+                          media:(nullable id)media
+                       fromView:(UIView *)sourceView;
 
 @end
 

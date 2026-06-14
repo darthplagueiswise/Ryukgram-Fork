@@ -1,4 +1,7 @@
 #import "SCIActionMenu.h"
+#import "../UI/SCIIcon.h"
+#import "SCIActionMenuConfig.h"
+#import "SCIActionCatalog.h"
 
 #pragma mark - SCIAction
 
@@ -10,6 +13,7 @@
 @property (nonatomic, copy, readwrite, nullable) NSArray<SCIAction *> *children;
 @property (nonatomic, assign, readwrite) BOOL destructive;
 @property (nonatomic, assign, readwrite) BOOL isSeparator;
+@property (nonatomic, assign, readwrite) BOOL disabled;
 @end
 
 @implementation SCIAction
@@ -50,6 +54,21 @@
     return a;
 }
 
++ (instancetype)headerWithTitle:(NSString *)title {
+    SCIAction *a = [SCIAction new];
+    a.title = title ?: @"";
+    a.disabled = YES;
+    return a;
+}
+
++ (instancetype)infoRowWithTitle:(NSString *)title icon:(NSString *)icon {
+    SCIAction *a = [SCIAction new];
+    a.title = title ?: @"";
+    a.systemIconName = icon;
+    a.disabled = YES;
+    return a;
+}
+
 @end
 
 
@@ -58,12 +77,10 @@
 @implementation SCIActionMenu
 
 + (UIImage *)imageForIcon:(NSString *)name {
-    if (!name.length) return nil;
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightRegular];
-    return [UIImage systemImageNamed:name withConfiguration:cfg];
+    // Menus use SF Symbols only — custom asset icons don't size right in UIMenu.
+    return [SCIIcon sfImageNamed:name pointSize:16];
 }
 
-// Convert SCIAction to UIMenuElement.
 + (UIMenuElement *)elementForAction:(SCIAction *)action {
     if (action.children.count) {
         NSMutableArray<UIMenuElement *> *kids = [NSMutableArray arrayWithCapacity:action.children.count];
@@ -89,6 +106,13 @@
         if (action.subtitle.length) ua.subtitle = action.subtitle;
     }
     if (action.destructive) ua.attributes = UIMenuElementAttributesDestructive;
+    if (action.disabled) {
+        if (@available(iOS 15.0, *)) {
+            ua.attributes |= UIMenuElementAttributesDisabled;
+        } else {
+            ua.attributes = UIMenuElementAttributesDisabled;
+        }
+    }
     return ua;
 }
 
@@ -96,23 +120,86 @@
     return [self buildMenuWithActions:actions title:nil];
 }
 
++ (NSArray<SCIAction *> *)actionsForConfig:(SCIActionMenuConfig *)config
+                                  dateHeader:(NSString *)dateHeader
+                                    resolver:(SCIAction * _Nullable (^)(NSString *))resolver {
+    return [self actionsForConfig:config dateHeader:dateHeader resolver:resolver includeDisabled:NO];
+}
+
++ (NSArray<SCIAction *> *)actionsForConfig:(SCIActionMenuConfig *)config
+                                  dateHeader:(NSString *)dateHeader
+                                    resolver:(SCIAction * _Nullable (^)(NSString *))resolver
+                             includeDisabled:(BOOL)includeDisabled {
+    NSMutableArray<SCIAction *> *out = [NSMutableArray array];
+    if (!config || !resolver) return out;
+
+    if (dateHeader.length) {
+        [out addObject:[SCIAction headerWithTitle:dateHeader]];
+    }
+
+    BOOL anyEmitted = (out.count > 0);
+    for (SCIActionConfigSection *section in config.sections) {
+        // Resolve first, emit separator after — empty sections shouldn't leave a stray divider.
+        NSMutableArray<SCIAction *> *resolved = [NSMutableArray arrayWithCapacity:section.actionIDs.count];
+        for (NSString *aid in section.actionIDs) {
+            if (!includeDisabled && [config isActionDisabled:aid]) continue;
+            SCIAction *action = resolver(aid);
+            if (action) {
+                if (!action.actionID.length) action.actionID = aid;
+                [resolved addObject:action];
+            }
+        }
+        if (resolved.count == 0) continue;
+
+        if (section.collapsible) {
+            if (anyEmitted) [out addObject:[SCIAction separator]];
+            NSString *icon = section.iconSF.length ? section.iconSF : @"folder";
+            NSString *title = section.title.length ? section.title : @"";
+            [out addObject:[SCIAction actionWithTitle:title icon:icon children:resolved]];
+            anyEmitted = YES;
+        } else {
+            if (anyEmitted) [out addObject:[SCIAction separator]];
+            [out addObjectsFromArray:resolved];
+            anyEmitted = YES;
+        }
+    }
+
+    return out;
+}
+
 + (UIMenu *)buildMenuWithActions:(NSArray<SCIAction *> *)actions title:(NSString *)title {
-    // Group actions between separators into inline submenus.
+    // First action is a header marker (disabled, no handler, not a separator) —
+    // hoist its title onto the first inline group so it shows as a grey caption.
+    NSString *headerTitle = nil;
+    NSArray<SCIAction *> *items = actions;
+    if (actions.count > 0) {
+        SCIAction *first = actions.firstObject;
+        if (first.disabled && !first.handler && !first.isSeparator) {
+            headerTitle = first.title;
+            NSUInteger start = 1;
+            if (start < actions.count && actions[start].isSeparator) start++;
+            items = [actions subarrayWithRange:NSMakeRange(start, actions.count - start)];
+        }
+    }
+
     NSMutableArray<UIMenuElement *> *top = [NSMutableArray array];
     NSMutableArray<UIMenuElement *> *currentGroup = [NSMutableArray array];
+    __block BOOL isFirstFlush = YES;
 
     void (^flush)(void) = ^{
         if (currentGroup.count == 0) return;
-        UIMenu *group = [UIMenu menuWithTitle:@""
+        NSString *t = (isFirstFlush && headerTitle.length) ? headerTitle : @"";
+        UIMenu *group = [UIMenu menuWithTitle:t
                                         image:nil
                                    identifier:nil
                                       options:UIMenuOptionsDisplayInline
                                      children:[currentGroup copy]];
         [top addObject:group];
         [currentGroup removeAllObjects];
+        isFirstFlush = NO;
     };
 
-    for (SCIAction *a in actions) {
+    for (SCIAction *a in items) {
         if (a.isSeparator) {
             flush();
             continue;

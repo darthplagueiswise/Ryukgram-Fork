@@ -32,9 +32,26 @@
           completion:(void(^)(NSURL *outputURL, NSError *error))completion
            cancelOut:(void(^)(void (^cancelBlock)(void)))cancelOut;
 
+// Still photo + a trimmed slice of an audio track → video (music-on-photo posts).
++ (void)muxPhotoURL:(NSURL *)photoURL
+           audioURL:(NSURL *)audioURL
+       audioStartMs:(double)audioStartMs
+         durationMs:(double)durationMs
+           progress:(void(^)(float progress, NSString *stage))progressBlock
+         completion:(void(^)(NSURL *outputURL, NSError *error))completion
+          cancelOut:(void(^)(void (^cancelBlock)(void)))cancelOut;
+
 + (void)convertAudioAtPath:(NSString *)inputPath
                   toFormat:(NSString *)format
                    bitrate:(NSString *)bitrate
                 completion:(void(^)(NSURL *outputURL, NSError *error))completion;
+
+// ffmpeg argv fragments, keyed @"video"/@"audio"/@"container"/@"filter".
+// adv_encoding_enabled=NO uses fallbackPreset; YES reads adv_* prefs.
++ (NSDictionary<NSString *, NSString *> *)encodingArgsForFallbackPreset:(NSString *)fallbackPreset;
+
+// Returns YES if the loaded ffmpeg-kit binary ships the given encoder
+// (e.g. "libx264", "h264_videotoolbox"). Result cached after first probe.
++ (BOOL)hasEncoder:(NSString *)encoderName;
 
 @end

@@ -1,495 +1,1054 @@
-// Story overlay buttons — action / audio / eye (tags 1339–1341).
+// Story overlay buttons — action / audio / eye / mentions.
 // Early-exits in DM context; DMOverlayButtons.xm handles that surface.
 
 #import "OverlayHelpers.h"
+#import "StoryHelpers.h"
 #import "SCIExcludedStoryUsers.h"
 #import "../../SCIChrome.h"
+#import "../../UI/SCIIcon.h"
 #import "../../ActionButton/SCIActionButton.h"
+#import "../../ActionButton/SCIActionIcon.h"
 #import "../../ActionButton/SCIMediaActions.h"
 #import "../../ActionButton/SCIActionMenu.h"
 #import "../../Downloader/Download.h"
+#import <objc/runtime.h>
+#import <objc/message.h>
 
 extern "C" BOOL sciSeenBypassActive;
 extern "C" BOOL sciAdvanceBypassActive;
-extern "C" void sciAllowSeenForPK(id);
 extern "C" BOOL sciStorySeenToggleEnabled;
+extern "C" void sciAllowSeenForPK(id);
 extern "C" void sciRefreshAllVisibleOverlays(UIViewController *storyVC);
 extern "C" void sciTriggerStoryMarkSeen(UIViewController *storyVC);
 extern "C" __weak UIViewController *sciActiveStoryViewerVC;
 extern "C" NSDictionary *sciOwnerInfoForView(UIView *view);
-extern "C" void sciShowStoryMentions(UIViewController *, UIView *);
 
-// MARK: - Playback control
+static const NSInteger kStoryMentionsCountTag = 13450;
+static const CGFloat kStoryBottomBaseOffset = -100.0;
+static NSString *const kStoryBottomConstraintID = @"sci_story_bottom";
+
+static char kStoryActionDefaultKey;
+static char kStoryReelItemsProviderKey;
+static char kStoryMentionsAnchorKey;
+static char kStoryMentionsCountKey;
+static char kStoryMentionsRetryGenKey;
+static char kStoryEyeAnchorKey;
+static char kStoryLastPKKey;
+static char kStoryLastExcludedKey;
+static char kStoryLastAudioKey;
+static char kStoryLastMediaPKKey;
+static char kStoryInstallPendingKey;
+
+typedef struct {
+	BOOL action;
+	BOOL audio;
+	BOOL seen;
+	BOOL mentions;
+	BOOL mentionsCounter;
+} SCIStoryOverlayPrefs;
+
+static inline SCIStoryOverlayPrefs SCIStoryPrefs(void) {
+	SCIStoryOverlayPrefs p;
+	p.action = [SCIUtils getBoolPref:@"stories_action_button"];
+	p.audio = [SCIUtils getBoolPref:@"story_audio_toggle"];
+	p.seen = [SCIUtils getBoolPref:@"no_seen_receipt"] && [SCIUtils getBoolPref:@"show_story_seen_button"];
+	p.mentions = [SCIUtils getBoolPref:@"story_mentions_button"];
+	p.mentionsCounter = [SCIUtils getBoolPref:@"story_mentions_counter"];
+	return p;
+}
+
+static void sciConfirmStoryMarkSeen(UIViewController *presenter, void (^onConfirm)(void), void (^onCancel)(void)) {
+	[SCIUtils confirmIfNeeded:[SCIUtils getBoolPref:@"confirm_mark_seen_story"]
+	                    title:SCILocalized(@"Mark as seen?")
+	                  message:SCILocalized(@"This will send a story view receipt.")
+	             confirmTitle:SCILocalized(@"Mark seen")
+	                     from:presenter
+	                onConfirm:onConfirm
+	                 onCancel:onCancel];
+}
+
+static inline BOOL SCIStoryHasAnyFeature(SCIStoryOverlayPrefs p) {
+	return p.action || p.audio || p.seen || p.mentions;
+}
+
+static inline NSString *SCIStoryDefaultAction(void) {
+	return [SCIUtils getStringPref:@"stories_action_default"] ?: @"";
+}
+
+static inline SCIChromeButton *SCIStoryButton(NSString *symbol, CGFloat pointSize, CGFloat diameter, NSInteger tag) {
+	SCIChromeButton *button = [[SCIChromeButton alloc] initWithSymbol:symbol pointSize:pointSize diameter:diameter];
+	button.tag = tag;
+	return button;
+}
+
+static inline SCIChromeButton *SCIStoryExistingButton(UIView *root, NSInteger tag) {
+	id button = [root viewWithTag:tag];
+	return [button isKindOfClass:SCIChromeButton.class] ? button : nil;
+}
+
+static inline void SCIRemoveStoryButton(UIView *root, NSInteger tag) {
+	[[root viewWithTag:tag] removeFromSuperview];
+}
+
+static void SCIRemoveAllStoryButtons(UIView *root) {
+	SCIRemoveStoryButton(root, SCI_STORY_ACTION_TAG);
+	SCIRemoveStoryButton(root, SCI_STORY_EYE_TAG);
+	SCIRemoveStoryButton(root, SCI_STORY_AUDIO_TAG);
+	SCIRemoveStoryButton(root, SCI_STORY_MENTIONS_TAG);
+}
+
+static void SCIActivateBottomTrailing(UIView *host, UIView *button, CGFloat size, CGFloat trailing) {
+	NSLayoutConstraint *bottom = [button.bottomAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.bottomAnchor constant:kStoryBottomBaseOffset];
+	bottom.identifier = kStoryBottomConstraintID;
+
+	[NSLayoutConstraint activateConstraints:@[
+		bottom,
+		[button.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:trailing],
+		[button.widthAnchor constraintEqualToConstant:size],
+		[button.heightAnchor constraintEqualToConstant:size]
+	]];
+}
+
+static void SCIActivateBottomLeading(UIView *host, UIView *button, CGFloat size, CGFloat leading) {
+	NSLayoutConstraint *bottom = [button.bottomAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.bottomAnchor constant:kStoryBottomBaseOffset];
+	bottom.identifier = kStoryBottomConstraintID;
+
+	[NSLayoutConstraint activateConstraints:@[
+		bottom,
+		[button.leadingAnchor constraintEqualToAnchor:host.leadingAnchor constant:leading],
+		[button.widthAnchor constraintEqualToConstant:size],
+		[button.heightAnchor constraintEqualToConstant:size]
+	]];
+}
+
+static void SCIActivateLeftOfAnchor(UIView *button, UIView *anchor, CGFloat size) {
+	[NSLayoutConstraint activateConstraints:@[
+		[button.centerYAnchor constraintEqualToAnchor:anchor.centerYAnchor],
+		[button.trailingAnchor constraintEqualToAnchor:anchor.leadingAnchor constant:-10.0],
+		[button.widthAnchor constraintEqualToConstant:size],
+		[button.heightAnchor constraintEqualToConstant:size]
+	]];
+}
+
+static NSHashTable<UIView *> *sciLiveStoryOverlays(void) {
+	static NSHashTable *table;
+	static dispatch_once_t once;
+
+	dispatch_once(&once, ^{
+		table = NSHashTable.weakObjectsHashTable;
+	});
+
+	return table;
+}
+
+static void sciRegisterLiveStoryOverlay(UIView *overlay) {
+	if (overlay.window && !sciOverlayIsInDMContext(overlay)) {
+		[sciLiveStoryOverlays() addObject:overlay];
+	}
+}
+
+static id sciSafeCall0(id target, SEL sel) {
+	if (!target || ![target respondsToSelector:sel]) return nil;
+
+	@try {
+		return ((id (*)(id, SEL))objc_msgSend)(target, sel);
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+static void sciSafeCall1(id target, SEL sel, id arg) {
+	if (!target || ![target respondsToSelector:sel]) return;
+
+	@try {
+		((void (*)(id, SEL, id))objc_msgSend)(target, sel, arg);
+	} @catch (__unused id e) {}
+}
+
+static NSString *sciPKFromObject(id obj) {
+	id pk = sciSafeCall0(obj, @selector(pk));
+	if (!pk) pk = [SCIUtils fieldCacheValue:obj forKey:@"pk"];
+	if (!pk) pk = [SCIUtils fieldCacheValue:obj forKey:@"id"];
+
+	if ([pk respondsToSelector:@selector(stringValue)]) return [pk stringValue];
+	return [pk isKindOfClass:NSString.class] ? pk : nil;
+}
+
+static UIViewController *sciStoryVCForView(UIView *view) {
+	UIViewController *vc = sciFindVC(view, @"IGStoryViewerViewController");
+	return vc ?: sciActiveStoryViewerVC;
+}
+
+static id sciStorySectionController(UIViewController *storyVC) {
+	return sciSafeCall0(storyVC, @selector(currentlyDisplayedSectionController));
+}
+
+static id sciOverlayMedia(UIView *view) {
+	id media = [SCIUtils getIvarForObj:view name:"_media"];
+	Class cls = NSClassFromString(@"IGMedia");
+	return (cls && [media isKindOfClass:cls]) ? media : nil;
+}
+
+static id sciStoryItemFromContextProvider(id provider) {
+	id ctx = sciSafeCall0(provider, @selector(currentStoryItemContext));
+	if (!ctx) ctx = sciSafeCall0(provider, @selector(_currentStoryItemContext));
+
+	id item = sciSafeCall0(ctx, @selector(storyItem));
+	return item ?: ctx;
+}
+
+static id sciCurrentStoryItemFromView(UIResponder *sourceView) {
+	UIViewController *storyVC = sciFindVC(sourceView, @"IGStoryViewerViewController");
+	storyVC = storyVC ?: sciActiveStoryViewerVC;
+	if (!storyVC) return nil;
+
+	id item = sciStoryItemFromContextProvider(sourceView);
+	if (item) return item;
+
+	item = sciSafeCall0(storyVC, @selector(currentStoryItem));
+	if (item) return item;
+
+	id section = sciStorySectionController(storyVC);
+	item = sciSafeCall0(section, @selector(currentStoryItem));
+	if (item) return item;
+
+	id vm = sciSafeCall0(storyVC, @selector(currentViewModel));
+	return sciSafeCall0(vm, @selector(currentStoryItem)) ?: sciCall1(storyVC, @selector(currentStoryItemForViewModel:), vm);
+}
+
+static id sciCurrentStoryMedia(UIView *sourceView) {
+	id media = sciOverlayMedia(sourceView);
+	if (media) return media;
+
+	id item = sciCurrentStoryItemFromView(sourceView);
+
+	if ([item isKindOfClass:NSClassFromString(@"IGMedia")]) return item;
+	return sciExtractMediaFromItem(item) ?: (id)kCFNull;
+}
+
+static NSString *sciCurrentStoryMediaPK(UIView *sourceView) {
+	id media = sciOverlayMedia(sourceView);
+	if (media) return sciPKFromObject(media);
+
+	media = sciCurrentStoryMedia(sourceView);
+	return media && media != (id)kCFNull ? sciPKFromObject(media) : nil;
+}
+
+static NSArray *sciStoryReelItemsForSource(UIView *sourceView) {
+	UIViewController *storyVC = sciStoryVCForView(sourceView);
+	id vm = sciSafeCall0(storyVC, @selector(currentViewModel));
+	id items = sciSafeCall0(vm, @selector(items));
+	return ([items isKindOfClass:NSArray.class] && [(NSArray *)items count] > 1) ? items : nil;
+}
 
 static void sciPauseStoryPlayback(UIView *sourceView) {
-    UIViewController *storyVC = sciFindVC(sourceView, @"IGStoryViewerViewController");
-    if (!storyVC) return;
-    id sc = sciFindSectionController(storyVC);
+	UIViewController *storyVC = sciStoryVCForView(sourceView);
+	id section = sciStorySectionController(storyVC);
 
-    SEL pauseSel = NSSelectorFromString(@"pauseWithReason:");
-    if (sc && [sc respondsToSelector:pauseSel]) {
-        ((void(*)(id, SEL, NSInteger))objc_msgSend)(sc, pauseSel, 10);
-        return;
-    }
-    if ([storyVC respondsToSelector:pauseSel]) {
-        ((void(*)(id, SEL, NSInteger))objc_msgSend)(storyVC, pauseSel, 10);
-    }
+	if ([section respondsToSelector:@selector(pauseWithReason:)]) {
+		((void (*)(id, SEL, NSInteger))objc_msgSend)(section, @selector(pauseWithReason:), 10);
+		return;
+	}
+
+	if ([storyVC respondsToSelector:@selector(pauseWithReason:)]) {
+		((void (*)(id, SEL, NSInteger))objc_msgSend)(storyVC, @selector(pauseWithReason:), 10);
+	}
 }
 
 static void sciResumeStoryPlayback(UIView *sourceView) {
-    UIViewController *storyVC = sciFindVC(sourceView, @"IGStoryViewerViewController");
-    if (!storyVC) return;
-    id sc = sciFindSectionController(storyVC);
+	UIViewController *storyVC = sciStoryVCForView(sourceView);
+	id section = sciStorySectionController(storyVC);
 
-    SEL resumeSel1 = NSSelectorFromString(@"tryResumePlaybackWithReason:");
-    SEL resumeSel2 = NSSelectorFromString(@"tryResumePlayback");
-    if (sc && [sc respondsToSelector:resumeSel1]) {
-        ((void(*)(id, SEL, NSInteger))objc_msgSend)(sc, resumeSel1, 0);
-        return;
-    }
-    if ([storyVC respondsToSelector:resumeSel2]) {
-        ((void(*)(id, SEL))objc_msgSend)(storyVC, resumeSel2);
-        return;
-    }
-    if ([storyVC respondsToSelector:resumeSel1]) {
-        ((void(*)(id, SEL, NSInteger))objc_msgSend)(storyVC, resumeSel1, 0);
-    }
+	if ([section respondsToSelector:@selector(tryResumePlaybackWithReason:)]) {
+		((void (*)(id, SEL, NSInteger))objc_msgSend)(section, @selector(tryResumePlaybackWithReason:), 10);
+		return;
+	}
+
+	if ([storyVC respondsToSelector:@selector(tryResumePlayback)]) {
+		((void (*)(id, SEL))objc_msgSend)(storyVC, @selector(tryResumePlayback));
+	}
 }
 
-// MARK: - Overlay hook
+// showsMenuAsPrimaryAction bypasses UIContextMenuInteractionDelegate, so the
+// usual willEnd callback never fires — poll the window hierarchy instead.
+static BOOL sciAnyContextMenuVisible(void) {
+	for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+		if (![scene isKindOfClass:UIWindowScene.class]) continue;
+
+		for (UIWindow *win in ((UIWindowScene *)scene).windows) {
+			NSMutableArray *q = [NSMutableArray arrayWithObject:win];
+
+			while (q.count) {
+				UIView *cur = q.lastObject;
+				[q removeLastObject];
+
+				NSString *cls = NSStringFromClass(cur.class);
+				if ([cls containsString:@"ContextMenuContainerView"] || [cls containsString:@"_UIContextMenuView"] || [cls containsString:@"ContextMenuPlatterView"]) {
+					return YES;
+				}
+
+				for (UIView *s in cur.subviews) {
+					[q addObject:s];
+				}
+			}
+		}
+	}
+
+	return NO;
+}
+
+static void sciWatchForMenuDismiss(void (^onDismiss)(void)) {
+	if (!onDismiss) return;
+
+	__block BOOL appeared = NO;
+	__block NSInteger ticks = 0;
+
+	[NSTimer scheduledTimerWithTimeInterval:1.0 / 60.0 repeats:YES block:^(NSTimer *t) {
+		BOOL visible = sciAnyContextMenuVisible();
+		if (visible) appeared = YES;
+
+		if ((appeared && !visible) || (!appeared && ++ticks > 120)) {
+			[t invalidate];
+			onDismiss();
+		}
+	}];
+}
+
+static void SCIConfigureStoryActionButton(SCIChromeButton *button) {
+	if (!button) return;
+
+	__weak UIButton *weakBtn = button;
+
+	SCIActionMediaProvider provider = ^id (UIView *sourceView) {
+		sciPauseStoryPlayback(sourceView);
+
+		sciWatchForMenuDismiss(^{
+			UIButton *b = weakBtn;
+			if (b) sciResumeStoryPlayback(b);
+		});
+
+		id media = sciCurrentStoryMedia(sourceView);
+		return media == (id)kCFNull ? nil : media;
+	};
+
+	[SCIActionButton configureButton:button context:SCIActionContextStories prefKey:@"stories_action_default" mediaProvider:provider];
+
+	objc_setAssociatedObject(button, &kStoryReelItemsProviderKey, ^NSArray *(UIView *sourceView) {
+		return sciStoryReelItemsForSource(sourceView);
+	}, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+	__weak SCIChromeButton *weakButton = button;
+
+	objc_setAssociatedObject(button, kSCIDismissKey, ^{
+		SCIChromeButton *strongButton = weakButton;
+		if (strongButton) sciResumeStoryPlayback(strongButton);
+	}, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
+static void sciApplyMentionsCounter(SCIChromeButton *button, NSInteger count, BOOL enabled) {
+	if (!button) return;
+
+	UILabel *label = (UILabel *)[button viewWithTag:kStoryMentionsCountTag];
+
+	if (!enabled || count <= 0) {
+		[label removeFromSuperview];
+		objc_setAssociatedObject(button, &kStoryMentionsCountKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		return;
+	}
+
+	NSNumber *old = objc_getAssociatedObject(button, &kStoryMentionsCountKey);
+	if (label && old.integerValue == count) return;
+
+	if (!label) {
+		label = [UILabel new];
+		label.tag = kStoryMentionsCountTag;
+		label.translatesAutoresizingMaskIntoConstraints = NO;
+		label.textAlignment = NSTextAlignmentCenter;
+		label.font = [UIFont systemFontOfSize:10.0 weight:UIFontWeightBold];
+		label.textColor = UIColor.whiteColor;
+		label.backgroundColor = UIColor.systemRedColor;
+		label.layer.cornerRadius = 8.0;
+		label.layer.masksToBounds = YES;
+		label.adjustsFontSizeToFitWidth = YES;
+		label.minimumScaleFactor = 0.7;
+		label.userInteractionEnabled = NO;
+
+		UIView *host = button.captureContentView;
+		[host addSubview:label];
+
+		[NSLayoutConstraint activateConstraints:@[
+			[label.topAnchor constraintEqualToAnchor:host.topAnchor constant:-3.0],
+			[label.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:3.0],
+			[label.widthAnchor constraintGreaterThanOrEqualToConstant:16.0],
+			[label.heightAnchor constraintEqualToConstant:16.0]
+		]];
+	}
+
+	label.text = count > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)count];
+	objc_setAssociatedObject(button, &kStoryMentionsCountKey, @(count), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Music attribution/highlight buttons can overlap our custom bottom-right column.
+// Prefer scanning known overlay/header/footer roots instead of the whole story VC tree.
+static CGFloat sciStoryMusicClearance(UIView *overlay) {
+	CGFloat OW = overlay.bounds.size.width;
+	CGFloat H = overlay.bounds.size.height;
+	if (OW <= 0 || H <= 0) return 0;
+
+	static Class tapCls;
+	static dispatch_once_t once;
+
+	dispatch_once(&once, ^{
+		tapCls = NSClassFromString(@"IGTapButton");
+	});
+
+	if (!tapCls) return 0;
+
+	UIViewController *storyVC = sciStoryVCForView(overlay);
+	UIView *root = storyVC.view ?: overlay.window ?: overlay;
+
+	CGFloat safeBottom = H - overlay.safeAreaInsets.bottom;
+	CGFloat ourBottomEdgeY = safeBottom + kStoryBottomBaseOffset;
+	CGRect zone = CGRectMake(OW - 220.0, ourBottomEdgeY - 44.0, 220.0, 60.0);
+	const CGFloat pad = 10.0;
+
+	CGFloat clearance = 0;
+	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+
+	while (stack.count) {
+		UIView *v = stack.lastObject;
+		[stack removeLastObject];
+
+		for (UIView *s in v.subviews) {
+			[stack addObject:s];
+		}
+
+		if (![v isKindOfClass:tapCls] || v.hidden || v.alpha < 0.01 || !v.window) continue;
+		if (v.bounds.size.width > 120.0 || v.bounds.size.height > 120.0) continue;
+
+		CGRect f = [v convertRect:v.bounds toView:overlay];
+		if (!CGRectIntersectsRect(f, zone)) continue;
+
+		CGFloat need = ourBottomEdgeY - (CGRectGetMinY(f) - pad);
+		if (need > clearance) clearance = need;
+	}
+
+	return clearance;
+}
 
 %group StoryOverlayGroup
 
 %hook IGStoryFullscreenOverlayView
 
+- (void)didMoveToWindow {
+	%orig;
+
+	if (!self.window) return;
+
+	if (sciOverlayIsInDMContext(self)) {
+		SCIRemoveAllStoryButtons(self);
+		return;
+	}
+
+	sciRegisterLiveStoryOverlay((UIView *)self);
+
+	if ([objc_getAssociatedObject(self, &kStoryInstallPendingKey) boolValue]) return;
+	objc_setAssociatedObject(self, &kStoryInstallPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	__weak __typeof(self) weakSelf = self;
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		__strong __typeof(weakSelf) self = weakSelf;
+		if (!self) return;
+
+		objc_setAssociatedObject(self, &kStoryInstallPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+		if (self.window && !sciOverlayIsInDMContext(self)) {
+			((void (*)(id, SEL))objc_msgSend)(self, @selector(sciUpdateStoryOverlayButtons));
+		}
+	});
+}
+
 - (void)didMoveToSuperview {
-    %orig;
-    if (!self.superview) return;
+	%orig;
 
-    // Strip stale tags up-front so nothing flashes when this overlay
-    // turns out to belong to a DM viewer.
-    UIView *sA = [self viewWithTag:SCI_STORY_ACTION_TAG]; if (sA) [sA removeFromSuperview];
-    UIView *sE = [self viewWithTag:SCI_STORY_EYE_TAG];    if (sE) [sE removeFromSuperview];
-    UIView *sU = [self viewWithTag:SCI_STORY_AUDIO_TAG];  if (sU) [sU removeFromSuperview];
-
-    // Defer one tick — responder chain isn't complete yet, so the DM
-    // context check needs to run after the current runloop iteration.
-    __weak __typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        __strong __typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf.superview) return;
-        if (sciOverlayIsInDMContext(strongSelf)) return;
-        ((void(*)(id, SEL))objc_msgSend)(strongSelf, @selector(sciInstallStoryOverlayButtons));
-    });
+	if (self.superview && !sciOverlayIsInDMContext(self)) {
+		((void (*)(id, SEL))objc_msgSend)(self, @selector(sciUpdateStoryOverlayButtons));
+	} else if (sciOverlayIsInDMContext(self)) {
+		SCIRemoveAllStoryButtons(self);
+	}
 }
 
-%new - (void)sciInstallStoryOverlayButtons {
-    if (!self.superview) return;
+- (void)prepareForReuse {
+	%orig;
 
-    // --- Action button (tag 1340) ---
-    UIView *staleAction = [self viewWithTag:SCI_STORY_ACTION_TAG];
-    if (staleAction) {
-        @try { [staleAction removeObserver:self forKeyPath:@"highlighted"]; } @catch (__unused id e) {}
-        [staleAction removeFromSuperview];
-    }
-    if ([SCIUtils getBoolPref:@"stories_action_button"]) {
-        SCIChromeButton *btn = [[SCIChromeButton alloc] initWithSymbol:@"ellipsis.circle" pointSize:18 diameter:36];
-        btn.tag = SCI_STORY_ACTION_TAG;
-        [self addSubview:btn];
-        [NSLayoutConstraint activateConstraints:@[
-            [btn.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
-            [btn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
-            [btn.widthAnchor constraintEqualToConstant:36],
-            [btn.heightAnchor constraintEqualToConstant:36]
-        ]];
-
-        SCIActionMediaProvider provider = ^id (UIView *sourceView) {
-            sciPauseStoryPlayback(sourceView);
-            id item = sciGetCurrentStoryItem(sourceView);
-            if ([item isKindOfClass:NSClassFromString(@"IGMedia")]) return item;
-            id extracted = sciExtractMediaFromItem(item);
-            return extracted ?: (id)kCFNull;
-        };
-
-        [SCIActionButton configureButton:btn
-                                 context:SCIActionContextStories
-                                 prefKey:@"stories_action_default"
-                           mediaProvider:provider];
-
-        // Resume playback when the native UIMenu dismisses.
-        [btn addObserver:self forKeyPath:@"highlighted"
-                 options:NSKeyValueObservingOptionNew context:NULL];
-
-        // Reel items provider — used by SCIMediaActions for "download all".
-        static const void *kStoryReelItemsProvider = &kStoryReelItemsProvider;
-        objc_setAssociatedObject(btn, kStoryReelItemsProvider, ^NSArray *(UIView *src) {
-            UIViewController *storyVC = sciFindVC(src, @"IGStoryViewerViewController");
-            if (!storyVC) return nil;
-            id vm = sciCall(storyVC, @selector(currentViewModel));
-            if (!vm) return nil;
-
-            for (NSString *sel in @[@"items", @"storyItems", @"reelItems", @"mediaItems", @"allItems"]) {
-                if ([vm respondsToSelector:NSSelectorFromString(sel)]) {
-                    @try {
-                        id val = ((id(*)(id,SEL))objc_msgSend)(vm, NSSelectorFromString(sel));
-                        if ([val isKindOfClass:[NSArray class]] && [(NSArray *)val count] > 1) return val;
-                    } @catch (__unused id e) {}
-                }
-            }
-
-            Class mc = NSClassFromString(@"IGMedia");
-            unsigned int cnt = 0;
-            Ivar *ivs = class_copyIvarList(object_getClass(vm), &cnt);
-            for (unsigned int i = 0; i < cnt; i++) {
-                const char *type = ivar_getTypeEncoding(ivs[i]);
-                if (!type || type[0] != '@') continue;
-                @try {
-                    id val = object_getIvar(vm, ivs[i]);
-                    if ([val isKindOfClass:[NSArray class]] && [(NSArray *)val count] > 1) {
-                        id first = [(NSArray *)val firstObject];
-                        if (mc && [first isKindOfClass:mc]) { free(ivs); return val; }
-                        IGMedia *extracted = sciExtractMediaFromItem(first);
-                        if (extracted) { free(ivs); return val; }
-                    }
-                } @catch (__unused id e) {}
-            }
-            if (ivs) free(ivs);
-            return nil;
-        }, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    }
-
-    // --- Audio toggle (tag 1341) ---
-    UIView *staleAudio = [self viewWithTag:SCI_STORY_AUDIO_TAG];
-    if (staleAudio) [staleAudio removeFromSuperview];
-    sciInitStoryAudioState();
-    if ([SCIUtils getBoolPref:@"story_audio_toggle"]) {
-        NSString *icon = sciIsStoryAudioEnabled() ? @"speaker.wave.2" : @"speaker.slash";
-        SCIChromeButton *btn = [[SCIChromeButton alloc] initWithSymbol:icon pointSize:14 diameter:28];
-        btn.tag = SCI_STORY_AUDIO_TAG;
-        [btn addTarget:self action:@selector(sciStoryAudioToggleTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:btn];
-        [NSLayoutConstraint activateConstraints:@[
-            [btn.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
-            [btn.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:12],
-            [btn.widthAnchor constraintEqualToConstant:28],
-            [btn.heightAnchor constraintEqualToConstant:28]
-        ]];
-    }
-
-    // --- Eye / mark-seen (tag 1339) ---
-    // layoutSubviews can fire between the tick-0 strip and now, creating
-    // the eye with fallback constraints before the action exists. Drop it
-    // so the refresh rebuilds it anchored to the action button.
-    UIView *staleEye = [self viewWithTag:SCI_STORY_EYE_TAG];
-    if (staleEye) [staleEye removeFromSuperview];
-    ((void(*)(id, SEL))objc_msgSend)(self, @selector(sciRefreshSeenButton));
+	SCIRemoveAllStoryButtons(self);
+	objc_setAssociatedObject(self, &kStoryMentionsRetryGenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryLastPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryLastExcludedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryLastAudioKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryLastMediaPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
 
-// MARK: - Action button menu-dismiss resume
-
-%new - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
-                              change:(NSDictionary *)change context:(void *)context {
-    if ([keyPath isEqualToString:@"highlighted"]) {
-        BOOL highlighted = [change[NSKeyValueChangeNewKey] boolValue];
-        if (!highlighted) sciResumeStoryPlayback(self);
-    }
+- (void)dealloc {
+	SCIRemoveAllStoryButtons(self);
+	%orig;
 }
 
-// MARK: - Audio toggle
-
-%new - (void)sciStoryAudioToggleTapped:(SCIChromeButton *)sender {
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
-    [haptic impactOccurred];
-    sciToggleStoryAudio();
-    sender.symbolName = sciIsStoryAudioEnabled() ? @"speaker.wave.2" : @"speaker.slash";
+%new
+- (void)sciUpdateStoryOverlayButtons {
+	SCIStoryOverlayPrefs prefs = SCIStoryPrefs();
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciUpdateStoryOverlayButtonsWithPrefs:), prefs);
 }
 
-%new - (void)sciRefreshStoryAudioButton {
-    SCIChromeButton *btn = (SCIChromeButton *)[self viewWithTag:SCI_STORY_AUDIO_TAG];
-    if (![btn isKindOfClass:[SCIChromeButton class]]) return;
-    btn.symbolName = sciIsStoryAudioEnabled() ? @"speaker.wave.2" : @"speaker.slash";
+%new
+- (void)sciUpdateStoryOverlayButtonsWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	if (!self.superview || sciOverlayIsInDMContext(self)) return;
+
+	if (!SCIStoryHasAnyFeature(prefs)) {
+		SCIRemoveAllStoryButtons(self);
+		return;
+	}
+
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryActionButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryAudioButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshSeenButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciKickMentionsRetryChainWithPrefs:), prefs);
+	((void (*)(id, SEL))objc_msgSend)(self, @selector(sciApplyMusicButtonClearance));
 }
 
-// MARK: - Seen eye button
+%new
+- (void)sciApplyMusicButtonClearance {
+	NSMutableArray<NSLayoutConstraint *> *bottoms = nil;
 
-// Visible only when no_seen_receipt is on and the owner isn't excluded.
-%new - (void)sciRefreshSeenButton {
-    BOOL seenBlockingOn = [SCIUtils getBoolPref:@"no_seen_receipt"];
-    if (!seenBlockingOn) { UIView *old = [self viewWithTag:SCI_STORY_EYE_TAG]; if (old) [old removeFromSuperview]; return; }
+	for (NSLayoutConstraint *c in self.constraints) {
+		if (![c.identifier isEqualToString:kStoryBottomConstraintID]) continue;
+		if (!bottoms) bottoms = NSMutableArray.array;
+		[bottoms addObject:c];
+	}
 
-    NSDictionary *ownerInfo = sciOwnerInfoForView(self);
-    NSString *ownerPK = ownerInfo[@"pk"] ?: @"";
-    BOOL excluded = ownerPK.length && [SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
-    SCIChromeButton *existing = (SCIChromeButton *)[self viewWithTag:SCI_STORY_EYE_TAG];
-    if (![existing isKindOfClass:[SCIChromeButton class]]) existing = nil;
+	if (!bottoms.count) return;
 
-    if (excluded) { if (existing) [existing removeFromSuperview]; return; }
+	CGFloat offset = kStoryBottomBaseOffset - sciStoryMusicClearance(self);
 
-    BOOL toggleMode = [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"];
-    NSString *symName;
-    UIColor *tint;
-    if (toggleMode) {
-        symName = sciStorySeenToggleEnabled ? @"eye.fill" : @"eye";
-        tint = sciStorySeenToggleEnabled ? SCIUtils.SCIColor_Primary : [UIColor whiteColor];
-    } else {
-        symName = @"eye"; tint = [UIColor whiteColor];
-    }
-
-    if (existing) {
-        existing.symbolName = symName;
-        existing.iconTint = tint;
-        return;
-    }
-
-    SCIChromeButton *btn = [[SCIChromeButton alloc] initWithSymbol:symName pointSize:18 diameter:36];
-    btn.tag = SCI_STORY_EYE_TAG;
-    btn.iconTint = tint;
-    [btn addTarget:self action:@selector(sciStorySeenButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-    // Long-press → context menu (positions itself next to the button).
-    UIContextMenuInteraction *ix = [[UIContextMenuInteraction alloc] initWithDelegate:(id<UIContextMenuInteractionDelegate>)self];
-    [btn addInteraction:ix];
-    [self addSubview:btn];
-
-    UIView *anchor = [self viewWithTag:SCI_STORY_ACTION_TAG];
-    if (anchor) {
-        [NSLayoutConstraint activateConstraints:@[
-            [btn.centerYAnchor constraintEqualToAnchor:anchor.centerYAnchor],
-            [btn.trailingAnchor constraintEqualToAnchor:anchor.leadingAnchor constant:-10],
-            [btn.widthAnchor constraintEqualToConstant:36],
-            [btn.heightAnchor constraintEqualToConstant:36]
-        ]];
-    } else {
-        [NSLayoutConstraint activateConstraints:@[
-            [btn.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
-            [btn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
-            [btn.widthAnchor constraintEqualToConstant:36],
-            [btn.heightAnchor constraintEqualToConstant:36]
-        ]];
-    }
+	for (NSLayoutConstraint *c in bottoms) {
+		if (c.constant != offset) c.constant = offset;
+	}
 }
 
-// MARK: - Owner / audio refresh on layout
+%new
+- (void)sciRefreshStoryActionButtonWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	SCIChromeButton *button = SCIStoryExistingButton(self, SCI_STORY_ACTION_TAG);
+
+	if (!prefs.action) {
+		[button removeFromSuperview];
+		return;
+	}
+
+	NSString *currentAction = SCIStoryDefaultAction();
+	NSString *oldAction = objc_getAssociatedObject(button, &kStoryActionDefaultKey);
+
+	if (button && oldAction && [oldAction isEqualToString:currentAction]) return;
+
+	[button removeFromSuperview];
+
+	button = SCIStoryButton(@"", 18.0, 36.0, SCI_STORY_ACTION_TAG);
+	[self addSubview:button];
+
+	SCIActivateBottomTrailing(self, button, 36.0, -12.0);
+	[SCIActionIcon attachAutoUpdate:button source:SCIActionSourceStories pointSize:18.0 style:SCIActionIconStylePlain];
+	SCIConfigureStoryActionButton(button);
+
+	objc_setAssociatedObject(button, &kStoryActionDefaultKey, currentAction, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%new
+- (void)sciStoryAudioToggleTapped:(SCIChromeButton *)sender {
+	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+
+	sciToggleStoryAudio();
+
+	BOOL audioOn = sciIsStoryAudioEnabled();
+	sender.symbolName = audioOn ? @"speaker.wave.2" : @"speaker.slash";
+	objc_setAssociatedObject(self, &kStoryLastAudioKey, @(audioOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%new
+- (void)sciRefreshStoryAudioButtonWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	SCIChromeButton *button = SCIStoryExistingButton(self, SCI_STORY_AUDIO_TAG);
+
+	if (!prefs.audio) {
+		[button removeFromSuperview];
+		return;
+	}
+
+	BOOL audioOn = sciIsStoryAudioEnabled();
+	NSNumber *oldAudio = objc_getAssociatedObject(self, &kStoryLastAudioKey);
+
+	if (button) {
+		if (!oldAudio || oldAudio.boolValue != audioOn) {
+			button.symbolName = audioOn ? @"speaker.wave.2" : @"speaker.slash";
+		}
+
+		objc_setAssociatedObject(self, &kStoryLastAudioKey, @(audioOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		return;
+	}
+
+	sciInitStoryAudioState();
+
+	button = SCIStoryButton(audioOn ? @"speaker.wave.2" : @"speaker.slash", 14.0, 28.0, SCI_STORY_AUDIO_TAG);
+	[button addTarget:self action:@selector(sciStoryAudioToggleTapped:) forControlEvents:UIControlEventTouchUpInside];
+	[self addSubview:button];
+
+	SCIActivateBottomLeading(self, button, 28.0, 12.0);
+	objc_setAssociatedObject(self, &kStoryLastAudioKey, @(audioOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%new
+- (void)sciRefreshSeenButtonWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	SCIChromeButton *button = SCIStoryExistingButton(self, SCI_STORY_EYE_TAG);
+
+	if (!prefs.seen) {
+		[button removeFromSuperview];
+		objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		return;
+	}
+
+	NSDictionary *ownerInfo = sciOwnerInfoForView(self);
+	NSString *ownerPK = ownerInfo[@"pk"] ?: @"";
+	BOOL excluded = ownerPK.length && [SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
+
+	NSString *oldPK = objc_getAssociatedObject(self, &kStoryLastPKKey);
+	NSNumber *oldExcluded = objc_getAssociatedObject(self, &kStoryLastExcludedKey);
+	BOOL hasAction = [self viewWithTag:SCI_STORY_ACTION_TAG] != nil;
+	NSNumber *oldAnchor = objc_getAssociatedObject(self, &kStoryEyeAnchorKey);
+
+	BOOL sameOwner = oldPK && [oldPK isEqualToString:ownerPK] && oldExcluded && oldExcluded.boolValue == excluded;
+	BOOL sameAnchor = oldAnchor && oldAnchor.boolValue == hasAction;
+
+	if (button && sameOwner && sameAnchor) return;
+
+	objc_setAssociatedObject(self, &kStoryLastPKKey, ownerPK, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryLastExcludedKey, @(excluded), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, @(hasAction), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	if (excluded) {
+		[button removeFromSuperview];
+		return;
+	}
+
+	BOOL toggleMode = [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"];
+	NSString *symbol = (toggleMode && sciStorySeenToggleEnabled) ? @"eye.fill" : @"eye";
+	UIColor *tint = (toggleMode && sciStorySeenToggleEnabled) ? SCIUtils.SCIColor_Primary : UIColor.whiteColor;
+
+	if (!button || !sameAnchor) {
+		[button removeFromSuperview];
+
+		button = SCIStoryButton(@"", 18.0, 36.0, SCI_STORY_EYE_TAG);
+		[button addTarget:self action:@selector(sciStorySeenButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+		[button addInteraction:[[UIContextMenuInteraction alloc] initWithDelegate:(id<UIContextMenuInteractionDelegate>)self]];
+		[self addSubview:button];
+
+		UIView *action = [self viewWithTag:SCI_STORY_ACTION_TAG];
+		if (action) SCIActivateLeftOfAnchor(button, action, 36.0);
+		else SCIActivateBottomTrailing(self, button, 36.0, -12.0);
+
+		SCIChromeButton *mentions = SCIStoryExistingButton(self, SCI_STORY_MENTIONS_TAG);
+		objc_setAssociatedObject(mentions, &kStoryMentionsAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	}
+
+	[button setIconResource:symbol pointSize:18.0];
+	button.iconTint = tint;
+}
+
+%new
+- (void)sciRefreshStoryMentionsButtonWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	SCIChromeButton *button = SCIStoryExistingButton(self, SCI_STORY_MENTIONS_TAG);
+
+	if (!prefs.mentions || !sciStoryHasMentionsOrShares(self)) {
+		[button removeFromSuperview];
+		return;
+	}
+
+	UIView *eye = [self viewWithTag:SCI_STORY_EYE_TAG];
+	UIView *action = [self viewWithTag:SCI_STORY_ACTION_TAG];
+	UIView *anchor = eye ?: action;
+
+	NSInteger anchorState = (eye ? 1 : 0) | (action ? 2 : 0);
+	NSInteger count = prefs.mentionsCounter ? sciStoryMentionsCount(self) : 0;
+
+	NSNumber *oldAnchor = objc_getAssociatedObject(button, &kStoryMentionsAnchorKey);
+	NSNumber *oldCount = objc_getAssociatedObject(button, &kStoryMentionsCountKey);
+
+	if (button && oldAnchor && oldAnchor.integerValue == anchorState) {
+		if (!oldCount || oldCount.integerValue != count) {
+			sciApplyMentionsCounter(button, count, prefs.mentionsCounter);
+		}
+		return;
+	}
+
+	[button removeFromSuperview];
+
+	button = SCIStoryButton(@"at", 18.0, 36.0, SCI_STORY_MENTIONS_TAG);
+	[button addTarget:self action:@selector(sciStoryMentionsButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+	[self addSubview:button];
+
+	if (anchor) SCIActivateLeftOfAnchor(button, anchor, 36.0);
+	else SCIActivateBottomTrailing(self, button, 36.0, -12.0);
+
+	objc_setAssociatedObject(button, &kStoryMentionsAnchorKey, @(anchorState), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	sciApplyMentionsCounter(button, count, prefs.mentionsCounter);
+}
+
+%new
+- (void)sciKickMentionsRetryChainWithPrefs:(SCIStoryOverlayPrefs)prefs {
+	if (!prefs.mentions || [self viewWithTag:SCI_STORY_MENTIONS_TAG]) return;
+
+	NSInteger gen = [objc_getAssociatedObject(self, &kStoryMentionsRetryGenKey) integerValue] + 1;
+	objc_setAssociatedObject(self, &kStoryMentionsRetryGenKey, @(gen), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	((void (*)(id, SEL, NSInteger, NSInteger))objc_msgSend)(self, @selector(sciScheduleMentionsRetryGeneration:remaining:), gen, 4);
+}
+
+%new
+- (void)sciScheduleMentionsRetryGeneration:(NSInteger)gen remaining:(NSInteger)remaining {
+	if (remaining <= 0) return;
+
+	__weak __typeof(self) weakSelf = self;
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		__strong __typeof(weakSelf) self = weakSelf;
+		if (!self || !self.superview) return;
+		if ([objc_getAssociatedObject(self, &kStoryMentionsRetryGenKey) integerValue] != gen) return;
+
+		SCIStoryOverlayPrefs prefs = SCIStoryPrefs();
+		((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+
+		if (![self viewWithTag:SCI_STORY_MENTIONS_TAG]) {
+			((void (*)(id, SEL, NSInteger, NSInteger))objc_msgSend)(self, @selector(sciScheduleMentionsRetryGeneration:remaining:), gen, remaining - 1);
+		}
+	});
+}
+
+%new
+- (void)sciStoryMentionsButtonTapped:(SCIChromeButton *)sender {
+	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight] impactOccurred];
+
+	UIViewController *storyVC = sciStoryVCForView(self);
+	if (!storyVC) return;
+
+	sciPauseStoryPlayback(self);
+	sciShowStoryMentions(storyVC, self);
+}
 
 - (void)layoutSubviews {
-    %orig;
-    static char kLastPKKey;
-    static char kLastExclKey;
-    static char kLastAudioKey;
+	%orig;
 
-    UIButton *audioBtn = (UIButton *)[self viewWithTag:SCI_STORY_AUDIO_TAG];
-    if (audioBtn) {
-        BOOL audioOn = sciIsStoryAudioEnabled();
-        NSNumber *prevAudio = objc_getAssociatedObject(self, &kLastAudioKey);
-        if (!prevAudio || [prevAudio boolValue] != audioOn) {
-            objc_setAssociatedObject(self, &kLastAudioKey, @(audioOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            ((void(*)(id, SEL))objc_msgSend)(self, @selector(sciRefreshStoryAudioButton));
-        }
-    }
+	if (sciOverlayIsInDMContext(self)) {
+		SCIRemoveAllStoryButtons(self);
+		return;
+	}
 
-    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return;
-    NSDictionary *info = sciOwnerInfoForView(self);
-    NSString *pk = info[@"pk"] ?: @"";
-    BOOL excluded = pk.length && [SCIExcludedStoryUsers isUserPKExcluded:pk];
-    NSString *prev = objc_getAssociatedObject(self, &kLastPKKey);
-    NSNumber *prevExcl = objc_getAssociatedObject(self, &kLastExclKey);
-    BOOL changed = ![pk isEqualToString:prev ?: @""] || (prevExcl && [prevExcl boolValue] != excluded);
-    if (!changed) return;
-    objc_setAssociatedObject(self, &kLastPKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    objc_setAssociatedObject(self, &kLastExclKey, @(excluded), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ((void(*)(id, SEL))objc_msgSend)(self, @selector(sciRefreshSeenButton));
+	sciRegisterLiveStoryOverlay((UIView *)self);
+
+	SCIStoryOverlayPrefs prefs = SCIStoryPrefs();
+
+	if (!SCIStoryHasAnyFeature(prefs)) {
+		SCIRemoveAllStoryButtons(self);
+		return;
+	}
+
+	NSString *mediaPK = sciCurrentStoryMediaPK(self) ?: @"";
+	NSString *oldMediaPK = objc_getAssociatedObject(self, &kStoryLastMediaPKKey);
+	BOOL mediaChanged = !oldMediaPK || ![oldMediaPK isEqualToString:mediaPK];
+
+	if (mediaChanged) {
+		objc_setAssociatedObject(self, &kStoryLastMediaPKKey, mediaPK, OBJC_ASSOCIATION_COPY_NONATOMIC);
+		objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		objc_setAssociatedObject(self, &kStoryLastPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+		objc_setAssociatedObject(self, &kStoryLastExcludedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+		((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciUpdateStoryOverlayButtonsWithPrefs:), prefs);
+		return;
+	}
+
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryActionButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryAudioButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshSeenButtonWithPrefs:), prefs);
+	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+	((void (*)(id, SEL))objc_msgSend)(self, @selector(sciApplyMusicButtonClearance));
 }
 
-// MARK: - Seen button tap handlers
+%new
+- (void)sciStorySeenButtonTapped:(SCIChromeButton *)sender {
+	if ([[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"]) {
+		sciStorySeenToggleEnabled = !sciStorySeenToggleEnabled;
 
-%new - (void)sciStorySeenButtonTapped:(SCIChromeButton *)sender {
-    if ([[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"]) {
-        sciStorySeenToggleEnabled = !sciStorySeenToggleEnabled;
-        sender.symbolName = sciStorySeenToggleEnabled ? @"eye.fill" : @"eye";
-        sender.iconTint = sciStorySeenToggleEnabled ? SCIUtils.SCIColor_Primary : [UIColor whiteColor];
-        [SCIUtils showToastForDuration:2.0 title:sciStorySeenToggleEnabled ? SCILocalized(@"Story read receipts enabled") : SCILocalized(@"Story read receipts disabled")];
-        return;
-    }
-    ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciStoryMarkSeenTapped:), sender);
+		[sender setIconResource:(sciStorySeenToggleEnabled ? @"eye.fill" : @"eye") pointSize:18.0];
+		sender.iconTint = sciStorySeenToggleEnabled ? SCIUtils.SCIColor_Primary : UIColor.whiteColor;
+
+		SCINotifySuccess(SCI_NOTIF_SEEN_STORY, sciStorySeenToggleEnabled ? SCILocalized(@"Story read receipts enabled") : SCILocalized(@"Story read receipts disabled"), nil);
+		return;
+	}
+
+	((void (*)(id, SEL, id))objc_msgSend)(self, @selector(sciStoryMarkSeenTapped:), sender);
 }
 
-// Long-press menu — rebuilt per display so owner/exclusion is always fresh.
-%new - (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-                             configurationForMenuAtLocation:(CGPoint)location {
-    __weak __typeof(self) weakSelf = self;
-    return [UIContextMenuConfiguration
-        configurationWithIdentifier:nil
-                    previewProvider:nil
-                     actionProvider:^UIMenu * _Nullable(NSArray<UIMenuElement *> * _Nonnull suggested) {
-        __strong __typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return nil;
+%new
+- (UIContextMenuConfiguration *)contextMenuInteraction:(UIContextMenuInteraction *)interaction configurationForMenuAtLocation:(CGPoint)location {
+	__weak __typeof(self) weakSelf = self;
 
-        NSDictionary *ownerInfo = sciOwnerInfoForView(strongSelf);
-        NSString *pk = ownerInfo[@"pk"];
-        NSString *username = ownerInfo[@"username"] ?: @"";
-        NSString *fullName = ownerInfo[@"fullName"] ?: @"";
-        BOOL inList = pk && [SCIExcludedStoryUsers isInList:pk];
-        BOOL blockSelected = [SCIExcludedStoryUsers isBlockSelectedMode];
+	return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+		__strong __typeof(weakSelf) self = weakSelf;
+		if (!self) return nil;
 
-        NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
-        [items addObject:[UIAction actionWithTitle:SCILocalized(@"Mark seen")
-                                             image:[UIImage systemImageNamed:@"eye"]
-                                        identifier:nil
-                                           handler:^(UIAction *a) {
-            ((void(*)(id, SEL, id))objc_msgSend)(strongSelf, @selector(sciStoryMarkSeenTapped:), nil);
-        }]];
-        if (pk) {
-            NSString *addLabel = blockSelected ? SCILocalized(@"Add to block list") : SCILocalized(@"Exclude story seen");
-            NSString *removeLabel = blockSelected ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude story seen");
-            NSString *t = inList ? removeLabel : addLabel;
-            NSString *img = inList ? @"minus.circle" : @"eye.slash";
-            UIAction *excl = [UIAction actionWithTitle:t
-                                                 image:[UIImage systemImageNamed:img]
-                                            identifier:nil
-                                               handler:^(UIAction *a) {
-                if (inList) {
-                    [SCIExcludedStoryUsers removePK:pk];
-                    [SCIUtils showToastForDuration:2.0 title:blockSelected ? SCILocalized(@"Unblocked") : SCILocalized(@"Un-excluded")];
-                    if (blockSelected) sciTriggerStoryMarkSeen(sciActiveStoryViewerVC);
-                } else {
-                    [SCIExcludedStoryUsers addOrUpdateEntry:@{ @"pk": pk, @"username": username, @"fullName": fullName }];
-                    [SCIUtils showToastForDuration:2.0 title:blockSelected ? SCILocalized(@"Blocked") : SCILocalized(@"Excluded")];
-                    if (!blockSelected) sciTriggerStoryMarkSeen(sciActiveStoryViewerVC);
-                }
-                sciRefreshAllVisibleOverlays(sciActiveStoryViewerVC);
-            }];
-            if (inList) excl.attributes = UIMenuElementAttributesDestructive;
-            [items addObject:excl];
-        }
-        return [UIMenu menuWithTitle:@"" children:items];
-    }];
+		NSDictionary *ownerInfo = sciOwnerInfoForView(self);
+		NSString *pk = ownerInfo[@"pk"];
+		NSString *username = ownerInfo[@"username"] ?: @"";
+		NSString *fullName = ownerInfo[@"fullName"] ?: @"";
+		BOOL inList = pk.length && [SCIExcludedStoryUsers isInList:pk];
+		BOOL blockMode = [SCIExcludedStoryUsers isBlockSelectedMode];
+
+		NSMutableArray<UIMenuElement *> *items = NSMutableArray.array;
+
+		[items addObject:[UIAction actionWithTitle:SCILocalized(@"Mark seen") image:[SCIIcon imageNamed:@"eye"] identifier:nil handler:^(__unused UIAction *action) {
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+				((void (*)(id, SEL, id))objc_msgSend)(self, @selector(sciStoryMarkSeenTapped:), nil);
+			});
+		}]];
+
+		if (pk.length) {
+			NSString *title = inList ? (blockMode ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude story seen")) : (blockMode ? SCILocalized(@"Add to block list") : SCILocalized(@"Exclude story seen"));
+
+			UIAction *exclude = [UIAction actionWithTitle:title image:[SCIIcon imageNamed:(inList ? @"minus.circle" : @"eye.slash")] identifier:nil handler:^(__unused UIAction *action) {
+				if (inList) {
+					[SCIExcludedStoryUsers removePK:pk];
+					SCINotifySuccess(blockMode ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_STORY, blockMode ? SCILocalized(@"Unblocked") : SCILocalized(@"Un-excluded"), nil);
+					if (blockMode) sciTriggerStoryMarkSeen(sciActiveStoryViewerVC);
+				} else {
+					[SCIExcludedStoryUsers addOrUpdateEntry:@{ @"pk": pk, @"username": username, @"fullName": fullName }];
+					SCINotifySuccess(blockMode ? SCI_NOTIF_BLOCK_TOGGLE : SCI_NOTIF_EXCLUDE_STORY, blockMode ? SCILocalized(@"Blocked") : SCILocalized(@"Excluded"), nil);
+					if (!blockMode) sciTriggerStoryMarkSeen(sciActiveStoryViewerVC);
+				}
+
+				sciRefreshAllVisibleOverlays(sciActiveStoryViewerVC);
+			}];
+
+			if (inList) exclude.attributes = UIMenuElementAttributesDestructive;
+			[items addObject:exclude];
+		}
+
+		return [UIMenu menuWithTitle:@"" children:items];
+	}];
 }
 
-%new - (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-     willDisplayMenuForConfiguration:(UIContextMenuConfiguration *)configuration
-                            animator:(id<UIContextMenuInteractionAnimating>)animator {
-    sciPauseStoryPlayback(self);
+%new
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction willDisplayMenuForConfiguration:(UIContextMenuConfiguration *)configuration animator:(id<UIContextMenuInteractionAnimating>)animator {
+	sciPauseStoryPlayback(self);
 }
 
-%new - (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction
-           willEndForConfiguration:(UIContextMenuConfiguration *)configuration
-                          animator:(id<UIContextMenuInteractionAnimating>)animator {
-    __weak __typeof(self) weakSelf = self;
-    void (^resume)(void) = ^{ if (weakSelf) sciResumeStoryPlayback(weakSelf); };
-    if (animator) [animator addCompletion:resume];
-    else          resume();
+%new
+- (void)contextMenuInteraction:(UIContextMenuInteraction *)interaction willEndForConfiguration:(UIContextMenuConfiguration *)configuration animator:(id<UIContextMenuInteractionAnimating>)animator {
+	__weak __typeof(self) weakSelf = self;
+
+	void (^resume)(void) = ^{
+		__strong __typeof(weakSelf) self = weakSelf;
+		if (self) sciResumeStoryPlayback(self);
+	};
+
+	if (animator) [animator addCompletion:resume];
+	else resume();
 }
 
-%new - (void)sciStoryMarkSeenTapped:(UIButton *)sender {
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [haptic impactOccurred];
-    if (sender) {
-        [UIView animateWithDuration:0.1 animations:^{ sender.transform = CGAffineTransformMakeScale(0.8, 0.8); sender.alpha = 0.6; }
-                         completion:^(BOOL f) { [UIView animateWithDuration:0.15 animations:^{ sender.transform = CGAffineTransformIdentity; sender.alpha = 1.0; }]; }];
-    }
+%new
+- (void)sciStoryMarkSeenTapped:(UIButton *)sender {
+	[[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
 
-    @try {
-        UIViewController *storyVC = sciFindVC(self, @"IGStoryViewerViewController");
-        if (!storyVC) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"VC not found")]; return; }
+	if (sender) {
+		[UIView animateWithDuration:0.1 animations:^{
+			sender.transform = CGAffineTransformMakeScale(0.8, 0.8);
+			sender.alpha = 0.6;
+		} completion:^(__unused BOOL finished) {
+			[UIView animateWithDuration:0.15 animations:^{
+				sender.transform = CGAffineTransformIdentity;
+				sender.alpha = 1.0;
+			}];
+		}];
+	}
 
-        id sectionCtrl = sciFindSectionController(storyVC);
-        id storyItem = sectionCtrl ? sciCall(sectionCtrl, NSSelectorFromString(@"currentStoryItem")) : nil;
-        if (!storyItem) storyItem = sciGetCurrentStoryItem(self);
-        IGMedia *media = (storyItem && [storyItem isKindOfClass:NSClassFromString(@"IGMedia")]) ? storyItem : sciExtractMediaFromItem(storyItem);
-        if (!media) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not find story media")]; return; }
+	UIViewController *presenter = sciStoryVCForView(self);
+	BOOL confirmActive = presenter && [SCIUtils getBoolPref:@"confirm_mark_seen_story"];
 
-        sciAllowSeenForPK(media);
-        sciSeenBypassActive = YES;
+	__weak __typeof(self) weakSelf = self;
+	__weak UIButton *weakSender = sender;
 
-        SEL delegateSel = @selector(fullscreenSectionController:didMarkItemAsSeen:);
-        if ([storyVC respondsToSelector:delegateSel]) {
-            typedef void (*Func)(id, SEL, id, id);
-            ((Func)objc_msgSend)(storyVC, delegateSel, sectionCtrl, media);
-        }
-        if (sectionCtrl) {
-            SEL markSel = NSSelectorFromString(@"markItemAsSeen:");
-            if ([sectionCtrl respondsToSelector:markSel])
-                ((SCIMsgSend1)objc_msgSend)(sectionCtrl, markSel, media);
-        }
-        id seenManager = sciCall(storyVC, @selector(viewingSessionSeenStateManager));
-        id vm = sciCall(storyVC, @selector(currentViewModel));
-        if (seenManager && vm) {
-            SEL setSel = NSSelectorFromString(@"setSeenMediaId:forReelPK:");
-            if ([seenManager respondsToSelector:setSel]) {
-                id mediaPK = sciCall(media, @selector(pk));
-                id reelPK = sciCall(vm, NSSelectorFromString(@"reelPK"));
-                if (!reelPK) reelPK = sciCall(vm, @selector(pk));
-                if (mediaPK && reelPK) {
-                    typedef void (*SetFunc)(id, SEL, id, id);
-                    ((SetFunc)objc_msgSend)(seenManager, setSel, mediaPK, reelPK);
-                }
-            }
-        }
-        sciSeenBypassActive = NO;
-        [SCIUtils showToastForDuration:2.0 title:SCILocalized(@"Marked as seen") subtitle:SCILocalized(@"Will sync when leaving stories")];
+	if (confirmActive) sciPauseStoryPlayback(self);
 
-        if (sender && [SCIUtils getBoolPref:@"advance_on_mark_seen"] && sectionCtrl) {
-            __block id secCtrl = sectionCtrl;
-            __weak __typeof(self) weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                sciAdvanceBypassActive = YES;
-                SEL advSel = NSSelectorFromString(@"advanceToNextItemWithNavigationAction:");
-                if ([secCtrl respondsToSelector:advSel])
-                    ((void(*)(id, SEL, NSInteger))objc_msgSend)(secCtrl, advSel, 1);
+	sciConfirmStoryMarkSeen(confirmActive ? presenter : nil, ^{
+		__strong __typeof(weakSelf) strongSelf = weakSelf;
+		if (strongSelf) {
+			((void (*)(id, SEL, id))objc_msgSend)(strongSelf, @selector(sciStoryDoMarkSeen:), weakSender);
+		}
+	}, ^{
+		__strong __typeof(weakSelf) strongSelf = weakSelf;
+		if (strongSelf) sciResumeStoryPlayback(strongSelf);
+	});
+}
 
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    __strong __typeof(weakSelf) strongSelf = weakSelf;
-                    UIViewController *vc2 = strongSelf ? sciFindVC(strongSelf, @"IGStoryViewerViewController") : nil;
-                    id sc2 = vc2 ? sciFindSectionController(vc2) : nil;
-                    if (sc2) {
-                        SEL resumeSel = NSSelectorFromString(@"tryResumePlaybackWithReason:");
-                        if ([sc2 respondsToSelector:resumeSel])
-                            ((void(*)(id, SEL, NSInteger))objc_msgSend)(sc2, resumeSel, 0);
-                    }
-                    sciAdvanceBypassActive = NO;
-                });
-            });
-        }
-    } @catch (NSException *e) {
-        [SCIUtils showErrorHUDWithDescription:[NSString stringWithFormat:SCILocalized(@"Error: %@"), e.reason]];
-    }
+%new
+- (void)sciStoryDoMarkSeen:(UIButton *)sender {
+	@try {
+		UIViewController *storyVC = sciStoryVCForView(self);
+
+		if (!storyVC) {
+			[SCIUtils showErrorHUDWithDescription:SCILocalized(@"VC not found")];
+			return;
+		}
+
+		id sectionController = sciStorySectionController(storyVC);
+		id storyItem = sciCurrentStoryItemFromView(self);
+
+		IGMedia *media = [storyItem isKindOfClass:NSClassFromString(@"IGMedia")] ? storyItem : sciExtractMediaFromItem(storyItem);
+
+		if (!media) {
+			[SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not find story media")];
+			return;
+		}
+
+		sciAllowSeenForPK(media);
+		sciSeenBypassActive = YES;
+
+		SEL delegateSel = @selector(fullscreenSectionController:didMarkItemAsSeen:);
+		if ([storyVC respondsToSelector:delegateSel]) {
+			((void (*)(id, SEL, id, id))objc_msgSend)(storyVC, delegateSel, sectionController, media);
+		}
+
+		sciSafeCall1(sectionController, NSSelectorFromString(@"markItemAsSeen:"), media);
+
+		id seenManager = sciSafeCall0(storyVC, @selector(viewingSessionSeenStateManager));
+		id viewModel = sciSafeCall0(storyVC, @selector(currentViewModel));
+		SEL setSeenSel = NSSelectorFromString(@"setSeenMediaId:forReelPK:");
+
+		if (seenManager && viewModel && [seenManager respondsToSelector:setSeenSel]) {
+			id mediaPK = sciSafeCall0(media, @selector(pk));
+			id reelPK = sciSafeCall0(viewModel, @selector(reelPK));
+
+			if (mediaPK && reelPK) {
+				((void (*)(id, SEL, id, id))objc_msgSend)(seenManager, setSeenSel, mediaPK, reelPK);
+			}
+		}
+
+		sciSeenBypassActive = NO;
+		SCINotifySuccess(SCI_NOTIF_SEEN_STORY, SCILocalized(@"Story marked as seen"), nil);
+
+		if (sender && [SCIUtils getBoolPref:@"advance_on_mark_seen"] && sectionController) {
+			__weak __typeof(self) weakSelf = self;
+			__block id weakSection = sectionController;
+
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+				sciAdvanceBypassActive = YES;
+
+				if ([weakSection respondsToSelector:@selector(advanceToNextItemWithNavigationAction:)]) {
+					((void (*)(id, SEL, NSInteger))objc_msgSend)(weakSection, @selector(advanceToNextItemWithNavigationAction:), 1);
+				}
+
+				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+					__strong __typeof(weakSelf) self = weakSelf;
+					if (self) sciResumeStoryPlayback(self);
+					sciAdvanceBypassActive = NO;
+				});
+			});
+		}
+	} @catch (NSException *exception) {
+		sciSeenBypassActive = NO;
+		sciAdvanceBypassActive = NO;
+		[SCIUtils showErrorHUDWithDescription:[NSString stringWithFormat:SCILocalized(@"Error: %@"), exception.reason]];
+	}
 }
 
 %end
 
-// MARK: - Chrome alpha sync (story only)
+static void sciSyncStoryButtonsAlpha(UIView *sourceView, CGFloat alpha) {
+	Class overlayClass = NSClassFromString(@"IGStoryFullscreenOverlayView");
+	if (!overlayClass) return;
 
-static void sciSyncStoryButtonsAlpha(UIView *self_, CGFloat alpha) {
-    Class overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayView");
-    if (!overlayCls) return;
-    UIView *cur = self_;
-    while (cur) {
-        for (UIView *sib in cur.superview.subviews) {
-            if (![sib isKindOfClass:overlayCls]) continue;
-            UIView *seen  = [sib viewWithTag:SCI_STORY_EYE_TAG];
-            UIView *act   = [sib viewWithTag:SCI_STORY_ACTION_TAG];
-            UIView *audio = [sib viewWithTag:SCI_STORY_AUDIO_TAG];
-            if (seen)  seen.alpha  = alpha;
-            if (act)   act.alpha   = alpha;
-            if (audio) audio.alpha = alpha;
-            return;
-        }
-        cur = cur.superview;
-    }
+	NSInteger tags[] = {
+		SCI_STORY_EYE_TAG,
+		SCI_STORY_ACTION_TAG,
+		SCI_STORY_AUDIO_TAG,
+		SCI_STORY_MENTIONS_TAG
+	};
+
+	for (UIView *current = sourceView; current.superview; current = current.superview) {
+		for (UIView *sibling in current.superview.subviews) {
+			if (![sibling isKindOfClass:overlayClass]) continue;
+
+			for (NSInteger i = 0; i < 4; i++) {
+				[sibling viewWithTag:tags[i]].alpha = alpha;
+			}
+
+			return;
+		}
+	}
 }
 
 %hook IGStoryFullscreenHeaderView
+
 - (void)setAlpha:(CGFloat)alpha {
-    %orig;
-    sciSyncStoryButtonsAlpha((UIView *)self, alpha);
+	%orig;
+	sciSyncStoryButtonsAlpha((UIView *)self, alpha);
 }
+
 %end
 
-%end // StoryOverlayGroup
+static void sciRefreshMentionsInVisibleOverlays(id storyVC) {
+	SCIStoryOverlayPrefs prefs = SCIStoryPrefs();
+
+	for (UIView *overlay in sciLiveStoryOverlays().allObjects) {
+		if (!overlay.window || sciOverlayIsInDMContext(overlay)) continue;
+
+		if ([overlay respondsToSelector:@selector(sciApplyMusicButtonClearance)]) {
+			((void (*)(id, SEL))objc_msgSend)(overlay, @selector(sciApplyMusicButtonClearance));
+		}
+
+		if (!prefs.mentions) continue;
+
+		if ([overlay respondsToSelector:@selector(sciRefreshStoryMentionsButtonWithPrefs:)]) {
+			((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(overlay, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+		}
+
+		if ([overlay respondsToSelector:@selector(sciKickMentionsRetryChainWithPrefs:)]) {
+			((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(overlay, @selector(sciKickMentionsRetryChainWithPrefs:), prefs);
+		}
+	}
+}
+
+%hook IGStoryViewerViewController
+
+- (void)fullscreenSectionController:(id)sc didDisplayStoryModel:(id)model {
+	%orig;
+	sciRefreshMentionsInVisibleOverlays(self);
+}
+
+- (void)fullscreenSectionController:(id)sc didStartToProgressWithStoryItem:(id)item {
+	%orig;
+	sciRefreshMentionsInVisibleOverlays(self);
+}
+
+- (void)fullscreenSectionController:(id)sc didUpdateFromStoryModel:(id)fromModel toStoryModel:(id)toModel storyItem:(id)item {
+	%orig;
+	sciRefreshMentionsInVisibleOverlays(self);
+}
+
+%end
+
+%end
 
 %ctor {
-    if ([SCIUtils getBoolPref:@"stories_action_button"] ||
-        [SCIUtils getBoolPref:@"story_audio_toggle"] ||
-        [SCIUtils getBoolPref:@"no_seen_receipt"]) {
-        %init(StoryOverlayGroup);
-    }
+	if (SCIStoryHasAnyFeature(SCIStoryPrefs())) {
+		%init(StoryOverlayGroup);
+	}
 }

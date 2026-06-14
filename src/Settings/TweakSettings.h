@@ -10,8 +10,15 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSArray *)sections;
 + (NSString *)title;
-+ (NSDictionary *)menus;
 
+@end
+
+// Implemented in section files under Sections/. Declared as a category so the
+// implementations don't conflict with the primary @interface.
+@interface SCITweakSettings (Public)
++ (NSDictionary *)menus;
++ (void)presentClearCacheConfirmation;
++ (NSArray *)rebuildAdvancedEncodingSlotInSections:(NSArray *)sections;
 @end
 
 NS_ASSUME_NONNULL_END

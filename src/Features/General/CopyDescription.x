@@ -1,6 +1,5 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
-#import "../../../modules/JGProgressHUD/JGProgressHUD.h"
 
 %hook IGCoreTextView
 - (void)didMoveToSuperview {
@@ -33,18 +32,11 @@
                                                    withTemplate:@""]
           stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
-    NSLog(@"[SCInsta] Copying description");
 
     // Copy text to system clipboard
     UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
     pasteboard.string = result;
 
-    // Notify user
-    JGProgressHUD *HUD = [[JGProgressHUD alloc] init];
-    HUD.textLabel.text = SCILocalized(@"Copied text to clipboard");
-    HUD.indicatorView = [[JGProgressHUDSuccessIndicatorView alloc] init];
-    
-    [HUD showInView:topMostController().view];
-    [HUD dismissAfterDelay:2.0];
+    SCINotifySuccess(SCI_NOTIF_COPY_DESCRIPTION, SCILocalized(@"Copied text to clipboard"), nil);
 }
 %end

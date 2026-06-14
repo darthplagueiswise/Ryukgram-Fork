@@ -2,27 +2,21 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Bitmask must match the one in SCISettingsBackup.m — kept as plain
-// NSInteger here so consumers don't have to drag the enum around.
-typedef NS_OPTIONS(NSInteger, SCIBackupScopePickerMask) {
-    SCIBackupScopePickerSettings = 1 << 0,
-    SCIBackupScopePickerLists    = 1 << 1,
-    SCIBackupScopePickerAnalyzer = 1 << 2,
-};
-
-// Scope picker + live preview. Rows combine a leading checkbox toggle with a
-// tappable body that pushes a read-only drill-down; a "Raw JSON" row pushes
-// the full payload viewer; a CTA commits.
+// Category picker. The model hands a flat list of row descriptors + a raw-JSON
+// string; this VC renders checkboxes, drills into rows with detailSections, and
+// commits the chosen bitmask (bits are opaque NSInteger, defined model-side).
+// Descriptor keys: bit, title, subtitle, symbol, color, detailSections (optional).
+// With showsImportMode a Replace/Merge selector is shown; the chosen mode comes
+// back through onContinue's `merge`.
 @interface SCIBackupScopePickerVC : UIViewController
 
 @property (nonatomic, copy) NSString *continueTitle;
 @property (nonatomic, copy, nullable) NSString *headerMessage;
-// Scopes present in the payload. Rows outside the mask are disabled.
-@property (nonatomic, assign) SCIBackupScopePickerMask availableScopes;
-@property (nonatomic, assign) SCIBackupScopePickerMask initialSelection;
-// v2 envelope: {"settings": {...}, "lists": {...}, "analyzer": {...}}.
-@property (nonatomic, copy, nullable) NSDictionary *payload;
-@property (nonatomic, copy) void (^onContinue)(SCIBackupScopePickerMask chosen);
+@property (nonatomic, copy) NSArray<NSDictionary *> *rows;
+@property (nonatomic, assign) NSInteger initialSelection;
+@property (nonatomic, assign) BOOL showsImportMode;
+@property (nonatomic, copy, nullable) NSString *rawJSON;
+@property (nonatomic, copy) void (^onContinue)(NSInteger chosen, BOOL merge);
 
 @end
 
