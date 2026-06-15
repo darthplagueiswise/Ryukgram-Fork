@@ -168,7 +168,7 @@
 											@"rows": @[
 												[SCISetting buttonCellWithTitle:SCILocalized(@"★ Best available (cascade)")
 													   subtitle:SCILocalized(@"Tenta Notes → DogfoodVC → Autofill → SearchDebug → URL handler")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"wrench.and.screwdriver"]
+													       icon:[SCISymbol symbolWithName:@"wrench.and.screwdriver"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openBestAvailableInternalMenu];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -180,7 +180,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Notes dogfooding settings")
 													   subtitle:SCILocalized(@"notesDogfoodingSettingsOpenOnViewController:userSession: — confiavel")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"note.text"]
+													       icon:[SCISymbol symbolWithName:@"note.text"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingNotesSettings];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -192,7 +192,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Dogfooding Settings VC")
 													   subtitle:SCILocalized(@"openWithConfig:onViewController:userSession: (precisa de config capturado — ative employee gate antes)")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"dog.fill"]
+													       icon:[SCISymbol symbolWithName:@"dog.fill"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingSettingsVC];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -204,7 +204,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Autofill internal settings")
 													   subtitle:SCILocalized(@"IGAutofillTokenizationInternalSettingsViewController — sem employee gate")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"person.text.rectangle"]
+													       icon:[SCISymbol symbolWithName:@"person.text.rectangle"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openAutofillInternalSettings];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -216,7 +216,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Search debug settings")
 													   subtitle:SCILocalized(@"IGSearchDebugSettingsViewController (sem session)")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"magnifyingglass"]
+													       icon:[SCISymbol symbolWithName:@"magnifyingglass"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openSearchDebugSettings];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -228,7 +228,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Story store debug settings")
 													   subtitle:SCILocalized(@"IGStoryStoreDebugSettingsViewController (sem session)")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"books.vertical"]
+													       icon:[SCISymbol symbolWithName:@"books.vertical"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openStoryStoreDebugSettings];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
@@ -240,7 +240,7 @@
 													}],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"URL handler: instagram://internal_settings")
 													   subtitle:SCILocalized(@"IGURLHandler openInternalURL: — fallback")
-													       icon:[SCISymbol symbolWithIGName:nil fallback:@"link"]
+													       icon:[SCISymbol symbolWithName:@"link"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
