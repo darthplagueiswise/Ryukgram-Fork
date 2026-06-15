@@ -5,6 +5,7 @@
 #import <objc/runtime.h>
 #import <os/log.h>
 #import <stdatomic.h>
+#import <dlfcn.h>
 
 #define CLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] CSym " fmt,##__VA_ARGS__)
 
@@ -118,30 +119,36 @@ static bool repl_gidw1_##slotvar(void *a0,int32_t gid,void *a2,void *a3,void *a4
 
 // We declare a fixed set of replacement instances bound to slot indices 0..N.
 // Slots are assigned in the same order as g_symbol_defs below.
-DEFINE_GID_W0(0)   // EasyGatingGetBoolean_Internal_DoNotUseOrMock
-DEFINE_GID_W0(1)   // EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock
-DEFINE_GID_W1(2)   // MCQEasyGatingGetBooleanInternalDoNotUseOrMock
-DEFINE_OPAQUE(3)   // IGMobileConfigBooleanValueForInternalUse
-DEFINE_OPAQUE(4)   // MSGCSessionedMobileConfigGetBoolean
+// IMPORTANT: every symbol here was validated to actually exist as a GOT import
+// in this exact Instagram 433 build (chained-fixup imports, all from
+// FBSharedFramework). Two symbols from an earlier draft — "GetMobileConfigBoolean"
+// and "EasyGatingPlatformGetBoolean" — DO NOT EXIST as imports and were removed;
+// rebinding a non-existent symbol is what crashed when "GetMobileConfigBoolean"
+// was toggled on.
+DEFINE_GID_W0(0)   // EasyGatingGetBoolean_Internal_DoNotUseOrMock                  (ID in w0)
+DEFINE_OPAQUE(1)   // EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock (x0,x1,x3 — opaque)
+DEFINE_GID_W1(2)   // MCQEasyGatingGetBooleanInternalDoNotUseOrMock                 (ID in w1)
+DEFINE_OPAQUE(3)   // IGMobileConfigBooleanValueForInternalUse                      (x2 = param obj)
+DEFINE_OPAQUE(4)   // MSGCSessionedMobileConfigGetBoolean                           (x0,x2)
 DEFINE_OPAQUE(5)   // MCIExperimentCacheGetMobileConfigBoolean
 DEFINE_OPAQUE(6)   // MCIExtensionExperimentCacheGetMobileConfigBoolean
-DEFINE_OPAQUE(7)   // GetMobileConfigBoolean
-DEFINE_OPAQUE(8)   // EasyGatingPlatformGetBoolean
-DEFINE_OPAQUE(9)   // IGDirectOneWayGatingGetBoolValue
 
 // Definition table — order MUST match the DEFINE_* slot indices above.
+// `safe` = the prologue does not mangle LR/x30 (no PAC return-address juggling),
+// so a constant-return replacement is ABI-safe. The two readers that DO mangle
+// x30 in their prologue (MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter and
+// IGDirectOneWayGatingGetBoolValue) are deliberately NOT in this curated list;
+// they require an LR-preserving trampoline and are out of scope for the simple
+// force path.
 typedef struct { const char *name; SCICAbiFamily fam; void *repl; const char *display; } SCICDef;
 static SCICDef g_symbol_defs[] = {
-	{ "EasyGatingGetBoolean_Internal_DoNotUseOrMock",                 SCICAbiFamilyGatingId_w0, (void*)repl_gidw0_0, "EasyGating (Internal)" },
-	{ "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", SCICAbiFamilyGatingId_w0, (void*)repl_gidw0_1, "EasyGating (AuthData)" },
-	{ "MCQEasyGatingGetBooleanInternalDoNotUseOrMock",                SCICAbiFamilyGatingId_w1, (void*)repl_gidw1_2, "MCQ EasyGating (Internal)" },
-	{ "IGMobileConfigBooleanValueForInternalUse",                     SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_3, "MobileConfig (InternalUse)" },
-	{ "MSGCSessionedMobileConfigGetBoolean",                          SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_4, "MobileConfig (Sessioned)" },
-	{ "MCIExperimentCacheGetMobileConfigBoolean",                     SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_5, "MobileConfig (ExpCache)" },
-	{ "MCIExtensionExperimentCacheGetMobileConfigBoolean",            SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_6, "MobileConfig (ExtExpCache)" },
-	{ "GetMobileConfigBoolean",                                       SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_7, "MobileConfig (Get)" },
-	{ "EasyGatingPlatformGetBoolean",                                 SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_8, "EasyGating (Platform)" },
-	{ "IGDirectOneWayGatingGetBoolValue",                             SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_9, "OneWayGating (Direct)" },
+	{ "EasyGatingGetBoolean_Internal_DoNotUseOrMock",                     SCICAbiFamilyGatingId_w0, (void*)repl_gidw0_0,  "EasyGating (Internal)" },
+	{ "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_1, "EasyGating (AuthData)" },
+	{ "MCQEasyGatingGetBooleanInternalDoNotUseOrMock",                    SCICAbiFamilyGatingId_w1, (void*)repl_gidw1_2,  "MCQ EasyGating (Internal)" },
+	{ "IGMobileConfigBooleanValueForInternalUse",                         SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_3, "MobileConfig (InternalUse)" },
+	{ "MSGCSessionedMobileConfigGetBoolean",                              SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_4, "MobileConfig (Sessioned)" },
+	{ "MCIExperimentCacheGetMobileConfigBoolean",                         SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_5, "MobileConfig (ExpCache)" },
+	{ "MCIExtensionExperimentCacheGetMobileConfigBoolean",                SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_6, "MobileConfig (ExtExpCache)" },
 };
 static const int g_def_count = (int)(sizeof(g_symbol_defs)/sizeof(g_symbol_defs[0]));
 
@@ -149,7 +156,8 @@ static const int g_def_count = (int)(sizeof(g_symbol_defs)/sizeof(g_symbol_defs[
 // ignored). This is the watchdog-risky one — only installed under the explicit
 // "all BOOL gates" master. Kept separate from the slot table because its ABI and
 // risk profile differ from the curated readers.
-static void *g_universal_native_orig = NULL;
+static void *g_universal_native_orig __attribute__((unused)) = NULL;
+__attribute__((unused))
 static bool repl_universal_native(void *a,void *b,void *c,void *d,void *e,void *f,void *g,void *h){
 	(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;
 	return true;
@@ -358,6 +366,14 @@ static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val
 		int idn = atomic_load(&s->id_count);
 		for (int j = 0; j < idn; j++) if (atomic_load(&s->id_force[j]) >= 0) { hasID = YES; break; }
 		if (!hasGlobal && !hasID && !diagAll) continue;
+		// SAFETY: never hand fishhook a symbol that isn't actually resolvable in
+		// this process. dlsym(RTLD_DEFAULT) confirms the import exists before we
+		// rebind it. This is what prevents the crash seen when a phantom name
+		// (e.g. a mistyped/nonexistent "GetMobileConfigBoolean") was toggled on.
+		if (dlsym(RTLD_DEFAULT, g_symbol_defs[i].name) == NULL) {
+			CLOG("SKIP %{public}s — not resolvable via dlsym (not a real import)", g_symbol_defs[i].name);
+			continue;
+		}
 		rebs[nreb].name = g_symbol_defs[i].name;
 		rebs[nreb].replacement = g_symbol_defs[i].repl;
 		rebs[nreb].replaced = (void **)&s->orig;
@@ -365,13 +381,13 @@ static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val
 		CLOG("rebinding %{public}s (family %ld)", g_symbol_defs[i].name, (long)s->family);
 	}
 	// Universal native adapter (separate, constant-YES, watchdog-risky).
-	if (universalRequested) {
-		rebs[nreb].name = "MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter";
-		rebs[nreb].replacement = (void *)repl_universal_native;
-		rebs[nreb].replaced = (void **)&g_universal_native_orig;
-		nreb++;
-		CLOG("rebinding UNIVERSAL native adapter (watchdog risk)");
-	}
+	// NOTE: MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter and
+	// IGDirectOneWayGatingGetBoolValue mangle x30/LR in their prologue (PAC
+	// return-address juggling). A naive constant-return fishhook replacement
+	// corrupts the return path and crashes. They are intentionally NOT rebound
+	// here. If the universal force is ever needed it must use an LR-preserving
+	// trampoline; out of scope for the curated, safe readers above.
+	(void)universalRequested;
 	if (nreb == 0) { CLOG("no C-symbol overrides to install"); return; }
 	int rc = rebind_symbols(rebs, nreb);
 	CLOG("rebind_symbols installed=%d rc=%d", nreb, rc);
