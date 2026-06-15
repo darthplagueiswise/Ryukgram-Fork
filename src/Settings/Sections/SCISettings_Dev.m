@@ -13,6 +13,7 @@
 #import "../SCIDogfoodBrowserViewController.h"
 #import "../SCIInternalActionsViewController.h"
 #import "../SCISymbolBrowserViewController.h"
+#import "../SCICSymbolBrowserViewController.h"
 #import "../SCIIGDSLauncherConfigViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
@@ -227,7 +228,11 @@
 								[SCISetting navigationCellWithTitle:SCILocalized(@"FBSharedFramework Browser")
 							   subtitle:SCILocalized(@"Classes in FBSharedFramework → hookable BOOL getters, live state, force toggles.")
 								   icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"shippingbox"]
-							viewController:[[SCISymbolBrowserViewController alloc] initWithImage:SCISymbolImageFBShared]]
+							viewController:[[SCISymbolBrowserViewController alloc] initWithImage:SCISymbolImageFBShared]],
+				[SCISetting navigationCellWithTitle:SCILocalized(@"C Symbols Browser (MobileConfig / EasyGating)")
+					   subtitle:SCILocalized(@"Readers C importados do FBSharedFramework (hookados por fishhook). Liga forcing, captura IDs em tempo real e forca por simbolo ou por ID. Caminho para o internal settings gate.")
+						icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"terminal"]
+					viewController:[[SCICSymbolBrowserViewController alloc] init]]
 											]
 										},
 										@{

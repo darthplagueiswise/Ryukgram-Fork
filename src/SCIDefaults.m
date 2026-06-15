@@ -433,6 +433,10 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"notif_mirror_clear_on_open": @(YES),
 		// ── Dev menu (gates / internal / IGDS / wordmark) ─────────────────
 		@"sci_symbol_overrides": @{},
+		@"sci_c_symbol_overrides": @{},
+		@"sci_c_symbol_id_overrides": @{},
+		@"sci_c_symbol_force_enabled": @(NO),
+		@"sci_c_symbol_diag_all": @(NO),
 		@"sci_apply_bloks_prefetch": @(NO),
 		@"sci_apply_force_bloks": @(NO),
 		@"sci_apply_internal_native": @(NO),
