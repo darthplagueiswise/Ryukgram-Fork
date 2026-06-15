@@ -164,10 +164,10 @@
 										},
 										@{
 											@"header": SCILocalized(@"Open internal menus (direct, live session)"),
-											@"footer": SCILocalized(@"Botoes individuais por entrypoint validado no binario. Todos precisam de sessao ativa (abra apos o login). Se um falhar, tente o proximo. Ligue os gates de employee/internal primeiro se o VC precisar de config."),
+											@"footer": SCILocalized(@"Apenas entrypoints onde o IG constroi o VC (seguros contra trap do Swift). Precisam de sessao ativa (abra apos o login). Os menus que exigiam construir VC Swift foram removidos porque um cast falho do Swift e um trap que nenhum @try segura."),
 											@"rows": @[
 												[SCISetting buttonCellWithTitle:SCILocalized(@"★ Best available (cascade)")
-													   subtitle:SCILocalized(@"Tenta Notes → DogfoodVC → Autofill → SearchDebug → URL handler")
+													   subtitle:SCILocalized(@"Tenta Notes → DogfoodVC → URL handler (so caminhos seguros)")
 													       icon:[SCISymbol symbolWithName:@"wrench.and.screwdriver"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openBestAvailableInternalMenu];
@@ -195,42 +195,6 @@
 													       icon:[SCISymbol symbolWithName:@"dog.fill"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingSettingsVC];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
-														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Autofill internal settings")
-													   subtitle:SCILocalized(@"IGAutofillTokenizationInternalSettingsViewController — sem employee gate")
-													       icon:[SCISymbol symbolWithName:@"person.text.rectangle"]
-													     action:^(void) {
-														NSString *r = [SCIInternalMenusLauncher openAutofillInternalSettings];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
-														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Search debug settings")
-													   subtitle:SCILocalized(@"IGSearchDebugSettingsViewController (sem session)")
-													       icon:[SCISymbol symbolWithName:@"magnifyingglass"]
-													     action:^(void) {
-														NSString *r = [SCIInternalMenusLauncher openSearchDebugSettings];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
-														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Story store debug settings")
-													   subtitle:SCILocalized(@"IGStoryStoreDebugSettingsViewController (sem session)")
-													       icon:[SCISymbol symbolWithName:@"books.vertical"]
-													     action:^(void) {
-														NSString *r = [SCIInternalMenusLauncher openStoryStoreDebugSettings];
 														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
 														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;

@@ -1,40 +1,23 @@
-#import <Foundation/Foundation.h>
-NS_ASSUME_NONNULL_BEGIN
+#import <UIKit/UIKit.h>
+
+// Opens Instagram's own internal/dogfooding surfaces — but ONLY via entrypoints
+// where Instagram itself constructs the (Swift) object graph. We never alloc/init
+// a Swift VC ourselves: a failed Swift type-metadata check is an uncatchable
+// `brk #1` trap (see crash post-mortem in the .m). Every method returns a short
+// human-readable status string; a successful open starts with "opened".
 @interface SCIInternalMenusLauncher : NSObject
 
-// ── Reliable openers (work without a captured config) ──────────────────────
-// Calls +[IGDirectNotesDogfoodingSettingsStaticFuncs
-//         notesDogfoodingSettingsOpenOnViewController:userSession:].
-// Always opens the native Notes/Dogfooding Settings surface.
+// +notesDogfoodingSettingsOpenOnViewController:userSession: (class method, safe).
 + (NSString *)openDogfoodingNotesSettings;
 
-// Walks through a cascade of IG-internal openers (Notes → Dogfooding VC if
-// config was captured → Autofill internal settings → URL handler fallback).
-// Returns a human-readable result string suitable for a toast.
-+ (NSString *)openBestAvailableInternalMenu;
-
-// ── Openers that need a live user session ──────────────────────────────────
-// Opens IGDogfoodingSettingsViewController via openWithConfig:onViewController:userSession:
-// or initWithConfig:userSession:. Only works if a config was captured by the
-// runtime observer (i.e., IG's employee gate was on at some point this session).
+// IG's openWithConfig:onViewController:userSession: using a config IG built.
+// If no config was captured, falls back to Notes; never fabricates the config.
 + (NSString *)openDogfoodingSettingsVC;
 
-// Opens the autofill-internal-settings debug surface (validates that
-// IGAutofillTokenizationInternalSettingsPlugin / IGAutofillInternalSettings
-// exist and can be instantiated without a full employee session).
-+ (NSString *)openAutofillInternalSettings;
-
-// Opens the internal search-debug settings surface:
-// _TtC21IGSearchDebugSettings35IGSearchDebugSettingsViewController
-+ (NSString *)openSearchDebugSettings;
-
-// Opens the story-store debug settings surface:
-// _TtC26IGStoryStoresDebugSettings39IGStoryStoreDebugSettingsViewController
-+ (NSString *)openStoryStoreDebugSettings;
-
-// Tries several known internal-URL schemes through IGURLHandler. The urlString
-// may be e.g. @"instagram://internal_settings" or any known ig:// deep link.
+// IGURLHandler internal-URL routing (IG builds the destination VC).
 + (NSString *)openInternalURLString:(NSString *)urlString;
 
+// Tries the safe openers in order: Notes → DogfoodVC → URL handler.
++ (NSString *)openBestAvailableInternalMenu;
+
 @end
-NS_ASSUME_NONNULL_END
