@@ -48,6 +48,22 @@
 		footer:@"Os readers sao importados do FBSharedFramework via GOT, entao fishhook os intercepta. Forcar TODOS quebra o app: prefira forcar um simbolo especifico, ou melhor, um ID especifico capturado abaixo."
 		rows:master]];
 
+	// ── One-tap aggressive internal unlock ──────────────────────────────────
+	NSMutableArray<SCIBaseSettingsRow *> *quick = [NSMutableArray array];
+	[quick addObject:[SCIBaseSettingsRow switchRowWithTitle:@"★ Force internal/employee readers"
+		subtitle:@"Liga de uma vez os readers *_Internal / *ForInternalUse (equivalente dylib de retornar 1 nos MobileConfig boolean de uso interno). Direcionado, nao afeta config geral. Relaunch para aplicar."
+		value:^BOOL{
+			for (NSString *n in [SCICSymbolEngine internalGateSymbolNames])
+				if (![SCICSymbolEngine overrideForSymbolName:n]) return NO;
+			return [SCICSymbolEngine internalGateSymbolNames].count > 0;
+		}
+		action:^(BOOL on, UIViewController *vc){
+			[SCICSymbolEngine forceInternalReadersEnabled:on];
+		}]];
+	[sections addObject:[SCIBaseSettingsSection sectionWithHeader:@"Internal mode (one tap)"
+		footer:[NSString stringWithFormat:@"Forca: %@", [[SCICSymbolEngine internalGateSymbolNames] componentsJoinedByString:@", "]]
+		rows:quick]];
+
 	// ── One section per symbol ──────────────────────────────────────────────
 	for (SCICSymbol *sym in [SCICSymbolEngine allSymbols]) {
 		NSMutableArray<SCIBaseSettingsRow *> *rows = [NSMutableArray array];

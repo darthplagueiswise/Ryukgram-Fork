@@ -84,6 +84,18 @@ typedef NS_ENUM(NSInteger, SCICAbiFamily) {
 // Whether a global enable for C-symbol forcing is on (cheap pref).
 + (BOOL)masterEnabled;
 
+// ── Aggressive "Internal Mode" forcing ─────────────────────────────────────
+// Force the curated set of internal/employee MobileConfig + EasyGating readers
+// to YES in one shot. This is the dylib equivalent of stubbing the internal-use
+// MobileConfig booleans to return 1. It is targeted (only the *_Internal /
+// *ForInternalUse readers), not a blanket force of every config read, so it
+// unlocks internal mode without forcing unrelated experiments.
+// Returns the list of symbol names it marked as forced.
++ (NSArray<NSString *> *)forceInternalReadersEnabled:(BOOL)enabled;
+
+// The subset of allSymbols considered "internal/employee gate" readers.
++ (NSArray<NSString *> *)internalGateSymbolNames;
+
 // Install fishhook rebindings for every symbol that has any persisted override.
 // Called once from the %ctor. Idempotent.
 + (void)reinstallPersistedHooks;

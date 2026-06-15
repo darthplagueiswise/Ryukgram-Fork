@@ -145,6 +145,16 @@ static SCICDef g_symbol_defs[] = {
 };
 static const int g_def_count = (int)(sizeof(g_symbol_defs)/sizeof(g_symbol_defs[0]));
 
+// Universal native MobileConfig adapter: constant-YES, ABI-agnostic (args
+// ignored). This is the watchdog-risky one — only installed under the explicit
+// "all BOOL gates" master. Kept separate from the slot table because its ABI and
+// risk profile differ from the curated readers.
+static void *g_universal_native_orig = NULL;
+static bool repl_universal_native(void *a,void *b,void *c,void *d,void *e,void *f,void *g,void *h){
+	(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;
+	return true;
+}
+
 static void ensure_slots_initialized(void) {
 	if (g_slot_count) return;
 	for (int i = 0; i < g_def_count && i < MAX_SYMS; i++) {
@@ -206,6 +216,29 @@ static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val
 }
 
 + (BOOL)masterEnabled { return [SCIUtils getBoolPref:kCMasterKey]; }
+
+// The curated readers that gate internal/employee surfaces. These are the
+// *_Internal / *ForInternalUse boolean readers — forcing them is the targeted
+// dylib equivalent of returning 1 from the internal-use MobileConfig booleans.
++ (NSArray<NSString *> *)internalGateSymbolNames {
+	return @[
+		@"IGMobileConfigBooleanValueForInternalUse",
+		@"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+		@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+		@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+		@"MSGCSessionedMobileConfigGetBoolean",
+	];
+}
+
++ (NSArray<NSString *> *)forceInternalReadersEnabled:(BOOL)enabled {
+	NSArray<NSString *> *names = [self internalGateSymbolNames];
+	for (NSString *n in names) {
+		[self setOverride:(enabled ? @YES : nil) forSymbolName:n];
+	}
+	// Forcing requires the master switch and a relaunch to install the hooks.
+	if (enabled) [SCIUtils setPref:@YES forKey:kCMasterKey];
+	return names;
+}
 
 + (nullable NSNumber *)overrideForSymbolName:(NSString *)name {
 	NSDictionary *d = [SCIUtils getDictPref:kCOverridesKey];
@@ -292,13 +325,31 @@ static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val
 		}
 	}
 
-	// Build the rebinding list for any slot that has an override OR is requested
-	// for diagnostics (a slot is rebound if it has a global force, any id force,
-	// or a diagnostic flag). To keep things predictable we rebind a slot when it
-	// has any override; diagnostics-only capture is opt-in via a separate pref.
+	// ── Back-compat: honor the legacy SCIMobileConfigForce.x prefs so the old
+	//    Dev switches keep working through the single unified engine. These map
+	//    onto the same curated readers. The universal native adapter is wired
+	//    only under the explicit "all BOOL gates" master (watchdog risk).
+	BOOL legacyMaster   = [SCIUtils getBoolPref:@"sci_force_all_mc_gates"];
+	BOOL legacyInternal = legacyMaster || [SCIUtils getBoolPref:@"sci_force_mc_internal_use_boolean"];
+	BOOL legacySessAll  = legacyMaster || [SCIUtils getBoolPref:@"sci_force_sessioned_mc_all"];
+	BOOL legacyMsgc     = legacySessAll || [SCIUtils getBoolPref:@"sci_force_msgc_sessioned_boolean"];
+	BOOL legacyMciExp   = legacySessAll || [SCIUtils getBoolPref:@"sci_force_mci_experiment_boolean"];
+	BOOL legacyMciExt   = legacySessAll || [SCIUtils getBoolPref:@"sci_force_mci_extension_boolean"];
+	BOOL legacyUniversal= legacyMaster || [SCIUtils getBoolPref:@"sci_force_mc_internal_use_all"];
+	if (legacyInternal) push_global_override_to_cache(@"IGMobileConfigBooleanValueForInternalUse", @YES);
+	if (legacyMsgc)     push_global_override_to_cache(@"MSGCSessionedMobileConfigGetBoolean", @YES);
+	if (legacyMciExp)   push_global_override_to_cache(@"MCIExperimentCacheGetMobileConfigBoolean", @YES);
+	if (legacyMciExt)   push_global_override_to_cache(@"MCIExtensionExperimentCacheGetMobileConfigBoolean", @YES);
+
+	// The universal native reader is registered as a special slot only when the
+	// explicit master is set. It is NOT in g_symbol_defs (different ABI + risk),
+	// so we rebind it inline here with a constant-YES replacement.
+	static BOOL universalRequested = NO;
+	universalRequested = legacyUniversal;
+
 	BOOL diagAll = [SCIUtils getBoolPref:@"sci_c_symbol_diag_all"];
 
-	struct rebinding rebs[MAX_SYMS];
+	struct rebinding rebs[MAX_SYMS + 1];
 	int nreb = 0;
 	for (int i = 0; i < g_slot_count; i++) {
 		SCICSlot *s = &g_slots[i];
@@ -312,6 +363,14 @@ static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val
 		rebs[nreb].replaced = (void **)&s->orig;
 		nreb++;
 		CLOG("rebinding %{public}s (family %ld)", g_symbol_defs[i].name, (long)s->family);
+	}
+	// Universal native adapter (separate, constant-YES, watchdog-risky).
+	if (universalRequested) {
+		rebs[nreb].name = "MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter";
+		rebs[nreb].replacement = (void *)repl_universal_native;
+		rebs[nreb].replaced = (void **)&g_universal_native_orig;
+		nreb++;
+		CLOG("rebinding UNIVERSAL native adapter (watchdog risk)");
 	}
 	if (nreb == 0) { CLOG("no C-symbol overrides to install"); return; }
 	int rc = rebind_symbols(rebs, nreb);
