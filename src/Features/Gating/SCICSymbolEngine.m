@@ -1,396 +1,527 @@
 // SCICSymbolEngine.m
+// Real runtime browser for FBSharedFramework exported C symbols.
+//
+// This browser enumerates the loaded FBSharedFramework Mach-O symbol table at
+// runtime, filters to C-like exported function symbols, and lets the user search
+// the whole FBShared export universe. Hooking remains opt-in and profile-gated:
+// fishhook can rebind consumers' imports of a FBShared symbol, but it cannot
+// patch direct calls made inside FBSharedFramework itself. Force is therefore
+// only allowed for bool-like readers and is blocked for known MCI/MCDDasm crashers.
+
 #import "SCICSymbolEngine.h"
 #import "../../Utils.h"
 #import "../../../modules/fishhook/fishhook.h"
-#import <objc/runtime.h>
-#import <os/log.h>
-#import <stdatomic.h>
+
+#import <mach-o/dyld.h>
+#import <mach-o/loader.h>
+#import <mach-o/nlist.h>
 #import <dlfcn.h>
+#import <stdatomic.h>
+#import <stdbool.h>
+#import <os/log.h>
+#import <string.h>
+#import <stdlib.h>
 
-#define CLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] CSym " fmt,##__VA_ARGS__)
+#define CLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] FBSharedCSym " fmt,##__VA_ARGS__)
 
-static NSString *const kCOverridesKey = @"sci_c_symbol_overrides";       // { "C#name": @(1) }
-static NSString *const kCIDOverridesKey = @"sci_c_symbol_id_overrides";  // { "C#name": { "412": @(1) } }
-static NSString *const kCMasterKey = @"sci_c_symbol_force_enabled";
+static NSString *const kCOverridesKey = @"sci_c_symbol_overrides"; // { "C#name": @(YES/NO) }
+static NSString *const kCObserveKey   = @"sci_c_symbol_observe";   // { "C#name": @(YES) }
+static NSString *const kCMasterKey    = @"sci_c_symbol_force_enabled";
 
-// ───────────────────────────────────────────────────────────────────────────
-// Static C cache (hot path). No Obj-C, no NSUserDefaults inside replacements.
-// ───────────────────────────────────────────────────────────────────────────
-
-#define MAX_SYMS 32
-#define MAX_IDS_PER_SYM 256
+#define MAX_C_HOOKS 64
 
 typedef struct {
-	const char *name;          // import symbol name (without leading underscore)
-	SCICAbiFamily family;
-	atomic_int force;          // -1 = no global override, 0 = force NO, 1 = force YES
-	atomic_uint hits;          // call count since launch
-	// captured gating IDs (families w0/w1) and their forced/observed values
-	atomic_int id_count;
-	int32_t ids[MAX_IDS_PER_SYM];
-	atomic_schar id_force[MAX_IDS_PER_SYM];     // -1 none, 0 NO, 1 YES
-	atomic_schar id_observed[MAX_IDS_PER_SYM];  // -1 unknown, 0/1 last real value
-	void *orig;                // original function pointer (filled by fishhook)
-} SCICSlot;
+    const char *name;
+    void *orig;
+    atomic_int force;      // -1 none, 0 NO, 1 YES
+    atomic_uint hits;
+    atomic_schar observed; // -1 unknown, 0 NO, 1 YES
+    bool installed;
+} SCIHookSlot;
 
-static SCICSlot g_slots[MAX_SYMS];
+static SCIHookSlot g_slots[MAX_C_HOOKS];
 static int g_slot_count = 0;
 
-static SCICSlot *slot_for_name_c(const char *name) {
-	for (int i = 0; i < g_slot_count; i++)
-		if (strcmp(g_slots[i].name, name) == 0) return &g_slots[i];
-	return NULL;
+static int slotIndexForName(const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < g_slot_count; i++) {
+        if (g_slots[i].name && strcmp(g_slots[i].name, name) == 0) return i;
+    }
+    return -1;
 }
 
-// Record a gating ID for a slot, return its index (or -1 if full). Lock-free-ish:
-// only the (single) caller path writes; duplicates tolerated rarely.
-static int slot_note_id(SCICSlot *s, int32_t gid, int real_value) {
-	int n = atomic_load(&s->id_count);
-	for (int i = 0; i < n; i++) {
-		if (s->ids[i] == gid) {
-			if (real_value >= 0) atomic_store(&s->id_observed[i], (signed char)real_value);
-			return i;
-		}
-	}
-	if (n >= MAX_IDS_PER_SYM) return -1;
-	s->ids[n] = gid;
-	atomic_store(&s->id_force[n], -1);
-	atomic_store(&s->id_observed[n], real_value >= 0 ? (signed char)real_value : -1);
-	atomic_store(&s->id_count, n + 1);
-	return n;
+static bool scicHookCall(int idx, void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) {
+    if (idx < 0 || idx >= MAX_C_HOOKS) return false;
+    SCIHookSlot *slot = &g_slots[idx];
+    atomic_fetch_add(&slot->hits, 1);
+
+    bool real = false;
+    if (slot->orig) {
+        bool (*orig)(void *, void *, void *, void *, void *, void *, void *, void *) = (void *)slot->orig;
+        real = orig(a0, a1, a2, a3, a4, a5, a6, a7);
+        atomic_store(&slot->observed, real ? 1 : 0);
+    }
+
+    int forced = atomic_load(&slot->force);
+    return forced < 0 ? real : (forced != 0);
 }
 
-// Decide final return value for a slot given a (possibly captured) gating id.
-// Returns: -1 = passthrough (use orig), 0/1 = forced value.
-static int slot_decision(SCICSlot *s, int has_id, int32_t gid, int real_value) {
-	if (has_id) {
-		int n = atomic_load(&s->id_count);
-		for (int i = 0; i < n; i++) {
-			if (s->ids[i] == gid) {
-				int f = atomic_load(&s->id_force[i]);
-				if (f >= 0) return f;
-				break;
-			}
-		}
-	}
-	(void)real_value;
-	int gf = atomic_load(&s->force);
-	if (gf >= 0) return gf;
-	return -1;
-}
+static bool scic_repl_0(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(0, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_1(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(1, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_2(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(2, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_3(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(3, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_4(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(4, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_5(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(5, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_6(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(6, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_7(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(7, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_8(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(8, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_9(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(9, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_10(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(10, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_11(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(11, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_12(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(12, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_13(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(13, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_14(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(14, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_15(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(15, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_16(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(16, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_17(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(17, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_18(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(18, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_19(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(19, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_20(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(20, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_21(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(21, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_22(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(22, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_23(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(23, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_24(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(24, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_25(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(25, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_26(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(26, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_27(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(27, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_28(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(28, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_29(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(29, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_30(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(30, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_31(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(31, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_32(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(32, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_33(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(33, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_34(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(34, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_35(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(35, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_36(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(36, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_37(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(37, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_38(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(38, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_39(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(39, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_40(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(40, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_41(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(41, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_42(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(42, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_43(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(43, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_44(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(44, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_45(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(45, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_46(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(46, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_47(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(47, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_48(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(48, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_49(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(49, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_50(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(50, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_51(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(51, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_52(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(52, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_53(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(53, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_54(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(54, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_55(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(55, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_56(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(56, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_57(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(57, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_58(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(58, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_59(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(59, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_60(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(60, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_61(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(61, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_62(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(62, a0, a1, a2, a3, a4, a5, a6, a7); }
+static bool scic_repl_63(void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) { return scicHookCall(63, a0, a1, a2, a3, a4, a5, a6, a7); }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Typed replacements per ABI family.
-// We always call orig first to (a) keep app state consistent and (b) capture the
-// real value, then apply the override decision.
-// ───────────────────────────────────────────────────────────────────────────
-
-// Family OpaqueBool: BOOL f(a,b,c,d,e,f,g,h)  — we pass through up to 8 ptr-args.
-#define DEFINE_OPAQUE(slotvar) \
-static bool repl_opaque_##slotvar(void *a0,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6,void *a7){ \
-	SCICSlot *s=&g_slots[slotvar]; atomic_fetch_add(&s->hits,1); \
-	bool real=false; \
-	if(s->orig){ bool(*o)(void*,void*,void*,void*,void*,void*,void*,void*)=(void*)s->orig; real=o(a0,a1,a2,a3,a4,a5,a6,a7);} \
-	int d=slot_decision(s,0,0,real?1:0); \
-	return d<0 ? real : (d!=0); \
-}
-
-// Family GatingId_w0: BOOL f(int32 gid, a1..a6). id in first int arg.
-#define DEFINE_GID_W0(slotvar) \
-static bool repl_gidw0_##slotvar(int32_t gid,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6){ \
-	SCICSlot *s=&g_slots[slotvar]; atomic_fetch_add(&s->hits,1); \
-	bool real=false; \
-	if(s->orig){ bool(*o)(int32_t,void*,void*,void*,void*,void*,void*)=(void*)s->orig; real=o(gid,a1,a2,a3,a4,a5,a6);} \
-	slot_note_id(s,gid,real?1:0); \
-	int d=slot_decision(s,1,gid,real?1:0); \
-	return d<0 ? real : (d!=0); \
-}
-
-// Family GatingId_w1: BOOL f(void* a0, int32 gid, a2..a6). id in second arg.
-#define DEFINE_GID_W1(slotvar) \
-static bool repl_gidw1_##slotvar(void *a0,int32_t gid,void *a2,void *a3,void *a4,void *a5,void *a6){ \
-	SCICSlot *s=&g_slots[slotvar]; atomic_fetch_add(&s->hits,1); \
-	bool real=false; \
-	if(s->orig){ bool(*o)(void*,int32_t,void*,void*,void*,void*,void*)=(void*)s->orig; real=o(a0,gid,a2,a3,a4,a5,a6);} \
-	slot_note_id(s,gid,real?1:0); \
-	int d=slot_decision(s,1,gid,real?1:0); \
-	return d<0 ? real : (d!=0); \
-}
-
-// We declare a fixed set of replacement instances bound to slot indices 0..N.
-// Slots are assigned in the same order as g_symbol_defs below.
-// IMPORTANT: every symbol here was validated to actually exist as a GOT import
-// in this exact Instagram 433 build (chained-fixup imports, all from
-// FBSharedFramework). Two symbols from an earlier draft — "GetMobileConfigBoolean"
-// and "EasyGatingPlatformGetBoolean" — DO NOT EXIST as imports and were removed;
-// rebinding a non-existent symbol is what crashed when "GetMobileConfigBoolean"
-// was toggled on.
-DEFINE_GID_W0(0)   // EasyGatingGetBoolean_Internal_DoNotUseOrMock                  (ID in w0)
-DEFINE_OPAQUE(1)   // EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock (x0,x1,x3 — opaque)
-DEFINE_GID_W1(2)   // MCQEasyGatingGetBooleanInternalDoNotUseOrMock                 (ID in w1)
-DEFINE_OPAQUE(3)   // IGMobileConfigBooleanValueForInternalUse                      (x2 = param obj)
-DEFINE_OPAQUE(4)   // MSGCSessionedMobileConfigGetBoolean                           (x0,x2)
-DEFINE_OPAQUE(5)   // MCIExperimentCacheGetMobileConfigBoolean
-DEFINE_OPAQUE(6)   // MCIExtensionExperimentCacheGetMobileConfigBoolean
-
-// Definition table — order MUST match the DEFINE_* slot indices above.
-// `safe` = the prologue does not mangle LR/x30 (no PAC return-address juggling),
-// so a constant-return replacement is ABI-safe. The two readers that DO mangle
-// x30 in their prologue (MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter and
-// IGDirectOneWayGatingGetBoolValue) are deliberately NOT in this curated list;
-// they require an LR-preserving trampoline and are out of scope for the simple
-// force path.
-typedef struct { const char *name; SCICAbiFamily fam; void *repl; const char *display; } SCICDef;
-static SCICDef g_symbol_defs[] = {
-	{ "EasyGatingGetBoolean_Internal_DoNotUseOrMock",                     SCICAbiFamilyGatingId_w0, (void*)repl_gidw0_0,  "EasyGating (Internal)" },
-	{ "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_1, "EasyGating (AuthData)" },
-	{ "MCQEasyGatingGetBooleanInternalDoNotUseOrMock",                    SCICAbiFamilyGatingId_w1, (void*)repl_gidw1_2,  "MCQ EasyGating (Internal)" },
-	{ "IGMobileConfigBooleanValueForInternalUse",                         SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_3, "MobileConfig (InternalUse)" },
-	{ "MSGCSessionedMobileConfigGetBoolean",                              SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_4, "MobileConfig (Sessioned)" },
-	{ "MCIExperimentCacheGetMobileConfigBoolean",                         SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_5, "MobileConfig (ExpCache)" },
-	{ "MCIExtensionExperimentCacheGetMobileConfigBoolean",                SCICAbiFamilyOpaqueBool,  (void*)repl_opaque_6, "MobileConfig (ExtExpCache)" },
+static void *g_replacements[MAX_C_HOOKS] = {
+    (void *)scic_repl_0,
+    (void *)scic_repl_1,
+    (void *)scic_repl_2,
+    (void *)scic_repl_3,
+    (void *)scic_repl_4,
+    (void *)scic_repl_5,
+    (void *)scic_repl_6,
+    (void *)scic_repl_7,
+    (void *)scic_repl_8,
+    (void *)scic_repl_9,
+    (void *)scic_repl_10,
+    (void *)scic_repl_11,
+    (void *)scic_repl_12,
+    (void *)scic_repl_13,
+    (void *)scic_repl_14,
+    (void *)scic_repl_15,
+    (void *)scic_repl_16,
+    (void *)scic_repl_17,
+    (void *)scic_repl_18,
+    (void *)scic_repl_19,
+    (void *)scic_repl_20,
+    (void *)scic_repl_21,
+    (void *)scic_repl_22,
+    (void *)scic_repl_23,
+    (void *)scic_repl_24,
+    (void *)scic_repl_25,
+    (void *)scic_repl_26,
+    (void *)scic_repl_27,
+    (void *)scic_repl_28,
+    (void *)scic_repl_29,
+    (void *)scic_repl_30,
+    (void *)scic_repl_31,
+    (void *)scic_repl_32,
+    (void *)scic_repl_33,
+    (void *)scic_repl_34,
+    (void *)scic_repl_35,
+    (void *)scic_repl_36,
+    (void *)scic_repl_37,
+    (void *)scic_repl_38,
+    (void *)scic_repl_39,
+    (void *)scic_repl_40,
+    (void *)scic_repl_41,
+    (void *)scic_repl_42,
+    (void *)scic_repl_43,
+    (void *)scic_repl_44,
+    (void *)scic_repl_45,
+    (void *)scic_repl_46,
+    (void *)scic_repl_47,
+    (void *)scic_repl_48,
+    (void *)scic_repl_49,
+    (void *)scic_repl_50,
+    (void *)scic_repl_51,
+    (void *)scic_repl_52,
+    (void *)scic_repl_53,
+    (void *)scic_repl_54,
+    (void *)scic_repl_55,
+    (void *)scic_repl_56,
+    (void *)scic_repl_57,
+    (void *)scic_repl_58,
+    (void *)scic_repl_59,
+    (void *)scic_repl_60,
+    (void *)scic_repl_61,
+    (void *)scic_repl_62,
+    (void *)scic_repl_63
 };
-static const int g_def_count = (int)(sizeof(g_symbol_defs)/sizeof(g_symbol_defs[0]));
 
-// Universal native MobileConfig adapter: constant-YES, ABI-agnostic (args
-// ignored). This is the watchdog-risky one — only installed under the explicit
-// "all BOOL gates" master. Kept separate from the slot table because its ABI and
-// risk profile differ from the curated readers.
-static void *g_universal_native_orig __attribute__((unused)) = NULL;
-__attribute__((unused))
-static bool repl_universal_native(void *a,void *b,void *c,void *d,void *e,void *f,void *g,void *h){
-	(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;
-	return true;
+static BOOL SCIImageNameIsFBShared(const char *imageName) {
+    if (!imageName) return NO;
+    NSString *s = [NSString stringWithUTF8String:imageName];
+    NSString *last = s.lastPathComponent;
+    return [last isEqualToString:@"FBSharedFramework"] || [s containsString:@"FBSharedFramework.framework/FBSharedFramework"];
 }
 
-static void ensure_slots_initialized(void) {
-	if (g_slot_count) return;
-	for (int i = 0; i < g_def_count && i < MAX_SYMS; i++) {
-		SCICSlot *s = &g_slots[i];
-		s->name = g_symbol_defs[i].name;
-		s->family = g_symbol_defs[i].fam;
-		atomic_store(&s->force, -1);
-		atomic_store(&s->hits, 0);
-		atomic_store(&s->id_count, 0);
-		s->orig = NULL;
-		g_slot_count++;
-	}
+static NSString *SCICleanExportName(const char *name) {
+    if (!name || !name[0]) return nil;
+    if (name[0] == '_') name++;
+    if (!name[0]) return nil;
+    NSString *s = [NSString stringWithUTF8String:name];
+    if (!s.length) return nil;
+    if ([s hasPrefix:@"_"]) return nil;
+
+    // Exclude ObjC methods/classes, Swift/C++ mangling and compiler/linker artifacts.
+    if ([s containsString:@"<"] || [s containsString:@">"]) return nil;
+    NSArray<NSString *> *badPrefixes = @[
+        @"OBJC_", @"_OBJC_", @"objc_", @"__objc", @"__block_descriptor",
+        @"__NS", @"_$s", @"$s", @"__ZN", @"_Z", @"__Z",
+        @"l_", @"GCC_", @"_mh_"
+    ];
+    for (NSString *prefix in badPrefixes) {
+        if ([s hasPrefix:prefix]) return nil;
+    }
+
+    return s;
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Override persistence helpers (UI side; not on hot path).
-// ───────────────────────────────────────────────────────────────────────────
-
-static void push_global_override_to_cache(NSString *name, NSNumber *val) {
-	const char *cn = name.UTF8String;
-	SCICSlot *s = slot_for_name_c(cn);
-	if (!s) return;
-	atomic_store(&s->force, val ? (val.boolValue ? 1 : 0) : -1);
+static BOOL SCISymbolIsForceBlacklisted(NSString *name) {
+    if (!name.length) return YES;
+    NSArray<NSString *> *bad = @[
+        @"MCI",                      // includes MCIStats and MCI* readers that abort under forced state
+        @"MCDDasm",                  // hot path DASM adapter
+        @"IGDirectOneWayGatingGetBoolValue",
+        @"MCISessionedNetworker",
+        @"MCIGraphQL",
+        @"MCIStats"
+    ];
+    for (NSString *part in bad) {
+        if ([name rangeOfString:part options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
+    }
+    return NO;
 }
 
-static void push_id_override_to_cache(NSString *name, int32_t gid, NSNumber *val) {
-	SCICSlot *s = slot_for_name_c(name.UTF8String);
-	if (!s) return;
-	int idx = slot_note_id(s, gid, -1);
-	if (idx < 0) return;
-	atomic_store(&s->id_force[idx], val ? (val.boolValue ? 1 : 0) : -1);
+static BOOL SCISymbolLooksBoolLike(NSString *name) {
+    if (!name.length) return NO;
+    NSArray<NSString *> *parts = @[
+        @"Bool", @"Boolean", @"Gating", @"Gate", @"MobileConfig", @"ConfigBoolean",
+        @"IsEmployee", @"IsInternal", @"Dogfood", @"Eligible", @"Eligibility", @"Should", @"CanUse", @"Has"
+    ];
+    for (NSString *p in parts) {
+        if ([name rangeOfString:p options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
+    }
+    return NO;
 }
 
-@implementation SCICSymbol
-- (NSString *)overrideKey { return [NSString stringWithFormat:@"C#%@", self.symbolName]; }
+static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t imageIndex) {
+    const struct mach_header *mh0 = _dyld_get_image_header(imageIndex);
+    const char *imageName = _dyld_get_image_name(imageIndex);
+    if (!mh0 || !SCIImageNameIsFBShared(imageName) || mh0->magic != MH_MAGIC_64) return @[];
+
+    const struct mach_header_64 *mh = (const struct mach_header_64 *)mh0;
+    const uint8_t *cmdp = (const uint8_t *)(mh + 1);
+    const struct segment_command_64 *linkedit = NULL;
+    const struct symtab_command *symtab = NULL;
+
+    for (uint32_t i = 0; i < mh->ncmds; i++) {
+        const struct load_command *lc = (const struct load_command *)cmdp;
+        if (lc->cmd == LC_SEGMENT_64) {
+            const struct segment_command_64 *seg = (const struct segment_command_64 *)cmdp;
+            if (strncmp(seg->segname, "__LINKEDIT", 16) == 0) linkedit = seg;
+        } else if (lc->cmd == LC_SYMTAB) {
+            symtab = (const struct symtab_command *)cmdp;
+        }
+        if (lc->cmdsize == 0) break;
+        cmdp += lc->cmdsize;
+    }
+
+    if (!linkedit || !symtab || symtab->nsyms == 0 || symtab->stroff == 0 || symtab->strsize == 0) return @[];
+
+    intptr_t slide = _dyld_get_image_vmaddr_slide(imageIndex);
+    uintptr_t linkeditBase = (uintptr_t)slide + (uintptr_t)linkedit->vmaddr - (uintptr_t)linkedit->fileoff;
+    const struct nlist_64 *symbols = (const struct nlist_64 *)(linkeditBase + symtab->symoff);
+    const char *strings = (const char *)(linkeditBase + symtab->stroff);
+
+    NSMutableArray<SCICImport *> *out = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+    for (uint32_t i = 0; i < symtab->nsyms; i++) {
+        struct nlist_64 n = symbols[i];
+        if ((n.n_type & N_STAB) != 0) continue;
+        if ((n.n_type & N_EXT) == 0) continue;
+        uint8_t type = n.n_type & N_TYPE;
+        if (type != N_SECT && type != N_ABS) continue;
+        if (n.n_un.n_strx == 0 || n.n_un.n_strx >= symtab->strsize) continue;
+
+        NSString *name = SCICleanExportName(strings + n.n_un.n_strx);
+        if (!name.length || [seen containsObject:name]) continue;
+        [seen addObject:name];
+
+        SCICImport *item = [SCICImport new];
+        item.symbolName = name;
+        item.imageName = @"FBSharedFramework export";
+        item.resolvable = dlsym(RTLD_DEFAULT, name.UTF8String) != NULL;
+        item.boolLike = SCISymbolLooksBoolLike(name);
+        item.forceBlacklisted = SCISymbolIsForceBlacklisted(name);
+        [out addObject:item];
+    }
+    return out;
+}
+
+static NSArray<SCICImport *> *SCIAllFBSharedExports(void) {
+    static NSArray<SCICImport *> *exports;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary<NSString *, SCICImport *> *byName = [NSMutableDictionary dictionary];
+        uint32_t count = _dyld_image_count();
+        for (uint32_t i = 0; i < count; i++) {
+            for (SCICImport *item in SCIEnumerateFBSharedExportsForImage(i)) {
+                byName[item.symbolName] = item;
+            }
+        }
+        exports = [[byName allValues] sortedArrayUsingComparator:^NSComparisonResult(SCICImport *a, SCICImport *b) {
+            return [a.symbolName compare:b.symbolName options:NSCaseInsensitiveSearch];
+        }];
+        CLOG("FBShared export enumeration complete: %lu symbols", (unsigned long)exports.count);
+    });
+    return exports ?: @[];
+}
+
+static SCICImport *SCIExportForName(NSString *name) {
+    if (!name.length) return nil;
+    for (SCICImport *item in SCIAllFBSharedExports()) {
+        if ([item.symbolName isEqualToString:name]) return item;
+    }
+    return nil;
+}
+
+static NSMutableDictionary *SCIMutableDictPref(NSString *key) {
+    NSDictionary *d = [SCIUtils getDictPref:key];
+    return [d isKindOfClass:NSDictionary.class] ? [d mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static NSString *SCIKeyForSymbol(NSString *name) { return [@"C#" stringByAppendingString:(name ?: @"")]; }
+
+static NSNumber *SCIOverrideForName(NSString *name) {
+    id v = [SCIUtils getDictPref:kCOverridesKey][SCIKeyForSymbol(name)];
+    return [v isKindOfClass:NSNumber.class] ? v : nil;
+}
+
+static BOOL SCIObserveForName(NSString *name) {
+    id v = [SCIUtils getDictPref:kCObserveKey][SCIKeyForSymbol(name)];
+    return [v isKindOfClass:NSNumber.class] ? [v boolValue] : NO;
+}
+
+static BOOL SCICSymbolCanInstallBoolHook(NSString *name) {
+    if (!name.length) return NO;
+    if (!SCISymbolLooksBoolLike(name)) return NO;
+    if (dlsym(RTLD_DEFAULT, name.UTF8String) == NULL) return NO;
+    return YES;
+}
+
+static BOOL SCIInstallHookForName(NSString *name) {
+    if (!SCICSymbolCanInstallBoolHook(name)) return NO;
+    if (SCISymbolIsForceBlacklisted(name) && SCIOverrideForName(name)) return NO;
+
+    @synchronized([SCICSymbolEngine class]) {
+        int existing = slotIndexForName(name.UTF8String);
+        if (existing >= 0) return YES;
+        if (g_slot_count >= MAX_C_HOOKS) return NO;
+        int idx = g_slot_count++;
+        g_slots[idx].name = strdup(name.UTF8String);
+        g_slots[idx].orig = NULL;
+        atomic_store(&g_slots[idx].force, -1);
+        atomic_store(&g_slots[idx].hits, 0);
+        atomic_store(&g_slots[idx].observed, -1);
+        g_slots[idx].installed = false;
+
+        NSNumber *forced = SCIOverrideForName(name);
+        if (forced && !SCISymbolIsForceBlacklisted(name)) atomic_store(&g_slots[idx].force, forced.boolValue ? 1 : 0);
+
+        struct rebinding rb = { name.UTF8String, g_replacements[idx], (void **)&g_slots[idx].orig };
+        int rc = rebind_symbols(&rb, 1);
+        if (rc != 0 || !g_slots[idx].orig) {
+            CLOG("rebind no consumer import %s rc=%d", name.UTF8String, rc);
+            free((void *)g_slots[idx].name);
+            memset(&g_slots[idx], 0, sizeof(SCIHookSlot));
+            g_slot_count--;
+            return NO;
+        }
+        g_slots[idx].installed = true;
+        CLOG("rebound FBShared export %s slot=%d", name.UTF8String, idx);
+        return YES;
+    }
+}
+
+static void SCIPushForceToCache(NSString *name, NSNumber *value) {
+    int idx = slotIndexForName(name.UTF8String);
+    if (idx < 0) return;
+    if (SCISymbolIsForceBlacklisted(name)) {
+        atomic_store(&g_slots[idx].force, -1);
+    } else {
+        atomic_store(&g_slots[idx].force, value ? (value.boolValue ? 1 : 0) : -1);
+    }
+}
+
+@implementation SCICImport
+- (NSString *)overrideKey { return SCIKeyForSymbol(self.symbolName); }
 - (NSNumber *)override { return [SCICSymbolEngine overrideForSymbolName:self.symbolName]; }
-- (BOOL)hookInstalled {
-	SCICSlot *s = slot_for_name_c(self.symbolName.UTF8String);
-	return s && s->orig != NULL;
-}
+- (BOOL)observing { return [SCICSymbolEngine isObserving:self.symbolName]; }
+- (BOOL)hookInstalled { return [SCICSymbolEngine hookInstalledForSymbolName:self.symbolName]; }
 - (NSUInteger)observedCallCount { return [SCICSymbolEngine callCountForSymbolName:self.symbolName]; }
-- (NSArray<NSNumber *> *)observedIDs { return [SCICSymbolEngine observedIDsForSymbolName:self.symbolName]; }
+- (NSNumber *)observedValue { return [SCICSymbolEngine observedValueForSymbolName:self.symbolName]; }
 @end
 
 @implementation SCICSymbolEngine
 
-+ (NSArray<SCICSymbol *> *)allSymbols {
-	ensure_slots_initialized();
-	NSMutableArray *out = [NSMutableArray array];
-	for (int i = 0; i < g_def_count; i++) {
-		SCICSymbol *sym = [SCICSymbol new];
-		sym.symbolName  = @(g_symbol_defs[i].name);
-		sym.displayName = @(g_symbol_defs[i].display);
-		sym.originImage = @"FBSharedFramework";
-		sym.abiFamily   = g_symbol_defs[i].fam;
-		[out addObject:sym];
-	}
-	return out;
++ (NSArray<SCICImport *> *)searchImports:(NSString *)query limit:(NSUInteger)limit {
+    NSArray<SCICImport *> *all = SCIAllFBSharedExports();
+    if (limit == 0) limit = 200;
+    NSString *q = query.lowercaseString ?: @"";
+    NSMutableArray<SCICImport *> *out = [NSMutableArray arrayWithCapacity:MIN(limit, (NSUInteger)200)];
+    for (SCICImport *item in all) {
+        if (q.length && [item.symbolName.lowercaseString rangeOfString:q].location == NSNotFound) continue;
+        [out addObject:item];
+        if (out.count >= limit) break;
+    }
+    return out;
 }
 
++ (NSUInteger)totalImportCount { return SCIAllFBSharedExports().count; }
 + (BOOL)masterEnabled { return [SCIUtils getBoolPref:kCMasterKey]; }
 
-// The curated readers that gate internal/employee surfaces. These are the
-// *_Internal / *ForInternalUse boolean readers — forcing them is the targeted
-// dylib equivalent of returning 1 from the internal-use MobileConfig booleans.
++ (BOOL)hasPersistedHooks {
+    NSDictionary *forces = [SCIUtils getDictPref:kCOverridesKey];
+    NSDictionary *obs = [SCIUtils getDictPref:kCObserveKey];
+    return [self masterEnabled] && (forces.count > 0 || obs.count > 0);
+}
+
++ (nullable NSNumber *)overrideForSymbolName:(NSString *)name { return SCIOverrideForName(name); }
+
++ (BOOL)setForce:(NSNumber *)value forSymbolName:(NSString *)name {
+    if (!name.length) return NO;
+    if (!SCICSymbolCanInstallBoolHook(name) || SCISymbolIsForceBlacklisted(name)) return NO;
+
+    NSMutableDictionary *d = SCIMutableDictPref(kCOverridesKey);
+    NSString *key = SCIKeyForSymbol(name);
+    if (value) d[key] = value; else [d removeObjectForKey:key];
+    [SCIUtils setPref:d forKey:kCOverridesKey];
+    if (value) [SCIUtils setPref:@YES forKey:kCMasterKey];
+    if (!SCIInstallHookForName(name)) return NO;
+    SCIPushForceToCache(name, value);
+    return YES;
+}
+
++ (BOOL)setObserve:(BOOL)observe forSymbolName:(NSString *)name {
+    if (!name.length) return NO;
+    if (!SCICSymbolCanInstallBoolHook(name)) return NO;
+
+    NSMutableDictionary *d = SCIMutableDictPref(kCObserveKey);
+    NSString *key = SCIKeyForSymbol(name);
+    if (observe) d[key] = @YES; else [d removeObjectForKey:key];
+    [SCIUtils setPref:d forKey:kCObserveKey];
+    if (observe) return SCIInstallHookForName(name);
+    return YES;
+}
+
++ (BOOL)isObserving:(NSString *)name { return SCIObserveForName(name); }
+
++ (NSUInteger)callCountForSymbolName:(NSString *)name {
+    int idx = slotIndexForName(name.UTF8String);
+    return idx >= 0 ? atomic_load(&g_slots[idx].hits) : 0;
+}
+
++ (nullable NSNumber *)observedValueForSymbolName:(NSString *)name {
+    int idx = slotIndexForName(name.UTF8String);
+    if (idx < 0) return nil;
+    signed char v = atomic_load(&g_slots[idx].observed);
+    return v < 0 ? nil : @(v != 0);
+}
+
++ (BOOL)hookInstalledForSymbolName:(NSString *)name { return slotIndexForName(name.UTF8String) >= 0; }
++ (BOOL)isForceBlacklistedSymbolName:(NSString *)name { return SCISymbolIsForceBlacklisted(name); }
++ (BOOL)isBoolLikeSymbolName:(NSString *)name { return SCISymbolLooksBoolLike(name); }
+
 + (NSArray<NSString *> *)internalGateSymbolNames {
-	return @[
-		@"IGMobileConfigBooleanValueForInternalUse",
-		@"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
-		@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
-		@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
-		@"MSGCSessionedMobileConfigGetBoolean",
-	];
+    return @[
+        @"IGMobileConfigBooleanValueForInternalUse",
+        @"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+        @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+        @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+        @"MSGCSessionedMobileConfigGetBoolean",
+    ];
 }
 
 + (NSArray<NSString *> *)forceInternalReadersEnabled:(BOOL)enabled {
-	NSArray<NSString *> *names = [self internalGateSymbolNames];
-	for (NSString *n in names) {
-		[self setOverride:(enabled ? @YES : nil) forSymbolName:n];
-	}
-	// Forcing requires the master switch and a relaunch to install the hooks.
-	if (enabled) [SCIUtils setPref:@YES forKey:kCMasterKey];
-	return names;
+    NSMutableArray *ok = [NSMutableArray array];
+    for (NSString *name in [self internalGateSymbolNames]) {
+        BOOL changed = [self setForce:(enabled ? @YES : nil) forSymbolName:name];
+        if (changed) [ok addObject:name];
+    }
+    return ok;
 }
 
-+ (nullable NSNumber *)overrideForSymbolName:(NSString *)name {
-	NSDictionary *d = [SCIUtils getDictPref:kCOverridesKey];
-	id v = d[[NSString stringWithFormat:@"C#%@", name]];
-	return [v isKindOfClass:NSNumber.class] ? v : nil;
-}
-
-+ (void)setOverride:(nullable NSNumber *)value forSymbolName:(NSString *)name {
-	NSMutableDictionary *d = [[SCIUtils getDictPref:kCOverridesKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-	NSString *k = [NSString stringWithFormat:@"C#%@", name];
-	if (value) d[k] = value; else [d removeObjectForKey:k];
-	[SCIUtils setPref:d forKey:kCOverridesKey];
-	push_global_override_to_cache(name, value);
-}
-
-+ (nullable NSNumber *)overrideForSymbolName:(NSString *)name gatingID:(int32_t)gatingID {
-	NSDictionary *all = [SCIUtils getDictPref:kCIDOverridesKey];
-	NSDictionary *perSym = all[[NSString stringWithFormat:@"C#%@", name]];
-	id v = perSym[[NSString stringWithFormat:@"%d", gatingID]];
-	return [v isKindOfClass:NSNumber.class] ? v : nil;
-}
-
-+ (void)setOverride:(nullable NSNumber *)value forSymbolName:(NSString *)name gatingID:(int32_t)gatingID {
-	NSMutableDictionary *all = [[SCIUtils getDictPref:kCIDOverridesKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-	NSString *symKey = [NSString stringWithFormat:@"C#%@", name];
-	NSMutableDictionary *perSym = [all[symKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-	NSString *idKey = [NSString stringWithFormat:@"%d", gatingID];
-	if (value) perSym[idKey] = value; else [perSym removeObjectForKey:idKey];
-	all[symKey] = perSym;
-	[SCIUtils setPref:all forKey:kCIDOverridesKey];
-	push_id_override_to_cache(name, gatingID, value);
-}
-
-+ (NSUInteger)callCountForSymbolName:(NSString *)name {
-	SCICSlot *s = slot_for_name_c(name.UTF8String);
-	return s ? atomic_load(&s->hits) : 0;
-}
-
-+ (NSArray<NSNumber *> *)observedIDsForSymbolName:(NSString *)name {
-	SCICSlot *s = slot_for_name_c(name.UTF8String);
-	if (!s) return @[];
-	NSMutableArray *out = [NSMutableArray array];
-	int n = atomic_load(&s->id_count);
-	for (int i = 0; i < n; i++) [out addObject:@(s->ids[i])];
-	return out;
-}
-
-+ (nullable NSNumber *)observedValueForSymbolName:(NSString *)name gatingID:(int32_t)gatingID {
-	SCICSlot *s = slot_for_name_c(name.UTF8String);
-	if (!s) return nil;
-	int n = atomic_load(&s->id_count);
-	for (int i = 0; i < n; i++) {
-		if (s->ids[i] == gatingID) {
-			signed char ov = atomic_load(&s->id_observed[i]);
-			return ov < 0 ? nil : @(ov != 0);
-		}
-	}
-	return nil;
-}
-
-// Install fishhook rebindings for symbols that have any persisted override
-// (global or per-ID). Idempotent; the %ctor calls this once.
 + (void)reinstallPersistedHooks {
-	ensure_slots_initialized();
-	if (![self masterEnabled]) { CLOG("master off; skipping C-symbol hooks"); return; }
+    if (![self hasPersistedHooks]) { CLOG("no enabled persisted FBShared C hooks"); return; }
 
-	// Load persisted overrides into the static cache first.
-	NSDictionary *globals = [SCIUtils getDictPref:kCOverridesKey];
-	for (NSString *k in globals) {
-		if (![k hasPrefix:@"C#"]) continue;
-		NSString *name = [k substringFromIndex:2];
-		id v = globals[k];
-		if ([v isKindOfClass:NSNumber.class]) push_global_override_to_cache(name, v);
-	}
-	NSDictionary *idOverrides = [SCIUtils getDictPref:kCIDOverridesKey];
-	for (NSString *symKey in idOverrides) {
-		if (![symKey hasPrefix:@"C#"]) continue;
-		NSString *name = [symKey substringFromIndex:2];
-		NSDictionary *perSym = idOverrides[symKey];
-		if (![perSym isKindOfClass:NSDictionary.class]) continue;
-		for (NSString *idKey in perSym) {
-			id v = perSym[idKey];
-			if ([v isKindOfClass:NSNumber.class]) push_id_override_to_cache(name, (int32_t)idKey.intValue, v);
-		}
-	}
+    NSDictionary *obs = [SCIUtils getDictPref:kCObserveKey];
+    for (NSString *key in obs) {
+        if (![key hasPrefix:@"C#"]) continue;
+        id v = obs[key];
+        if ([v isKindOfClass:NSNumber.class] && [v boolValue]) SCIInstallHookForName([key substringFromIndex:2]);
+    }
 
-	// ── Back-compat: honor the legacy SCIMobileConfigForce.x prefs so the old
-	//    Dev switches keep working through the single unified engine. These map
-	//    onto the same curated readers. The universal native adapter is wired
-	//    only under the explicit "all BOOL gates" master (watchdog risk).
-	BOOL legacyMaster   = [SCIUtils getBoolPref:@"sci_force_all_mc_gates"];
-	BOOL legacyInternal = legacyMaster || [SCIUtils getBoolPref:@"sci_force_mc_internal_use_boolean"];
-	BOOL legacySessAll  = legacyMaster || [SCIUtils getBoolPref:@"sci_force_sessioned_mc_all"];
-	BOOL legacyMsgc     = legacySessAll || [SCIUtils getBoolPref:@"sci_force_msgc_sessioned_boolean"];
-	BOOL legacyMciExp   = legacySessAll || [SCIUtils getBoolPref:@"sci_force_mci_experiment_boolean"];
-	BOOL legacyMciExt   = legacySessAll || [SCIUtils getBoolPref:@"sci_force_mci_extension_boolean"];
-	BOOL legacyUniversal= legacyMaster || [SCIUtils getBoolPref:@"sci_force_mc_internal_use_all"];
-	if (legacyInternal) push_global_override_to_cache(@"IGMobileConfigBooleanValueForInternalUse", @YES);
-	if (legacyMsgc)     push_global_override_to_cache(@"MSGCSessionedMobileConfigGetBoolean", @YES);
-	if (legacyMciExp)   push_global_override_to_cache(@"MCIExperimentCacheGetMobileConfigBoolean", @YES);
-	if (legacyMciExt)   push_global_override_to_cache(@"MCIExtensionExperimentCacheGetMobileConfigBoolean", @YES);
-
-	// The universal native reader is registered as a special slot only when the
-	// explicit master is set. It is NOT in g_symbol_defs (different ABI + risk),
-	// so we rebind it inline here with a constant-YES replacement.
-	static BOOL universalRequested = NO;
-	universalRequested = legacyUniversal;
-
-	BOOL diagAll = [SCIUtils getBoolPref:@"sci_c_symbol_diag_all"];
-
-	struct rebinding rebs[MAX_SYMS + 1];
-	int nreb = 0;
-	for (int i = 0; i < g_slot_count; i++) {
-		SCICSlot *s = &g_slots[i];
-		BOOL hasGlobal = atomic_load(&s->force) >= 0;
-		BOOL hasID = NO;
-		int idn = atomic_load(&s->id_count);
-		for (int j = 0; j < idn; j++) if (atomic_load(&s->id_force[j]) >= 0) { hasID = YES; break; }
-		if (!hasGlobal && !hasID && !diagAll) continue;
-		// SAFETY: never hand fishhook a symbol that isn't actually resolvable in
-		// this process. dlsym(RTLD_DEFAULT) confirms the import exists before we
-		// rebind it. This is what prevents the crash seen when a phantom name
-		// (e.g. a mistyped/nonexistent "GetMobileConfigBoolean") was toggled on.
-		if (dlsym(RTLD_DEFAULT, g_symbol_defs[i].name) == NULL) {
-			CLOG("SKIP %{public}s — not resolvable via dlsym (not a real import)", g_symbol_defs[i].name);
-			continue;
-		}
-		rebs[nreb].name = g_symbol_defs[i].name;
-		rebs[nreb].replacement = g_symbol_defs[i].repl;
-		rebs[nreb].replaced = (void **)&s->orig;
-		nreb++;
-		CLOG("rebinding %{public}s (family %ld)", g_symbol_defs[i].name, (long)s->family);
-	}
-	// Universal native adapter (separate, constant-YES, watchdog-risky).
-	// NOTE: MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter and
-	// IGDirectOneWayGatingGetBoolValue mangle x30/LR in their prologue (PAC
-	// return-address juggling). A naive constant-return fishhook replacement
-	// corrupts the return path and crashes. They are intentionally NOT rebound
-	// here. If the universal force is ever needed it must use an LR-preserving
-	// trampoline; out of scope for the curated, safe readers above.
-	(void)universalRequested;
-	if (nreb == 0) { CLOG("no C-symbol overrides to install"); return; }
-	int rc = rebind_symbols(rebs, nreb);
-	CLOG("rebind_symbols installed=%d rc=%d", nreb, rc);
+    NSDictionary *forces = [SCIUtils getDictPref:kCOverridesKey];
+    for (NSString *key in forces) {
+        if (![key hasPrefix:@"C#"]) continue;
+        NSString *name = [key substringFromIndex:2];
+        id v = forces[key];
+        if (![v isKindOfClass:NSNumber.class]) continue;
+        if (SCISymbolIsForceBlacklisted(name)) continue;
+        if (SCIInstallHookForName(name)) SCIPushForceToCache(name, v);
+    }
 }
 
 @end

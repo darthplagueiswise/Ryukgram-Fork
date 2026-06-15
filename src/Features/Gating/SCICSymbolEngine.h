@@ -1,104 +1,60 @@
 // SCICSymbolEngine.h
 //
-// Runtime browser + safe runtime hooking for C symbols (imported via GOT),
-// mirroring the ObjC SCISymbolBrowserEngine but for plain C functions such as
-// Instagram's MobileConfig / EasyGating boolean readers.
-//
-// Why this is safe and works (validated against IG 433 + FBSharedFramework):
-//   • The boolean readers (GetMobileConfigBoolean, EasyGatingGetBoolean_Internal_
-//     DoNotUseOrMock, MSGCSessionedMobileConfigGetBoolean, IGMobileConfigBoolean
-//     ValueForInternalUse, MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter, …) are
-//     all imported by the Instagram exec from FBSharedFramework via chained-fixup
-//     GOT slots. fishhook (rebind_symbols) rebinds exactly those GOT slots, so we
-//     intercept every call the exec makes — this is the THEOS.md "C imported
-//     symbol → fishhook, flag latched" pattern.
-//   • Each reader has a specific ABI. We do NOT use one generic block for all of
-//     them (a wrong C ABI is an uncatchable crash). Instead each symbol is bound
-//     to a typed replacement matching its real disassembled signature, grouped by
-//     "ABI family". The family is recorded per symbol below.
-//   • Hot path reads only a static C cache (atomics), never NSUserDefaults.
-//   • Persistence: one dict (sci_c_symbol_overrides) via SCIUtils, registered in
-//     SCIDefaults. Installed once from a Logos %ctor (SCICSymbolBootstrap.x),
-//     gated by a cheap pref. New selections take effect after relaunch; an
-//     already-installed symbol updates from the in-memory cache immediately.
-//
-// Force semantics (same as the ObjC browser):
-//   ON  = force return YES for this symbol (optionally only for a captured ID)
-//   OFF = remove override, return the app's real value
-//
-// Diagnostics: when a reader takes a small-integer gating/param ID as its first
-// integer argument (EasyGating family), the replacement records the set of IDs it
-// has been called with, plus the real value observed for each. That is how we
-// discover *which* numeric ID corresponds to IG_INTERNAL_SETTINGS so we can later
-// force only that one instead of forcing the symbol globally.
+// Real runtime browser for FBSharedFramework exported C symbols. It enumerates
+// the loaded FBSharedFramework Mach-O symbol table at runtime, then lets the
+// user search the actual FBShared export universe. Hooking is opt-in and
+// observe-only by default.
 
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-// ABI families discovered by disassembly. Each maps to a typed replacement.
-typedef NS_ENUM(NSInteger, SCICAbiFamily) {
-	// BOOL f(...): no usable integer ID in a known register; force-only, no per-ID.
-	SCICAbiFamilyOpaqueBool = 0,
-	// BOOL f(int32 gating_id, ...): EasyGating-style; first int arg is the ID.
-	//   _EasyGatingGetBoolean_Internal_DoNotUseOrMock          (id in w0)
-	SCICAbiFamilyGatingId_w0 = 1,
-	// BOOL f(void* a, int32 gating_id, ...): id in w1.
-	//   _MCQEasyGatingGetBooleanInternalDoNotUseOrMock          (id in w1)
-	SCICAbiFamilyGatingId_w1 = 2,
-};
-
-@interface SCICSymbol : NSObject
-@property (nonatomic, copy)   NSString *symbolName;     // e.g. "EasyGatingGetBoolean_Internal_DoNotUseOrMock"
-@property (nonatomic, copy)   NSString *displayName;    // short, for the cell title
-@property (nonatomic, copy)   NSString *originImage;    // "FBSharedFramework"
-@property (nonatomic, assign) SCICAbiFamily abiFamily;
-@property (nonatomic, readonly) NSString *overrideKey;  // "C#<symbolName>"
-@property (nonatomic, readonly, nullable) NSNumber *override;     // forced value, if any
+@interface SCICImport : NSObject
+@property (nonatomic, copy) NSString *symbolName;
+@property (nonatomic, copy) NSString *imageName;
+@property (nonatomic, assign) BOOL resolvable;
+@property (nonatomic, assign) BOOL boolLike;
+@property (nonatomic, assign) BOOL forceBlacklisted;
+@property (nonatomic, readonly) NSString *overrideKey;
+@property (nonatomic, readonly, nullable) NSNumber *override;
+@property (nonatomic, readonly) BOOL observing;
 @property (nonatomic, readonly) BOOL hookInstalled;
-@property (nonatomic, readonly) NSUInteger observedCallCount;     // hits since launch
-@property (nonatomic, readonly) NSArray<NSNumber *> *observedIDs; // captured gating IDs (families 1/2)
+@property (nonatomic, readonly) NSUInteger observedCallCount;
+@property (nonatomic, readonly, nullable) NSNumber *observedValue;
 @end
 
 @interface SCICSymbolEngine : NSObject
 
-// The curated, binary-validated list of hookable C boolean readers.
-+ (NSArray<SCICSymbol *> *)allSymbols;
+// Runtime FBSharedFramework export universe. Search is evaluated when the UI asks
+// for it; no full symbol scan runs in %ctor.
++ (NSArray<SCICImport *> *)searchImports:(nullable NSString *)query limit:(NSUInteger)limit;
++ (NSUInteger)totalImportCount;
 
-// Force value for a whole symbol (nil = remove override).
-+ (void)setOverride:(nullable NSNumber *)value forSymbolName:(NSString *)name;
+// Force value for a symbol (nil = remove override). Returns NO if the symbol is
+// not resolvable, not bool-like, or explicitly force-blacklisted.
++ (BOOL)setForce:(nullable NSNumber *)value forSymbolName:(NSString *)name;
 + (nullable NSNumber *)overrideForSymbolName:(NSString *)name;
 
-// Force value for a specific captured gating ID under a symbol (families 1/2 only).
-// This is the surgical path: force ONLY the internal-settings ID, leave the rest.
-+ (void)setOverride:(nullable NSNumber *)value
-	  forSymbolName:(NSString *)name
-		 gatingID:(int32_t)gatingID;
-+ (nullable NSNumber *)overrideForSymbolName:(NSString *)name gatingID:(int32_t)gatingID;
+// Observe-only hook. Replacement calls original, records hit count + real value,
+// and returns original unless a force override exists.
++ (BOOL)setObserve:(BOOL)observe forSymbolName:(NSString *)name;
++ (BOOL)isObserving:(NSString *)name;
 
-// Diagnostics readout for the UI.
 + (NSUInteger)callCountForSymbolName:(NSString *)name;
-+ (NSArray<NSNumber *> *)observedIDsForSymbolName:(NSString *)name;
-+ (nullable NSNumber *)observedValueForSymbolName:(NSString *)name gatingID:(int32_t)gatingID;
++ (nullable NSNumber *)observedValueForSymbolName:(NSString *)name;
++ (BOOL)hookInstalledForSymbolName:(NSString *)name;
++ (BOOL)isForceBlacklistedSymbolName:(NSString *)name;
++ (BOOL)isBoolLikeSymbolName:(NSString *)name;
 
-// Whether a global enable for C-symbol forcing is on (cheap pref).
+// Cheap launch gate used by SCICSymbolBootstrap.x.
++ (BOOL)hasPersistedHooks;
 + (BOOL)masterEnabled;
-
-// ── Aggressive "Internal Mode" forcing ─────────────────────────────────────
-// Force the curated set of internal/employee MobileConfig + EasyGating readers
-// to YES in one shot. This is the dylib equivalent of stubbing the internal-use
-// MobileConfig booleans to return 1. It is targeted (only the *_Internal /
-// *ForInternalUse readers), not a blanket force of every config read, so it
-// unlocks internal mode without forcing unrelated experiments.
-// Returns the list of symbol names it marked as forced.
-+ (NSArray<NSString *> *)forceInternalReadersEnabled:(BOOL)enabled;
-
-// The subset of allSymbols considered "internal/employee gate" readers.
-+ (NSArray<NSString *> *)internalGateSymbolNames;
-
-// Install fishhook rebindings for every symbol that has any persisted override.
-// Called once from the %ctor. Idempotent.
 + (void)reinstallPersistedHooks;
+
+// Back-compat helpers used by the Dev UI quick toggle. These only target the
+// curated internal/employee readers and still honor blacklist rules.
++ (NSArray<NSString *> *)internalGateSymbolNames;
++ (NSArray<NSString *> *)forceInternalReadersEnabled:(BOOL)enabled;
 
 @end
 
