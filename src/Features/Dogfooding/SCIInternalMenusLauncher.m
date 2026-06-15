@@ -6,77 +6,133 @@
 
 #define MLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] Menus " fmt,##__VA_ARGS__)
 
-@implementation SCIInternalMenusLauncher
-
-+ (UIViewController *)topVC { return [SCIDogfoodObjectRuntime topViewController]; }
-+ (id)session               { return [SCIDogfoodObjectRuntime activeUserSession]; }
-
-// Return a navigation controller we can push onto, or nil.
-+ (UINavigationController *)navFor:(UIViewController *)vc {
+static UIViewController *SCITopVC(void)  { return [SCIDogfoodObjectRuntime topViewController]; }
+static id               SCISession(void) { return [SCIDogfoodObjectRuntime activeUserSession]; }
+static UINavigationController *SCINavFor(UIViewController *vc) {
     if (!vc) return nil;
     if ([vc isKindOfClass:UINavigationController.class]) return (UINavigationController *)vc;
     return vc.navigationController;
 }
-
-// +[IGDirectNotesDogfoodingSettingsStaticFuncs
-//       notesDogfoodingSettingsOpenOnViewController:userSession:]
-// Signature v32@0:8@16@24 — takes (UIViewController *, userSession).
-// Passes the nav controller when available so the method can push.
-+ (NSString *)openDogfoodingNotesSettings {
-    id session = [self session];
-    if (!session) return @"no live user session (open after login)";
-
-    Class C = NSClassFromString(@"IGDirectNotesDogfoodingSettingsStaticFuncs");
-    if (!C) C = NSClassFromString(
-        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs");
-    if (!C) return @"IGDirectNotesDogfoodingSettingsStaticFuncs not found";
-
-    SEL s = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
-    if (![C respondsToSelector:s]) return @"selector not found on class";
-
-    UIViewController *top = [self topVC];
-    // Prefer a navigation controller so the method can push
-    UIViewController *presenter = [self navFor:top] ?: top;
-
-    @try {
-        ((void(*)(id,SEL,id,id))objc_msgSend)(C, s, presenter, session);
-        MLOG("notes dogfooding opened");
-        return @"opened Notes dogfooding settings";
-    } @catch (id e) {
-        return [NSString stringWithFormat:@"threw: %@", e];
-    }
+static NSString *SCIPresentVC(UIViewController *vc, NSString *tag) {
+    if (!vc || ![vc isKindOfClass:UIViewController.class])
+        return [NSString stringWithFormat:@"%@ — nil or non-VC returned", tag];
+    UIViewController *top = SCITopVC();
+    if (!top) return [NSString stringWithFormat:@"%@ — no topVC", tag];
+    UINavigationController *nav = SCINavFor(top);
+    if (nav) { [nav pushViewController:vc animated:YES]; return [NSString stringWithFormat:@"pushed %@", tag]; }
+    UINavigationController *wrap = [[UINavigationController alloc] initWithRootViewController:vc];
+    wrap.modalPresentationStyle = UIModalPresentationFormSheet;
+    [top presentViewController:wrap animated:YES completion:nil];
+    return [NSString stringWithFormat:@"presented %@", tag];
 }
 
-// Native Dogfooding Settings opener. Uses only dump-confirmed selectors and only
-// calls the Swift entrypoint when the runtime has captured the real config object.
+@implementation SCIInternalMenusLauncher
+
++ (NSString *)openDogfoodingNotesSettings {
+    id session = SCISession();
+    if (!session) return @"no live user session (open after login)";
+    Class C = NSClassFromString(@"IGDirectNotesDogfoodingSettingsStaticFuncs")
+           ?: NSClassFromString(@"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs");
+    if (!C) return @"IGDirectNotesDogfoodingSettingsStaticFuncs not found";
+    SEL s = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    if (![C respondsToSelector:s]) return @"selector not found on class";
+    UIViewController *top = SCITopVC();
+    UIViewController *presenter = SCINavFor(top) ?: top;
+    @try {
+        ((void(*)(id,SEL,id,id))objc_msgSend)(C, s, presenter, session);
+        MLOG("Notes dogfooding settings opened");
+        return @"opened Notes dogfooding settings";
+    } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
+}
+
 + (NSString *)openDogfoodingSettingsVC {
     @try {
         BOOL ok = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
         return ok ? @"opened native Dogfooding Settings"
-                  : @"native Dogfooding Settings unavailable: missing captured IGDogfoodingSettingsConfig/session; open an authorized native dogfood surface first";
-    } @catch (id e) {
-        return [NSString stringWithFormat:@"threw: %@", e];
-    }
+                  : @"Dogfooding Settings unavailable: missing captured IGDogfoodingSettingsConfig/session; open an authorized native dogfood surface first";
+    } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
 }
 
-// +[IGURLHandler openInternalURL:presentationConfig:controller:animated:userSession:annotation:]
-// Best-effort — tries common internal settings URL schemes.
++ (NSString *)openAutofillInternalSettings {
+    NSArray *plain = @[
+        @"IGAutofillTokenizationInternalSettingsPlugin.IGAutofillTokenizationInternalSettingsViewController",
+        @"_TtC44IGAutofillTokenizationInternalSettingsPlugin52IGAutofillTokenizationInternalSettingsViewController",
+    ];
+    for (NSString *name in plain) {
+        Class vcCls = NSClassFromString(name);
+        if (!vcCls || ![vcCls isSubclassOfClass:UIViewController.class]) continue;
+        @try {
+            UIViewController *vc = [[vcCls alloc] init];
+            NSString *r = SCIPresentVC(vc, @"AutofillInternalSettings");
+            if (![r containsString:@"nil"]) { MLOG("%{public}s", r.UTF8String); return r; }
+        } @catch (id) {}
+    }
+    id session = SCISession();
+    if (!session) return @"no live session and no sessionless autofill VC found";
+    for (NSString *name in plain) {
+        Class vcCls = NSClassFromString(name);
+        if (!vcCls) continue;
+        SEL si = NSSelectorFromString(@"initWithUserSession:");
+        if (![vcCls instancesRespondToSelector:si]) continue;
+        @try {
+            UIViewController *vc = ((id(*)(id,SEL,id))objc_msgSend)([vcCls alloc], si, session);
+            NSString *r = SCIPresentVC(vc, @"AutofillInternalSettings+session");
+            MLOG("%{public}s", r.UTF8String); return r;
+        } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
+    }
+    return @"AutofillInternalSettings class not found in binary";
+}
+
++ (NSString *)openSearchDebugSettings {
+    Class vcCls = NSClassFromString(@"IGSearchDebugSettings.IGSearchDebugSettingsViewController")
+               ?: NSClassFromString(@"_TtC21IGSearchDebugSettings35IGSearchDebugSettingsViewController");
+    if (!vcCls || ![vcCls isSubclassOfClass:UIViewController.class])
+        return @"IGSearchDebugSettingsViewController not found in binary";
+    @try {
+        UIViewController *vc = [[vcCls alloc] init];
+        NSString *r = SCIPresentVC(vc, @"SearchDebugSettings");
+        MLOG("%{public}s", r.UTF8String); return r;
+    } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
+}
+
++ (NSString *)openStoryStoreDebugSettings {
+    Class vcCls = NSClassFromString(@"IGStoryStoresDebugSettings.IGStoryStoreDebugSettingsViewController")
+               ?: NSClassFromString(@"_TtC26IGStoryStoresDebugSettings39IGStoryStoreDebugSettingsViewController");
+    if (!vcCls || ![vcCls isSubclassOfClass:UIViewController.class])
+        return @"IGStoryStoreDebugSettingsViewController not found in binary";
+    @try {
+        UIViewController *vc = [[vcCls alloc] init];
+        NSString *r = SCIPresentVC(vc, @"StoryStoreDebugSettings");
+        MLOG("%{public}s", r.UTF8String); return r;
+    } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
+}
+
++ (NSString *)openBestAvailableInternalMenu {
+    for (NSString *r in @[
+        [self openDogfoodingNotesSettings],
+        [self openDogfoodingSettingsVC],
+        [self openAutofillInternalSettings],
+        [self openSearchDebugSettings],
+        [self openInternalURLString:@"instagram://internal_settings"],
+    ]) {
+        if ([r hasPrefix:@"opened"] || [r hasPrefix:@"pushed"] || [r hasPrefix:@"presented"]) return r;
+    }
+    return @"All internal menu openers failed — are you logged in? Is any employee gate active?";
+}
+
 + (NSString *)openInternalURLString:(NSString *)urlString {
-    id session = [self session];
+    id session = SCISession();
     if (!session) return @"no live user session";
     Class C = NSClassFromString(@"IGURLHandler");
-    SEL s = NSSelectorFromString(
-        @"openInternalURL:presentationConfig:controller:animated:userSession:annotation:");
+    SEL s = NSSelectorFromString(@"openInternalURL:presentationConfig:controller:animated:userSession:annotation:");
     if (!C || ![C respondsToSelector:s]) return @"IGURLHandler.openInternalURL not found";
-    UIViewController *top = [self topVC];
+    UIViewController *top = SCITopVC();
     NSURL *url = [NSURL URLWithString:urlString];
     @try {
-        BOOL ok = ((BOOL(*)(id,SEL,id,id,id,BOOL,id,id))objc_msgSend)(
-            C, s, url, nil, top, YES, session, nil);
+        BOOL ok = ((BOOL(*)(id,SEL,id,id,id,BOOL,id,id))objc_msgSend)(C, s, url, nil, top, YES, session, nil);
         return ok ? [NSString stringWithFormat:@"opened: %@", urlString]
-                  : @"openInternalURL returned NO";
-    } @catch (id e) {
-        return [NSString stringWithFormat:@"threw: %@", e];
-    }
+                  : [NSString stringWithFormat:@"openInternalURL returned NO for: %@", urlString];
+    } @catch (id e) { return [NSString stringWithFormat:@"threw: %@", e]; }
 }
+
 @end

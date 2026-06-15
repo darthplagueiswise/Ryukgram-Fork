@@ -164,38 +164,92 @@
 										},
 										@{
 											@"header": SCILocalized(@"Open internal menus (direct, live session)"),
-											@"footer": SCILocalized(@"Presents Instagram’s own internal/dogfooding screens via validated class-method entrypoints using the live user session. Open after you are logged in. The VC/URL routes are best-effort and depend on the IG build."),
+											@"footer": SCILocalized(@"Botoes individuais por entrypoint validado no binario. Todos precisam de sessao ativa (abra apos o login). Se um falhar, tente o proximo. Ligue os gates de employee/internal primeiro se o VC precisar de config."),
 											@"rows": @[
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings")
-													   subtitle:SCILocalized(@"Reliable entrypoint (no config needed)")
-													       icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"]
+												[SCISetting buttonCellWithTitle:SCILocalized(@"★ Best available (cascade)")
+													   subtitle:SCILocalized(@"Tenta Notes → DogfoodVC → Autofill → SearchDebug → URL handler")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"wrench.and.screwdriver"]
+													     action:^(void) {
+														NSString *r = [SCIInternalMenusLauncher openBestAvailableInternalMenu];
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Notes dogfooding settings")
+													   subtitle:SCILocalized(@"notesDogfoodingSettingsOpenOnViewController:userSession: — confiavel")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"note.text"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingNotesSettings];
-														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
-													}
-												],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC")
-													   subtitle:SCILocalized(@"Best-effort: constructs the internal settings VC directly")
-													       icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"]
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Dogfooding Settings VC")
+													   subtitle:SCILocalized(@"openWithConfig:onViewController:userSession: (precisa de config capturado — ative employee gate antes)")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"dog.fill"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingSettingsVC];
-														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
-													}
-												],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL…")
-													   subtitle:SCILocalized(@"Routes via IGURLHandler internal URL opener")
-													       icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"]
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Autofill internal settings")
+													   subtitle:SCILocalized(@"IGAutofillTokenizationInternalSettingsViewController — sem employee gate")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"person.text.rectangle"]
+													     action:^(void) {
+														NSString *r = [SCIInternalMenusLauncher openAutofillInternalSettings];
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Search debug settings")
+													   subtitle:SCILocalized(@"IGSearchDebugSettingsViewController (sem session)")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"magnifyingglass"]
+													     action:^(void) {
+														NSString *r = [SCIInternalMenusLauncher openSearchDebugSettings];
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Story store debug settings")
+													   subtitle:SCILocalized(@"IGStoryStoreDebugSettingsViewController (sem session)")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"books.vertical"]
+													     action:^(void) {
+														NSString *r = [SCIInternalMenusLauncher openStoryStoreDebugSettings];
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"URL handler: instagram://internal_settings")
+													   subtitle:SCILocalized(@"IGURLHandler openInternalURL: — fallback")
+													       icon:[SCISymbol symbolWithIGName:nil fallback:@"link"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"];
-														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
+														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
+														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
-													}
-												],
+														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
+														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+														if(top)[top presentViewController:a animated:YES completion:nil];
+													}]
 											]
 										},
 										@{
