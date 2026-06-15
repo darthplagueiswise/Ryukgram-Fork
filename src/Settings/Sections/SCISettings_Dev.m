@@ -70,32 +70,48 @@
 											]
 										},
 
-										@{
-											@"header": SCILocalized(@"IGPlus / Consumer Subs"),
-											@"footer": SCILocalized(@"Client-side IGPlus benefit getters and eligibility helpers validated in the Instagram executable. Hooks install from persisted prefs; first enable from an all-off launch requires restart."),
-											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force all IGPlus benefits") subtitle:SCILocalized(@"Master for all IGConsumerSubsService benefit getters and lower-level eligibility helpers") defaultsKey:@"sci_force_igplus_all" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus eligibility/data-provider") subtitle:SCILocalized(@"SUBSBenefitDataProvider + peek/chat/custom app icon eligibility") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus access") subtitle:SCILocalized(@"hasAccessToIGPlus") defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Any active benefit") subtitle:SCILocalized(@"hasAnyActiveBenefit / isBenefitActive:") defaultsKey:@"sci_igplus_any_active" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Custom Lists") subtitle:@"" defaultsKey:@"sci_igplus_custom_lists" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Superlikes") subtitle:@"" defaultsKey:@"sci_igplus_story_superlikes" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Search Story Viewers") subtitle:@"" defaultsKey:@"sci_igplus_search_story_viewers" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Extend") subtitle:@"" defaultsKey:@"sci_igplus_story_extend" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Rewatch") subtitle:@"" defaultsKey:@"sci_igplus_story_rewatch" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Peeks") subtitle:@"" defaultsKey:@"sci_igplus_story_peeks" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Spotlight") subtitle:@"" defaultsKey:@"sci_igplus_story_spotlight" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Highlights") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_highlights" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Direct Message Peek") subtitle:@"" defaultsKey:@"sci_igplus_dm_peek" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Custom App Icon") subtitle:@"" defaultsKey:@"sci_igplus_custom_app_icon" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Branded Threads") subtitle:@"" defaultsKey:@"sci_igplus_branded_threads" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Timestamp Viewers List") subtitle:@"" defaultsKey:@"sci_igplus_timestamp_viewers" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Custom Bio Font") subtitle:@"" defaultsKey:@"sci_igplus_custom_bio_font" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Profile") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_profile" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Pinned Posts Increased Limit") subtitle:@"" defaultsKey:@"sci_igplus_pinned_posts_limit" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story Peek Active") subtitle:SCILocalized(@"IGConsumerSubsStoryPeekCoordinator.isPeekActive") defaultsKey:@"sci_igplus_story_peek_active" requiresRestart:YES],
-											]
-										},
+											@{
+												@"header": SCILocalized(@"IGPlus"),
+												@"footer": SCILocalized(@"Submenu dedicado dos gates de IGPlus (codinome interno \"Aura\"). Veja o diagnostico no Dogfood se um gate nao surtir efeito."),
+												@"rows": @[
+													[SCISetting navigationCellWithTitle:SCILocalized(@"★ IGPlus / Aura unlock")
+																		   subtitle:SCILocalized(@"Todos os gates do IGConsumerSubsService")
+																			   icon:nil
+																	navSections:@[
+														@{
+															@"header": SCILocalized(@"Master"),
+															@"footer": SCILocalized(@"Primeiro enable a partir de um launch all-off precisa de relaunch (o grupo instala no construtor)."),
+															@"rows": @[
+													[SCISetting switchCellWithTitle:SCILocalized(@"★ Force all IGPlus benefits") subtitle:SCILocalized(@"Master: todos os getters de benefit do IGConsumerSubsService + eligibility helpers") defaultsKey:@"sci_force_igplus_all" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus eligibility/data-provider") subtitle:SCILocalized(@"SUBSBenefitDataProvider + peek/chat eligibility") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus access") subtitle:SCILocalized(@"hasAccessToIGPlus") defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Any active benefit") subtitle:SCILocalized(@"hasAnyActiveBenefit") defaultsKey:@"sci_igplus_any_active" requiresRestart:YES]
+															]
+														},
+														@{
+															@"header": SCILocalized(@"Individual benefits"),
+															@"rows": @[
+													[SCISetting switchCellWithTitle:SCILocalized(@"Custom Lists") subtitle:@"" defaultsKey:@"sci_igplus_custom_lists" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Superlikes") subtitle:@"" defaultsKey:@"sci_igplus_story_superlikes" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Search Story Viewers") subtitle:@"" defaultsKey:@"sci_igplus_search_story_viewers" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Extend") subtitle:@"" defaultsKey:@"sci_igplus_story_extend" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Rewatch") subtitle:@"" defaultsKey:@"sci_igplus_story_rewatch" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Peeks") subtitle:@"" defaultsKey:@"sci_igplus_story_peeks" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Spotlight") subtitle:@"" defaultsKey:@"sci_igplus_story_spotlight" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Highlights") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_highlights" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Direct Message Peek") subtitle:@"" defaultsKey:@"sci_igplus_dm_peek" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Custom App Icon") subtitle:@"" defaultsKey:@"sci_igplus_custom_app_icon" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Branded Threads") subtitle:@"" defaultsKey:@"sci_igplus_branded_threads" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Timestamp Viewers List") subtitle:@"" defaultsKey:@"sci_igplus_timestamp_viewers" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Custom Bio Font") subtitle:@"" defaultsKey:@"sci_igplus_custom_bio_font" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Profile") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_profile" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Pinned Posts Increased Limit") subtitle:@"" defaultsKey:@"sci_igplus_pinned_posts_limit" requiresRestart:YES],
+													[SCISetting switchCellWithTitle:SCILocalized(@"Story Peek Active") subtitle:@"" defaultsKey:@"sci_igplus_story_peek_active" requiresRestart:YES]
+															]
+														}
+													]]
+												]
+											},
 										@{
 											@"header": SCILocalized(@"XPlugins"),
 											@"footer": SCILocalized(@"XPlugins fica documentado, mas o hook direto não é compilado neste patch porque toca exatamente o caminho do watchdog visto no crash. Reative só isoladamente, em arquivo separado e nunca no launch."),

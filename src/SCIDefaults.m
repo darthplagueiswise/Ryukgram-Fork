@@ -513,7 +513,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_igds_wordmark_isIGWordmark1bAltEnabled": @(NO),
 		@"sci_igds_wordmark_isIGWordmark1bEnabled": @(NO),
 		@"sci_internal_gate_crash_disabled_keys": @[],
-		@"sci_internal_gate_crash_guard_enabled": @(YES),
+		@"sci_internal_gate_crash_guard_enabled": @(NO),
 		@"sci_internal_gate_crash_last_source": @"",
 		@"sci_internal_gate_crash_pending_keys": @[],
 		@"sci_internal_menus": @(NO),
@@ -521,6 +521,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_story_tray": @(NO),
 
 		@"sci_mc_adapter_diag": @(NO),
+		@"sci_internal_gate_crash_strikes": @(0),
 	};
 }
 
