@@ -1,12 +1,12 @@
 // SCICSymbolEngine.m
-// Real runtime browser for FBSharedFramework exported C symbols.
+// Runtime browser for FBSharedFramework C symbols.
 //
-// This browser enumerates the loaded FBSharedFramework Mach-O symbol table at
-// runtime, filters to C-like exported function symbols, and lets the user search
-// the whole FBShared export universe. Hooking remains opt-in and profile-gated:
-// fishhook can rebind consumers' imports of a FBShared symbol, but it cannot
-// patch direct calls made inside FBSharedFramework itself. Force is therefore
-// only allowed for bool-like readers and is blocked for known MCI/MCDDasm crashers.
+// This engine enumerates the whole FBSharedFramework export symbol table at UI
+// time, but it only hooks known-safe bool-reader profiles. The previous generic
+// wrapper was unsafe: a C symbol name does not encode ABI, and calling arbitrary
+// exports as bool(void *, ...) can corrupt return values or crash. Data/key
+// symbols such as ig_* MobileConfig names remain searchable, but they are not
+// function-hookable here.
 
 #import "SCICSymbolEngine.h"
 #import "../../Utils.h"
@@ -28,7 +28,11 @@ static NSString *const kCOverridesKey = @"sci_c_symbol_overrides"; // { "C#name"
 static NSString *const kCObserveKey   = @"sci_c_symbol_observe";   // { "C#name": @(YES) }
 static NSString *const kCMasterKey    = @"sci_c_symbol_force_enabled";
 
-#define MAX_C_HOOKS 64
+static NSString *const kProfileNone        = @"none";
+static NSString *const kProfileBoolObserve = @"bool-observe";
+static NSString *const kProfileBoolForce   = @"bool-force";
+
+#define MAX_C_HOOKS 32
 
 typedef struct {
     const char *name;
@@ -57,6 +61,9 @@ static bool scicHookCall(int idx, void *a0, void *a1, void *a2, void *a3, void *
 
     bool real = false;
     if (slot->orig) {
+        // Only installed for known bool-return profiles. Extra pointer args are
+        // intentionally used for known reader-style functions only; arbitrary
+        // symbols never reach this wrapper.
         bool (*orig)(void *, void *, void *, void *, void *, void *, void *, void *) = (void *)slot->orig;
         real = orig(a0, a1, a2, a3, a4, a5, a6, a7);
         atomic_store(&slot->observed, real ? 1 : 0);
@@ -198,6 +205,12 @@ static void *g_replacements[MAX_C_HOOKS] = {
     (void *)scic_repl_63
 };
 
+typedef struct {
+    char segname[17];
+    char sectname[17];
+    uint32_t flags;
+} SCISectionInfo;
+
 static BOOL SCIImageNameIsFBShared(const char *imageName) {
     if (!imageName) return NO;
     NSString *s = [NSString stringWithUTF8String:imageName];
@@ -208,34 +221,26 @@ static BOOL SCIImageNameIsFBShared(const char *imageName) {
 static NSString *SCICleanExportName(const char *name) {
     if (!name || !name[0]) return nil;
     if (name[0] == '_') name++;
-    if (!name[0]) return nil;
+    if (!name[0] || name[0] == '_') return nil;
     NSString *s = [NSString stringWithUTF8String:name];
     if (!s.length) return nil;
-    if ([s hasPrefix:@"_"]) return nil;
 
-    // Exclude ObjC methods/classes, Swift/C++ mangling and compiler/linker artifacts.
-    if ([s containsString:@"<"] || [s containsString:@">"]) return nil;
     NSArray<NSString *> *badPrefixes = @[
         @"OBJC_", @"_OBJC_", @"objc_", @"__objc", @"__block_descriptor",
-        @"__NS", @"_$s", @"$s", @"__ZN", @"_Z", @"__Z",
-        @"l_", @"GCC_", @"_mh_"
+        @"__NS", @"_$s", @"$s", @"__ZN", @"_Z", @"__Z", @"l_", @"GCC_", @"_mh_"
     ];
     for (NSString *prefix in badPrefixes) {
         if ([s hasPrefix:prefix]) return nil;
     }
-
+    if ([s containsString:@"<"] || [s containsString:@">"]) return nil;
     return s;
 }
 
 static BOOL SCISymbolIsForceBlacklisted(NSString *name) {
     if (!name.length) return YES;
     NSArray<NSString *> *bad = @[
-        @"MCI",                      // includes MCIStats and MCI* readers that abort under forced state
-        @"MCDDasm",                  // hot path DASM adapter
-        @"IGDirectOneWayGatingGetBoolValue",
-        @"MCISessionedNetworker",
-        @"MCIGraphQL",
-        @"MCIStats"
+        @"MCI", @"MCDDasm", @"IGDirectOneWayGatingGetBoolValue",
+        @"MCISessionedNetworker", @"MCIGraphQL", @"MCIStats"
     ];
     for (NSString *part in bad) {
         if ([name rangeOfString:part options:NSCaseInsensitiveSearch].location != NSNotFound) return YES;
@@ -255,6 +260,72 @@ static BOOL SCISymbolLooksBoolLike(NSString *name) {
     return NO;
 }
 
+static NSSet<NSString *> *SCIForceAllowedBoolFunctions(void) {
+    static NSSet<NSString *> *set;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        set = [NSSet setWithArray:@[
+            @"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"
+        ]];
+    });
+    return set;
+}
+
+static NSSet<NSString *> *SCIObserveOnlyBoolFunctions(void) {
+    static NSSet<NSString *> *set;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        set = [NSSet setWithArray:@[
+            @"IGMobileConfigBooleanValueForInternalUse",
+            @"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+            @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+            @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+            @"MSGCSessionedMobileConfigGetBoolean",
+            @"MCIExperimentCacheGetMobileConfigBoolean",
+            @"MCIExtensionExperimentCacheGetMobileConfigBoolean",
+            @"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter",
+            @"IGDirectOneWayGatingGetBoolValue"
+        ]];
+    });
+    return set;
+}
+
+static NSString *SCIKindForSection(NSString *seg, NSString *sect, BOOL abs) {
+    if (abs) return @"absolute";
+    if ([seg isEqualToString:@"__TEXT"] && [sect isEqualToString:@"__text"]) return @"function";
+    if ([seg isEqualToString:@"__TEXT"] && [sect isEqualToString:@"__cstring"]) return @"string";
+    if ([seg isEqualToString:@"__TEXT"] && [sect isEqualToString:@"__const"]) return @"const";
+    if ([seg hasPrefix:@"__DATA"]) return @"data";
+    return [NSString stringWithFormat:@"%@,%@", seg ?: @"?", sect ?: @"?"];
+}
+
+static NSString *SCIProfileForSymbol(NSString *name, BOOL isFunction) {
+    if (!isFunction) return kProfileNone;
+    if ([SCIForceAllowedBoolFunctions() containsObject:name]) return kProfileBoolForce;
+    if ([SCIObserveOnlyBoolFunctions() containsObject:name]) return kProfileBoolObserve;
+    return kProfileNone;
+}
+
+static NSString *SCIReasonForSymbol(NSString *name, NSString *kind, NSString *profile, BOOL resolvable) {
+    if (![kind isEqualToString:@"function"]) {
+        if ([name hasPrefix:@"ig_"]) return @"FBShared key/data symbol; use MobileConfig/EasyGating key browser, not fishhook.";
+        return @"Not a __TEXT,__text function; not C-hookable.";
+    }
+    if (!resolvable) return @"Function export is not resolvable by dlsym in this process.";
+    if ([profile isEqualToString:kProfileBoolForce]) return @"Known single-purpose bool function; observe and Force YES allowed.";
+    if ([profile isEqualToString:kProfileBoolObserve]) return @"Known bool reader; observe-only. Global Force would affect many keys or crash hot path.";
+    if (SCISymbolLooksBoolLike(name)) return @"Looks bool-like, but ABI/profile is not validated; hook blocked.";
+    return @"Function symbol, but return type/signature is unknown; hook blocked.";
+}
+
+static BOOL SCICanHookProfile(NSString *profile) {
+    return [profile isEqualToString:kProfileBoolObserve] || [profile isEqualToString:kProfileBoolForce];
+}
+
+static BOOL SCICanForceProfile(NSString *profile) {
+    return [profile isEqualToString:kProfileBoolForce];
+}
+
 static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t imageIndex) {
     const struct mach_header *mh0 = _dyld_get_image_header(imageIndex);
     const char *imageName = _dyld_get_image_name(imageIndex);
@@ -264,12 +335,22 @@ static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t image
     const uint8_t *cmdp = (const uint8_t *)(mh + 1);
     const struct segment_command_64 *linkedit = NULL;
     const struct symtab_command *symtab = NULL;
+    NSMutableArray<NSValue *> *sections = [NSMutableArray array];
 
     for (uint32_t i = 0; i < mh->ncmds; i++) {
         const struct load_command *lc = (const struct load_command *)cmdp;
         if (lc->cmd == LC_SEGMENT_64) {
             const struct segment_command_64 *seg = (const struct segment_command_64 *)cmdp;
             if (strncmp(seg->segname, "__LINKEDIT", 16) == 0) linkedit = seg;
+            const struct section_64 *sec = (const struct section_64 *)(seg + 1);
+            for (uint32_t si = 0; si < seg->nsects; si++) {
+                SCISectionInfo info;
+                memset(&info, 0, sizeof(info));
+                strlcpy(info.segname, sec[si].segname, sizeof(info.segname));
+                strlcpy(info.sectname, sec[si].sectname, sizeof(info.sectname));
+                info.flags = sec[si].flags;
+                [sections addObject:[NSValue valueWithBytes:&info objCType:@encode(SCISectionInfo)]];
+            }
         } else if (lc->cmd == LC_SYMTAB) {
             symtab = (const struct symtab_command *)cmdp;
         }
@@ -299,12 +380,37 @@ static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t image
         if (!name.length || [seen containsObject:name]) continue;
         [seen addObject:name];
 
+        BOOL abs = (type == N_ABS);
+        SCISectionInfo info;
+        memset(&info, 0, sizeof(info));
+        if (!abs && n.n_sect > 0 && n.n_sect <= sections.count) {
+            [sections[n.n_sect - 1] getValue:&info];
+        }
+        NSString *seg = @"ABS";
+        NSString *sect = @"ABS";
+        if (!abs) {
+            NSString *segValue = [NSString stringWithUTF8String:info.segname];
+            NSString *sectValue = [NSString stringWithUTF8String:info.sectname];
+            seg = segValue.length ? segValue : @"?";
+            sect = sectValue.length ? sectValue : @"?";
+        }
+        NSString *kind = SCIKindForSection(seg, sect, abs);
+        BOOL isFunction = [kind isEqualToString:@"function"];
+        BOOL resolvable = dlsym(RTLD_DEFAULT, name.UTF8String) != NULL;
+        NSString *profile = SCIProfileForSymbol(name, isFunction);
+
         SCICImport *item = [SCICImport new];
         item.symbolName = name;
         item.imageName = @"FBSharedFramework export";
-        item.resolvable = dlsym(RTLD_DEFAULT, name.UTF8String) != NULL;
+        item.symbolKind = kind;
+        item.hookProfile = profile;
+        item.resolvable = resolvable;
+        item.functionSymbol = isFunction;
         item.boolLike = SCISymbolLooksBoolLike(name);
         item.forceBlacklisted = SCISymbolIsForceBlacklisted(name);
+        item.hookable = resolvable && SCICanHookProfile(profile);
+        item.forceAllowed = resolvable && SCICanForceProfile(profile) && !item.forceBlacklisted;
+        item.safetyReason = SCIReasonForSymbol(name, kind, profile, resolvable);
         [out addObject:item];
     }
     return out;
@@ -322,6 +428,7 @@ static NSArray<SCICImport *> *SCIAllFBSharedExports(void) {
             }
         }
         exports = [[byName allValues] sortedArrayUsingComparator:^NSComparisonResult(SCICImport *a, SCICImport *b) {
+            if (a.hookable != b.hookable) return a.hookable ? NSOrderedAscending : NSOrderedDescending;
             return [a.symbolName compare:b.symbolName options:NSCaseInsensitiveSearch];
         }];
         CLOG("FBShared export enumeration complete: %lu symbols", (unsigned long)exports.count);
@@ -354,16 +461,18 @@ static BOOL SCIObserveForName(NSString *name) {
     return [v isKindOfClass:NSNumber.class] ? [v boolValue] : NO;
 }
 
-static BOOL SCICSymbolCanInstallBoolHook(NSString *name) {
-    if (!name.length) return NO;
-    if (!SCISymbolLooksBoolLike(name)) return NO;
-    if (dlsym(RTLD_DEFAULT, name.UTF8String) == NULL) return NO;
-    return YES;
+static BOOL SCICSymbolCanInstallHook(NSString *name) {
+    SCICImport *item = SCIExportForName(name);
+    return item.hookable;
+}
+
+static BOOL SCICSymbolCanForce(NSString *name) {
+    SCICImport *item = SCIExportForName(name);
+    return item.forceAllowed;
 }
 
 static BOOL SCIInstallHookForName(NSString *name) {
-    if (!SCICSymbolCanInstallBoolHook(name)) return NO;
-    if (SCISymbolIsForceBlacklisted(name) && SCIOverrideForName(name)) return NO;
+    if (!SCICSymbolCanInstallHook(name)) return NO;
 
     @synchronized([SCICSymbolEngine class]) {
         int existing = slotIndexForName(name.UTF8String);
@@ -378,7 +487,7 @@ static BOOL SCIInstallHookForName(NSString *name) {
         g_slots[idx].installed = false;
 
         NSNumber *forced = SCIOverrideForName(name);
-        if (forced && !SCISymbolIsForceBlacklisted(name)) atomic_store(&g_slots[idx].force, forced.boolValue ? 1 : 0);
+        if (forced && SCICSymbolCanForce(name)) atomic_store(&g_slots[idx].force, forced.boolValue ? 1 : 0);
 
         struct rebinding rb = { name.UTF8String, g_replacements[idx], (void **)&g_slots[idx].orig };
         int rc = rebind_symbols(&rb, 1);
@@ -398,7 +507,7 @@ static BOOL SCIInstallHookForName(NSString *name) {
 static void SCIPushForceToCache(NSString *name, NSNumber *value) {
     int idx = slotIndexForName(name.UTF8String);
     if (idx < 0) return;
-    if (SCISymbolIsForceBlacklisted(name)) {
+    if (!SCICSymbolCanForce(name)) {
         atomic_store(&g_slots[idx].force, -1);
     } else {
         atomic_store(&g_slots[idx].force, value ? (value.boolValue ? 1 : 0) : -1);
@@ -422,7 +531,7 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
     NSString *q = query.lowercaseString ?: @"";
     NSMutableArray<SCICImport *> *out = [NSMutableArray arrayWithCapacity:MIN(limit, (NSUInteger)200)];
     for (SCICImport *item in all) {
-        if (q.length && [item.symbolName.lowercaseString rangeOfString:q].location == NSNotFound) continue;
+        if (q.length && [item.symbolName.lowercaseString rangeOfString:q].location == NSNotFound && [item.symbolKind.lowercaseString rangeOfString:q].location == NSNotFound) continue;
         [out addObject:item];
         if (out.count >= limit) break;
     }
@@ -430,6 +539,11 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 }
 
 + (NSUInteger)totalImportCount { return SCIAllFBSharedExports().count; }
++ (NSUInteger)hookableImportCount {
+    NSUInteger n = 0;
+    for (SCICImport *item in SCIAllFBSharedExports()) if (item.hookable) n++;
+    return n;
+}
 + (BOOL)masterEnabled { return [SCIUtils getBoolPref:kCMasterKey]; }
 
 + (BOOL)hasPersistedHooks {
@@ -442,7 +556,7 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 
 + (BOOL)setForce:(NSNumber *)value forSymbolName:(NSString *)name {
     if (!name.length) return NO;
-    if (!SCICSymbolCanInstallBoolHook(name) || SCISymbolIsForceBlacklisted(name)) return NO;
+    if (!SCICSymbolCanForce(name)) return NO;
 
     NSMutableDictionary *d = SCIMutableDictPref(kCOverridesKey);
     NSString *key = SCIKeyForSymbol(name);
@@ -456,7 +570,7 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 
 + (BOOL)setObserve:(BOOL)observe forSymbolName:(NSString *)name {
     if (!name.length) return NO;
-    if (!SCICSymbolCanInstallBoolHook(name)) return NO;
+    if (!SCICSymbolCanInstallHook(name)) return NO;
 
     NSMutableDictionary *d = SCIMutableDictPref(kCObserveKey);
     NSString *key = SCIKeyForSymbol(name);
@@ -483,14 +597,16 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 + (BOOL)hookInstalledForSymbolName:(NSString *)name { return slotIndexForName(name.UTF8String) >= 0; }
 + (BOOL)isForceBlacklistedSymbolName:(NSString *)name { return SCISymbolIsForceBlacklisted(name); }
 + (BOOL)isBoolLikeSymbolName:(NSString *)name { return SCISymbolLooksBoolLike(name); }
++ (BOOL)isHookableSymbolName:(NSString *)name { return SCICSymbolCanInstallHook(name); }
++ (BOOL)isForceAllowedSymbolName:(NSString *)name { return SCICSymbolCanForce(name); }
++ (NSString *)safetyReasonForSymbolName:(NSString *)name {
+    SCICImport *item = SCIExportForName(name);
+    return item.safetyReason ?: @"Unknown or unavailable symbol.";
+}
 
 + (NSArray<NSString *> *)internalGateSymbolNames {
     return @[
-        @"IGMobileConfigBooleanValueForInternalUse",
-        @"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
-        @"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
-        @"MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
-        @"MSGCSessionedMobileConfigGetBoolean",
+        @"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"
     ];
 }
 
@@ -510,7 +626,8 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
     for (NSString *key in obs) {
         if (![key hasPrefix:@"C#"]) continue;
         id v = obs[key];
-        if ([v isKindOfClass:NSNumber.class] && [v boolValue]) SCIInstallHookForName([key substringFromIndex:2]);
+        NSString *name = [key substringFromIndex:2];
+        if ([v isKindOfClass:NSNumber.class] && [v boolValue] && SCICSymbolCanInstallHook(name)) SCIInstallHookForName(name);
     }
 
     NSDictionary *forces = [SCIUtils getDictPref:kCOverridesKey];
@@ -519,7 +636,7 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
         NSString *name = [key substringFromIndex:2];
         id v = forces[key];
         if (![v isKindOfClass:NSNumber.class]) continue;
-        if (SCISymbolIsForceBlacklisted(name)) continue;
+        if (!SCICSymbolCanForce(name)) continue;
         if (SCIInstallHookForName(name)) SCIPushForceToCache(name, v);
     }
 }

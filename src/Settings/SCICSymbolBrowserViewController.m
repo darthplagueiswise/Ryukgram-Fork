@@ -24,7 +24,7 @@
     _searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     _searchController.searchResultsUpdater = self;
     _searchController.obscuresBackgroundDuringPresentation = NO;
-    _searchController.searchBar.placeholder = @"Search FBShared exports, EasyGating, MobileConfig…";
+    _searchController.searchBar.placeholder = @"Search FBShared exports, ig_, EasyGating…";
     self.navigationItem.searchController = _searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -53,9 +53,13 @@
 - (NSString *)subtitleForImport:(SCICImport *)item {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     [parts addObject:item.imageName ?: @"?"];
+    if (item.symbolKind.length) [parts addObject:item.symbolKind];
     [parts addObject:item.resolvable ? @"resolvable" : @"unresolved"];
-    if (!item.boolLike) [parts addObject:@"not bool-like"];
-    if (item.forceBlacklisted) [parts addObject:@"force blocked"];
+    if (item.hookable) [parts addObject:@"hookable"];
+    else [parts addObject:@"enum-only"];
+    if (item.forceAllowed) [parts addObject:@"force allowed"];
+    else [parts addObject:@"force blocked"];
+    if (item.boolLike) [parts addObject:@"bool-like name"];
     if (item.hookInstalled) [parts addObject:@"hooked"];
     if (item.observedCallCount) [parts addObject:[NSString stringWithFormat:@"%lu hits", (unsigned long)item.observedCallCount]];
     NSNumber *observed = item.observedValue;
@@ -69,23 +73,28 @@
     NSMutableArray<SCIBaseSettingsSection *> *sections = [NSMutableArray array];
 
     NSArray<SCICImport *> *hits = [SCICSymbolEngine searchImports:_query limit:200];
-    NSString *masterFooter = [NSString stringWithFormat:@"FBShared exports: %lu. Showing %lu. Browser enumera os símbolos exportados do FBSharedFramework carregado em runtime; fishhook intercepta consumidores/imports desse símbolo, não chamadas diretas internas do próprio FBShared. Observe chama orig e captura valor real; Force é bloqueado para MCI/MCDDasm/IGDirect crashers.", (unsigned long)[SCICSymbolEngine totalImportCount], (unsigned long)hits.count];
+    NSString *masterFooter = [NSString stringWithFormat:@"FBShared exports: %lu. Hookable safe profiles: %lu. This browser enumerates the full FBSharedFramework export table. Only known bool-return profiles can install fishhook. ig_* and InternalOnly keys in __const are data/key symbols, not functions; forcing them here would crash or do nothing — use MobileConfig/EasyGating key browsers for those.", (unsigned long)[SCICSymbolEngine totalImportCount], (unsigned long)[SCICSymbolEngine hookableImportCount]];
 
     NSMutableArray<SCIBaseSettingsRow *> *master = [NSMutableArray array];
     [master addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Enable C-symbol launch hooks"
-        subtitle:@"Permite reinstalar observe/force persistido no %ctor. O toque na tela instala o hook selecionado também."
+        subtitle:@"Reinstalls only persisted known-safe C symbol hooks in %ctor. No symbol table scan runs at launch."
         value:^BOOL{ return [SCIUtils getBoolPref:@"sci_c_symbol_force_enabled"]; }
         action:^(BOOL on, UIViewController *vc){ [SCIUtils setPref:@(on) forKey:@"sci_c_symbol_force_enabled"]; }]];
 
-    [master addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Force internal/employee safe readers"
-        subtitle:@"Força apenas readers internos curados. Não força MCI/MCDDasm hot path."
+    [master addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Force curated single-purpose gates"
+        subtitle:@"Only known single-purpose bool functions. Does not force MobileConfig/EasyGating/MCI multi-key readers."
         value:^BOOL{
-            for (NSString *name in [SCICSymbolEngine internalGateSymbolNames]) {
+            NSArray *names = [SCICSymbolEngine internalGateSymbolNames];
+            if (!names.count) return NO;
+            for (NSString *name in names) {
                 if (![SCICSymbolEngine overrideForSymbolName:name]) return NO;
             }
-            return [SCICSymbolEngine internalGateSymbolNames].count > 0;
+            return YES;
         }
-        action:^(BOOL on, UIViewController *vc){ [SCICSymbolEngine forceInternalReadersEnabled:on]; }]];
+        action:^(BOOL on, UIViewController *vc){
+            NSArray *changed = [SCICSymbolEngine forceInternalReadersEnabled:on];
+            [SCIUtils showToastForDuration:1.2 title:(changed.count ? @"Curated gates updated" : @"No curated gates updated")];
+        }]];
 
     [sections addObject:[SCIBaseSettingsSection sectionWithHeader:@"FBShared C symbol browser" footer:masterFooter rows:master]];
 
@@ -93,22 +102,29 @@
         NSString *name = item.symbolName;
         NSMutableArray<SCIBaseSettingsRow *> *rows = [NSMutableArray array];
 
-        [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Observe only"
-            subtitle:@"Hook via fishhook nos consumidores do símbolo, chama original, registra hits/valor real e retorna o real."
-            value:^BOOL{ return [SCICSymbolEngine isObserving:name]; }
-            action:^(BOOL on, UIViewController *vc){
-                BOOL ok = [SCICSymbolEngine setObserve:on forSymbolName:name];
-                if (!ok) [SCIUtils showToastForDuration:1.6 title:@"Symbol not safe/resolvable for observe"];
-            }]];
+        if (item.hookable) {
+            [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Observe only"
+                subtitle:@"Known bool profile: fishhook consumers, call original, record hits/value, return original."
+                value:^BOOL{ return [SCICSymbolEngine isObserving:name]; }
+                action:^(BOOL on, UIViewController *vc){
+                    BOOL ok = [SCICSymbolEngine setObserve:on forSymbolName:name];
+                    if (!ok) [SCIUtils showToastForDuration:1.6 title:@"Observe blocked for this symbol"];
+                }]];
+        } else {
+            [rows addObject:[SCIBaseSettingsRow rowWithTitle:@"Observe blocked" subtitle:item.safetyReason action:nil]];
+        }
 
-        NSString *forceSubtitle = item.forceBlacklisted ? @"Bloqueado: MCI/MCDDasm/IGDirect hot path causa abort/crash." : @"Explícito: retorna YES depois de chamar orig. Use só em bool reader validado.";
-        [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Force return YES"
-            subtitle:forceSubtitle
-            value:^BOOL{ NSNumber *o = [SCICSymbolEngine overrideForSymbolName:name]; return o.boolValue; }
-            action:^(BOOL on, UIViewController *vc){
-                BOOL ok = [SCICSymbolEngine setForce:(on ? @YES : nil) forSymbolName:name];
-                if (!ok) [SCIUtils showToastForDuration:1.6 title:@"Force blocked for this symbol"];
-            }]];
+        if (item.forceAllowed) {
+            [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Force return YES"
+                subtitle:@"Known single-purpose bool function. Returns YES after calling orig. Requires caution/restart for persisted launch hook."
+                value:^BOOL{ NSNumber *o = [SCICSymbolEngine overrideForSymbolName:name]; return o.boolValue; }
+                action:^(BOOL on, UIViewController *vc){
+                    BOOL ok = [SCICSymbolEngine setForce:(on ? @YES : nil) forSymbolName:name];
+                    if (!ok) [SCIUtils showToastForDuration:1.6 title:@"Force blocked for this symbol"];
+                }]];
+        } else {
+            [rows addObject:[SCIBaseSettingsRow rowWithTitle:@"Force blocked" subtitle:item.safetyReason action:nil]];
+        }
 
         SCIBaseSettingsRow *diag = [SCIBaseSettingsRow rowWithTitle:name subtitle:[self subtitleForImport:item] action:nil];
         diag.dynamicSubtitle = ^NSString *{ return [self subtitleForImport:item]; };
