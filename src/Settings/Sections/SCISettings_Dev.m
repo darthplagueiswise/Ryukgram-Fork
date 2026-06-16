@@ -13,7 +13,7 @@
 #import "../SCIDogfoodBrowserViewController.h"
 #import "../SCIInternalActionsViewController.h"
 #import "../SCISymbolBrowserViewController.h"
-#import "../SCICSymbolBrowserViewController.h"
+#import "../SCISymbolsBrowserViewController.h"
 #import "../SCIIGDSLauncherConfigViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
@@ -36,7 +36,6 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"sci_force_all_mc_gates — master único para IGMobileConfig, EasyGating, MCIExperimentCache, MSGCSessioned. Requer restart.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Force all MobileConfig BOOL gates") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"MobileConfig internal-use BOOL") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_boolean" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"MobileConfig read inventory (diagnostic)") subtitle:SCILocalized(@"sci_mc_adapter_diag — não força nada; chama orig e registra cada call site (caller offset) em Documents/sci_mobileconfig_adapter_diag.csv. Use para mapear ID↔feature. Requer restart.") defaultsKey:@"sci_mc_adapter_diag" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:SCILocalized(@"Uses the exported installed-internal-apps symbol when available; requires restart.") defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK encryption") subtitle:@"" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"IGAdPlatformLogger.isEmployee") subtitle:SCILocalized(@"Validated class: IGAdPlatformLogger_objc") defaultsKey:@"sci_force_ig_is_employee" requiresRestart:NO],
@@ -71,49 +70,32 @@
 											]
 										},
 
-											@{
-												@"header": SCILocalized(@"IGPlus"),
-												@"footer": SCILocalized(@"Submenu dedicado dos gates de IGPlus (codinome interno \"Aura\"). Veja o diagnostico no Dogfood se um gate nao surtir efeito."),
-												@"rows": @[
-													[SCISetting navigationCellWithTitle:SCILocalized(@"★ IGPlus / Aura unlock")
-																		   subtitle:SCILocalized(@"Todos os gates do IGConsumerSubsService")
-																			   icon:nil
-																	navSections:@[
-														@{
-															@"header": SCILocalized(@"Master"),
-															@"footer": SCILocalized(@"Primeiro enable a partir de um launch all-off precisa de relaunch (o grupo instala no construtor)."),
-															@"rows": @[
-													[SCISetting switchCellWithTitle:SCILocalized(@"★ Force all IGPlus benefits") subtitle:SCILocalized(@"Master: todos os getters de benefit do IGConsumerSubsService + eligibility helpers") defaultsKey:@"sci_force_igplus_all" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus eligibility/data-provider") subtitle:SCILocalized(@"SUBSBenefitDataProvider + peek/chat eligibility") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"★ Force eligibility HELPERS (agressivo)") subtitle:SCILocalized(@"Hooka os class-methods de elegibilidade (isUpsellEligible..., isAuraQuietPosting..., isChatPeek...) que o IG consulta via Swift direct dispatch. Caminho que o MSHookMessageEx no service nao pega. Requer restart.") defaultsKey:@"sci_igplus_force_eligibility_helpers" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus access") subtitle:SCILocalized(@"hasAccessToIGPlus") defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Any active benefit") subtitle:SCILocalized(@"hasAnyActiveBenefit") defaultsKey:@"sci_igplus_any_active" requiresRestart:YES]
-															]
-														},
-														@{
-															@"header": SCILocalized(@"Individual benefits"),
-															@"rows": @[
-													[SCISetting switchCellWithTitle:SCILocalized(@"Custom Lists") subtitle:@"" defaultsKey:@"sci_igplus_custom_lists" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Superlikes") subtitle:@"" defaultsKey:@"sci_igplus_story_superlikes" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Search Story Viewers") subtitle:@"" defaultsKey:@"sci_igplus_search_story_viewers" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Extend") subtitle:@"" defaultsKey:@"sci_igplus_story_extend" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Rewatch") subtitle:@"" defaultsKey:@"sci_igplus_story_rewatch" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Peeks") subtitle:@"" defaultsKey:@"sci_igplus_story_peeks" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Spotlight") subtitle:@"" defaultsKey:@"sci_igplus_story_spotlight" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Highlights") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_highlights" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Direct Message Peek") subtitle:@"" defaultsKey:@"sci_igplus_dm_peek" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Custom App Icon") subtitle:@"" defaultsKey:@"sci_igplus_custom_app_icon" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Branded Threads") subtitle:@"" defaultsKey:@"sci_igplus_branded_threads" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Timestamp Viewers List") subtitle:@"" defaultsKey:@"sci_igplus_timestamp_viewers" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Custom Bio Font") subtitle:@"" defaultsKey:@"sci_igplus_custom_bio_font" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Profile") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_profile" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Pinned Posts Increased Limit") subtitle:@"" defaultsKey:@"sci_igplus_pinned_posts_limit" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Story Peek Active") subtitle:@"" defaultsKey:@"sci_igplus_story_peek_active" requiresRestart:YES]
-															]
-														}
-													]]
-												]
-											},
+										@{
+											@"header": SCILocalized(@"IGPlus / Consumer Subs"),
+											@"footer": SCILocalized(@"Client-side IGPlus benefit getters and eligibility helpers validated in the Instagram executable. Hooks install from persisted prefs; first enable from an all-off launch requires restart."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force all IGPlus benefits") subtitle:SCILocalized(@"Master for all IGConsumerSubsService benefit getters and lower-level eligibility helpers") defaultsKey:@"sci_force_igplus_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus eligibility/data-provider") subtitle:SCILocalized(@"SUBSBenefitDataProvider + peek/chat/custom app icon eligibility") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus access") subtitle:SCILocalized(@"hasAccessToIGPlus") defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Any active benefit") subtitle:SCILocalized(@"hasAnyActiveBenefit / isBenefitActive:") defaultsKey:@"sci_igplus_any_active" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Custom Lists") subtitle:@"" defaultsKey:@"sci_igplus_custom_lists" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Superlikes") subtitle:@"" defaultsKey:@"sci_igplus_story_superlikes" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Search Story Viewers") subtitle:@"" defaultsKey:@"sci_igplus_search_story_viewers" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Extend") subtitle:@"" defaultsKey:@"sci_igplus_story_extend" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Rewatch") subtitle:@"" defaultsKey:@"sci_igplus_story_rewatch" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Peeks") subtitle:@"" defaultsKey:@"sci_igplus_story_peeks" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Spotlight") subtitle:@"" defaultsKey:@"sci_igplus_story_spotlight" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Highlights") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_highlights" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Direct Message Peek") subtitle:@"" defaultsKey:@"sci_igplus_dm_peek" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Custom App Icon") subtitle:@"" defaultsKey:@"sci_igplus_custom_app_icon" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Branded Threads") subtitle:@"" defaultsKey:@"sci_igplus_branded_threads" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Timestamp Viewers List") subtitle:@"" defaultsKey:@"sci_igplus_timestamp_viewers" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Custom Bio Font") subtitle:@"" defaultsKey:@"sci_igplus_custom_bio_font" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Silent Post to Profile") subtitle:@"" defaultsKey:@"sci_igplus_silent_post_profile" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Pinned Posts Increased Limit") subtitle:@"" defaultsKey:@"sci_igplus_pinned_posts_limit" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Story Peek Active") subtitle:SCILocalized(@"IGConsumerSubsStoryPeekCoordinator.isPeekActive") defaultsKey:@"sci_igplus_story_peek_active" requiresRestart:YES],
+											]
+										},
 										@{
 											@"header": SCILocalized(@"XPlugins"),
 											@"footer": SCILocalized(@"XPlugins fica documentado, mas o hook direto não é compilado neste patch porque toca exatamente o caminho do watchdog visto no crash. Reative só isoladamente, em arquivo separado e nunca no launch."),
@@ -166,56 +148,38 @@
 										},
 										@{
 											@"header": SCILocalized(@"Open internal menus (direct, live session)"),
-											@"footer": SCILocalized(@"Apenas entrypoints onde o IG constroi o VC (seguros contra trap do Swift). Precisam de sessao ativa (abra apos o login). Os menus que exigiam construir VC Swift foram removidos porque um cast falho do Swift e um trap que nenhum @try segura."),
+											@"footer": SCILocalized(@"Presents Instagram’s own internal/dogfooding screens via validated class-method entrypoints using the live user session. Open after you are logged in. The VC/URL routes are best-effort and depend on the IG build."),
 											@"rows": @[
-												[SCISetting buttonCellWithTitle:SCILocalized(@"★ Best available (cascade)")
-													   subtitle:SCILocalized(@"Tenta Notes → DogfoodVC → URL handler (so caminhos seguros)")
-													       icon:[SCISymbol symbolWithName:@"wrench.and.screwdriver"]
-													     action:^(void) {
-														NSString *r = [SCIInternalMenusLauncher openBestAvailableInternalMenu];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
-														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Notes dogfooding settings")
-													   subtitle:SCILocalized(@"notesDogfoodingSettingsOpenOnViewController:userSession: — confiavel")
-													       icon:[SCISymbol symbolWithName:@"note.text"]
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings")
+													   subtitle:SCILocalized(@"Reliable entrypoint (no config needed)")
+													       icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingNotesSettings];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Dogfooding Settings VC")
-													   subtitle:SCILocalized(@"openWithConfig:onViewController:userSession: (precisa de config capturado — ative employee gate antes)")
-													       icon:[SCISymbol symbolWithName:@"dog.fill"]
+														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
+													}
+												],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC")
+													   subtitle:SCILocalized(@"Best-effort: constructs the internal settings VC directly")
+													       icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openDogfoodingSettingsVC];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"URL handler: instagram://internal_settings")
-													   subtitle:SCILocalized(@"IGURLHandler openInternalURL: — fallback")
-													       icon:[SCISymbol symbolWithName:@"link"]
+														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
+													}
+												],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL…")
+													   subtitle:SCILocalized(@"Routes via IGURLHandler internal URL opener")
+													       icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"]
 													     action:^(void) {
 														NSString *r = [SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"];
-														if ([r hasPrefix:@"opened"]||[r hasPrefix:@"pushed"]||[r hasPrefix:@"presented"]) return;
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break;}
+														UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
 														UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-														UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menus") message:r preferredStyle:UIAlertControllerStyleAlert];
-														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-														if(top)[top presentViewController:a animated:YES completion:nil];
-													}]
+														if(![r hasPrefix:@"opened"] && ![r hasPrefix:@"presented"]){ UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Internal menu") message:r preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; }
+													}
+												],
 											]
 										},
 										@{
@@ -230,16 +194,17 @@
 							   subtitle:SCILocalized(@"Classes in FBSharedFramework → hookable BOOL getters, live state, force toggles.")
 								   icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"shippingbox"]
 							viewController:[[SCISymbolBrowserViewController alloc] initWithImage:SCISymbolImageFBShared]],
-				[SCISetting navigationCellWithTitle:SCILocalized(@"C Symbols Browser (MobileConfig / EasyGating)")
-					   subtitle:SCILocalized(@"Readers C importados do FBSharedFramework (hookados por fishhook). Liga forcing, captura IDs em tempo real e forca por simbolo ou por ID. Caminho para o internal settings gate.")
-						icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"terminal"]
-					viewController:[[SCICSymbolBrowserViewController alloc] init]]
+								[SCISetting navigationCellWithTitle:SCILocalized(@"FBShared C Symbols Browser")
+							   subtitle:SCILocalized(@"Exported FBShared C symbols; fishhook BOOL reader stubs with persisted C-cache force.")
+							       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"function"]
+							viewController:[SCISymbolsBrowserViewController new]],
 											]
 										},
 										@{
 											@"header": SCILocalized(@"Advanced experimental features"),
 											@"footer": SCILocalized(@"Toggle hidden Instagram experiments. StatusBarOldSchool and StoryTray take effect at next launch via SCIRuntimeBoolForce (safe, constant block). No restart needed for live session; full effect on next cold launch."),
 											@"rows": @[
+												[self experimentalEntryCell],
 
 							[SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School")
 										   subtitle:@""
