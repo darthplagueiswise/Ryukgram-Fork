@@ -32,7 +32,7 @@ static NSString *const kProfileNone        = @"none";
 static NSString *const kProfileBoolObserve = @"bool-observe";
 static NSString *const kProfileBoolForce   = @"bool-force";
 
-#define MAX_C_HOOKS 32
+#define MAX_C_HOOKS 64
 
 typedef struct {
     const char *name;
