@@ -435,6 +435,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_symbol_overrides": @{},
 		@"sci_c_symbol_overrides": @{},
 		@"sci_c_symbol_observe": @{},
+		@"sci_c_symbol_key_overrides": @{},
 		@"sci_c_symbol_id_overrides": @{},
 		@"sci_c_symbol_force_enabled": @(NO),
 		@"sci_c_symbol_diag_all": @(NO),

@@ -57,8 +57,9 @@
     [parts addObject:item.resolvable ? @"resolvable" : @"unresolved"];
     if (item.hookable) [parts addObject:@"hookable"];
     else [parts addObject:@"enum-only"];
-    if (item.forceAllowed) [parts addObject:@"force allowed"];
+    if (item.forceAllowed) [parts addObject:(item.mobileConfigKeySymbol ? @"key force allowed" : @"force allowed")];
     else [parts addObject:@"force blocked"];
+    if (item.mobileConfigKeySymbol && item.mobileConfigParamCount) [parts addObject:[NSString stringWithFormat:@"%lu param ids", (unsigned long)item.mobileConfigParamCount]];
     if (item.boolLike) [parts addObject:@"bool-like name"];
     if (item.hookInstalled) [parts addObject:@"hooked"];
     if (item.observedCallCount) [parts addObject:[NSString stringWithFormat:@"%lu hits", (unsigned long)item.observedCallCount]];
@@ -73,7 +74,7 @@
     NSMutableArray<SCIBaseSettingsSection *> *sections = [NSMutableArray array];
 
     NSArray<SCICImport *> *hits = [SCICSymbolEngine searchImports:_query limit:200];
-    NSString *masterFooter = [NSString stringWithFormat:@"FBShared exports: %lu. Hookable safe profiles: %lu. This browser enumerates the full FBSharedFramework export table. Only known bool-return profiles can install fishhook. ig_* and InternalOnly keys in __const are data/key symbols, not functions; forcing them here would crash or do nothing — use MobileConfig/EasyGating key browsers for those.", (unsigned long)[SCICSymbolEngine totalImportCount], (unsigned long)[SCICSymbolEngine hookableImportCount]];
+    NSString *masterFooter = [NSString stringWithFormat:@"FBShared exports: %lu. Hookable function profiles: %lu. Function symbols use fishhook only when ABI is curated. FBShared __const key symbols use MobileConfig typed overrides from their param-specifier records; no arbitrary C ABI guessing.", (unsigned long)[SCICSymbolEngine totalImportCount], (unsigned long)[SCICSymbolEngine hookableImportCount]];
 
     NSMutableArray<SCIBaseSettingsRow *> *master = [NSMutableArray array];
     [master addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Enable C-symbol launch hooks"
@@ -102,7 +103,10 @@
         NSString *name = item.symbolName;
         NSMutableArray<SCIBaseSettingsRow *> *rows = [NSMutableArray array];
 
-        if (item.hookable) {
+        if (item.mobileConfigKeySymbol) {
+            NSString *paramSubtitle = [NSString stringWithFormat:@"FBShared const key with %lu param specifier(s). Uses MobileConfig manual bool override, not fishhook.", (unsigned long)item.mobileConfigParamCount];
+            [rows addObject:[SCIBaseSettingsRow rowWithTitle:@"MobileConfig key" subtitle:paramSubtitle action:nil]];
+        } else if (item.hookable) {
             [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Observe only"
                 subtitle:@"Known bool profile: fishhook consumers, call original, record hits/value, return original."
                 value:^BOOL{ return [SCICSymbolEngine isObserving:name]; }
@@ -115,8 +119,10 @@
         }
 
         if (item.forceAllowed) {
-            [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:@"Force return YES"
-                subtitle:@"Known single-purpose bool function. Returns YES after calling orig. Requires caution/restart for persisted launch hook."
+            NSString *forceTitle = item.mobileConfigKeySymbol ? @"Force MobileConfig key YES" : @"Force return YES";
+            NSString *forceSubtitle = item.mobileConfigKeySymbol ? @"Sets typed bool overrides for this FBShared key's param specifier(s). Installs MobileConfig runtime hooks if needed." : @"Known single-purpose bool function. Returns YES after calling orig. Requires caution/restart for persisted launch hook.";
+            [rows addObject:[SCIBaseSettingsRow switchRowWithTitle:forceTitle
+                subtitle:forceSubtitle
                 value:^BOOL{ NSNumber *o = [SCICSymbolEngine overrideForSymbolName:name]; return o.boolValue; }
                 action:^(BOOL on, UIViewController *vc){
                     BOOL ok = [SCICSymbolEngine setForce:(on ? @YES : nil) forSymbolName:name];

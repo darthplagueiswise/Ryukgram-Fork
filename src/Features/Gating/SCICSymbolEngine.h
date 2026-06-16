@@ -24,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL hookable;
 @property (nonatomic, assign) BOOL forceAllowed;
 @property (nonatomic, assign) BOOL forceBlacklisted;
+@property (nonatomic, assign) BOOL mobileConfigKeySymbol;
+@property (nonatomic, assign) NSUInteger mobileConfigParamCount;
 @property (nonatomic, readonly) NSString *overrideKey;
 @property (nonatomic, readonly, nullable) NSNumber *override;
 @property (nonatomic, readonly) BOOL observing;
@@ -58,6 +60,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)isBoolLikeSymbolName:(NSString *)name;
 + (BOOL)isHookableSymbolName:(NSString *)name;
 + (BOOL)isForceAllowedSymbolName:(NSString *)name;
++ (BOOL)isMobileConfigKeySymbolName:(NSString *)name;
++ (NSUInteger)mobileConfigParamCountForSymbolName:(NSString *)name;
 + (NSString *)safetyReasonForSymbolName:(NSString *)name;
 
 // Cheap launch gate used by SCICSymbolBootstrap.x.

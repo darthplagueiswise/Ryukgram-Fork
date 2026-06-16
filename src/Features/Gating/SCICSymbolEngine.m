@@ -11,6 +11,7 @@
 #import "SCICSymbolEngine.h"
 #import "../../Utils.h"
 #import "../../../modules/fishhook/fishhook.h"
+#import "../MobileConfig/SCIMobileConfigRuntime.h"
 
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
@@ -26,11 +27,13 @@
 
 static NSString *const kCOverridesKey = @"sci_c_symbol_overrides"; // { "C#name": @(YES/NO) }
 static NSString *const kCObserveKey   = @"sci_c_symbol_observe";   // { "C#name": @(YES) }
+static NSString *const kCKeyOverridesKey = @"sci_c_symbol_key_overrides"; // { "C#name": { value, paramIDs } }
 static NSString *const kCMasterKey    = @"sci_c_symbol_force_enabled";
 
 static NSString *const kProfileNone        = @"none";
 static NSString *const kProfileBoolObserve = @"bool-observe";
 static NSString *const kProfileBoolForce   = @"bool-force";
+static NSString *const kProfileMCKeyForce   = @"mc-key-force";
 
 #define MAX_C_HOOKS 64
 
@@ -211,6 +214,20 @@ typedef struct {
     uint32_t flags;
 } SCISectionInfo;
 
+static int SCICompareU64(const void *a, const void *b) {
+    uint64_t va = *(const uint64_t *)a;
+    uint64_t vb = *(const uint64_t *)b;
+    return (va > vb) - (va < vb);
+}
+
+static uint64_t SCINextAddressAfter(uint64_t *addrs, uint32_t count, uint64_t value) {
+    if (!addrs || !count) return 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (addrs[i] > value) return addrs[i];
+    }
+    return 0;
+}
+
 static BOOL SCIImageNameIsFBShared(const char *imageName) {
     if (!imageName) return NO;
     NSString *s = [NSString stringWithUTF8String:imageName];
@@ -299,8 +316,21 @@ static NSString *SCIKindForSection(NSString *seg, NSString *sect, BOOL abs) {
     return [NSString stringWithFormat:@"%@,%@", seg ?: @"?", sect ?: @"?"];
 }
 
-static NSString *SCIProfileForSymbol(NSString *name, BOOL isFunction) {
-    if (!isFunction) return kProfileNone;
+static BOOL SCISymbolLooksMobileConfigKey(NSString *name, NSString *kind, NSUInteger symbolSize) {
+    if (!name.length || symbolSize < 8 || symbolSize > 512 || (symbolSize % 8) != 0) return NO;
+    if (![kind isEqualToString:@"const"] && ![kind isEqualToString:@"data"] && ![kind isEqualToString:@"string"]) return NO;
+    // Lowercase FBShared config-key symbols (for example ig_stories_...)
+    // are param-specifier data, not C functions. Uppercase enum/model symbols
+    // may also contain "Internal" in their name, but are not MobileConfig keys.
+    NSArray<NSString *> *prefixes = @[@"ig_", @"fb_", @"xplat_", @"direct_", @"reels_", @"stories_", @"messaging_"];
+    for (NSString *prefix in prefixes) if ([name hasPrefix:prefix]) return YES;
+    return NO;
+}
+
+static NSString *SCIProfileForSymbol(NSString *name, BOOL isFunction, NSString *kind, NSUInteger symbolSize) {
+    if (!isFunction) {
+        return SCISymbolLooksMobileConfigKey(name, kind, symbolSize) ? kProfileMCKeyForce : kProfileNone;
+    }
     if ([SCIForceAllowedBoolFunctions() containsObject:name]) return kProfileBoolForce;
     if ([SCIObserveOnlyBoolFunctions() containsObject:name]) return kProfileBoolObserve;
     return kProfileNone;
@@ -308,7 +338,8 @@ static NSString *SCIProfileForSymbol(NSString *name, BOOL isFunction) {
 
 static NSString *SCIReasonForSymbol(NSString *name, NSString *kind, NSString *profile, BOOL resolvable) {
     if (![kind isEqualToString:@"function"]) {
-        if ([name hasPrefix:@"ig_"]) return @"FBShared key/data symbol; use MobileConfig/EasyGating key browser, not fishhook.";
+        if ([profile isEqualToString:kProfileMCKeyForce]) return @"FBShared MobileConfig/EasyGating key symbol; Force YES applies typed MobileConfig overrides for its param specifier(s).";
+        if ([name hasPrefix:@"ig_"]) return @"FBShared key/data symbol without validated param-spec shape; enum only.";
         return @"Not a __TEXT,__text function; not C-hookable.";
     }
     if (!resolvable) return @"Function export is not resolvable by dlsym in this process.";
@@ -323,7 +354,11 @@ static BOOL SCICanHookProfile(NSString *profile) {
 }
 
 static BOOL SCICanForceProfile(NSString *profile) {
-    return [profile isEqualToString:kProfileBoolForce];
+    return [profile isEqualToString:kProfileBoolForce] || [profile isEqualToString:kProfileMCKeyForce];
+}
+
+static BOOL SCIIsMCKeyProfile(NSString *profile) {
+    return [profile isEqualToString:kProfileMCKeyForce];
 }
 
 static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t imageIndex) {
@@ -365,6 +400,20 @@ static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t image
     const struct nlist_64 *symbols = (const struct nlist_64 *)(linkeditBase + symtab->symoff);
     const char *strings = (const char *)(linkeditBase + symtab->stroff);
 
+    uint64_t *exportAddrs = calloc(symtab->nsyms ? symtab->nsyms : 1, sizeof(uint64_t));
+    uint32_t exportAddrCount = 0;
+    for (uint32_t ai = 0; ai < symtab->nsyms; ai++) {
+        struct nlist_64 n = symbols[ai];
+        if ((n.n_type & N_STAB) != 0 || (n.n_type & N_EXT) == 0) continue;
+        uint8_t type = n.n_type & N_TYPE;
+        if (type != N_SECT || n.n_value == 0) continue;
+        if (n.n_un.n_strx == 0 || n.n_un.n_strx >= symtab->strsize) continue;
+        NSString *clean = SCICleanExportName(strings + n.n_un.n_strx);
+        if (!clean.length) continue;
+        exportAddrs[exportAddrCount++] = n.n_value;
+    }
+    qsort(exportAddrs, exportAddrCount, sizeof(uint64_t), SCICompareU64);
+
     NSMutableArray<SCICImport *> *out = [NSMutableArray array];
     NSMutableSet<NSString *> *seen = [NSMutableSet set];
 
@@ -396,8 +445,10 @@ static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t image
         }
         NSString *kind = SCIKindForSection(seg, sect, abs);
         BOOL isFunction = [kind isEqualToString:@"function"];
+        uint64_t nextAddr = (!abs && n.n_value) ? SCINextAddressAfter(exportAddrs, exportAddrCount, n.n_value) : 0;
+        NSUInteger symbolSize = (nextAddr > n.n_value && (nextAddr - n.n_value) < 4096) ? (NSUInteger)(nextAddr - n.n_value) : 0;
         BOOL resolvable = dlsym(RTLD_DEFAULT, name.UTF8String) != NULL;
-        NSString *profile = SCIProfileForSymbol(name, isFunction);
+        NSString *profile = SCIProfileForSymbol(name, isFunction, kind, symbolSize);
 
         SCICImport *item = [SCICImport new];
         item.symbolName = name;
@@ -408,11 +459,14 @@ static NSArray<SCICImport *> *SCIEnumerateFBSharedExportsForImage(uint32_t image
         item.functionSymbol = isFunction;
         item.boolLike = SCISymbolLooksBoolLike(name);
         item.forceBlacklisted = SCISymbolIsForceBlacklisted(name);
+        item.mobileConfigKeySymbol = SCIIsMCKeyProfile(profile);
+        item.mobileConfigParamCount = item.mobileConfigKeySymbol ? (symbolSize / 8) : 0;
         item.hookable = resolvable && SCICanHookProfile(profile);
-        item.forceAllowed = resolvable && SCICanForceProfile(profile) && !item.forceBlacklisted;
+        item.forceAllowed = resolvable && SCICanForceProfile(profile) && (!item.forceBlacklisted || item.mobileConfigKeySymbol);
         item.safetyReason = SCIReasonForSymbol(name, kind, profile, resolvable);
         [out addObject:item];
     }
+    if (exportAddrs) free(exportAddrs);
     return out;
 }
 
@@ -451,7 +505,15 @@ static NSMutableDictionary *SCIMutableDictPref(NSString *key) {
 
 static NSString *SCIKeyForSymbol(NSString *name) { return [@"C#" stringByAppendingString:(name ?: @"")]; }
 
+static NSDictionary *SCIKeyOverrideEntryForName(NSString *name) {
+    id v = [SCIUtils getDictPref:kCKeyOverridesKey][SCIKeyForSymbol(name)];
+    return [v isKindOfClass:NSDictionary.class] ? v : nil;
+}
+
 static NSNumber *SCIOverrideForName(NSString *name) {
+    NSDictionary *keyEntry = SCIKeyOverrideEntryForName(name);
+    id kv = keyEntry[@"value"];
+    if ([kv isKindOfClass:NSNumber.class]) return kv;
     id v = [SCIUtils getDictPref:kCOverridesKey][SCIKeyForSymbol(name)];
     return [v isKindOfClass:NSNumber.class] ? v : nil;
 }
@@ -459,6 +521,62 @@ static NSNumber *SCIOverrideForName(NSString *name) {
 static BOOL SCIObserveForName(NSString *name) {
     id v = [SCIUtils getDictPref:kCObserveKey][SCIKeyForSymbol(name)];
     return [v isKindOfClass:NSNumber.class] ? [v boolValue] : NO;
+}
+
+static NSArray<NSString *> *SCIParamIDStringsForMCKeySymbol(NSString *name) {
+    SCICImport *item = SCIExportForName(name);
+    if (!item.mobileConfigKeySymbol || !item.resolvable || item.mobileConfigParamCount == 0 || item.mobileConfigParamCount > 64) return @[];
+    const void *ptr = dlsym(RTLD_DEFAULT, name.UTF8String);
+    if (!ptr) return @[];
+    NSMutableArray<NSString *> *ids = [NSMutableArray array];
+    const uint8_t *bytes = (const uint8_t *)ptr;
+    for (NSUInteger i = 0; i < item.mobileConfigParamCount; i++) {
+        uint64_t v = 0;
+        memcpy(&v, bytes + (i * sizeof(uint64_t)), sizeof(uint64_t));
+        if (!v) continue;
+        uint64_t hi = v >> 32;
+        if (hi == 0 || hi > 0x0fffffffULL) continue;
+        NSString *s = [NSString stringWithFormat:@"%llu", (unsigned long long)v];
+        if (![ids containsObject:s]) [ids addObject:s];
+    }
+    return ids;
+}
+
+static void SCIApplyMCKeyOverrideEntry(NSDictionary *entry, BOOL enabled) {
+    NSArray *ids = entry[@"paramIDs"];
+    if (![ids isKindOfClass:NSArray.class]) return;
+    [SCIUtils setPref:@YES forKey:@"sci_mc_runtime_browser_enabled"];
+    [SCIUtils setPref:@YES forKey:@"sci_mc_runtime_manual_overrides_enabled"];
+    SCIInstallMobileConfigRuntimeHooksIfNeeded();
+    for (id obj in ids) {
+        unsigned long long pid = strtoull([[obj description] UTF8String], NULL, 10);
+        if (!pid) continue;
+        if (enabled) [SCIMobileConfigRuntime setManualOverride:@YES paramID:pid type:@"bool"];
+        else [SCIMobileConfigRuntime removeManualOverrideForParamID:pid type:@"bool"];
+    }
+}
+
+static BOOL SCISetMCKeyForce(NSNumber *value, NSString *name) {
+    if (!name.length) return NO;
+    SCICImport *item = SCIExportForName(name);
+    if (!item.mobileConfigKeySymbol || !item.forceAllowed) return NO;
+    NSMutableDictionary *d = SCIMutableDictPref(kCKeyOverridesKey);
+    NSString *key = SCIKeyForSymbol(name);
+    if (value) {
+        NSArray<NSString *> *ids = SCIParamIDStringsForMCKeySymbol(name);
+        if (!ids.count) return NO;
+        NSDictionary *entry = @{ @"value": @YES, @"paramIDs": ids, @"symbol": name, @"kind": @"fbshared-mc-key" };
+        d[key] = entry;
+        [SCIUtils setPref:d forKey:kCKeyOverridesKey];
+        [SCIUtils setPref:@YES forKey:kCMasterKey];
+        SCIApplyMCKeyOverrideEntry(entry, YES);
+        return YES;
+    }
+    NSDictionary *old = d[key];
+    if ([old isKindOfClass:NSDictionary.class]) SCIApplyMCKeyOverrideEntry(old, NO);
+    [d removeObjectForKey:key];
+    [SCIUtils setPref:d forKey:kCKeyOverridesKey];
+    return YES;
 }
 
 static BOOL SCICSymbolCanInstallHook(NSString *name) {
@@ -549,13 +667,16 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 + (BOOL)hasPersistedHooks {
     NSDictionary *forces = [SCIUtils getDictPref:kCOverridesKey];
     NSDictionary *obs = [SCIUtils getDictPref:kCObserveKey];
-    return [self masterEnabled] && (forces.count > 0 || obs.count > 0);
+    NSDictionary *keyForces = [SCIUtils getDictPref:kCKeyOverridesKey];
+    return [self masterEnabled] && (forces.count > 0 || obs.count > 0 || keyForces.count > 0);
 }
 
 + (nullable NSNumber *)overrideForSymbolName:(NSString *)name { return SCIOverrideForName(name); }
 
 + (BOOL)setForce:(NSNumber *)value forSymbolName:(NSString *)name {
     if (!name.length) return NO;
+    SCICImport *item = SCIExportForName(name);
+    if (item.mobileConfigKeySymbol) return SCISetMCKeyForce(value, name);
     if (!SCICSymbolCanForce(name)) return NO;
 
     NSMutableDictionary *d = SCIMutableDictPref(kCOverridesKey);
@@ -599,6 +720,8 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
 + (BOOL)isBoolLikeSymbolName:(NSString *)name { return SCISymbolLooksBoolLike(name); }
 + (BOOL)isHookableSymbolName:(NSString *)name { return SCICSymbolCanInstallHook(name); }
 + (BOOL)isForceAllowedSymbolName:(NSString *)name { return SCICSymbolCanForce(name); }
++ (BOOL)isMobileConfigKeySymbolName:(NSString *)name { SCICImport *item = SCIExportForName(name); return item.mobileConfigKeySymbol; }
++ (NSUInteger)mobileConfigParamCountForSymbolName:(NSString *)name { SCICImport *item = SCIExportForName(name); return item.mobileConfigParamCount; }
 + (NSString *)safetyReasonForSymbolName:(NSString *)name {
     SCICImport *item = SCIExportForName(name);
     return item.safetyReason ?: @"Unknown or unavailable symbol.";
@@ -628,6 +751,12 @@ static void SCIPushForceToCache(NSString *name, NSNumber *value) {
         id v = obs[key];
         NSString *name = [key substringFromIndex:2];
         if ([v isKindOfClass:NSNumber.class] && [v boolValue] && SCICSymbolCanInstallHook(name)) SCIInstallHookForName(name);
+    }
+
+    NSDictionary *keyForces = [SCIUtils getDictPref:kCKeyOverridesKey];
+    for (NSString *key in keyForces) {
+        id entry = keyForces[key];
+        if ([entry isKindOfClass:NSDictionary.class]) SCIApplyMCKeyOverrideEntry(entry, YES);
     }
 
     NSDictionary *forces = [SCIUtils getDictPref:kCOverridesKey];
