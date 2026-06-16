@@ -14,9 +14,19 @@ static BOOL SCIIGDSBool(NSString *key) { return [SCIUtils getBoolPref:key]; }
 static NSString *SCIIGDSString(NSString *key) { return [SCIUtils getStringPref:key] ?: @""; }
 
 static BOOL SCIIGDSAll(void) { return SCIIGDSBool(@"sci_igds_launcher_all"); }
+// Unificação: o getter de LiquidGlass é UM SÓ no projeto (este). Respeita tanto
+// as prefs do menu Dev>IGDSLauncher (sci_igds_*) quanto as do menu Interface
+// (liquid_glass_*). Antes havia DOIS %hook IGDSLauncherConfig (aqui e no Tweak.x)
+// e, como 37 getters partilham o mesmo IMP (0x101fea604) e 24 o IMP 0x101ffdc50,
+// os dois %hook colidiam na cadeia de %orig do IMP compartilhado — o Interface
+// "ganhava" os 7 LG e o Dev não surtia efeito. Agora o Tweak.x não hooka mais
+// IGDSLauncherConfig; toda a lógica LG/Dev vive aqui, num único %hook.
+static BOOL SCIIGDSForceOff(void)   { return SCIIGDSBool(@"liquid_glass_force_off"); }
+static BOOL SCIIGDSIfaceButtons(void){ return !SCIIGDSForceOff() && SCIIGDSBool(@"liquid_glass_buttons"); }
 static BOOL SCIIGDSLiquidGlass(void) { return SCIIGDSAll() || SCIIGDSBool(@"sci_igds_liquidglass") || SCIIGDSBool(@"sci_apply_liquidglass"); }
 static BOOL SCIIGDSPrism(void) { return SCIIGDSAll() || SCIIGDSBool(@"sci_igds_prism"); }
-static BOOL SCIIGDSLG(NSString *key) { return SCIIGDSLiquidGlass() || SCIIGDSBool(key); }
+// LG getter decision: Interface force-off wins; then Dev/Interface enables.
+static BOOL SCIIGDSLG(NSString *key) { if (SCIIGDSForceOff()) return NO; return SCIIGDSIfaceButtons() || SCIIGDSLiquidGlass() || SCIIGDSBool(key); }
 static BOOL SCIIGDSNav(NSString *key) { return SCIIGDSAll() || SCIIGDSBool(key); }
 static NSString *SCIIGDSWordmarkVariant(void) {
 	NSString *variant = SCIIGDSString(@"sci_ig_wordmark_variant");
@@ -26,6 +36,9 @@ static NSString *SCIIGDSWordmarkVariant(void) {
 
 static BOOL SCIIGDSAnyPrefEnabled(void) {
 	NSString *variant = SCIIGDSWordmarkVariant();
+	// Inclui as prefs do menu Interface, pois agora ESTE é o único %hook de
+	// IGDSLauncherConfig — o grupo precisa instalar se Interface OU Dev pediu LG.
+	if (SCIIGDSBool(@"liquid_glass_buttons") || SCIIGDSBool(@"liquid_glass_force_off")) return YES;
 	return SCIIGDSAll() || SCIIGDSLiquidGlass() || SCIIGDSPrism() ||
 		   SCIIGDSBool(@"sci_igds_lg_inappnotif") || SCIIGDSBool(@"sci_igds_lg_toast") ||
 		   SCIIGDSBool(@"sci_igds_lg_toastpeek") || SCIIGDSBool(@"sci_igds_lg_iconbarbtn") ||
@@ -107,17 +120,6 @@ void SCIIGDSEnsureHooksInstalled(void) {
 %ctor {
 	@autoreleasepool {
 		if (!SCIIGDSAnyPrefEnabled()) return;
-		// IG 4xx renamed the launcher-config class. The old ObjC name
-		// "IGDSLauncherConfig" no longer exists, so %hook against it failed
-		// silently (this is why the toggles only seemed to "apply later" — they
-		// never installed). The concrete class is now the Swift type
-		// _TtC11BSLDSConfig11BSLDSConfig, which still exposes all 44 hooked BOOL
-		// getters as @objc (B16@0:8). Resolve it at runtime and bind the group to
-		// it; fall back to the legacy name for older builds.
-		Class cfg = objc_getClass("_TtC11BSLDSConfig11BSLDSConfig");
-		if (!cfg) cfg = objc_getClass("BSLDSConfig");
-		if (!cfg) cfg = objc_getClass("IGDSLauncherConfig"); // legacy
-		if (!cfg) return;
-		%init(SCIIGDSLauncherConfigGroup, IGDSLauncherConfig = cfg);
+		%init(SCIIGDSLauncherConfigGroup);
 	}
 }
