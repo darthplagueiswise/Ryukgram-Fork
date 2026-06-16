@@ -120,6 +120,12 @@ void SCIIGDSEnsureHooksInstalled(void) {
 %ctor {
 	@autoreleasepool {
 		if (!SCIIGDSAnyPrefEnabled()) return;
-		%init(SCIIGDSLauncherConfigGroup);
+		// Mesmo padrão do resto da tweak (ver %init no Tweak.x): classes Swift são
+		// resolvidas por NSClassFromString(@"_TtC...") ?: nome legado, e passadas
+		// ao %init. IGDSLauncherConfig é o nome @objc de _TtC11BSLDSConfig11BSLDSConfig;
+		// resolver explicitamente garante o bind mesmo que a classe seja realizada
+		// lazy (não está no __objc_classlist estático).
+		%init(SCIIGDSLauncherConfigGroup,
+			IGDSLauncherConfig = NSClassFromString(@"_TtC11BSLDSConfig11BSLDSConfig") ?: NSClassFromString(@"IGDSLauncherConfig"));
 	}
 }

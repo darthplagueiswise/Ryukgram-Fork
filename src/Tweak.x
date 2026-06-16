@@ -553,13 +553,22 @@ static void sciInstallLiquidGlassHooks(void) {
 %ctor {
 	SCIRegisterDefaultsOnce();
 
+	// Conformidade: o menu Dev>IGDSLauncher segue o MESMO padrão do resto da
+	// tweak. As prefs do Dev de LiquidGlass alimentam as MESMAS static BOOLs que
+	// o mecanismo real (sciInstallLiquidGlassHooks) consome. Assim, ligar
+	// LiquidGlass no Dev dispara o mesmo ponto de decisão validado no binário:
+	// os símbolos C IGTabBarStyleForLauncherSet/IGFloatingTabBarEnabled (FBShared,
+	// importados pelo exec) + IGLiquidGlassSwizzleToggle.isEnabled. Os getters de
+	// IGDSLauncherConfig sozinhos NÃO ligam o LiquidGlass (são config/telemetria).
+	BOOL devLG  = SCI_PREF(@"sci_igds_liquidglass") || SCI_PREF(@"sci_igds_launcher_all") || SCI_PREF(@"sci_apply_liquidglass");
+
 	sLGForceOff = SCI_PREF(@"liquid_glass_force_off");
 
 	if (@available(iOS 19.0, *)) {
-		sLGButtons = !sLGForceOff && SCI_PREF(@"liquid_glass_buttons");
+		sLGButtons = !sLGForceOff && (SCI_PREF(@"liquid_glass_buttons") || devLG);
 	}
 
-	sLGSurfaces = !sLGForceOff && SCI_PREF(@"liquid_glass_surfaces");
+	sLGSurfaces = !sLGForceOff && (SCI_PREF(@"liquid_glass_surfaces") || devLG);
 
 	if (@available(iOS 26.0, *)) {
 		sLGProgressiveBlur = SCI_PREF(@"liquid_glass_progressive_blur") && objc_getClass("UIScrollEdgeEffect") != nil;
