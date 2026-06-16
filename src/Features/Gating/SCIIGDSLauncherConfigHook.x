@@ -8,6 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import "../../Utils.h"
+#import <objc/runtime.h>
 
 static BOOL SCIIGDSBool(NSString *key) { return [SCIUtils getBoolPref:key]; }
 static NSString *SCIIGDSString(NSString *key) { return [SCIUtils getStringPref:key] ?: @""; }
@@ -106,6 +107,17 @@ void SCIIGDSEnsureHooksInstalled(void) {
 %ctor {
 	@autoreleasepool {
 		if (!SCIIGDSAnyPrefEnabled()) return;
-		%init(SCIIGDSLauncherConfigGroup);
+		// IG 4xx renamed the launcher-config class. The old ObjC name
+		// "IGDSLauncherConfig" no longer exists, so %hook against it failed
+		// silently (this is why the toggles only seemed to "apply later" — they
+		// never installed). The concrete class is now the Swift type
+		// _TtC11BSLDSConfig11BSLDSConfig, which still exposes all 44 hooked BOOL
+		// getters as @objc (B16@0:8). Resolve it at runtime and bind the group to
+		// it; fall back to the legacy name for older builds.
+		Class cfg = objc_getClass("_TtC11BSLDSConfig11BSLDSConfig");
+		if (!cfg) cfg = objc_getClass("BSLDSConfig");
+		if (!cfg) cfg = objc_getClass("IGDSLauncherConfig"); // legacy
+		if (!cfg) return;
+		%init(SCIIGDSLauncherConfigGroup, IGDSLauncherConfig = cfg);
 	}
 }
