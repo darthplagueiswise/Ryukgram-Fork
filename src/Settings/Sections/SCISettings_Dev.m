@@ -75,6 +75,7 @@
 											@"footer": SCILocalized(@"Client-side IGPlus benefit getters and eligibility helpers validated in the Instagram executable. Hooks install from persisted prefs; first enable from an all-off launch requires restart."),
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force all IGPlus benefits") subtitle:SCILocalized(@"Master for all IGConsumerSubsService benefit getters and lower-level eligibility helpers") defaultsKey:@"sci_force_igplus_all" requiresRestart:YES],
+														[SCISetting switchCellWithTitle:SCILocalized(@"⚠️ IGPlus Swift __TEXT decisor") subtitle:SCILocalized(@"Experimental ElleKit/MSHookFunction jump at 0x101c42d58; forces the generic direct-dispatch benefit decisor to YES") defaultsKey:@"sci_igplus_inline_text_decisor_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus eligibility/data-provider") subtitle:SCILocalized(@"SUBSBenefitDataProvider + peek/chat/custom app icon eligibility") defaultsKey:@"sci_igplus_eligibility" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"IGPlus access") subtitle:SCILocalized(@"hasAccessToIGPlus") defaultsKey:@"sci_igplus_has_access" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Any active benefit") subtitle:SCILocalized(@"hasAnyActiveBenefit / isBenefitActive:") defaultsKey:@"sci_igplus_any_active" requiresRestart:YES],
