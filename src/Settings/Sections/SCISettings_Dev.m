@@ -15,30 +15,12 @@
 #import "../SCISymbolBrowserViewController.h"
 #import "../SCISymbolsBrowserViewController.h"
 #import "../SCIIGDSLauncherConfigViewController.h"
+#import "../SCIExpFlagsViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 
 @implementation SCITweakSettings (Section_Dev)
-
-// Estado efetivo de um toggle de reader: ON se a própria pref OU um master
-// (force-all / employee) estiver ON. Faz os filhos REFLETIREM o master ligado.
-static BOOL SCIDevReaderMasterOn(void) {
-	NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-	return [ud boolForKey:@"sci_force_all_mc_gates"]
-	    || [ud boolForKey:@"sci_force_mc_internal_use_all"];
-}
-static BOOL SCIDevReaderEffective(NSString *ownKey) {
-	return SCIDevReaderMasterOn() || [NSUserDefaults.standardUserDefaults boolForKey:ownKey];
-}
-static void SCIDevReaderSet(NSString *ownKey, BOOL on) {
-	[NSUserDefaults.standardUserDefaults setBool:on forKey:ownKey];
-}
-// Master dos gates ObjC IG-only (isEmployee, badges) — faz o toggle específico
-// isEmployee refletir quando o master "Force all IG-only/debug ObjC gates" está ON.
-static BOOL SCIDevObjCMasterOn(void) {
-	return [NSUserDefaults.standardUserDefaults boolForKey:@"sci_force_ig_internal_employee"];
-}
 
 + (SCISetting *)devNavCell {
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Dev")
@@ -52,22 +34,12 @@ static BOOL SCIDevObjCMasterOn(void) {
 													[SCISetting switchCellWithTitle:SCILocalized(@"★ Internal & Dogfood Menus") subtitle:SCILocalized(@"Persists ON/OFF. Applies only when switched ON inside Settings; never auto-runs during launch.") defaultsKey:@"sci_internal_menus" requiresRestart:NO],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Internal hook crash guard") subtitle:SCILocalized(@"Auto-disables active internal gates if the previous launch crashed before becoming stable") defaultsKey:@"sci_internal_gate_crash_guard_enabled" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Force all IG-only/debug ObjC gates") subtitle:SCILocalized(@"Master switch for isEmployee, internal badges, launch debug info and story debug underlay") defaultsKey:@"sci_force_ig_internal_employee" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"sci_force_all_mc_gates — master único: liga TODOS os readers abaixo (IGMobileConfig, MCDDasm, MCIExperimentCache, MCIExtension, MSGCSessioned, EasyGating, MCQ, MEB, IGApp). Requer restart.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"sci_force_all_mc_gates — master único para IGMobileConfig, EasyGating, MCIExperimentCache, MSGCSessioned. Requer restart.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force all MobileConfig BOOL gates") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"MobileConfig internal-use BOOL") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_boolean" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:SCILocalized(@"Uses the exported installed-internal-apps symbol when available; requires restart.") defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK encryption") subtitle:@"" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
-											[SCISetting switchCellWithTitle:SCILocalized(@"★ Modo FILTRADO (só employee/dogfood)") subtitle:SCILocalized(@"sci_dogfood_filtered — quando ON, os readers abaixo só forçam os parâmetros ig_is_employee/dogfood (não tudo). Quando OFF, cada reader ligado força TODOS os bools dele.") defaultsKey:@"sci_dogfood_filtered" requiresRestart:YES],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Logar chaves dos readers") subtitle:SCILocalized(@"sci_dogfood_log_keys — registra no console (os_log [SCIGate] Dogfood) o ponteiro de parâmetro de cada chamada dos readers com param em x2. Use para descobrir a chave que destrava e depois ligar o Modo Filtrado.") defaultsKey:@"sci_dogfood_log_keys" requiresRestart:YES],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: IGMobileConfig BOOL") subtitle:SCILocalized(@"IGMobileConfigBooleanValueForInternalUse — param em x2 (filtrável). Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_igmc_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_igmc_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MCDDasm BOOL ⚠") subtitle:SCILocalized(@"MCDDasmNativeGetMobileConfigBooleanV2DvmAdapter — hot-path/PAC. Pode instabilizar; você decide. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_mcdasm_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_mcdasm_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MCIExperimentCache BOOL ⚠") subtitle:SCILocalized(@"MCIExperimentCacheGetMobileConfigBoolean — hot-path. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_mci_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_mci_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MCIExtension BOOL") subtitle:SCILocalized(@"MCIExtensionExperimentCacheGetMobileConfigBoolean — param em x2 (filtrável). Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_mciext_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_mciext_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MSGCSessioned BOOL") subtitle:SCILocalized(@"MSGCSessionedMobileConfigGetBoolean — param em x2 (filtrável). Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_msgc_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_msgc_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MEB Minos") subtitle:SCILocalized(@"MEBIsMinosDogfoodMekEncryptionVersionEnabled. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_meb_minos"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_meb_minos", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: EasyGating BOOL") subtitle:SCILocalized(@"EasyGatingGetBoolean_Internal_DoNotUseOrMock. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_easy_bool"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_easy_bool", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: EasyGating Auth BOOL") subtitle:SCILocalized(@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_easy_auth"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_easy_auth", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: IGApp internal apps") subtitle:SCILocalized(@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_ig_internalapps"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_ig_internalapps", on); }],
-											[SCISetting switchCellWithTitle:SCILocalized(@"Reader: MCQEasyGating BOOL") subtitle:SCILocalized(@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock. Requer restart.") value:^BOOL{ return SCIDevReaderEffective(@"sci_force_reader_mcq_easy"); } action:^(BOOL on){ SCIDevReaderSet(@"sci_force_reader_mcq_easy", on); }],
-												[SCISetting switchCellWithTitle:SCILocalized(@"IGAdPlatformLogger.isEmployee") subtitle:SCILocalized(@"Validated class: IGAdPlatformLogger_objc. Reflete o master \"Force all IG-only/debug ObjC gates\".") value:^BOOL{ return SCIDevObjCMasterOn() || [NSUserDefaults.standardUserDefaults boolForKey:@"sci_force_ig_is_employee"]; } action:^(BOOL on){ [NSUserDefaults.standardUserDefaults setBool:on forKey:@"sci_force_ig_is_employee"]; }],
+												[SCISetting switchCellWithTitle:SCILocalized(@"IGAdPlatformLogger.isEmployee") subtitle:SCILocalized(@"Validated class: IGAdPlatformLogger_objc") defaultsKey:@"sci_force_ig_is_employee" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Persist employee defaults") subtitle:@"" defaultsKey:@"sci_force_employee_defaults_persist" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Featured internal badge") subtitle:@"" defaultsKey:@"sci_force_ig_featured_internal_badge" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Inbox internal badge") subtitle:@"" defaultsKey:@"sci_force_ig_inbox_internal_badge" requiresRestart:NO],
@@ -253,6 +225,7 @@ static BOOL SCIDevObjCMasterOn(void) {
 							viewController:[SCIIGDSLauncherConfigViewController new]],
 					[SCISetting navigationCellWithTitle:SCILocalized(@"Dogfood & Internal Browser") subtitle:SCILocalized(@"Runtime stubs, live IGUserSession objects, dogfood actions and native internal setters") icon:[SCISymbol symbolWithName:@"pawprint"] viewController:[SCIDogfoodBrowserViewController new]],
 					[SCISetting navigationCellWithTitle:SCILocalized(@"Internal Actions") subtitle:SCILocalized(@"Live IGUserSession actions, IGFacebookUserInfo.isEmployee, Notes dogfood and native Autofill setters") icon:[SCISymbol symbolWithName:@"switch.2"] viewController:[SCIInternalActionsViewController new]],
+					[SCISetting navigationCellWithTitle:SCILocalized(@"Experiment Flags (MetaLocalExperiment)") subtitle:SCILocalized(@"Override de grupos de MetaLocalExperiment (match por substring do nome) e observação ao vivo de experimentos/MobileConfig. Requer 'sci_exp_flags_enabled'.") icon:[SCISymbol symbolWithName:@"flask"] viewController:[SCIExpFlagsViewController new]],
 											]
 						}
 				]];

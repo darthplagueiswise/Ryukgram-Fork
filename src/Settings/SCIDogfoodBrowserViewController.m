@@ -156,11 +156,16 @@ typedef NS_ENUM(NSInteger, SCIDogfoodBrowserMode) {
     self.title = @"Dogfood Browser";
     self.mode = SCIDogfoodBrowserModeLaunchpad;
     SCIUIKit26ConfigureViewController(self);
+    SCIConfigureNavigationChromeForGlass(self);
 
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshAll)];
     UIBarButtonItem *export = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(exportSnapshot)];
-    self.navigationItem.rightBarButtonItems = @[refresh, export];
-    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemTrash target:self action:@selector(confirmClearRuntime)];
+    UIBarButtonItem *trash = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemTrash target:self action:@selector(confirmClearRuntime)];
+    // O botão de lixo vai para a DIREITA junto com refresh/export. Antes ele
+    // ocupava o leftBarButtonItem e SOBRESCREVIA o botão "voltar" nativo do
+    // navigationController (o VC é apresentado via pushViewController), por isso
+    // não havia como voltar. Deixando o left livre, o back nativo reaparece.
+    self.navigationItem.rightBarButtonItems = @[refresh, export, trash];
 
     self.glassSearchBar = [[SCIUIKit26SearchBarContainerView alloc] initWithRadius:22.0];
     self.glassSearchBar.translatesAutoresizingMaskIntoConstraints = NO;

@@ -4,6 +4,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <string.h>
+#import <dispatch/dispatch.h>
 #import "../Dogfooding/SCIDogfoodObjectRuntime.h"
 
 extern void SCIInstallMobileConfigRuntimeHooksIfNeeded(void);
@@ -362,8 +363,24 @@ static unsigned long long SCIULLFromObject(id obj) {
     return @[@"dogfood", @"dogfooding", @"dogfooder", @"employee", @"is_employee", @"staff", @"internal", @"internalfb", @"is_internal_build", @"launcher", @"launcherset", @"notes", @"directnotes", @"quicksnap", @"instants", @"mobile_config_debug"];
 }
 
++ (BOOL)onCriticalFacebookQueue {
+    // O reader de MobileConfig roda em qualquer thread, inclusive nas filas de
+    // banco/rede do Facebook (com.facebook.lightspeed.database.*, MCI/MSGC). Fazer
+    // trabalho pesado ali (callStackSymbols, introspecção KVC de objetos Swift)
+    // foi a causa do abort() em MCIStatsIncrement (crash 2026-06-17, thread 36).
+    // Detecta a fila atual pelo label e bloqueia o enrichment nessas filas.
+    const char *label = dispatch_queue_get_label(DISPATCH_CURRENT_QUEUE_LABEL);
+    if (!label) return NO;
+    return (strstr(label, "facebook") != NULL) || (strstr(label, "lightspeed") != NULL) ||
+           (strstr(label, "MCI") != NULL) || (strstr(label, "mci") != NULL) ||
+           (strstr(label, "mobileconfig") != NULL) || (strstr(label, "MobileConfig") != NULL) ||
+           (strstr(label, "database") != NULL) || (strstr(label, "networker") != NULL);
+}
+
 + (BOOL)deepCaptureReady {
     if (![self deepCallerSymbolsEnabled]) return NO;
+    // Nunca enriquecer (callStackSymbols) nas filas críticas do FB — causa abort.
+    if ([self onCriticalFacebookQueue]) return NO;
     if (sRuntimeStartTime <= 0) sRuntimeStartTime = [NSDate.date timeIntervalSince1970];
     return ([NSDate.date timeIntervalSince1970] - sRuntimeStartTime) > 45.0;
 }
@@ -545,6 +562,10 @@ static unsigned long long SCIULLFromObject(id obj) {
         NSInteger c = [existing[@"count"] integerValue];
         shouldEnrich = (!existing || c < 2 || (c % 500) == 0);
     }
+    // A introspecção pesada (KVC/ivars de objetos Swift, callStackSymbols) NÃO
+    // pode rodar nas filas críticas do FB (DB/MCI/networker) — é onde o app
+    // aborta. Nessas filas, só registramos o paramID/valor (barato e seguro).
+    if (shouldEnrich && [self onCriticalFacebookQueue]) shouldEnrich = NO;
     if (sourceObject && shouldEnrich) {
         [self noteLiveObject:sourceObject role:@"getter source" source:selector ?: @""];
         [self noteRelatedObjectsFromObject:sourceObject source:selector ?: sourceClass];

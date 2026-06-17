@@ -625,22 +625,9 @@ static char kSCIRowKey;
 
 - (void)switchChanged:(UISwitch *)sender {
 	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
-	if (row.switchAction) {
-		row.switchAction(sender.isOn);
-		// Block-backed toggles podem ter estado derivado de masters; recarrega
-		// para refletir imediatamente (ex.: readers que herdam de force-all).
-		[self.tableView reloadData];
-		return;
-	}
+	if (row.switchAction) { row.switchAction(sender.isOn); return; }
 	if (!row.defaultsKey.length) return;
 	[NSUserDefaults.standardUserDefaults setBool:sender.isOn forKey:row.defaultsKey];
-	// Masters que ditam o estado efetivo de outros toggles (block-backed):
-	// ao mudar, recarrega a tabela para que os filhos reflitam ON/OFF na hora.
-	static NSSet *masters = nil;
-	if (!masters) masters = [NSSet setWithArray:@[@"sci_force_all_mc_gates",
-		@"sci_force_mc_internal_use_all", @"sci_force_ig_is_employee",
-		@"sci_force_ig_internal_employee", @"sci_dogfood_filtered"]];
-	if ([masters containsObject:row.defaultsKey]) [self.tableView reloadData];
 	if (row.requiresRestart) [SCIUtils showRestartConfirmation];
 	if ([row.defaultsKey isEqualToString:@"hide_suggested_stories"])
 		[NSNotificationCenter.defaultCenter postNotificationName:@"SCISuggestedStoriesReload" object:nil];
