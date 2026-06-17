@@ -25,40 +25,31 @@
 #define SCILOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] MCGate " fmt,##__VA_ARGS__)
 
 // ── Pref keys ──────────────────────────────────────────────────────────────
-static NSString * const kBool        = @"sci_force_mc_internal_use_boolean";
 static NSString * const kInternalApp = @"sci_force_ig_internal_apps_installed_after_ios18";
 static NSString * const kMinos       = @"sci_force_minos_dogfood_mek_encryption";
 
 // ── C-only cache (NO ObjC, NO NSUserDefaults inside hooks) ─────────────────
 // Written at %ctor and whenever the user flips a toggle (KVO).
 // Hooks read these atomically — zero risk of re-entrant NSUserDefaults call.
-static volatile BOOL sCacheBool        = NO;
 static volatile BOOL sCacheInternalApp = NO;
 static volatile BOOL sCacheMinos       = NO;
 
 static void SCIRefreshHookCache(void) {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     BOOL all = [ud boolForKey:@"sci_force_mc_internal_use_all"] || [ud boolForKey:@"sci_force_all_mc_gates"];
-    sCacheBool        = all || [ud boolForKey:kBool];
     sCacheInternalApp = all || [ud boolForKey:kInternalApp];
     sCacheMinos       = all || [ud boolForKey:kMinos];
-    SCILOG("cache refreshed — bool=%d apps=%d minos=%d",
-           (int)sCacheBool, (int)sCacheInternalApp, (int)sCacheMinos);
+    SCILOG("cache refreshed — apps=%d minos=%d",
+           (int)sCacheInternalApp, (int)sCacheMinos);
 }
 
 // ── Originals ──────────────────────────────────────────────────────────────
-typedef BOOL (*MCBoolFn_t)(id, BOOL, void *);
 typedef BOOL (*SimpleBoolFn_t)(void);
 
-static MCBoolFn_t        orig_MCBool        = NULL;
 static SimpleBoolFn_t    orig_InternalApps  = NULL;
 static SimpleBoolFn_t    orig_Minos         = NULL;
 
 // ── Hook implementations — plain C, zero ObjC ─────────────────────────────
-static BOOL my_MCBool(id session, BOOL def, void *p) {
-    if (sCacheBool) return YES;
-    return orig_MCBool ? orig_MCBool(session, def, p) : def;
-}
 static BOOL my_InternalApps(void) {
     if (sCacheInternalApp) return YES;
     return orig_InternalApps ? orig_InternalApps() : NO;
@@ -81,7 +72,7 @@ static SCIMCGateObserver *sObserver = nil;
 static void SCIInstallKVOObserver(void) {
     sObserver = [SCIMCGateObserver new];
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-    for (NSString *key in @[kBool, kInternalApp, kMinos,
+    for (NSString *key in @[kInternalApp, kMinos,
                             @"sci_force_mc_internal_use_all", @"sci_force_all_mc_gates"]) {
         [ud addObserver:sObserver forKeyPath:key
                options:NSKeyValueObservingOptionNew context:NULL];
@@ -94,7 +85,7 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
 
     // Read prefs before installing hooks. If every pref is OFF, do not touch GOT/fishhook.
     SCIRefreshHookCache();
-    BOOL any = sCacheBool || sCacheInternalApp || sCacheMinos;
+    BOOL any = sCacheInternalApp || sCacheMinos;
     if (!any) {
         SCILOG("skip install: all prefs disabled");
         return;
@@ -103,9 +94,13 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     if (done) return;
     done = YES;
 
+    // NOTE: IGMobileConfigBooleanValueForInternalUse foi MOVIDO para
+    // SCIDogfoodParamGateHook.x, que faz discriminação por parâmetro (employee/
+    // dogfood) em vez de forçar TODOS os bools. O "forçar tudo" legado continua
+    // disponível lá via a pref sci_force_all_mc_gates. Aqui ficam apenas os dois
+    // gates independentes de parâmetro. Ter dois fishhook no mesmo símbolo
+    // encadeava %orig de forma imprevisível — por isso a separação.
     struct rebinding r[] = {
-        {"IGMobileConfigBooleanValueForInternalUse",
-         (void *)my_MCBool, (void **)&orig_MCBool},
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
          (void *)my_InternalApps, (void **)&orig_InternalApps},
         {"MEBIsMinosDogfoodMekEncryptionVersionEnabled",

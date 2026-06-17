@@ -33,7 +33,6 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
         @"sci_force_internal_settings_menu",
         @"sci_force_internal_settings_loggedout",
         @"sci_force_igplus_all",
-        @"sci_igplus_inline_text_decisor_all",
         @"sci_igplus_eligibility",
         @"sci_igplus_has_access",
         @"sci_igplus_any_active",

@@ -458,7 +458,6 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_force_ig_launch_debug_info_v2": @(NO),
 		@"sci_force_ig_story_debug_underlay": @(NO),
 		@"sci_force_igplus_all": @(NO),
-		@"sci_igplus_inline_text_decisor_all": @(NO),
 		@"sci_igplus_eligibility": @(NO),
 		@"sci_igplus_has_access": @(NO),
 		@"sci_igplus_any_active": @(NO),
