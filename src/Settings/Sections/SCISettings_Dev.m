@@ -20,6 +20,7 @@
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
+#import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 
 @implementation SCITweakSettings (Section_Dev)
 
@@ -144,28 +145,14 @@
 											   subtitle:SCILocalized(@"Abre o MetaLocalExperimentListViewController nativo do Instagram para inspecionar/forçar grupos de experimentos locais.")
 											       icon:[SCISymbol symbolWithIGName:@"flask" fallback:@"flask"]
 											     action:^(void) {
-												Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
-												UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
-												UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-												if (!cls) { UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Indisponível") message:SCILocalized(@"MetaLocalExperimentListViewController não está presente nesta versão.") preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; return; }
-												// Coletar os configs que conformam ao MetaLocalExperimentConfigProtocol e o gerador nativo, igual o IG faz internamente.
-												NSMutableArray *configs = [NSMutableArray array];
-												Protocol *p = objc_getProtocol("MetaLocalExperimentConfigProtocol");
-												if (p) { unsigned int n=0; Class *all=objc_copyClassList(&n); for(unsigned int i=0;i<n;i++){ if(class_conformsToProtocol(all[i],p)){ @try{ id x=[[all[i] alloc] init]; if(x)[configs addObject:x]; }@catch(__unused id e){} } } if(all) free(all); }
-												id generator = nil;
-												Class gc = NSClassFromString(@"LIDExperimentGenerator");
-												SEL gs = NSSelectorFromString(@"initWithDeviceID:logger:");
-												if (gc && [gc instancesRespondToSelector:gs]) { id(*snd)(id,SEL,id,id)=(id(*)(id,SEL,id,id))objc_msgSend; @try{ generator=snd([gc alloc],gs,nil,nil); }@catch(__unused id e){} }
-												UIViewController *vc=nil;
-												SEL initSel = NSSelectorFromString(@"initWithExperimentConfigs:experimentGenerator:");
-												@try {
-													if ([cls instancesRespondToSelector:initSel]) { id(*snd)(id,SEL,id,id)=(id(*)(id,SEL,id,id))objc_msgSend; vc=snd([cls alloc],initSel,configs,generator); }
-													else { vc=[[cls alloc] init]; }
-												} @catch(__unused id e) {}
-												if (!vc) { UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Falhou") message:SCILocalized(@"Não foi possível inicializar o browser nativo.") preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; return; }
-												UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:vc];
-												nav.modalPresentationStyle=UIModalPresentationFullScreen;
-												if(top)[top presentViewController:nav animated:YES completion:nil];
+												BOOL ok = [SCIDogfoodObjectRuntime tryOpenMetaLocalExperimentBrowser];
+												if (!ok) {
+													UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
+													UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+													UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"MetaLocalExperiment") message:SCILocalized(@"Não foi possível abrir o browser nativo. Veja Dogfood > Logs/Status.") preferredStyle:UIAlertControllerStyleAlert];
+													[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+													if(top)[top presentViewController:a animated:YES completion:nil];
+												}
 											}
 										],
 										[SCISetting switchCellWithTitle:SCILocalized(@"Show Internal Settings menu") subtitle:SCILocalized(@"Forces showInternalSettings=YES in IGBugReportMenuViewController (shake-to-report menu). Shake device to open it.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:NO],

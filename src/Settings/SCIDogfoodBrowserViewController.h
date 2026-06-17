@@ -1,4 +1,4 @@
 #import <UIKit/UIKit.h>
 
-@interface SCIDogfoodBrowserViewController : UIViewController
+@interface SCIDogfoodBrowserViewController : UITableViewController
 @end

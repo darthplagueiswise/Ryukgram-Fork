@@ -93,34 +93,44 @@ static void sciInstallBackButtonOnController(UIViewController *vc, NSString *tit
 // Pattern extracted from the disabled SCIExpFlagsViewController code path.
 
 + (NSArray *)sciCollectMetaLocalExperimentConfigs {
-	Protocol *p = objc_getProtocol("MetaLocalExperimentConfigProtocol");
-	if (!p) return @[];
-	unsigned int n = 0;
-	// Enumerate the runtime class set to find every type conforming to
-	// MetaLocalExperimentConfigProtocol — the native browser VC requires this
-	// array, and there is no public registry to query in its place.
-	Class *all = objc_copyClassList(&n);
-	NSMutableArray *out = [NSMutableArray array];
-	for (unsigned int i = 0; i < n; i++) {
-		if (class_conformsToProtocol(all[i], p)) {
+	static NSArray *cached = nil;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		Protocol *p = objc_getProtocol("MetaLocalExperimentConfigProtocol");
+		if (!p) { cached = @[]; return; }
+		unsigned int n = 0;
+		Class *all = objc_copyClassList(&n);
+		NSMutableArray *out = [NSMutableArray array];
+		for (unsigned int i = 0; i < n; i++) {
+			Class c = all[i];
+			if (!c || !class_conformsToProtocol(c, p)) continue;
+			// Avoid obviously abstract/protocol helper classes; native list only needs concrete configs.
+			NSString *name = NSStringFromClass(c);
+			if ([name hasSuffix:@"Protocol"] || [name containsString:@"ViewController"]) continue;
 			@try {
-				id x = [[all[i] alloc] init];
+				id x = [[c alloc] init];
 				if (x) [out addObject:x];
 			} @catch (__unused id e) {}
 		}
-	}
-	if (all) free(all);
-	return out;
+		if (all) free(all);
+		cached = out.copy ?: @[];
+	});
+	return cached ?: @[];
 }
 
 + (id)sciBuildExperimentGenerator {
+	static id cached = nil;
+	static BOOL tried = NO;
+	if (tried) return cached;
+	tried = YES;
 	Class c = NSClassFromString(@"LIDExperimentGenerator");
 	if (!c) return nil;
 	SEL s = @selector(initWithDeviceID:logger:);
 	if (![c instancesRespondToSelector:s]) return nil;
 	@try {
 		typedef id (*InitIMP)(id, SEL, id, id);
-		return ((InitIMP)objc_msgSend)([c alloc], s, nil, nil);
+		cached = ((InitIMP)objc_msgSend)([c alloc], s, nil, nil);
+		return cached;
 	} @catch (__unused id e) { return nil; }
 }
 
@@ -131,27 +141,34 @@ static void sciInstallBackButtonOnController(UIViewController *vc, NSString *tit
 	Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
 	if (!cls) { [SCIUtils showErrorHUDWithDescription:@"MetaLocalExperiment browser not registered"]; return; }
 
-	UIViewController *vc = nil;
-	SEL initSel = @selector(initWithExperimentConfigs:experimentGenerator:);
-	@try {
-		if ([cls instancesRespondToSelector:initSel]) {
-			NSArray *configs = [self sciCollectMetaLocalExperimentConfigs];
-			id gen = [self sciBuildExperimentGenerator];
-			typedef id (*InitIMP)(id, SEL, id, id);
-			vc = ((InitIMP)objc_msgSend)([cls alloc], initSel, configs, gen);
-		} else {
-			vc = [[cls alloc] init];
-		}
-	} @catch (__unused id e) {}
+	[SCIUtils showToastForDuration:1.0 title:@"MetaLocalExperiment" subtitle:@"Preparando browser nativo…"];
+	Class targetClass = cls;
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+		NSArray *configs = [self sciCollectMetaLocalExperimentConfigs];
+		id gen = [self sciBuildExperimentGenerator];
+		dispatch_async(dispatch_get_main_queue(), ^{
+			UIViewController *vc = nil;
+			SEL initSel = @selector(initWithExperimentConfigs:experimentGenerator:);
+			@try {
+				if ([targetClass instancesRespondToSelector:initSel]) {
+					typedef id (*InitIMP)(id, SEL, id, id);
+					vc = ((InitIMP)objc_msgSend)([targetClass alloc], initSel, configs ?: @[], gen);
+				} else {
+					vc = [[targetClass alloc] init];
+				}
+			} @catch (__unused id e) {}
 
-	if (![vc isKindOfClass:UIViewController.class]) {
-		[SCIUtils showErrorHUDWithDescription:@"MetaLocalExperiment init failed"];
-		return;
-	}
-	sciInstallBackButtonOnController(vc, @"Back");
-	UINavigationController *nav = sciWrapInNav(vc);
-	nav.navigationBar.prefersLargeTitles = NO;
-	[top presentViewController:nav animated:YES completion:nil];
+			if (![vc isKindOfClass:UIViewController.class]) {
+				[SCIUtils showErrorHUDWithDescription:@"MetaLocalExperiment init failed"];
+				return;
+			}
+			sciInstallBackButtonOnController(vc, @"Back");
+			UINavigationController *nav = sciWrapInNav(vc);
+			nav.navigationBar.prefersLargeTitles = NO;
+			UIViewController *freshTop = sciDogfoodTopVC() ?: top;
+			[freshTop presentViewController:nav animated:YES completion:nil];
+		});
+	});
 }
 
 @end

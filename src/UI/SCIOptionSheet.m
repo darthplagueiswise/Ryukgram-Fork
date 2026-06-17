@@ -15,12 +15,23 @@
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 68.0 : 54.0;
+	return self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension;
+}
+
+- (CGFloat)estimatedRowHeight {
+	if (self.wordmarkMode) return 68.0;
+	BOOL hasDescriptions = NO;
+	for (NSDictionary *opt in self.options) {
+		NSString *desc = opt[@"description"];
+		if (desc.length) { hasDescriptions = YES; break; }
+	}
+	return hasDescriptions ? 82.0 : 56.0;
 }
 
 - (CGSize)panelSize {
 	CGFloat width = self.wordmarkMode ? 330.0 : 300.0;
-	CGFloat height = MIN(MAX(72.0, [self rowHeight] * MAX((NSUInteger)1, self.options.count)), 390.0);
+	CGFloat perRow = self.wordmarkMode ? 68.0 : [self estimatedRowHeight];
+	CGFloat height = MIN(MAX(72.0, perRow * MAX((NSUInteger)1, self.options.count) + 16.0), 460.0);
 	return CGSizeMake(width, height);
 }
 
@@ -51,7 +62,9 @@
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
 	self.tableView.alwaysBounceVertical = NO;
-	self.tableView.showsVerticalScrollIndicator = self.options.count > 7;
+	self.tableView.rowHeight = self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension;
+	self.tableView.estimatedRowHeight = [self estimatedRowHeight];
+	self.tableView.showsVerticalScrollIndicator = self.options.count > 5;
 	[self.panelView.contentView addSubview:self.tableView];
 
 	CGSize size = [self panelSize];
@@ -76,7 +89,8 @@
 - (void)dismissSelf { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self rowHeight]; }
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension; }
+- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self estimatedRowHeight]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
@@ -121,6 +135,8 @@
 	}
 	cell.contentConfiguration = cfg;
 	cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+	cell.clipsToBounds = NO;
+	cell.contentView.clipsToBounds = NO;
 	return cell;
 }
 
