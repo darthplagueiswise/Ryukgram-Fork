@@ -26,6 +26,7 @@ FOUNDATION_EXPORT void SCIInstallMobileConfigRuntimeHooksIfNeeded(void);
 + (BOOL)onCriticalFacebookQueue;
 + (void)noteLiveObject:(nullable id)object role:(NSString *)role source:(nullable NSString *)source;
 + (NSArray<NSDictionary *> *)liveContexts;
++ (NSArray *)liveContextObjects;
 + (NSDictionary<NSString *, NSArray<NSDictionary *> *> *)paramsMapIndex;
 + (NSString *)mapSummaryForParamID:(unsigned long long)paramID;
 + (NSArray<NSDictionary *> *)mapCandidatesForParamID:(unsigned long long)paramID stableID:(nullable NSString *)stableID;

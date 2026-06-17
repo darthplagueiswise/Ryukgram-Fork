@@ -183,6 +183,17 @@ static unsigned long long SCIULLFromObject(id obj) {
     return out;
 }
 
++ (NSArray *)liveContextObjects {
+    [self ensureLiveObjects];
+    NSMutableArray *out = [NSMutableArray array];
+    @synchronized (sLiveObjects) {
+        NSEnumerator *e = [sLiveObjects keyEnumerator];
+        id obj = nil;
+        while ((obj = [e nextObject])) { if (obj) [out addObject:obj]; }
+    }
+    return out;
+}
+
 + (NSArray<NSDictionary *> *)liveContexts {
     [self ensureLiveObjects];
     NSMutableArray *out = [NSMutableArray array];

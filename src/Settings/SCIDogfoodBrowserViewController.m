@@ -1,581 +1,136 @@
+// SCIDogfoodBrowserViewController.m — rebuilt as a navigation browser.
+// Root screen pushes lightweight subtables instead of rendering every dogfood
+// surface in one segmented table. This keeps capture/deep controls isolated,
+// gives every submenu a native back button, and uses the same LiquidGlass cells
+// as the rest of the tweak.
+
 #import "SCIDogfoodBrowserViewController.h"
 #import "../Features/MobileConfig/SCIMobileConfigRuntime.h"
+#import "../Features/MobileConfig/SCIMobileConfigNativeOverrides.h"
 #import "../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
-#import "../Features/Dogfooding/SCILauncherOverride.h"
 #import "../Features/Dogfooding/SCIInternalActions.h"
+#import "../UI/SCIUIKit26LiquidGlass.h"
 #import "../Utils.h"
 
-static NSString *SCIDFBrowserString(id value) {
+extern void SCIInstallMobileConfigRuntimeHooksIfNeeded(void);
+
+static NSString *SCIDFString(id value) {
     if (!value || value == (id)kCFNull) return @"";
-    @try { return [[value description] copy] ?: @""; } @catch (__unused id ex) { return @"<exception>"; }
+    @try { return [[value description] copy] ?: @""; } @catch (__unused id e) { return @"<exception>"; }
 }
 
-static NSString *SCIDFBrowserJSON(id object) {
+static NSString *SCIDFJSON(id object) {
     if (!object) return @"";
     if ([NSJSONSerialization isValidJSONObject:object]) {
-        NSData *data = [NSJSONSerialization dataWithJSONObject:object options:NSJSONWritingPrettyPrinted error:nil];
-        NSString *text = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-        if (text.length) return text;
+        NSData *d = [NSJSONSerialization dataWithJSONObject:object options:NSJSONWritingPrettyPrinted error:nil];
+        NSString *s = d ? [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] : nil;
+        if (s.length) return s;
     }
-    return SCIDFBrowserString(object);
+    return SCIDFString(object);
 }
 
-static NSString *SCIDFBrowserJoined(id value) {
-    if ([value isKindOfClass:NSArray.class]) return [(NSArray *)value componentsJoinedByString:@", "];
-    return SCIDFBrowserString(value);
+static NSString *SCIDFBadge(BOOL v) { return v ? @"ON" : @"OFF"; }
+static unsigned long long SCIDFULL(id v) { return strtoull(SCIDFString(v).UTF8String, NULL, 10); }
+
+@interface SCIDFRow : NSObject
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, copy) NSString *subtitle;
+@property (nonatomic, copy) NSString *badge;
+@property (nonatomic, assign) BOOL emphasized;
+@property (nonatomic, copy) void (^action)(void);
+@property (nonatomic, strong) id detailObject;
++ (instancetype)row:(NSString *)title subtitle:(NSString *)subtitle badge:(NSString *)badge emphasized:(BOOL)emphasized action:(void (^)(void))action;
+@end
+@implementation SCIDFRow
++ (instancetype)row:(NSString *)title subtitle:(NSString *)subtitle badge:(NSString *)badge emphasized:(BOOL)emphasized action:(void (^)(void))action {
+    SCIDFRow *r = [SCIDFRow new]; r.title = title ?: @""; r.subtitle = subtitle ?: @""; r.badge = badge; r.emphasized = emphasized; r.action = action; return r;
 }
+@end
 
-static NSString *SCIDFBrowserHaystack(id value) {
-    if ([value isKindOfClass:NSDictionary.class]) {
-        NSMutableString *s = [NSMutableString string];
-        NSDictionary *d = (NSDictionary *)value;
-        for (id key in d) {
-            [s appendFormat:@" %@ %@", SCIDFBrowserString(key), SCIDFBrowserHaystack(d[key])];
-        }
-        return s;
-    }
-    if ([value isKindOfClass:NSArray.class]) {
-        NSMutableString *s = [NSMutableString string];
-        for (id item in (NSArray *)value) [s appendFormat:@" %@", SCIDFBrowserHaystack(item)];
-        return s;
-    }
-    return SCIDFBrowserString(value);
-}
+@interface SCIDFSection : NSObject
+@property (nonatomic, copy) NSString *header;
+@property (nonatomic, copy) NSString *footer;
+@property (nonatomic, strong) NSArray<SCIDFRow *> *rows;
++ (instancetype)section:(NSString *)header footer:(NSString *)footer rows:(NSArray<SCIDFRow *> *)rows;
+@end
+@implementation SCIDFSection
++ (instancetype)section:(NSString *)header footer:(NSString *)footer rows:(NSArray<SCIDFRow *> *)rows { SCIDFSection *s=[SCIDFSection new]; s.header=header?:@""; s.footer=footer?:@""; s.rows=rows?:@[]; return s; }
+@end
 
-static BOOL SCIDFBrowserMatches(id value, NSString *query) {
-    if (!query.length) return YES;
-    return [[SCIDFBrowserHaystack(value) lowercaseString] containsString:query.lowercaseString];
-}
-
-static NSString *SCIDFBrowserBoolBadge(BOOL value) { return value ? @"ON" : @"OFF"; }
-
-static BOOL SCIDFNativeReady(NSDictionary *state) {
-    return [state[@"launcherRespondsOpenWithConfig"] boolValue] &&
-           [state[@"viewControllerRespondsInitWithConfig"] boolValue] &&
-           ![SCIDFBrowserString(state[@"config"]) isEqualToString:@"nil"] &&
-           ![SCIDFBrowserString(state[@"session"]) isEqualToString:@"nil"] &&
-           ![SCIDFBrowserString(state[@"topViewController"]) isEqualToString:@"nil"];
-}
-
-@interface SCIDogfoodJSONDetailViewController : UIViewController
+@interface SCIDFJSONViewController : UIViewController
 @property (nonatomic, copy) NSString *detailTitle;
 @property (nonatomic, copy) NSString *detailText;
-@property (nonatomic, strong) UITextView *textView;
 - (instancetype)initWithTitle:(NSString *)title object:(id)object;
 @end
-
-@implementation SCIDogfoodJSONDetailViewController
-
-- (instancetype)initWithTitle:(NSString *)title object:(id)object {
-    self = [super initWithNibName:nil bundle:nil];
-    if (self) {
-        _detailTitle = [title copy] ?: @"Details";
-        _detailText = [SCIDFBrowserJSON(object) copy] ?: @"";
-    }
-    return self;
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = self.detailTitle;
-    SCIUIKit26ConfigureViewController(self);
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(copyDetails)];
-
-    self.textView = [UITextView new];
-    self.textView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.textView.editable = NO;
-    self.textView.selectable = YES;
-    self.textView.alwaysBounceVertical = YES;
-    self.textView.backgroundColor = UIColor.clearColor;
-    self.textView.textColor = UIColor.labelColor;
-    self.textView.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightRegular];
-    self.textView.textContainerInset = UIEdgeInsetsMake(18.0, 16.0, 18.0, 16.0);
-    self.textView.text = self.detailText ?: @"";
-    [self.view addSubview:self.textView];
-
-    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.textView.topAnchor constraintEqualToAnchor:g.topAnchor],
-        [self.textView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.textView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.textView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
-}
-
-- (void)copyDetails {
-    UIPasteboard.generalPasteboard.string = self.detailText ?: @"";
-    [SCIUtils showToastForDuration:1.2 title:@"Copied" subtitle:@"Details copied to clipboard"];
-}
-
+@implementation SCIDFJSONViewController
+- (instancetype)initWithTitle:(NSString *)title object:(id)object { if ((self=[super initWithNibName:nil bundle:nil])) { _detailTitle=[title copy]?:@"Details"; _detailText=[SCIDFJSON(object) copy]?:@""; } return self; }
+- (void)viewDidLoad { [super viewDidLoad]; self.title=self.detailTitle; SCIUIKit26ConfigureViewController(self); SCIConfigureNavigationChromeForGlass(self); self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(copyDetails)]; UITextView *tv=[UITextView new]; tv.translatesAutoresizingMaskIntoConstraints=NO; tv.editable=NO; tv.selectable=YES; tv.backgroundColor=UIColor.clearColor; tv.textColor=UIColor.labelColor; tv.font=[UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular]; tv.text=self.detailText; tv.textContainerInset=UIEdgeInsetsMake(16,14,24,14); [self.view addSubview:tv]; [NSLayoutConstraint activateConstraints:@[[tv.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],[tv.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],[tv.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],[tv.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]]; }
+- (void)copyDetails { UIPasteboard.generalPasteboard.string=self.detailText?:@""; [SCIUtils showToastForDuration:1.0 title:@"Copied" subtitle:nil]; }
 @end
 
-typedef NS_ENUM(NSInteger, SCIDogfoodBrowserMode) {
-    SCIDogfoodBrowserModeLaunchpad = 0,
-    SCIDogfoodBrowserModeRuntime = 1,
-    SCIDogfoodBrowserModeCaptures = 2,
-    SCIDogfoodBrowserModeLogs = 3,
-};
-
-@interface SCIDogfoodBrowserViewController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
-@property (nonatomic, strong) SCIUIKit26SearchBarContainerView *glassSearchBar;
-@property (nonatomic, strong) UISearchBar *searchBar;
-@property (nonatomic, strong) SCIUIKit26GlassPanelView *modePanel;
-@property (nonatomic, strong) UISegmentedControl *modeControl;
-@property (nonatomic, strong) UITableView *tableView;
+@interface SCIDFListViewController : UITableViewController <UISearchResultsUpdating>
+@property (nonatomic, copy) NSArray<SCIDFSection *> *(^sectionsProvider)(NSString *query);
+@property (nonatomic, copy) NSString *listTitle;
+@property (nonatomic, assign) BOOL searchable;
+@property (nonatomic, copy) NSArray<SCIDFSection *> *sections;
 @property (nonatomic, copy) NSString *query;
-@property (nonatomic, assign) SCIDogfoodBrowserMode mode;
+@end
+@implementation SCIDFListViewController
+- (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
+- (void)viewDidLoad { [super viewDidLoad]; self.title=self.listTitle?:@"Dogfood"; SCIUIKit26ConfigureViewController(self); SCIConfigureNavigationChromeForGlass(self); SCIUIKit26ConfigureTableView(self.tableView); self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone; self.tableView.rowHeight=UITableViewAutomaticDimension; self.tableView.estimatedRowHeight=76; [self.tableView registerClass:SCIUIKit26ParamCell.class forCellReuseIdentifier:@"cell"]; [self.tableView registerClass:SCIUIKit26SectionHeaderView.class forHeaderFooterViewReuseIdentifier:@"hdr"]; if (self.searchable) { UISearchController *sc=[[UISearchController alloc] initWithSearchResultsController:nil]; sc.searchResultsUpdater=self; sc.obscuresBackgroundDuringPresentation=NO; sc.searchBar.placeholder=@"Filter"; SCIUIKit26ConfigureSearchBar(sc.searchBar); self.navigationItem.searchController=sc; self.navigationItem.hidesSearchBarWhenScrolling=NO; } [self reload]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reload]; }
+- (void)reload { self.sections = self.sectionsProvider ? self.sectionsProvider(self.query?:@"") : @[]; [self.tableView reloadData]; }
+- (void)updateSearchResultsForSearchController:(UISearchController *)sc { self.query=sc.searchBar.text?:@""; [self reload]; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.sections.count; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return self.sections[s].rows.count; }
+- (UIView *)tableView:(UITableView *)tv viewForHeaderInSection:(NSInteger)s { SCIDFSection *sec=self.sections[s]; if (!sec.header.length && !sec.footer.length) return nil; SCIUIKit26SectionHeaderView *h=[tv dequeueReusableHeaderFooterViewWithIdentifier:@"hdr"]; [h configureWithTitle:sec.header subtitle:sec.footer]; return h; }
+- (CGFloat)tableView:(UITableView *)tv heightForHeaderInSection:(NSInteger)s { return (self.sections[s].header.length || self.sections[s].footer.length) ? UITableViewAutomaticDimension : 8.0; }
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip { SCIUIKit26ParamCell *c=[tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip]; SCIDFRow *r=self.sections[ip.section].rows[ip.row]; [c configureWithTitle:r.title subtitle:r.subtitle badge:r.badge emphasized:r.emphasized]; c.accessoryType=(r.action||r.detailObject)?UITableViewCellAccessoryDisclosureIndicator:UITableViewCellAccessoryNone; return c; }
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip { [tv deselectRowAtIndexPath:ip animated:YES]; SCIDFRow *r=self.sections[ip.section].rows[ip.row]; if (r.action) { r.action(); [self reload]; return; } if (r.detailObject) { [self.navigationController pushViewController:[[SCIDFJSONViewController alloc] initWithTitle:r.title object:r.detailObject] animated:YES]; } }
+@end
 
-@property (nonatomic, copy) NSDictionary *state;
-@property (nonatomic, copy) NSDictionary *nativeState;
-@property (nonatomic, copy) NSDictionary *autofillState;
-@property (nonatomic, copy) NSArray<NSDictionary *> *statusRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *nativeActionRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *autofillRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *stubs;
-@property (nonatomic, copy) NSArray<NSDictionary *> *objects;
-@property (nonatomic, copy) NSArray<NSDictionary *> *settingsTargets;
-@property (nonatomic, copy) NSArray<NSDictionary *> *notesChanges;
-@property (nonatomic, copy) NSArray<NSDictionary *> *params;
-@property (nonatomic, copy) NSArray<NSDictionary *> *actions;
-
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredStatusRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredNativeActionRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredAutofillRows;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredStubs;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredObjects;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredSettingsTargets;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredNotesChanges;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredParams;
-@property (nonatomic, copy) NSArray<NSDictionary *> *filteredActions;
+@interface SCIDogfoodBrowserViewController ()
 @end
 
 @implementation SCIDogfoodBrowserViewController
 
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"Dogfood Browser";
-    self.mode = SCIDogfoodBrowserModeLaunchpad;
-    SCIUIKit26ConfigureViewController(self);
-    SCIConfigureNavigationChromeForGlass(self);
+- (instancetype)init { return [super initWithStyle:UITableViewStyleInsetGrouped]; }
 
-    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshAll)];
-    UIBarButtonItem *export = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(exportSnapshot)];
-    UIBarButtonItem *trash = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemTrash target:self action:@selector(confirmClearRuntime)];
-    // O botão de lixo vai para a DIREITA junto com refresh/export. Antes ele
-    // ocupava o leftBarButtonItem e SOBRESCREVIA o botão "voltar" nativo do
-    // navigationController (o VC é apresentado via pushViewController), por isso
-    // não havia como voltar. Deixando o left livre, o back nativo reaparece.
-    self.navigationItem.rightBarButtonItems = @[refresh, export, trash];
+- (void)viewDidLoad { [super viewDidLoad]; self.title=@"Dogfood & Internal"; SCIUIKit26ConfigureViewController(self); SCIConfigureNavigationChromeForGlass(self); SCIUIKit26ConfigureTableView(self.tableView); self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone; self.tableView.rowHeight=UITableViewAutomaticDimension; self.tableView.estimatedRowHeight=76; [self.tableView registerClass:SCIUIKit26ParamCell.class forCellReuseIdentifier:@"cell"]; [self.tableView registerClass:SCIUIKit26SectionHeaderView.class forHeaderFooterViewReuseIdentifier:@"hdr"]; self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(exportSnapshot)]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
 
-    self.glassSearchBar = [[SCIUIKit26SearchBarContainerView alloc] initWithRadius:22.0];
-    self.glassSearchBar.translatesAutoresizingMaskIntoConstraints = NO;
-    self.searchBar = self.glassSearchBar.searchBar;
-    self.searchBar.delegate = self;
-    self.searchBar.placeholder = @"Search class, selector, ivar, session, launcher, param";
-    self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
-    [self.view addSubview:self.glassSearchBar];
+- (NSArray<SCIDFRow *> *)rootRows { __weak typeof(self) ws=self; NSDictionary *native=[SCIDogfoodObjectRuntime dogfoodNativeState]?:@{}; BOOL ready=[native[@"launcherRespondsOpenWithConfig"] boolValue]&&[native[@"viewControllerRespondsInitWithConfig"] boolValue]; BOOL capture=[SCIMobileConfigRuntime runtimeHooksEnabled]; NSDictionary *sym=[SCIMobileConfigNativeOverrides symbolStatus]; BOOL nativeOV=[sym[@"updateBool"] boolValue]&&[sym[@"getMobileConfigManager"] boolValue]; return @[[SCIDFRow row:@"Status & contexto" subtitle:@"Sessão ativa, Dogfood native, AutofillInternalSettings e símbolos nativos." badge:ready?@"READY":@"WAIT" emphasized:ready action:^{ [ws pushStatus]; }],[SCIDFRow row:@"Ações nativas" subtitle:@"Abrir Dogfood Settings, MetaLocalExperiment, Notes e Autofill/Bloks." badge:@"RUN" emphasized:NO action:^{ [ws pushNativeActions]; }],[SCIDFRow row:@"Captura MobileConfig" subtitle:capture?@"Tracer ativo. Ver leituras e aplicar override por paramID.":@"Liga captura leve para popular parâmetros lidos." badge:SCIDFBadge(capture) emphasized:capture action:^{ [ws pushCapture]; }],[SCIDFRow row:@"Native MobileConfig override" subtitle:nativeOV?@"updateOverrideForParam resolvido. Requer contexto vivo capturado.":@"Símbolos/contexts ainda indisponíveis; há fallback runtime." badge:nativeOV?@"NATIVE":@"FALL" emphasized:nativeOV action:^{ [ws pushNativeOverrideStatus]; }],[SCIDFRow row:@"Objetos vivos & stubs" subtitle:@"Object graph, runtime stubs e capturas estruturais." badge:@"IDX" emphasized:NO action:^{ [ws pushObjects]; }],[SCIDFRow row:@"Logs / ações recentes" subtitle:@"Histórico das ações executadas pelo browser." badge:@"LOG" emphasized:NO action:^{ [ws pushLogs]; }]]; }
 
-    self.modePanel = [[SCIUIKit26GlassPanelView alloc] initWithRadius:18.0];
-    self.modePanel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:self.modePanel];
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return [self rootRows].count; }
+- (UIView *)tableView:(UITableView *)tv viewForHeaderInSection:(NSInteger)section { SCIUIKit26SectionHeaderView *h=[tv dequeueReusableHeaderFooterViewWithIdentifier:@"hdr"]; [h configureWithTitle:@"Dogfood Browser" subtitle:@"Menu refeito: subtelas leves, Liquid Glass, back nativo e captura isolada."]; return h; }
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip { SCIUIKit26ParamCell *c=[tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip]; SCIDFRow *r=[self rootRows][ip.row]; [c configureWithTitle:r.title subtitle:r.subtitle badge:r.badge emphasized:r.emphasized]; c.accessoryType=UITableViewCellAccessoryDisclosureIndicator; return c; }
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip { [tv deselectRowAtIndexPath:ip animated:YES]; SCIDFRow *r=[self rootRows][ip.row]; if (r.action) r.action(); }
 
-    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"Run", @"Runtime", @"Captures", @"Logs"]];
-    self.modeControl.selectedSegmentIndex = self.mode;
-    self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.modeControl addTarget:self action:@selector(modeChanged:) forControlEvents:UIControlEventValueChanged];
-    SCIUIKit26ConfigureSegmentedControl(self.modeControl);
-    [self.modePanel.contentView addSubview:self.modeControl];
+- (SCIDFListViewController *)listWithTitle:(NSString *)title searchable:(BOOL)searchable provider:(NSArray<SCIDFSection *> *(^)(NSString *q))provider { SCIDFListViewController *vc=[SCIDFListViewController new]; vc.listTitle=title; vc.searchable=searchable; vc.sectionsProvider=provider; return vc; }
 
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView.dataSource = self;
-    self.tableView.delegate = self;
-    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-    self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 82.0;
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, 16.0, 0);
-    self.tableView.verticalScrollIndicatorInsets = self.tableView.contentInset;
-    SCIUIKit26ConfigureTableView(self.tableView);
-    [self.tableView registerClass:SCIUIKit26ParamCell.class forCellReuseIdentifier:@"cell"];
-    [self.tableView registerClass:SCIUIKit26SectionHeaderView.class forHeaderFooterViewReuseIdentifier:@"header"];
-    [self.view addSubview:self.tableView];
+- (void)pushStatus { SCIDFListViewController *vc=[self listWithTitle:@"Status & contexto" searchable:NO provider:^NSArray<SCIDFSection *> *(NSString *q) { NSDictionary *state=[SCIDogfoodObjectRuntime runtimeState]?:@{}; NSDictionary *native=[SCIDogfoodObjectRuntime dogfoodNativeState]?:@{}; NSDictionary *af=[SCIInternalActions state]?:@{}; NSDictionary *syms=[SCIMobileConfigNativeOverrides symbolStatus]?:@{}; SCIDFRow *r1=[SCIDFRow row:@"Native Dogfood readiness" subtitle:[NSString stringWithFormat:@"Config %@ · Session %@", SCIDFString(native[@"config"]).length?SCIDFString(native[@"config"]):@"nil", SCIDFString(state[@"activeUserSession"]).length?SCIDFString(state[@"activeUserSession"]):@"nil"] badge:([native[@"launcherRespondsOpenWithConfig"] boolValue]?@"READY":@"WAIT") emphasized:[native[@"launcherRespondsOpenWithConfig"] boolValue] action:nil]; r1.detailObject=native; SCIDFRow *r2=[SCIDFRow row:@"Autofill Internal Settings" subtitle:[NSString stringWithFormat:@"Bloks %@ · employee %@ · debug footer %@", SCIDFString(af[@"bloksForceExperienceState"]), SCIDFBadge([af[@"forceInternalEmployeeEnabled"] boolValue]), SCIDFBadge([af[@"debugFooterEnabled"] boolValue])] badge:@"AUTO" emphasized:NO action:nil]; r2.detailObject=af; SCIDFRow *r3=[SCIDFRow row:@"Native override symbols" subtitle:[NSString stringWithFormat:@"updateBool %@ · getManager %@ · live contexts %lu", SCIDFBadge([syms[@"updateBool"] boolValue]), SCIDFBadge([syms[@"getMobileConfigManager"] boolValue]), (unsigned long)[SCIMobileConfigRuntime liveContextObjects].count] badge:@"SYM" emphasized:[syms[@"updateBool"] boolValue] action:nil]; r3.detailObject=syms; SCIDFRow *r4=[SCIDFRow row:@"Runtime context" subtitle:SCIDFString(state[@"topViewController"]) badge:@"CTX" emphasized:NO action:nil]; r4.detailObject=state; return @[[SCIDFSection section:@"Estado" footer:@"Toque em qualquer linha para ver JSON completo." rows:@[r1,r2,r3,r4]]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [self.glassSearchBar.topAnchor constraintEqualToAnchor:g.topAnchor constant:8.0],
-        [self.glassSearchBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:14.0],
-        [self.glassSearchBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-14.0],
-        [self.glassSearchBar.heightAnchor constraintEqualToConstant:52.0],
-        [self.modePanel.topAnchor constraintEqualToAnchor:self.glassSearchBar.bottomAnchor constant:10.0],
-        [self.modePanel.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:16.0],
-        [self.modePanel.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-16.0],
-        [self.modeControl.topAnchor constraintEqualToAnchor:self.modePanel.contentView.topAnchor constant:8.0],
-        [self.modeControl.leadingAnchor constraintEqualToAnchor:self.modePanel.contentView.leadingAnchor constant:10.0],
-        [self.modeControl.trailingAnchor constraintEqualToAnchor:self.modePanel.contentView.trailingAnchor constant:-10.0],
-        [self.modeControl.bottomAnchor constraintEqualToAnchor:self.modePanel.contentView.bottomAnchor constant:-8.0],
-        [self.tableView.topAnchor constraintEqualToAnchor:self.modePanel.bottomAnchor constant:6.0],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
+- (void)pushNativeActions { __weak typeof(self) ws=self; SCIDFListViewController *vc=[self listWithTitle:@"Ações nativas" searchable:NO provider:^NSArray<SCIDFSection *> *(NSString *q) { NSDictionary *af=[SCIInternalActions state]?:@{}; NSInteger bloks=[af[@"bloksForceExperienceState"] integerValue]; NSArray *menus=@[[SCIDFRow row:@"Abrir Native Dogfood Settings" subtitle:@"IGDogfoodingSettingsConfig + sessão ativa." badge:@"OPEN" emphasized:YES action:^{ if(![SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings]) [SCIUtils showErrorHUDWithDescription:@"Native Dogfood Settings indisponível. Veja Status."]; }],[SCIDFRow row:@"Abrir MetaLocalExperiment (native)" subtitle:@"MetaLocalExperimentListViewController nativo; sem SCIExpFlags store." badge:@"META" emphasized:YES action:^{ if(![SCIDogfoodObjectRuntime tryOpenMetaLocalExperimentBrowser]) [SCIUtils showErrorHUDWithDescription:@"MetaLocalExperiment native browser indisponível."]; }],[SCIDFRow row:@"Abrir Notes Dogfooding" subtitle:@"notesDogfoodingSettingsOpenOnViewController:userSession:" badge:@"NOTES" emphasized:NO action:^{ NSError *e=nil; if(![SCIInternalActions openNotesDogfoodSettings:&e]) [SCIUtils showErrorHUDWithDescription:e.localizedDescription?:@"Falhou abrir Notes Dogfooding"]; }]]; NSArray *bloksRows=@[[SCIDFRow row:@"Bloks Experience ON" subtitle:@"setForceBloksExperienceOn" badge:(bloks==1?@"ON":@"SET") emphasized:(bloks==1) action:^{ [ws runAction:@"Force Bloks ON" block:^BOOL{ return [SCIInternalActions setBloksForceExperienceState:1 error:NULL]; }]; }],[SCIDFRow row:@"Bloks Experience OFF" subtitle:@"setForceBloksExperienceOff" badge:(bloks==0?@"OFF":@"SET") emphasized:(bloks==0) action:^{ [ws runAction:@"Force Bloks OFF" block:^BOOL{ return [SCIInternalActions setBloksForceExperienceState:0 error:NULL]; }]; }],[SCIDFRow row:@"Bloks Experience native" subtitle:@"clearForceBloksExperience" badge:(bloks!=0&&bloks!=1?@"NATIVE":@"SET") emphasized:(bloks!=0&&bloks!=1) action:^{ [ws runAction:@"Clear Bloks" block:^BOOL{ return [SCIInternalActions setBloksForceExperienceState:2 error:NULL]; }]; }],[SCIDFRow row:@"Bloks Prefetch ON" subtitle:@"setBloksPrefetchEnabledWithEnabled:YES" badge:SCIDFBadge([af[@"bloksPrefetchEnabled"] boolValue]) emphasized:[af[@"bloksPrefetchEnabled"] boolValue] action:^{ [ws runAction:@"Bloks Prefetch ON" block:^BOOL{ return [SCIInternalActions setBloksPrefetchEnabled:YES error:NULL]; }]; }],[SCIDFRow row:@"Debug Footer ON" subtitle:@"setDebugFooterEnabledWithEnabled:YES" badge:SCIDFBadge([af[@"debugFooterEnabled"] boolValue]) emphasized:[af[@"debugFooterEnabled"] boolValue] action:^{ [ws runAction:@"Debug Footer ON" block:^BOOL{ return [SCIInternalActions setDebugFooterEnabled:YES error:NULL]; }]; }]]; return @[[SCIDFSection section:@"Menus" footer:@"Cada ação abre/usa o fluxo nativo do Instagram." rows:menus],[SCIDFSection section:@"Autofill / Bloks" footer:@"Usa o IGAutofillInternalSettings vivo." rows:bloksRows]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-    [SCIDogfoodObjectRuntime installIfNeeded];
-    [self refreshAll];
-}
+- (void)pushCapture { __weak typeof(self) ws=self; SCIDFListViewController *vc=[self listWithTitle:@"Captura MobileConfig" searchable:YES provider:^NSArray<SCIDFSection *> *(NSString *q) { BOOL capture=[SCIMobileConfigRuntime runtimeHooksEnabled]; BOOL deep=[SCIMobileConfigRuntime deepCallerSymbolsEnabled]; SCIDFRow *cap=[SCIDFRow row:@"Runtime capture" subtitle:capture?@"ATIVO. Hooks ObjC dos context managers instalados.":@"Desligado. Liga capture leve; sem deep por padrão." badge:SCIDFBadge(capture) emphasized:capture action:^{ BOOL n=![SCIMobileConfigRuntime runtimeHooksEnabled]; [SCIMobileConfigRuntime setRuntimeCaptureActive:n]; if(n) SCIInstallMobileConfigRuntimeHooksIfNeeded(); [SCIDogfoodObjectRuntime noteAction:@"MobileConfig runtime capture" status:n?@"enabled":@"disabled" detail:nil]; }]; SCIDFRow *deepRow=[SCIDFRow row:@"Deep caller symbols ⚠" subtitle:deep?@"ATIVO; ainda bloqueado em filas críticas do Facebook.":@"OFF. Use só para rastrear callsite." badge:SCIDFBadge(deep) emphasized:deep action:^{ BOOL n=![SCIMobileConfigRuntime deepCallerSymbolsEnabled]; [SCIUtils setPref:@(n) forKey:@"sci_mc_runtime_deep_symbols_enabled"]; [SCIDogfoodObjectRuntime noteAction:@"Deep caller symbols" status:n?@"enabled":@"disabled" detail:nil]; }]; SCIDFRow *clear=[SCIDFRow row:@"Limpar capturas" subtitle:@"Zera observações de MobileConfig. Overrides manuais não são removidos." badge:@"CLR" emphasized:NO action:^{ [ws runAction:@"Clear captures" block:^BOOL{ [SCIMobileConfigRuntime clearObservations]; return YES; }]; }]; NSMutableArray *paramRows=[NSMutableArray array]; if(capture){ for(NSDictionary *p in [SCIMobileConfigRuntime dogfoodCandidateParams]?:@[]){ NSString *hay=SCIDFJSON(p); if(q.length && [hay.lowercaseString rangeOfString:q.lowercaseString].location==NSNotFound) continue; NSString *type=SCIDFString(p[@"type"]); unsigned long long pid=SCIDFULL(p[@"paramID"]); id ov=[SCIMobileConfigRuntime overrideForParamID:pid type:type original:nil]; NSString *badge=ov?@"FORCED":@"MC"; NSString *name=SCIDFString(p[@"name"]).length?SCIDFString(p[@"name"]):[NSString stringWithFormat:@"param %llu", pid]; SCIDFRow *r=[SCIDFRow row:name subtitle:[NSString stringWithFormat:@"id %llu · %@ · reads %@ · value %@", pid, type, SCIDFString(p[@"count"]), SCIDFString(p[@"returned"])] badge:badge emphasized:(ov!=nil) action:^{ [ws presentOverrideMenuForParam:p]; }]; r.detailObject=p; [paramRows addObject:r]; if(paramRows.count>=220) break; }} return @[[SCIDFSection section:@"Tracer" footer:@"Capture liga os hooks ObjC de leitura. Deep é opcional e mais caro." rows:@[cap,deepRow,clear]],[SCIDFSection section:[NSString stringWithFormat:@"Parâmetros lidos (%lu)",(unsigned long)paramRows.count] footer:capture?@"Toque num parâmetro para forçar via FBMobileConfigOverridesTable; se não houver table viva, cai no runtime override seguro.":@"Ligue Runtime capture e navegue no IG para popular." rows:paramRows]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    SCIUIKit26ConfigureViewController(self);
-    [SCIDogfoodObjectRuntime installIfNeeded];
-    [self refreshRuntimeStateOnly];
-}
+- (void)pushNativeOverrideStatus { SCIDFListViewController *vc=[self listWithTitle:@"Native override status" searchable:NO provider:^NSArray<SCIDFSection *> *(NSString *q){ NSDictionary *s=[SCIMobileConfigNativeOverrides symbolStatus]?:@{}; NSMutableArray *rows=[NSMutableArray array]; for(NSString *k in [[s allKeys] sortedArrayUsingSelector:@selector(compare:)]){ [rows addObject:[SCIDFRow row:k subtitle:@"dlsym/exports validation" badge:SCIDFBadge([s[k] boolValue]) emphasized:[s[k] boolValue] action:nil]]; } SCIDFRow *ctx=[SCIDFRow row:@"Live contexts" subtitle:@"FBMobileConfigContext objects captured by runtime tracer." badge:[NSString stringWithFormat:@"%lu",(unsigned long)[SCIMobileConfigRuntime liveContextObjects].count] emphasized:([SCIMobileConfigRuntime liveContextObjects].count>0) action:nil]; return @[[SCIDFSection section:@"Symbols" footer:@"updateOverrideForParam é chamado só pela UI, nunca em hot path." rows:rows],[SCIDFSection section:@"Context" footer:@"Para native override funcionar, ligue capture e acione uma tela que leia MobileConfig." rows:@[ctx]]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    [SCIMobileConfigRuntime setRuntimeCaptureActive:NO];
-}
+- (void)pushObjects { SCIDFListViewController *vc=[self listWithTitle:@"Objetos & stubs" searchable:YES provider:^NSArray<SCIDFSection *> *(NSString *q){ NSMutableArray *stubRows=[NSMutableArray array]; for(NSDictionary *s in [SCIDogfoodObjectRuntime runtimeStubsMatching:(q.length?q:nil) limit:220]?:@[]){ SCIDFRow *r=[SCIDFRow row:SCIDFString(s[@"class"]?:s[@"name"]) subtitle:SCIDFString(s[@"summary"]?:s[@"detail"]) badge:@"STUB" emphasized:NO action:nil]; r.detailObject=s; [stubRows addObject:r]; } NSMutableArray *objRows=[NSMutableArray array]; for(NSDictionary *o in [SCIDogfoodObjectRuntime liveObjectGraph]?:@[]){ NSString *hay=SCIDFJSON(o); if(q.length && [hay.lowercaseString rangeOfString:q.lowercaseString].location==NSNotFound) continue; SCIDFRow *r=[SCIDFRow row:SCIDFString(o[@"role"]?:o[@"class"]) subtitle:SCIDFString(o[@"class"]?:o[@"address"]) badge:@"OBJ" emphasized:NO action:nil]; r.detailObject=o; [objRows addObject:r]; } return @[[SCIDFSection section:[NSString stringWithFormat:@"Runtime stubs (%lu)",(unsigned long)stubRows.count] footer:nil rows:stubRows],[SCIDFSection section:[NSString stringWithFormat:@"Objetos vivos (%lu)",(unsigned long)objRows.count] footer:nil rows:objRows]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-- (void)modeChanged:(UISegmentedControl *)sender {
-    self.mode = (SCIDogfoodBrowserMode)sender.selectedSegmentIndex;
-    [self.tableView reloadData];
-}
+- (void)pushLogs { SCIDFListViewController *vc=[self listWithTitle:@"Logs" searchable:NO provider:^NSArray<SCIDFSection *> *(NSString *q){ NSMutableArray *rows=[NSMutableArray array]; for(NSDictionary *a in [SCIDogfoodObjectRuntime recentActions]?:@[]){ SCIDFRow *r=[SCIDFRow row:SCIDFString(a[@"action"]) subtitle:[NSString stringWithFormat:@"%@ · %@", SCIDFString(a[@"status"]), SCIDFString(a[@"detail"])] badge:@"LOG" emphasized:NO action:nil]; r.detailObject=a; [rows addObject:r]; } return @[[SCIDFSection section:[NSString stringWithFormat:@"Ações recentes (%lu)",(unsigned long)rows.count] footer:nil rows:rows]]; }]; [self.navigationController pushViewController:vc animated:YES]; }
 
-- (NSArray<NSDictionary *> *)buildStatusRows {
-    NSDictionary *state = self.state ?: @{};
-    NSDictionary *native = self.nativeState ?: @{};
-    NSDictionary *autofill = self.autofillState ?: @{};
-    BOOL nativeReady = SCIDFNativeReady(native);
-    NSString *session = SCIDFBrowserString(state[@"activeUserSession"]);
-    NSString *config = SCIDFBrowserString(native[@"config"]);
-    NSString *top = SCIDFBrowserString(state[@"topViewController"]);
-    NSString *launcherSet = SCIDFBrowserString(state[@"bestLauncherSet"]);
-    NSString *autofillObj = SCIDFBrowserString(autofill[@"autofillInternalSettings"]);
-    NSString *runtimeSubtitle = [NSString stringWithFormat:@"Objects %@ · Settings targets %@ · Notes changes %lu · MC reads %lu",
-                                 state[@"liveObjects"] ?: @0,
-                                 state[@"settingsTargets"] ?: @0,
-                                 (unsigned long)self.notesChanges.count,
-                                 (unsigned long)self.params.count];
-    return @[
-        @{ @"title": @"Native Dogfood readiness", @"subtitle": [NSString stringWithFormat:@"%@ · Config %@ · Session %@", nativeReady ? @"Ready" : @"Waiting for native config", config.length ? config : @"nil", session.length ? session : @"nil"], @"badge": nativeReady ? @"READY" : @"WAIT", @"object": native },
-        @{ @"title": @"Current presentation context", @"subtitle": [NSString stringWithFormat:@"Top %@ · LauncherSet %@", top.length ? top : @"nil", launcherSet.length ? launcherSet : @"nil"], @"badge": @"CTX", @"object": state },
-        @{ @"title": @"Autofill Internal state", @"subtitle": [NSString stringWithFormat:@"Object %@ · Bloks %@ · Prefetch %@ · Footer %@", autofillObj.length ? autofillObj : @"nil", autofill[@"bloksForceExperienceState"] ?: @"?", SCIDFBrowserBoolBadge([autofill[@"bloksPrefetchEnabled"] boolValue]), SCIDFBrowserBoolBadge([autofill[@"debugFooterEnabled"] boolValue])], @"badge": @"AUTO", @"object": autofill },
-        @{ @"title": @"Runtime index", @"subtitle": runtimeSubtitle, @"badge": @"IDX", @"object": @{ @"state": state, @"native": native, @"autofill": autofill } },
-    ];
-}
+- (void)presentOverrideMenuForParam:(NSDictionary *)param { unsigned long long pid=SCIDFULL(param[@"paramID"]); NSString *type=SCIDFString(param[@"type"]); if(!pid || !type.length){ [SCIUtils showErrorHUDWithDescription:@"paramID/type inválido"]; return; } NSString *title=SCIDFString(param[@"name"]).length?SCIDFString(param[@"name"]):[NSString stringWithFormat:@"%llu",pid]; UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:[NSString stringWithFormat:@"paramID %llu · %@", pid, type] preferredStyle:UIAlertControllerStyleActionSheet]; if([type isEqualToString:@"bool"]){ [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL YES (native/fallback)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [self applyOverride:param value:@YES]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL NO (native/fallback)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ [self applyOverride:param value:@NO]; }]]; } else if([type isEqualToString:@"int"]||[type isEqualToString:@"int64"]){ [self addTextOverrideActionTo:a param:param placeholder:@"123" title:@"Force Int64…"]; } else if([type isEqualToString:@"double"]){ [self addTextOverrideActionTo:a param:param placeholder:@"1.0" title:@"Force Double…"]; } else if([type isEqualToString:@"string"]){ [self addTextOverrideActionTo:a param:param placeholder:@"value" title:@"Force String…"]; } [a addAction:[UIAlertAction actionWithTitle:@"Clear override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *x){ [self clearOverride:param]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Copy JSON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIPasteboard.generalPasteboard.string=SCIDFJSON(param); [SCIUtils showToastForDuration:1 title:@"Copied" subtitle:nil]; }]]; [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; [self presentViewController:a animated:YES completion:nil]; }
 
-- (NSArray<NSDictionary *> *)buildNativeActionRows {
-    BOOL nativeReady = SCIDFNativeReady(self.nativeState ?: @{});
-    BOOL capture = [SCIMobileConfigRuntime runtimeHooksEnabled];
-    BOOL deep = [SCIMobileConfigRuntime deepCallerSymbolsEnabled];
-    return @[
-        @{ @"title": @"Open Native Dogfood Settings", @"subtitle": nativeReady ? @"Uses openWithConfig:onViewController:userSession: with the captured native config." : @"Waiting for IGDogfoodingSettingsConfig captured from the real native flow.", @"badge": nativeReady ? @"OPEN" : @"WAIT", @"action": @"openNative", @"emphasized": @(nativeReady) },
-        @{ @"title": @"Open Notes Dogfooding", @"subtitle": @"Uses notesDogfoodingSettingsOpenOnViewController:userSession: with the live user session.", @"badge": @"NOTES", @"action": @"openNotes", @"emphasized": @(YES) },
-        @{ @"title": @"Copy full runtime snapshot", @"subtitle": @"Exports state, stubs, live objects, captures, MobileConfig reads and launcher overrides as JSON.", @"badge": @"JSON", @"action": @"export", @"emphasized": @(NO) },
-        @{ @"title": @"MobileConfig runtime capture", @"subtitle": capture ? @"ON for this session. Dogfood/Internal read tracer is active." : @"OFF. Tap to enable only while investigating a specific getter.", @"badge": SCIDFBrowserBoolBadge(capture), @"action": @"toggleCapture", @"emphasized": @(capture) },
-        @{ @"title": @"Deep caller symbols", @"subtitle": deep ? @"ON. Delayed stack/caller symbol enrichment is active." : @"OFF. Safer default; enable only when the callsite is needed.", @"badge": SCIDFBrowserBoolBadge(deep), @"action": @"toggleDeep", @"emphasized": @(deep) },
-    ];
-}
+- (void)addTextOverrideActionTo:(UIAlertController *)menu param:(NSDictionary *)param placeholder:(NSString *)placeholder title:(NSString *)title { [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:[NSString stringWithFormat:@"paramID %@ · %@", SCIDFString(param[@"paramID"]), SCIDFString(param[@"type"])] preferredStyle:UIAlertControllerStyleAlert]; [a addTextFieldWithConfigurationHandler:^(UITextField *tf){ tf.placeholder=placeholder; tf.text=SCIDFString(param[@"returned"]); tf.clearButtonMode=UITextFieldViewModeWhileEditing; }]; [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; [a addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *y){ [self applyOverride:param value:a.textFields.firstObject.text?:@""]; }]]; [self presentViewController:a animated:YES completion:nil]; }]]; }
 
-- (NSArray<NSDictionary *> *)buildAutofillRows {
-    NSDictionary *state = self.autofillState ?: @{};
-    NSInteger forceState = [state[@"bloksForceExperienceState"] integerValue];
-    NSString *forceLabel = forceState == 1 ? @"ON" : (forceState == 0 ? @"OFF" : @"NATIVE");
-    return @[
-        @{ @"title": @"Bloks Experience: ON", @"subtitle": @"Calls setForceBloksExperienceOn on IGAutofillInternalSettings.", @"badge": [forceLabel isEqualToString:@"ON"] ? @"ON" : @"SET", @"action": @"bloksOn", @"emphasized": @([forceLabel isEqualToString:@"ON"]) },
-        @{ @"title": @"Bloks Experience: OFF", @"subtitle": @"Calls setForceBloksExperienceOff on IGAutofillInternalSettings.", @"badge": [forceLabel isEqualToString:@"OFF"] ? @"OFF" : @"SET", @"action": @"bloksOff", @"emphasized": @([forceLabel isEqualToString:@"OFF"]) },
-        @{ @"title": @"Bloks Experience: native/default", @"subtitle": @"Calls clearForceBloksExperience to stop forcing ON/OFF.", @"badge": forceLabel, @"action": @"bloksClear", @"emphasized": @([forceLabel isEqualToString:@"NATIVE"]) },
-        @{ @"title": @"Enable Bloks Prefetch", @"subtitle": @"Calls setBloksPrefetchEnabledWithEnabled:YES.", @"badge": SCIDFBrowserBoolBadge([state[@"bloksPrefetchEnabled"] boolValue]), @"action": @"prefetchOn", @"emphasized": @([state[@"bloksPrefetchEnabled"] boolValue]) },
-        @{ @"title": @"Enable Debug Footer", @"subtitle": @"Calls setDebugFooterEnabledWithEnabled:YES.", @"badge": SCIDFBrowserBoolBadge([state[@"debugFooterEnabled"] boolValue]), @"action": @"debugFooterOn", @"emphasized": @([state[@"debugFooterEnabled"] boolValue]) },
-    ];
-}
+- (void)applyOverride:(NSDictionary *)param value:(id)value { unsigned long long pid=SCIDFULL(param[@"paramID"]); NSString *type=SCIDFString(param[@"type"]); NSError *err=nil; BOOL ok=NO; if([type isEqualToString:@"bool"]) ok=[SCIMobileConfigNativeOverrides applyBoolOverrideForParamID:pid value:[value boolValue] error:&err]; else if([type isEqualToString:@"int"]||[type isEqualToString:@"int64"]) ok=[SCIMobileConfigNativeOverrides applyInt64OverrideForParamID:pid value:[value longLongValue] error:&err]; else if([type isEqualToString:@"double"]) ok=[SCIMobileConfigNativeOverrides applyDoubleOverrideForParamID:pid value:[value doubleValue] error:&err]; else if([type isEqualToString:@"string"]) ok=[SCIMobileConfigNativeOverrides applyStringOverrideForParamID:pid value:SCIDFString(value) error:&err]; if(!ok){ [SCIMobileConfigNativeOverrides applyRuntimeFallbackOverrideForParamID:pid type:type value:value error:NULL]; [SCIDogfoodObjectRuntime noteAction:@"Fallback MobileConfig override" status:@"saved" detail:@{ @"paramID":@(pid), @"type":type?:@"", @"value":value?:@"", @"nativeError":err.localizedDescription?:@"" }]; [SCIUtils showToastForDuration:2.0 title:@"Fallback override salvo" subtitle:@"Capture/manual override ativo"]; return; } [SCIDogfoodObjectRuntime noteAction:@"Native MobileConfig override" status:@"applied" detail:@{ @"paramID":@(pid), @"type":type?:@"", @"value":value?:@"" }]; [SCIUtils showToastForDuration:1.5 title:@"Native override aplicado" subtitle:nil]; }
 
-- (void)refreshRuntimeStateOnly {
-    self.state = [SCIDogfoodObjectRuntime runtimeState] ?: @{};
-    self.nativeState = [SCIDogfoodObjectRuntime dogfoodNativeState] ?: @{};
-    self.autofillState = [SCIInternalActions state] ?: @{};
-    self.stubs = [SCIDogfoodObjectRuntime runtimeStubsMatching:self.query limit:220] ?: @[];
-    self.objects = [SCIDogfoodObjectRuntime liveObjectGraph] ?: @[];
-    self.settingsTargets = [SCIDogfoodObjectRuntime settingsInjectionTargets] ?: @[];
-    self.notesChanges = [SCIDogfoodObjectRuntime dogfoodingSettingChanges] ?: @[];
-    self.actions = [SCIDogfoodObjectRuntime recentActions] ?: @[];
-    if (![SCIMobileConfigRuntime runtimeHooksEnabled]) self.params = @[];
-    self.statusRows = [self buildStatusRows];
-    self.nativeActionRows = [self buildNativeActionRows];
-    self.autofillRows = [self buildAutofillRows];
-    [self applyFilterAndReload:YES];
-}
+- (void)clearOverride:(NSDictionary *)param { unsigned long long pid=SCIDFULL(param[@"paramID"]); NSString *type=SCIDFString(param[@"type"]); NSError *err=nil; BOOL native=[SCIMobileConfigNativeOverrides removeOverrideForParamID:pid error:&err]; [SCIMobileConfigNativeOverrides removeRuntimeFallbackOverrideForParamID:pid type:type]; [SCIDogfoodObjectRuntime noteAction:@"Clear MobileConfig override" status:native?@"native+fallback":@"fallback" detail:@{ @"paramID":@(pid), @"type":type?:@"", @"nativeError":err.localizedDescription?:@"" }]; [SCIUtils showToastForDuration:1.3 title:@"Override limpo" subtitle:native?@"native + fallback":@"fallback"]; }
 
-- (void)refreshAll {
-    if ([SCIMobileConfigRuntime runtimeHooksEnabled]) [SCIMobileConfigRuntime reloadParamsMapIndex];
-    self.params = [SCIMobileConfigRuntime runtimeHooksEnabled] ? ([SCIMobileConfigRuntime dogfoodCandidateParams] ?: @[]) : @[];
-    [self refreshRuntimeStateOnly];
-}
+- (void)runAction:(NSString *)title block:(BOOL(^)(void))block { UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:nil preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]]; [a addAction:[UIAlertAction actionWithTitle:@"Run" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *x){ BOOL ok=block?block():NO; [SCIDogfoodObjectRuntime noteAction:title status:ok?@"sent":@"failed" detail:nil]; if(ok)[SCIUtils showToastForDuration:1.2 title:@"OK" subtitle:title]; else [SCIUtils showErrorHUDWithDescription:@"Falhou. Veja Logs."]; }]]; [self presentViewController:a animated:YES completion:nil]; }
 
-- (void)confirmClearRuntime {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Clear runtime capture?" message:@"This clears captured Dogfood objects, Notes persistence snapshots and MobileConfig observations. Manual launcher overrides are not removed." preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *_) {
-        [SCIDogfoodObjectRuntime clear];
-        [SCIMobileConfigRuntime clearObservations];
-        [self refreshAll];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
-}
-
-- (NSArray<NSDictionary *> *)filterArray:(NSArray<NSDictionary *> *)array query:(NSString *)q {
-    if (!q.length) return array ?: @[];
-    NSMutableArray *out = [NSMutableArray array];
-    for (NSDictionary *d in array ?: @[]) if (SCIDFBrowserMatches(d, q)) [out addObject:d];
-    return out.copy;
-}
-
-- (void)applyFilterAndReload:(BOOL)reload {
-    NSString *q = self.query ?: @"";
-    self.filteredStatusRows = [self filterArray:self.statusRows query:q];
-    self.filteredNativeActionRows = [self filterArray:self.nativeActionRows query:q];
-    self.filteredAutofillRows = [self filterArray:self.autofillRows query:q];
-    self.filteredStubs = q.length ? ([SCIDogfoodObjectRuntime runtimeStubsMatching:q limit:220] ?: @[]) : (self.stubs ?: @[]);
-    self.filteredObjects = [self filterArray:self.objects query:q];
-    self.filteredSettingsTargets = [self filterArray:self.settingsTargets query:q];
-    self.filteredNotesChanges = [self filterArray:self.notesChanges query:q];
-    self.filteredParams = [self filterArray:self.params query:q];
-    self.filteredActions = [self filterArray:self.actions query:q];
-    if (reload) [self.tableView reloadData];
-}
-
-- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText {
-    self.query = searchText ?: @"";
-    [self applyFilterAndReload:YES];
-}
-
-- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar {
-    [searchBar resignFirstResponder];
-}
-
-- (BOOL)sectionVisible:(NSInteger)section {
-    switch (self.mode) {
-        case SCIDogfoodBrowserModeLaunchpad: return section == 0 || section == 1 || section == 2;
-        case SCIDogfoodBrowserModeRuntime: return section == 3 || section == 4 || section == 5;
-        case SCIDogfoodBrowserModeCaptures: return section == 6 || section == 7;
-        case SCIDogfoodBrowserModeLogs: return section == 8;
-    }
-    return NO;
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 9; }
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (![self sectionVisible:section]) return 0;
-    if (section == 0) return self.filteredStatusRows.count;
-    if (section == 1) return self.filteredNativeActionRows.count;
-    if (section == 2) return self.filteredAutofillRows.count;
-    if (section == 3) return self.filteredStubs.count;
-    if (section == 4) return self.filteredObjects.count;
-    if (section == 5) return self.filteredSettingsTargets.count;
-    if (section == 6) return self.filteredNotesChanges.count;
-    if (section == 7) return self.filteredParams.count;
-    return MIN((NSInteger)self.filteredActions.count, 60);
-}
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    if (![self sectionVisible:section]) return nil;
-    SCIUIKit26SectionHeaderView *h = [tableView dequeueReusableHeaderFooterViewWithIdentifier:@"header"];
-    if (section == 0) [h configureWithTitle:@"Runtime status" subtitle:@"Readiness cards. No giant state dump in the header; tap a row for the full JSON."];
-    else if (section == 1) [h configureWithTitle:@"Authorized native openers" subtitle:@"Only selectors confirmed by the static dump are used. Missing config/session is shown instead of crashing."];
-    else if (section == 2) [h configureWithTitle:@"Autofill Internal Settings" subtitle:@"Native IGAutofillInternalSettings setters. Actions ask for confirmation and log errors."];
-    else if (section == 3) [h configureWithTitle:[NSString stringWithFormat:@"Runtime stubs · %lu", (unsigned long)self.filteredStubs.count] subtitle:@"Class, method, property and ivar stubs from loaded ObjC metadata. No method invocation."];
-    else if (section == 4) [h configureWithTitle:[NSString stringWithFormat:@"Live objects · %lu", (unsigned long)self.filteredObjects.count] subtitle:@"Objects captured by named hooks only. No heap scan."];
-    else if (section == 5) [h configureWithTitle:[NSString stringWithFormat:@"Settings targets · %lu", (unsigned long)self.filteredSettingsTargets.count] subtitle:@"Captured settings-related controllers/models. Overlay injection stays disabled."];
-    else if (section == 6) [h configureWithTitle:[NSString stringWithFormat:@"Notes persistence captures · %lu", (unsigned long)self.filteredNotesChanges.count] subtitle:@"Native DogfoodingSettings item/options snapshots and replayability evidence."];
-    else if (section == 7) [h configureWithTitle:[NSString stringWithFormat:@"MobileConfig dogfood reads · %lu", (unsigned long)self.filteredParams.count] subtitle:@"Secondary tracer. Enable capture only while investigating a specific callsite."];
-    else [h configureWithTitle:[NSString stringWithFormat:@"Recent actions · %lu", (unsigned long)self.filteredActions.count] subtitle:@"Open attempts, exceptions and diagnostics."];
-    return h;
-}
-
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return [self sectionVisible:section] ? 76.0 : CGFLOAT_MIN;
-}
-
-- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
-    return [self sectionVisible:section] ? 8.0 : CGFLOAT_MIN;
-}
-
-- (UITableViewCell *)configuredCellForIndexPath:(NSIndexPath *)ip model:(NSDictionary *)model badge:(NSString *)fallbackBadge emphasized:(BOOL)fallbackEmphasis {
-    SCIUIKit26ParamCell *cell = [self.tableView dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
-    NSString *title = model[@"title"] ?: model[@"display"] ?: model[@"class"] ?: model[@"paramID"] ?: model[@"action"] ?: @"";
-    NSString *subtitle = model[@"subtitle"];
-    if (!subtitle.length) {
-        if (model[@"selector"] || model[@"sourceClass"]) subtitle = [NSString stringWithFormat:@"%@ · %@ · %@", model[@"selector"] ?: @"", model[@"sourceClass"] ?: @"", model[@"map"] ?: @""];
-        else if (model[@"roles"] || model[@"sources"]) subtitle = [NSString stringWithFormat:@"roles %@ · sources %@", SCIDFBrowserJoined(model[@"roles"]), SCIDFBrowserJoined(model[@"sources"])] ;
-        else if (model[@"detail"]) subtitle = SCIDFBrowserString(model[@"detail"]);
-        else subtitle = SCIDFBrowserString(model);
-    }
-    NSString *badge = model[@"badge"] ?: fallbackBadge;
-    BOOL emph = model[@"emphasized"] ? [model[@"emphasized"] boolValue] : fallbackEmphasis;
-    [cell configureWithTitle:title subtitle:subtitle badge:badge emphasized:emph];
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    return cell;
-}
-
-- (NSDictionary *)modelForIndexPath:(NSIndexPath *)ip {
-    if (ip.section == 0 && ip.row < (NSInteger)self.filteredStatusRows.count) return self.filteredStatusRows[ip.row];
-    if (ip.section == 1 && ip.row < (NSInteger)self.filteredNativeActionRows.count) return self.filteredNativeActionRows[ip.row];
-    if (ip.section == 2 && ip.row < (NSInteger)self.filteredAutofillRows.count) return self.filteredAutofillRows[ip.row];
-    if (ip.section == 3 && ip.row < (NSInteger)self.filteredStubs.count) return self.filteredStubs[ip.row];
-    if (ip.section == 4 && ip.row < (NSInteger)self.filteredObjects.count) return self.filteredObjects[ip.row];
-    if (ip.section == 5 && ip.row < (NSInteger)self.filteredSettingsTargets.count) return self.filteredSettingsTargets[ip.row];
-    if (ip.section == 6 && ip.row < (NSInteger)self.filteredNotesChanges.count) return self.filteredNotesChanges[ip.row];
-    if (ip.section == 7 && ip.row < (NSInteger)self.filteredParams.count) return self.filteredParams[ip.row];
-    if (ip.section == 8 && ip.row < (NSInteger)self.filteredActions.count) return self.filteredActions[ip.row];
-    return nil;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
-    NSDictionary *model = [self modelForIndexPath:ip] ?: @{};
-    if (ip.section == 3) {
-        NSMutableDictionary *m = [model mutableCopy];
-        if (!m[@"subtitle"]) m[@"subtitle"] = [NSString stringWithFormat:@"methods %@/%@ · props %@ · ivars %@", model[@"methodCountPreview"] ?: @0, model[@"classMethodCountPreview"] ?: @0, model[@"propertyCountPreview"] ?: @0, model[@"ivarCountPreview"] ?: @0];
-        return [self configuredCellForIndexPath:ip model:m badge:@"STUB" emphasized:YES];
-    }
-    if (ip.section == 4 || ip.section == 5) {
-        NSMutableDictionary *m = [model mutableCopy];
-        m[@"title"] = [NSString stringWithFormat:@"%@ %@", model[@"class"] ?: @"", model[@"address"] ?: @""];
-        m[@"subtitle"] = [NSString stringWithFormat:@"roles %@ · sources %@ · ivars %@", SCIDFBrowserJoined(model[@"roles"]), SCIDFBrowserJoined(model[@"sources"]), @([model[@"ivars"] count])];
-        return [self configuredCellForIndexPath:ip model:m badge:(ip.section == 5 ? @"SET" : @"LIVE") emphasized:(ip.section == 4)];
-    }
-    if (ip.section == 6) {
-        NSMutableDictionary *m = [model mutableCopy];
-        BOOL replay = [model[@"canReplayLauncherOverride"] boolValue];
-        m[@"title"] = [NSString stringWithFormat:@"%@ %@", replay ? @"Replayable" : @"Snapshot", model[@"source"] ?: @""];
-        m[@"subtitle"] = [NSString stringWithFormat:@"launcher %@ · parameter %@ · value %@ · item %@", model[@"launcher"] ?: @"?", model[@"parameter"] ?: @"?", model[@"value"] ?: @"?", model[@"itemClass"] ?: @""];
-        return [self configuredCellForIndexPath:ip model:m badge:@"SAVE" emphasized:replay];
-    }
-    if (ip.section == 7) {
-        NSMutableDictionary *m = [model mutableCopy];
-        NSArray *tags = [model[@"tags"] isKindOfClass:NSArray.class] ? model[@"tags"] : @[];
-        m[@"title"] = [NSString stringWithFormat:@"%@%@ %@", tags.count ? [[tags componentsJoinedByString:@", "] stringByAppendingString:@" · "] : @"", model[@"paramID"] ?: @"", model[@"type"] ?: @""];
-        m[@"subtitle"] = [NSString stringWithFormat:@"count %@ · value %@ · %@", model[@"count"] ?: @0, model[@"returned"] ?: @"", model[@"map"] ?: @""];
-        return [self configuredCellForIndexPath:ip model:m badge:@"MC" emphasized:NO];
-    }
-    if (ip.section == 8) {
-        NSMutableDictionary *m = [model mutableCopy];
-        m[@"title"] = [NSString stringWithFormat:@"%@ · %@", model[@"action"] ?: @"", model[@"status"] ?: @""];
-        m[@"subtitle"] = model[@"detail"] ?: @"";
-        return [self configuredCellForIndexPath:ip model:m badge:@"LOG" emphasized:NO];
-    }
-    return [self configuredCellForIndexPath:ip model:model badge:nil emphasized:NO];
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tableView deselectRowAtIndexPath:ip animated:YES];
-    NSDictionary *model = [self modelForIndexPath:ip];
-    if (!model) return;
-    if (ip.section == 1 || ip.section == 2) {
-        NSString *action = model[@"action"];
-        if ([self performAction:action model:model]) return;
-    }
-    [self presentDetailsForModel:model section:ip.section];
-}
-
-- (BOOL)performAction:(NSString *)action model:(NSDictionary *)model {
-    if (!action.length) return NO;
-    if ([action isEqualToString:@"openNative"]) {
-        if (![SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings]) [self showNativeFailure];
-        [self refreshRuntimeStateOnly];
-        return YES;
-    }
-    if ([action isEqualToString:@"openNotes"]) {
-        NSError *err = nil;
-        if (![SCIInternalActions openNotesDogfoodSettings:&err]) {
-            NSString *msg = err.localizedDescription ?: @"Notes dogfooding unavailable.";
-            [SCIDogfoodObjectRuntime noteAction:@"Open Notes Dogfooding" status:@"failed" detail:msg];
-            [SCIUtils showErrorHUDWithDescription:msg];
-        } else {
-            [SCIDogfoodObjectRuntime noteAction:@"Open Notes Dogfooding" status:@"sent native opener" detail:nil];
-        }
-        [self refreshRuntimeStateOnly];
-        return YES;
-    }
-    if ([action isEqualToString:@"export"]) { [self exportSnapshot]; return YES; }
-    if ([action isEqualToString:@"toggleCapture"]) { [self toggleCapturePreference]; return YES; }
-    if ([action isEqualToString:@"toggleDeep"]) { [self toggleDeepCallerSymbols]; return YES; }
-    if ([action isEqualToString:@"bloksOn"]) { [self confirmAutofillAction:@"Force Bloks Experience ON" message:@"Call setForceBloksExperienceOn on the live IGAutofillInternalSettings object?" block:^{ return [SCIInternalActions setBloksForceExperienceState:1 error:NULL]; }]; return YES; }
-    if ([action isEqualToString:@"bloksOff"]) { [self confirmAutofillAction:@"Force Bloks Experience OFF" message:@"Call setForceBloksExperienceOff on the live IGAutofillInternalSettings object?" block:^{ return [SCIInternalActions setBloksForceExperienceState:0 error:NULL]; }]; return YES; }
-    if ([action isEqualToString:@"bloksClear"]) { [self confirmAutofillAction:@"Clear forced Bloks Experience" message:@"Call clearForceBloksExperience and return to native/default selection?" block:^{ return [SCIInternalActions setBloksForceExperienceState:2 error:NULL]; }]; return YES; }
-    if ([action isEqualToString:@"prefetchOn"]) { [self confirmAutofillAction:@"Enable Bloks Prefetch" message:@"Call setBloksPrefetchEnabledWithEnabled:YES?" block:^{ return [SCIInternalActions setBloksPrefetchEnabled:YES error:NULL]; }]; return YES; }
-    if ([action isEqualToString:@"debugFooterOn"]) { [self confirmAutofillAction:@"Enable Debug Footer" message:@"Call setDebugFooterEnabledWithEnabled:YES?" block:^{ return [SCIInternalActions setDebugFooterEnabled:YES error:NULL]; }]; return YES; }
-    return NO;
-}
-
-- (void)showNativeFailure {
-    NSDictionary *state = [SCIDogfoodObjectRuntime dogfoodNativeState];
-    NSString *msg = [NSString stringWithFormat:@"Native Dogfood Settings is not ready yet.\n\n%@", SCIDFBrowserJSON(state)];
-    [SCIUtils showErrorHUDWithDescription:msg dismissAfterDelay:5.0];
-}
-
-- (void)toggleCapturePreference {
-    BOOL next = ![SCIMobileConfigRuntime runtimeHooksEnabled];
-    [SCIMobileConfigRuntime setRuntimeCaptureActive:next];
-    if (next) SCIInstallMobileConfigRuntimeHooksIfNeeded();
-    [SCIDogfoodObjectRuntime noteAction:@"MobileConfig runtime capture" status:(next ? @"enabled" : @"disabled") detail:nil];
-    [self refreshAll];
-}
-
-- (void)toggleDeepCallerSymbols {
-    BOOL next = ![SCIMobileConfigRuntime deepCallerSymbolsEnabled];
-    [SCIUtils setPref:@(next) forKey:@"sci_mc_runtime_deep_symbols_enabled"];
-    [SCIDogfoodObjectRuntime noteAction:@"Deep caller symbols" status:(next ? @"enabled" : @"disabled") detail:nil];
-    [self refreshAll];
-}
-
-- (void)confirmAutofillAction:(NSString *)title message:(NSString *)message block:(BOOL(^)(void))block {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Run" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
-        BOOL ok = block ? block() : NO;
-        [SCIDogfoodObjectRuntime noteAction:title status:(ok ? @"sent" : @"failed") detail:[SCIInternalActions state]];
-        if (ok) [SCIUtils showToastForDuration:1.2 title:@"Sent" subtitle:title];
-        else [SCIUtils showErrorHUDWithDescription:@"Action failed. Open Logs for the last runtime error."];
-        [self refreshRuntimeStateOnly];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
-}
-
-- (void)presentDetailsForModel:(NSDictionary *)model section:(NSInteger)section {
-    id detail = model[@"object"] ?: model;
-    NSString *title = model[@"title"] ?: model[@"display"] ?: model[@"class"] ?: @"Details";
-    if (section == 3) {
-        NSString *cls = model[@"class"] ?: @"";
-        NSDictionary *rich = [SCIDogfoodObjectRuntime detailsForRuntimeStubClass:cls];
-        if (rich.count) detail = rich;
-        if (cls.length) title = cls;
-    } else if (section == 4 || section == 5) {
-        NSString *addr = model[@"address"] ?: @"";
-        NSDictionary *rich = [SCIDogfoodObjectRuntime detailsForObjectAddress:addr];
-        if (rich.count) detail = rich;
-        title = model[@"class"] ?: title;
-    }
-    SCIDogfoodJSONDetailViewController *vc = [[SCIDogfoodJSONDetailViewController alloc] initWithTitle:title object:detail];
-    [self.navigationController pushViewController:vc animated:YES];
-}
-
-- (void)exportSnapshot {
-    NSDictionary *snapshot = @{
-        @"dogfoodObjectRuntime": [SCIDogfoodObjectRuntime fullSnapshotIncludingDetails:NO] ?: @{},
-        @"nativeState": [SCIDogfoodObjectRuntime dogfoodNativeState] ?: @{},
-        @"autofillInternalState": [SCIInternalActions state] ?: @{},
-        @"runtimeStubs": self.stubs ?: @[],
-        @"notesDogfoodingPersistence": self.notesChanges ?: @[],
-        @"mobileConfigReads": self.params ?: @[],
-        @"launcherOverrides": [SCILauncherOverride allOverrides] ?: @{},
-        @"recentActions": [SCIDogfoodObjectRuntime recentActions] ?: @[]
-    };
-    UIPasteboard.generalPasteboard.string = SCIDFBrowserJSON(snapshot);
-    [SCIDogfoodObjectRuntime noteAction:@"Copy Dogfood Browser snapshot" status:@"copied" detail:nil];
-    [SCIUtils showToastForDuration:1.2 title:@"Copied" subtitle:@"Runtime snapshot copied as JSON"];
-    [self refreshRuntimeStateOnly];
-}
+- (void)exportSnapshot { NSDictionary *snap=@{@"dogfoodObjectRuntime":[SCIDogfoodObjectRuntime fullSnapshotIncludingDetails:NO]?:@{}, @"nativeState":[SCIDogfoodObjectRuntime dogfoodNativeState]?:@{}, @"autofill":[SCIInternalActions state]?:@{}, @"nativeOverrideSymbols":[SCIMobileConfigNativeOverrides symbolStatus]?:@{}, @"recentActions":[SCIDogfoodObjectRuntime recentActions]?:@[]}; UIPasteboard.generalPasteboard.string=SCIDFJSON(snap); [SCIDogfoodObjectRuntime noteAction:@"Copy Dogfood Browser snapshot" status:@"copied" detail:nil]; [SCIUtils showToastForDuration:1.2 title:@"Snapshot copiado" subtitle:nil]; }
 
 @end
