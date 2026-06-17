@@ -10,12 +10,13 @@
 // MobileConfig} units, all gated so nothing heavy runs during launch.
 
 #import "SCISettingsSections.h"
+#import <objc/runtime.h>
+#import <objc/message.h>
 #import "../SCIDogfoodBrowserViewController.h"
 #import "../SCIInternalActionsViewController.h"
 #import "../SCISymbolBrowserViewController.h"
 #import "../SCISymbolsBrowserViewController.h"
 #import "../SCIIGDSLauncherConfigViewController.h"
-#import "../SCIExpFlagsViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
@@ -139,7 +140,35 @@
 														if(top)[top presentViewController:a animated:YES completion:nil];
 													}
 												],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Show Internal Settings menu") subtitle:SCILocalized(@"Forces showInternalSettings=YES in IGBugReportMenuViewController (shake-to-report menu). Shake device to open it.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:NO],
+												[SCISetting buttonCellWithTitle:SCILocalized(@"Open MetaLocalExperiment (native)")
+											   subtitle:SCILocalized(@"Abre o MetaLocalExperimentListViewController nativo do Instagram para inspecionar/forçar grupos de experimentos locais.")
+											       icon:[SCISymbol symbolWithIGName:@"flask" fallback:@"flask"]
+											     action:^(void) {
+												Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
+												UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
+												UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
+												if (!cls) { UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Indisponível") message:SCILocalized(@"MetaLocalExperimentListViewController não está presente nesta versão.") preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; return; }
+												// Coletar os configs que conformam ao MetaLocalExperimentConfigProtocol e o gerador nativo, igual o IG faz internamente.
+												NSMutableArray *configs = [NSMutableArray array];
+												Protocol *p = objc_getProtocol("MetaLocalExperimentConfigProtocol");
+												if (p) { unsigned int n=0; Class *all=objc_copyClassList(&n); for(unsigned int i=0;i<n;i++){ if(class_conformsToProtocol(all[i],p)){ @try{ id x=[[all[i] alloc] init]; if(x)[configs addObject:x]; }@catch(__unused id e){} } } if(all) free(all); }
+												id generator = nil;
+												Class gc = NSClassFromString(@"LIDExperimentGenerator");
+												SEL gs = NSSelectorFromString(@"initWithDeviceID:logger:");
+												if (gc && [gc instancesRespondToSelector:gs]) { id(*snd)(id,SEL,id,id)=(id(*)(id,SEL,id,id))objc_msgSend; @try{ generator=snd([gc alloc],gs,nil,nil); }@catch(__unused id e){} }
+												UIViewController *vc=nil;
+												SEL initSel = NSSelectorFromString(@"initWithExperimentConfigs:experimentGenerator:");
+												@try {
+													if ([cls instancesRespondToSelector:initSel]) { id(*snd)(id,SEL,id,id)=(id(*)(id,SEL,id,id))objc_msgSend; vc=snd([cls alloc],initSel,configs,generator); }
+													else { vc=[[cls alloc] init]; }
+												} @catch(__unused id e) {}
+												if (!vc) { UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"Falhou") message:SCILocalized(@"Não foi possível inicializar o browser nativo.") preferredStyle:UIAlertControllerStyleAlert]; [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]]; if(top)[top presentViewController:a animated:YES completion:nil]; return; }
+												UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:vc];
+												nav.modalPresentationStyle=UIModalPresentationFullScreen;
+												if(top)[top presentViewController:nav animated:YES completion:nil];
+											}
+										],
+										[SCISetting switchCellWithTitle:SCILocalized(@"Show Internal Settings menu") subtitle:SCILocalized(@"Forces showInternalSettings=YES in IGBugReportMenuViewController (shake-to-report menu). Shake device to open it.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"└ also when logged out") subtitle:SCILocalized(@"Also forces showLoggedOutInternalSettings=YES") defaultsKey:@"sci_force_internal_settings_loggedout" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Auto-apply on launch (native)") subtitle:SCILocalized(@"Re-applies a few seconds after login") defaultsKey:@"sci_apply_internal_native" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Enable debug footer") subtitle:SCILocalized(@"Gateway to internal/debug menus (applied by the button above)") defaultsKey:@"sci_apply_internal_native" requiresRestart:YES],
@@ -225,7 +254,6 @@
 							viewController:[SCIIGDSLauncherConfigViewController new]],
 					[SCISetting navigationCellWithTitle:SCILocalized(@"Dogfood & Internal Browser") subtitle:SCILocalized(@"Runtime stubs, live IGUserSession objects, dogfood actions and native internal setters") icon:[SCISymbol symbolWithName:@"pawprint"] viewController:[SCIDogfoodBrowserViewController new]],
 					[SCISetting navigationCellWithTitle:SCILocalized(@"Internal Actions") subtitle:SCILocalized(@"Live IGUserSession actions, IGFacebookUserInfo.isEmployee, Notes dogfood and native Autofill setters") icon:[SCISymbol symbolWithName:@"switch.2"] viewController:[SCIInternalActionsViewController new]],
-					[SCISetting navigationCellWithTitle:SCILocalized(@"Experiment Flags (MetaLocalExperiment)") subtitle:SCILocalized(@"Override de grupos de MetaLocalExperiment (match por substring do nome) e observação ao vivo de experimentos/MobileConfig. Requer 'sci_exp_flags_enabled'.") icon:[SCISymbol symbolWithName:@"flask"] viewController:[SCIExpFlagsViewController new]],
 											]
 						}
 				]];
