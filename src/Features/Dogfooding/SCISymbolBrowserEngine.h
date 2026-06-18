@@ -50,6 +50,7 @@ typedef NS_ENUM(NSInteger, SCISymbolImage) {
 
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
 + (BOOL)hookInstalledForKey:(NSString *)overrideKey;
++ (BOOL)installOverrideForKey:(NSString *)overrideKey;
 
 + (void)setOverride:(nullable NSNumber *)value
 		   forClass:(NSString *)className
