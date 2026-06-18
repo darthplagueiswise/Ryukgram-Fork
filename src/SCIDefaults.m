@@ -434,6 +434,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		// ── Dev menu (gates / internal / IGDS / wordmark) ─────────────────
 		@"sci_symbol_overrides": @{},
 		@"sci_csym_stub_overrides": @{},
+		@"sci_csym_stub_typed_overrides": @{},
 		@"sci_csym_stub_observe": @{},
 		@"sci_csym_stub_install_at_launch": @NO,
 		@"sci_apply_bloks_prefetch": @(NO),

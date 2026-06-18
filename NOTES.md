@@ -92,3 +92,11 @@
 - Removed the Disable instants creation toggle — Instagram has its own option to hide Instants
 - Removed the Auto-scroll reels toggle — Instagram now has this natively
 - Locked, hidden, and excluded chat lists now show real profile pictures, including group chat photos
+
+## v32 ABI runtime browser correction
+
+- Restored actual runtime hook actions in the C function browser.
+- Added typed force support for validated int64/int32, double, and string/pointer C readers.
+- Added observe-only action hooks for registration/update actions.
+- Browser rows now show forced typed values and expose typed force from tap/context menu.
+- DATA/param descriptors remain separated from function hooks; they must be routed through the consuming reader.

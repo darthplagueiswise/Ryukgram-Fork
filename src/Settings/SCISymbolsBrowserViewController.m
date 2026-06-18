@@ -414,7 +414,7 @@ static char kSCICSymbolRowPayloadKey;
 }
 
 - (BOOL)entryMatchesDefaultFilters:(SCICSymbolEntry *)e {
-    if ([SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
+    if ([SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
     for (NSString *f in SCICDefaultFiltersForMode(_mode)) if ([e.name.lowercaseString containsString:f.lowercaseString] || [e.abi.lowercaseString containsString:f.lowercaseString]) return YES;
     return NO;
 }
@@ -425,7 +425,11 @@ static char kSCICSymbolRowPayloadKey;
     [bits addObject:e.section ?: @"section?"];
     [bits addObject:e.kind ?: @"kind?"];
     if (e.resolvable) [bits addObject:@"dlsym OK"];
-    if (e.function && [SCICSymbolStub isForceableSymbol:e.name]) [bits addObject:@"BOOL hardstub allowed"];
+    NSDictionary *typed = [SCICSymbolStub typedForceForSymbol:e.name];
+    if ([SCICSymbolStub forceForSymbol:e.name] != nil) [bits addObject:@"BOOL forced"];
+    else if (typed) [bits addObject:[NSString stringWithFormat:@"%@ forced %@", typed[@"kind"] ?: @"typed", typed[@"value"] ?: @""]];
+    else if (e.function && [SCICSymbolStub isForceableSymbol:e.name]) [bits addObject:@"BOOL hardstub allowed"];
+    else if (e.function && [SCICSymbolStub isTypedForceableSymbol:e.name]) [bits addObject:[NSString stringWithFormat:@"%@ force allowed", [SCICSymbolStub returnKindForSymbol:e.name] ?: @"typed"]];
     else [bits addObject:e.abi ?: @"ABI unknown"];
     return [bits componentsJoinedByString:@" · "];
 }
@@ -439,6 +443,35 @@ static char kSCICSymbolRowPayloadKey;
     [self.navigationController pushViewController:[[SCICRealtimeDetailViewController alloc] initWithEntry:entry] animated:YES];
 }
 
+
+- (void)promptTypedForceForEntry:(SCICSymbolEntry *)entry {
+    NSString *kind = [SCICSymbolStub returnKindForSymbol:entry.name] ?: @"unknown";
+    if (![SCICSymbolStub isTypedForceableSymbol:entry.name]) return;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Force %@", kind]
+                                                                 message:entry.name
+                                                          preferredStyle:UIAlertControllerStyleAlert];
+    NSString *placeholder = [kind isEqualToString:@"double"] ? @"1.0" : ([kind isEqualToString:@"string"] ? @"forced" : @"1");
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = placeholder;
+        NSDictionary *cur = [SCICSymbolStub typedForceForSymbol:entry.name];
+        id v = cur[@"value"];
+        tf.text = v ? [v description] : placeholder;
+        tf.clearButtonMode = UITextFieldViewModeWhileEditing;
+        if ([kind isEqualToString:@"int64"] || [kind isEqualToString:@"double"]) tf.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+    }];
+    __weak typeof(self) weakSelf = self;
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+        NSString *text = a.textFields.firstObject.text ?: @"";
+        id value = text;
+        if ([kind isEqualToString:@"int64"]) value = @([text longLongValue]);
+        else if ([kind isEqualToString:@"double"]) value = @([text doubleValue]);
+        [SCICSymbolStub setTypedForceValue:value returnKind:kind forSymbol:entry.name];
+        [weakSelf rebuildSections];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
 - (void)presentActionsForEntry:(SCICSymbolEntry *)entry {
     if (!entry) return;
     UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.name message:[self detailForEntry:entry] preferredStyle:UIAlertControllerStyleActionSheet];
@@ -446,9 +479,18 @@ static char kSCICSymbolRowPayloadKey;
     [a addAction:[UIAlertAction actionWithTitle:@"Realtime resolve/disassemble" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf pushRealtimeDetailForEntry:entry]; }]];
     if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL YES (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-        [a addAction:[UIAlertAction actionWithTitle:@"Clear force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL NO (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:@NO forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Observe only" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Clear BOOL force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+    } else if (entry.function && [SCICSymbolStub isTypedForceableSymbol:entry.name]) {
+        NSString *kind = [SCICSymbolStub returnKindForSymbol:entry.name] ?: @"typed";
+        [a addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Force %@ value…", kind] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf promptTypedForceForEntry:entry]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Observe only" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Clear typed force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setTypedForceValue:nil returnKind:kind forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+    } else if (entry.function && [SCICSymbolStub isHookableSymbol:entry.name]) {
+        [a addAction:[UIAlertAction actionWithTitle:@"Observe action/function" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
     } else {
-        UIAlertAction *blocked = [UIAlertAction actionWithTitle:@"No BOOL stub: see ABI/Hook plan" style:UIAlertActionStyleDefault handler:nil];
+        UIAlertAction *blocked = [UIAlertAction actionWithTitle:@"No safe runtime hook: see ABI/Hook plan" style:UIAlertActionStyleDefault handler:nil];
         blocked.enabled = NO;
         [a addAction:blocked];
     }
@@ -478,7 +520,7 @@ static char kSCICSymbolRowPayloadKey;
         objc_setAssociatedObject(row, &kSCICSymbolRowPayloadKey, e, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         if ([e.image isEqualToString:@"Instagram"]) [igRows addObject:row]; else [fbRows addObject:row];
     }
-    NSString *footer = @"Modes are separated: C functions, DATA/param descriptors, and Swift/direct-dispatch symbols. ObjC method browsing remains in the Instagram/FBShared ObjC browsers. Only validated BOOL functions get hardstub toggles; typed int/double/string/action symbols show ABI plan instead of fake BOOL switches.";
+    NSString *footer = @"Modes are separated: C functions, DATA/param descriptors, and Swift/direct-dispatch symbols. ObjC method browsing remains in the Instagram/FBShared ObjC browsers. Validated BOOL functions get hardstub toggles; validated int64/double/string readers get typed runtime force; actions get observe-only unless arguments are mounted by a dedicated button.";
     if (!igRows.count) [igRows addObject:[SCIBaseSettingsRow rowWithTitle:@"No Instagram symbols" subtitle:@"Search another term or switch browser mode." action:nil]];
     if (!fbRows.count) [fbRows addObject:[SCIBaseSettingsRow rowWithTitle:@"No FBShared symbols" subtitle:@"Search another term or switch browser mode." action:nil]];
     self.sections = @[
@@ -499,7 +541,13 @@ static char kSCICSymbolRowPayloadKey;
         [items addObject:[UIAction actionWithTitle:@"Realtime resolve/disassemble" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf pushRealtimeDetailForEntry:entry]; }]];
         if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
             [items addObject:[UIAction actionWithTitle:@"Force BOOL YES (hardstub)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-            [items addObject:[UIAction actionWithTitle:@"Clear force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear BOOL force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        } else if (entry.function && [SCICSymbolStub isTypedForceableSymbol:entry.name]) {
+            NSString *kind = [SCICSymbolStub returnKindForSymbol:entry.name] ?: @"typed";
+            [items addObject:[UIAction actionWithTitle:[NSString stringWithFormat:@"Force %@ value…", kind] image:[UIImage systemImageNamed:@"number"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf promptTypedForceForEntry:entry]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear typed force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setTypedForceValue:nil returnKind:kind forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        } else if (entry.function && [SCICSymbolStub isHookableSymbol:entry.name]) {
+            [items addObject:[UIAction actionWithTitle:@"Observe action/function" image:[UIImage systemImageNamed:@"eye"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         }
         [items addObject:[UIAction actionWithTitle:@"Copy symbol" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = entry.name ?: @""; }]];
         [items addObject:[UIAction actionWithTitle:@"Copy ABI report" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = [weakSelf detailForEntry:entry]; }]];
