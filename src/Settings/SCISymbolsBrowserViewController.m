@@ -421,7 +421,7 @@ static BOOL SCICParamLikeDataName(NSString *name) {
     [actions addObject:[SCIBaseSettingsRow rowWithTitle:@"Full resolver report" subtitle:@"Open copyable xref/import/strategy report." action:^(__unused UIViewController *vc){
         [weakSelf.navigationController pushViewController:[[SCICPatchReportViewController alloc] initWithReport:[SCICRuntimePatchResolver reportForPlan:weakSelf.plan] title:@"Patch report"] animated:YES];
     }]];
-    if ([SCICRuntimePatchResolver persistedPatchForSymbol:self.entry.name] || [SCICSymbolBrowserEngine overrideForKey:[NSString stringWithFormat:@"%@%@#%@", self.entry.objcClassMethod?@"+":@"", self.entry.objcClassName?:@"", self.entry.objcSelectorName?:@""]] != nil || [SCICSymbolStub hookInstalledForSymbol:self.entry.name]) {
+    if ([SCICRuntimePatchResolver persistedPatchForSymbol:self.entry.name] || [SCISymbolBrowserEngine overrideForKey:[NSString stringWithFormat:@"%@%@#%@", self.entry.objcClassMethod?@"+":@"", self.entry.objcClassName?:@"", self.entry.objcSelectorName?:@""]] != nil || [SCICSymbolStub hookInstalledForSymbol:self.entry.name]) {
         [actions addObject:[SCIBaseSettingsRow destructiveRowWithTitle:@"Revert / clear patch" subtitle:@"Remove persisted plan and restore original bytes when available." action:^(__unused UIViewController *vc){ [weakSelf clearNow]; }]];
     }
 
