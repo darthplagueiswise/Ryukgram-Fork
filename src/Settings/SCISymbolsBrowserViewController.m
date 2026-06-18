@@ -65,6 +65,165 @@ static NSString *SCICImageShortName(NSString *path) {
     return path.lastPathComponent ?: @"Image";
 }
 
+
+static BOOL SCICRuntimeResolveSymbol(NSString *name, void **addrOut) {
+    if (!name.length) return NO;
+    void *p = dlsym(RTLD_DEFAULT, name.UTF8String);
+    if (!p) p = dlsym(RTLD_DEFAULT, [[@"_" stringByAppendingString:name] UTF8String]);
+    if (addrOut) *addrOut = p;
+    return p != NULL;
+}
+
+static NSString *SCICImageForAddress(uintptr_t address) {
+    if (!address) return @"unknown";
+    Dl_info info = {0};
+    if (dladdr((void *)address, &info) && info.dli_fname) {
+        NSString *path = [NSString stringWithUTF8String:info.dli_fname];
+        return path.lastPathComponent ?: path;
+    }
+    return @"unknown";
+}
+
+static NSData *SCICBytesAtAddress(uintptr_t address, NSUInteger maxLen) {
+    if (!address || !maxLen) return nil;
+    @try {
+        return [NSData dataWithBytes:(const void *)address length:maxLen];
+    } @catch (__unused id ex) {
+        return nil;
+    }
+}
+
+static NSString *SCICHexDump(NSData *data, uintptr_t address) {
+    if (!data.length) return @"<unavailable>";
+    const uint8_t *b = data.bytes;
+    NSMutableString *out = [NSMutableString string];
+    for (NSUInteger i = 0; i < data.length; i += 4) {
+        uint32_t word = 0;
+        NSUInteger n = MIN((NSUInteger)4, data.length - i);
+        memcpy(&word, b + i, n);
+        [out appendFormat:@"0x%llx  %08x\n", (unsigned long long)(address + i), word];
+    }
+    return out.copy;
+}
+
+static int64_t SCICSignExtend(int64_t v, unsigned bits) {
+    int64_t m = 1LL << (bits - 1);
+    return (v ^ m) - m;
+}
+
+static NSString *SCICRegisterName(unsigned r, BOOL wide) {
+    if (r == 31) return wide ? @"xzr/sp" : @"wzr/wsp";
+    return [NSString stringWithFormat:@"%@%u", wide ? @"x" : @"w", r];
+}
+
+static NSString *SCICDecodeARM64(uint32_t insn, uintptr_t pc) {
+    if (insn == 0xd503245f) return @"bti c";
+    if (insn == 0xd503201f) return @"nop";
+    if (insn == 0xd65f03c0) return @"ret";
+    if ((insn & 0x7f800000) == 0x52800000) {
+        unsigned rd = insn & 31;
+        unsigned imm = (insn >> 5) & 0xffff;
+        unsigned hw = (insn >> 21) & 3;
+        return [NSString stringWithFormat:@"movz %@, #0x%x, lsl #%u", SCICRegisterName(rd, NO), imm, hw * 16];
+    }
+    if ((insn & 0xfc000000) == 0x94000000) {
+        int64_t imm = SCICSignExtend((int64_t)(insn & 0x03ffffff), 26) << 2;
+        return [NSString stringWithFormat:@"bl 0x%llx", (unsigned long long)(pc + imm)];
+    }
+    if ((insn & 0xfc000000) == 0x14000000) {
+        int64_t imm = SCICSignExtend((int64_t)(insn & 0x03ffffff), 26) << 2;
+        return [NSString stringWithFormat:@"b 0x%llx", (unsigned long long)(pc + imm)];
+    }
+    if ((insn & 0x9f000000) == 0x90000000) {
+        unsigned rd = insn & 31;
+        return [NSString stringWithFormat:@"adrp %@, <page>", SCICRegisterName(rd, YES)];
+    }
+    if ((insn & 0xffc00000) == 0x91000000) {
+        unsigned rd = insn & 31, rn = (insn >> 5) & 31, imm = (insn >> 10) & 0xfff;
+        return [NSString stringWithFormat:@"add %@, %@, #0x%x", SCICRegisterName(rd, YES), SCICRegisterName(rn, YES), imm];
+    }
+    if ((insn & 0xffc00000) == 0xb9400000) {
+        unsigned rt = insn & 31, rn = (insn >> 5) & 31, imm = ((insn >> 10) & 0xfff) << 2;
+        return [NSString stringWithFormat:@"ldr %@, [%@,#0x%x]", SCICRegisterName(rt, NO), SCICRegisterName(rn, YES), imm];
+    }
+    if ((insn & 0xffc00000) == 0xf9400000) {
+        unsigned rt = insn & 31, rn = (insn >> 5) & 31, imm = ((insn >> 10) & 0xfff) << 3;
+        return [NSString stringWithFormat:@"ldr %@, [%@,#0x%x]", SCICRegisterName(rt, YES), SCICRegisterName(rn, YES), imm];
+    }
+    if ((insn & 0xfffffc00) == 0xaa0003e0) {
+        unsigned rd = insn & 31, rn = (insn >> 16) & 31;
+        return [NSString stringWithFormat:@"mov %@, %@", SCICRegisterName(rd, YES), SCICRegisterName(rn, YES)];
+    }
+    return @"<decode pending>";
+}
+
+static NSString *SCICDisassembleCommonARM64(uintptr_t address, NSUInteger instructionCount) {
+    NSData *data = SCICBytesAtAddress(address, instructionCount * 4);
+    if (!data.length) return @"<bytes unavailable>";
+    const uint8_t *b = data.bytes;
+    NSMutableString *out = [NSMutableString string];
+    for (NSUInteger i = 0; i + 4 <= data.length; i += 4) {
+        uint32_t word = 0;
+        memcpy(&word, b + i, 4);
+        uintptr_t pc = address + i;
+        [out appendFormat:@"0x%llx  %08x  %@\n", (unsigned long long)pc, word, SCICDecodeARM64(word, pc)];
+    }
+    return out.copy;
+}
+
+@interface SCICRealtimeDetailViewController : UIViewController
+@property (nonatomic, strong) SCICSymbolEntry *entry;
+@end
+
+@implementation SCICRealtimeDetailViewController
+- (instancetype)initWithEntry:(SCICSymbolEntry *)entry { if ((self=[super initWithNibName:nil bundle:nil])) { _entry=entry; self.title=@"Realtime"; } return self; }
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    SCIUIKit26ConfigureViewController(self);
+    SCIConfigureNavigationChromeForGlass(self);
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshNow)];
+    [self refreshNow];
+}
+- (void)refreshNow {
+    for (UIView *v in self.view.subviews) [v removeFromSuperview];
+    void *runtime = NULL;
+    BOOL dlsymOK = SCICRuntimeResolveSymbol(self.entry.name, &runtime);
+    uintptr_t addr = runtime ? (uintptr_t)runtime : self.entry.address;
+    NSString *resolvedImage = SCICImageForAddress(addr);
+    NSMutableString *text = [NSMutableString string];
+    [text appendFormat:@"%@\n\n", self.entry.name ?: @""];
+    [text appendFormat:@"Mode: %@\nImage(enum): %@\nImage(runtime): %@\nSection: %@\nKind: %@\n", self.entry.swiftLike?@"Swift/C++":(self.entry.function?@"C function":@"DATA"), self.entry.image?:@"", resolvedImage, self.entry.section?:@"", self.entry.kind?:@""];
+    [text appendFormat:@"Symbol table addr: 0x%llx\ndlsym: %@%@\n\n", (unsigned long long)self.entry.address, dlsymOK?@"YES":@"NO", dlsymOK?[NSString stringWithFormat:@" (0x%llx)", (unsigned long long)addr]:@""];
+    [text appendFormat:@"ABI\n%@\n\nHook plan\n%@\n\n", self.entry.abi?:@"", self.entry.hookPlan?:@""];
+    if (self.entry.function && addr) {
+        [text appendString:@"Realtime ARM64 decode (common patterns)\n"];
+        [text appendString:SCICDisassembleCommonARM64(addr, 12)];
+        [text appendString:@"\nRaw bytes\n"];
+        [text appendString:SCICHexDump(SCICBytesAtAddress(addr, 48), addr)];
+    } else if (addr) {
+        [text appendString:@"DATA bytes\n"];
+        [text appendString:SCICHexDump(SCICBytesAtAddress(addr, 32), addr)];
+    }
+    UITextView *tv = [UITextView new];
+    tv.translatesAutoresizingMaskIntoConstraints = NO;
+    tv.editable = NO;
+    tv.selectable = YES;
+    tv.alwaysBounceVertical = YES;
+    tv.backgroundColor = UIColor.clearColor;
+    tv.textColor = UIColor.labelColor;
+    tv.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
+    tv.textContainerInset = UIEdgeInsetsMake(14, 14, 24, 14);
+    tv.text = text;
+    [self.view addSubview:tv];
+    [NSLayoutConstraint activateConstraints:@[
+        [tv.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [tv.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [tv.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [tv.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    ]];
+}
+@end
+
 static BOOL SCICNameLooksSwiftOrCXX(NSString *name) {
     if (![name isKindOfClass:NSString.class]) return NO;
     return [name hasPrefix:@"$s"] || [name hasPrefix:@"$S"] || [name hasPrefix:@"_T"] || [name hasPrefix:@"_Z"] || [name hasPrefix:@"__Z"] || [name containsString:@"Swift"];
@@ -200,10 +359,24 @@ static char kSCICSymbolRowPayloadKey;
     SCIUIKit26ConfigureSearchBar(sc.searchBar);
     self.navigationItem.searchController = sc;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshRuntimeSymbols)];
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.center = self.view.center;
     _spinner.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin|UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;
     [self.view addSubview:_spinner];
+    [_spinner startAnimating];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSArray *symbols = SCICEnumerateInstagramAndFBSharedSymbols();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_allSymbols = symbols;
+            [self->_spinner stopAnimating];
+            [self rebuildSections];
+        });
+    });
+}
+
+
+- (void)refreshRuntimeSymbols {
     [_spinner startAnimating];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSArray *symbols = SCICEnumerateInstagramAndFBSharedSymbols();
@@ -261,10 +434,16 @@ static char kSCICSymbolRowPayloadKey;
     return [NSString stringWithFormat:@"%@\n\nImage: %@\nSection: %@\nAddress: 0x%llx\nKind: %@\nResolvable: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.section?:@"", (unsigned long long)e.address, e.kind?:@"", e.resolvable?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
 }
 
+- (void)pushRealtimeDetailForEntry:(SCICSymbolEntry *)entry {
+    if (!entry) return;
+    [self.navigationController pushViewController:[[SCICRealtimeDetailViewController alloc] initWithEntry:entry] animated:YES];
+}
+
 - (void)presentActionsForEntry:(SCICSymbolEntry *)entry {
     if (!entry) return;
     UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.name message:[self detailForEntry:entry] preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
+    [a addAction:[UIAlertAction actionWithTitle:@"Realtime resolve/disassemble" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf pushRealtimeDetailForEntry:entry]; }]];
     if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL YES (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Clear force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
@@ -294,7 +473,7 @@ static char kSCICSymbolRowPayloadKey;
         if (tokens.count) { if (![self entry:e matchesTokens:tokens]) continue; }
         else if (![self entryMatchesDefaultFilters:e]) continue;
         if (shown++ >= limit) break;
-        SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:e.name subtitle:nil action:^(__unused UIViewController *vc){ [self presentActionsForEntry:e]; }];
+        SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:e.name subtitle:nil action:^(__unused UIViewController *vc){ [self pushRealtimeDetailForEntry:e]; }];
         row.dynamicSubtitle = ^NSString *{ return [self subtitleForEntry:e]; };
         objc_setAssociatedObject(row, &kSCICSymbolRowPayloadKey, e, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         if ([e.image isEqualToString:@"Instagram"]) [igRows addObject:row]; else [fbRows addObject:row];
@@ -309,14 +488,34 @@ static char kSCICSymbolRowPayloadKey;
     [self reloadSettings];
 }
 
+
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(__unused CGPoint)point {
+    SCIBaseSettingsRow *row = self.sections[indexPath.section].rows[indexPath.row];
+    SCICSymbolEntry *entry = objc_getAssociatedObject(row, &kSCICSymbolRowPayloadKey);
+    if (!entry) return nil;
+    __weak typeof(self) weakSelf = self;
+    return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(__unused NSArray<UIMenuElement *> *suggestedActions) {
+        NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
+        [items addObject:[UIAction actionWithTitle:@"Realtime resolve/disassemble" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf pushRealtimeDetailForEntry:entry]; }]];
+        if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
+            [items addObject:[UIAction actionWithTitle:@"Force BOOL YES (hardstub)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil attributes:UIMenuElementAttributesDestructive handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+        }
+        [items addObject:[UIAction actionWithTitle:@"Copy symbol" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = entry.name ?: @""; }]];
+        [items addObject:[UIAction actionWithTitle:@"Copy ABI report" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = [weakSelf detailForEntry:entry]; }]];
+        return [UIMenu menuWithTitle:entry.name ?: @"Symbol" children:items];
+    }];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [super tableView:tableView cellForRowAtIndexPath:indexPath];
     UIListContentConfiguration *cfg = (UIListContentConfiguration *)cell.contentConfiguration;
-    cfg.textProperties.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
+    cfg.textProperties.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightRegular];
     cfg.textProperties.numberOfLines = 2;
-    cfg.secondaryTextProperties.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightRegular];
-    cfg.secondaryTextProperties.numberOfLines = 4;
+    cfg.secondaryTextProperties.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightRegular];
+    cfg.secondaryTextProperties.numberOfLines = 3;
     cell.contentConfiguration = cfg;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
 
