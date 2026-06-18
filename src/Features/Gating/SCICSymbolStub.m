@@ -67,20 +67,6 @@ static BOOL SCIParamDescriptorSymbolKnown(NSString *name) {
     return [SCIParamDescriptorSymbols() containsObject:name ?: @""];
 }
 
-// A descriptor is forceable if it is in the curated list OR it resolves to a
-// non-null DATA pointer via dlsym (a runtime-confirmed descriptor, e.g. one the
-// xref resolver tied to IGMobileConfigBooleanValueForInternalUse). This is safe
-// to widen because the reader filter matches by the descriptor POINTER against
-// the reader's argument — a symbol that is not actually the consumed descriptor
-// simply never matches, so orig is returned unchanged.
-static BOOL SCIParamDescriptorSymbolForceable(NSString *name) {
-    if (![name isKindOfClass:NSString.class] || !name.length) return NO;
-    if (SCIParamDescriptorSymbolKnown(name)) return YES;
-    if (dlsym(RTLD_DEFAULT, name.UTF8String) != NULL) return YES;
-    NSString *under = [@"_" stringByAppendingString:name];
-    return dlsym(RTLD_DEFAULT, under.UTF8String) != NULL;
-}
-
 typedef struct {
     char name[128];
     void *addr;
@@ -120,7 +106,7 @@ static void SCIParamDescriptorRefreshCache(void) {
 static void SCIParamDescriptorInstallSlotsForPersisted(void) {
     NSDictionary *prefs = SCIParamBoolPref();
     for (NSString *name in prefs.allKeys) {
-        if (!SCIParamDescriptorSymbolForceable(name) || param_slot_for_name(name.UTF8String)) continue;
+        if (!SCIParamDescriptorSymbolKnown(name) || param_slot_for_name(name.UTF8String)) continue;
         if (g_param_slot_count >= MAX_PARAM_DESCRIPTOR_STUBS) break;
         SCIParamDescriptorSlot *slot = &g_param_slots[g_param_slot_count++];
         memset(slot, 0, sizeof(*slot));
@@ -140,11 +126,11 @@ static int SCIParamDescriptorForcedValueForMobileConfigBoolArgs(void *a0, void *
     SCIParamDescriptorInstallSlotsForPersisted();
     SCIParamDescriptorRefreshCache();
     for (int i = 0; i < g_param_slot_count; i++) {
-        if (!g_param_slots[i].addr) continue;
+        int f = atomic_load(&g_param_slots[i].force);
+        if (f < 0 || !g_param_slots[i].addr) continue;
         if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) {
-            atomic_fetch_add(&g_param_slots[i].hits, 1);   // count match even when only observing
-            int f = atomic_load(&g_param_slots[i].force);
-            return f;                                       // f>=0 forces; f<0 = observe (passthrough)
+            atomic_fetch_add(&g_param_slots[i].hits, 1);
+            return f;
         }
     }
     return -1;
@@ -415,10 +401,9 @@ static void SCIStubRefreshCache(void) {
 
 
 + (BOOL)isParamDescriptorSymbol:(NSString *)name { return SCIParamDescriptorSymbolKnown(name); }
-+ (BOOL)canForceAsParamDescriptor:(NSString *)name { return SCIParamDescriptorSymbolForceable(name); }
 + (NSNumber *)forceForParamDescriptorSymbol:(NSString *)name { id v = SCIParamBoolPref()[name ?: @""]; return [v isKindOfClass:NSNumber.class] ? v : nil; }
 + (BOOL)setParamDescriptorForce:(NSNumber *)value forSymbol:(NSString *)name {
-    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolForceable(name)) return NO;
+    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolKnown(name)) return NO;
     NSMutableDictionary *d = [SCIParamBoolPref() mutableCopy] ?: [NSMutableDictionary dictionary];
     if (value) d[name] = value; else [d removeObjectForKey:name];
     [SCIUtils setPref:d forKey:kParamBoolOverrides];
@@ -432,33 +417,6 @@ static void SCIStubRefreshCache(void) {
     return YES;
 }
 + (NSArray<NSString *> *)forcedParamDescriptorSymbols { return SCIParamBoolPref().allKeys ?: @[]; }
-
-// Observe a descriptor: ensure the boolean reader hook is installed and an
-// in-memory slot exists (force = -1) so the filter counts hits for it without
-// forcing. Session-only; the descriptor pointer must resolve via dlsym.
-+ (BOOL)setParamDescriptorObserve:(BOOL)observe forSymbol:(NSString *)name {
-    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolForceable(name)) return NO;
-    if (observe) {
-        if (![self hookInstalledForSymbol:@"IGMobileConfigBooleanValueForInternalUse"]) [self installStubForSymbol:@"IGMobileConfigBooleanValueForInternalUse"];
-        if (!param_slot_for_name(name.UTF8String) && g_param_slot_count < MAX_PARAM_DESCRIPTOR_STUBS) {
-            SCIParamDescriptorSlot *slot = &g_param_slots[g_param_slot_count++];
-            memset(slot, 0, sizeof(*slot));
-            strncpy(slot->name, name.UTF8String, sizeof(slot->name)-1);
-            atomic_store(&slot->force, -1); // observe only
-        }
-        SCIParamDescriptorRefreshCache();
-    } else {
-        SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
-        if (s && [self forceForParamDescriptorSymbol:name] == nil) atomic_store(&s->force, -1);
-    }
-    return YES;
-}
-
-+ (NSUInteger)paramDescriptorCallCountForSymbol:(NSString *)name {
-    if (![name isKindOfClass:NSString.class] || !name.length) return 0;
-    SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
-    return s ? (NSUInteger)atomic_load(&s->hits) : 0;
-}
 
 
 + (void *)replacementForKind:(SCICReturnKind)kind index:(int)idx { if(idx<0||idx>=MAX_STUBS)return NULL; if(kind==SCICReturnKindBool)return g_bool_repls[idx]; if(kind==SCICReturnKindInt64)return g_i64_repls[idx]; if(kind==SCICReturnKindDouble)return g_double_repls[idx]; if(kind==SCICReturnKindString)return g_ptr_repls[idx]; if(kind==SCICReturnKindAction)return g_action_repls[idx]; return NULL; }

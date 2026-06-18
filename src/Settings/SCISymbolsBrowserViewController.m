@@ -2,7 +2,6 @@
 #import "SCISymbolsBrowserViewController.h"
 #import "../Utils.h"
 #import "../Features/Gating/SCICSymbolStub.h"
-#import "../Features/Gating/SCIRuntimeXrefScanner.h"
 #import "../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
@@ -172,343 +171,58 @@ static NSString *SCICDisassembleCommonARM64(uintptr_t address, NSUInteger instru
     return out.copy;
 }
 
-// ── Realtime resolver + patcher detail screen (v34) ─────────────────────────
 @interface SCICRealtimeDetailViewController : UIViewController
-- (instancetype)initWithEntry:(SCICSymbolEntry *)entry;
-@end
-
-// Interactive: resolves the symbol live (dlsym/dladdr), runs a bounded realtime
-// xref scan to find the consumer/reader, auto-selects the sideload-safe patch
-// strategy, and exposes a working Apply/Revert that drives the SAME persisted
-// install backends used everywhere in the tweak (fishhook BOOL/typed stubs,
-// MobileConfig descriptor reader-filter, ObjC IMP swizzle). No "plan only".
-
-typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
-    SCICPatchStrategyNone = 0,    // no sideload-safe patch (observe only)
-    SCICPatchStrategyObjC,        // MSHookMessageEx via SCISymbolBrowserEngine
-    SCICPatchStrategyBoolStub,    // fishhook hardstub BOOL
-    SCICPatchStrategyTyped,       // fishhook typed force (int64/double/string)
-    SCICPatchStrategyParamDesc,   // reader-filter on IGMobileConfigBooleanValueForInternalUse
-};
-
-@interface SCICRealtimeDetailViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) SCICSymbolEntry *entry;
-@property (nonatomic, strong) UITableView *table;
-@property (nonatomic, assign) uintptr_t resolvedAddr;
-@property (nonatomic, assign) SCICPatchStrategy strategy;
-@property (nonatomic, assign) NSInteger scanState; // 0 idle, 1 scanning, 2 done
-@property (nonatomic, assign) BOOL scanHitBudget;
-@property (nonatomic, assign) BOOL consumerIsBoolReader;
-@property (nonatomic, copy) NSArray<SCIXrefHit *> *xrefHits;
-@property (nonatomic, copy) NSArray<NSArray<NSString *> *> *resolutionRows;
-@property (nonatomic, copy) NSString *disasmText;
 @end
 
 @implementation SCICRealtimeDetailViewController
-
-- (instancetype)initWithEntry:(SCICSymbolEntry *)entry {
-    if ((self = [super initWithNibName:nil bundle:nil])) { _entry = entry; self.title = @"Resolve & Patch"; }
-    return self;
-}
-
+- (instancetype)initWithEntry:(SCICSymbolEntry *)entry { if ((self=[super initWithNibName:nil bundle:nil])) { _entry=entry; self.title=@"Realtime"; } return self; }
 - (void)viewDidLoad {
     [super viewDidLoad];
     SCIUIKit26ConfigureViewController(self);
     SCIConfigureNavigationChromeForGlass(self);
-    self.navigationItem.rightBarButtonItems = @[
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshNow)],
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction target:self action:@selector(copyReport)],
-    ];
-    self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
-    self.table.translatesAutoresizingMaskIntoConstraints = NO;
-    self.table.dataSource = self;
-    self.table.delegate = self;
-    self.table.backgroundColor = UIColor.clearColor;
-    self.table.rowHeight = UITableViewAutomaticDimension;
-    self.table.estimatedRowHeight = 56.0;
-    [self.view addSubview:self.table];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.table.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [self.table.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.table.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-    ]];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshNow)];
     [self refreshNow];
-    // DATA symbols: auto-run the xref consumer scan once on open.
-    if (self.entry.data && self.resolvedAddr) [self runXrefScan];
 }
-
 - (void)refreshNow {
+    for (UIView *v in self.view.subviews) [v removeFromSuperview];
     void *runtime = NULL;
-    SCICRuntimeResolveSymbol(self.entry.name, &runtime);
-    self.resolvedAddr = runtime ? (uintptr_t)runtime : self.entry.address;
-    self.strategy = [self resolveStrategy];
-
-    NSMutableArray *rows = [NSMutableArray array];
-    [rows addObject:@[@"Kind", self.entry.swiftLike ? @"Swift/C++" : (self.entry.function ? @"C function" : @"DATA/const")]];
-    [rows addObject:@[@"Image", SCICImageForAddress(self.resolvedAddr)]];
-    [rows addObject:@[@"Section", self.entry.section ?: @"?"]];
-    [rows addObject:@[@"Symtab addr", [NSString stringWithFormat:@"0x%llx", (unsigned long long)self.entry.address]]];
-    [rows addObject:@[@"dlsym addr", runtime ? [NSString stringWithFormat:@"0x%llx", (unsigned long long)self.resolvedAddr] : @"unresolved"]];
-    [rows addObject:@[@"ABI", self.entry.abi ?: @"?"]];
-    self.resolutionRows = rows;
-
-    if (self.entry.function && self.resolvedAddr) {
-        self.disasmText = SCICDisassembleCommonARM64(self.resolvedAddr, 14);
-    } else if (self.resolvedAddr) {
-        self.disasmText = SCICHexDump(SCICBytesAtAddress(self.resolvedAddr, 48), self.resolvedAddr);
-    } else {
-        self.disasmText = @"<address unresolved>";
+    BOOL dlsymOK = SCICRuntimeResolveSymbol(self.entry.name, &runtime);
+    uintptr_t addr = runtime ? (uintptr_t)runtime : self.entry.address;
+    NSString *resolvedImage = SCICImageForAddress(addr);
+    NSMutableString *text = [NSMutableString string];
+    [text appendFormat:@"%@\n\n", self.entry.name ?: @""];
+    [text appendFormat:@"Mode: %@\nImage(enum): %@\nImage(runtime): %@\nSection: %@\nKind: %@\n", self.entry.swiftLike?@"Swift/C++":(self.entry.function?@"C function":@"DATA"), self.entry.image?:@"", resolvedImage, self.entry.section?:@"", self.entry.kind?:@""];
+    [text appendFormat:@"Symbol table addr: 0x%llx\ndlsym: %@%@\n\n", (unsigned long long)self.entry.address, dlsymOK?@"YES":@"NO", dlsymOK?[NSString stringWithFormat:@" (0x%llx)", (unsigned long long)addr]:@""];
+    [text appendFormat:@"ABI\n%@\n\nHook plan\n%@\n\n", self.entry.abi?:@"", self.entry.hookPlan?:@""];
+    if (self.entry.function && addr) {
+        [text appendString:@"Realtime ARM64 decode (common patterns)\n"];
+        [text appendString:SCICDisassembleCommonARM64(addr, 12)];
+        [text appendString:@"\nRaw bytes\n"];
+        [text appendString:SCICHexDump(SCICBytesAtAddress(addr, 48), addr)];
+    } else if (addr) {
+        [text appendString:@"DATA bytes\n"];
+        [text appendString:SCICHexDump(SCICBytesAtAddress(addr, 32), addr)];
     }
-    [self.table reloadData];
+    UITextView *tv = [UITextView new];
+    tv.translatesAutoresizingMaskIntoConstraints = NO;
+    tv.editable = NO;
+    tv.selectable = YES;
+    tv.alwaysBounceVertical = YES;
+    tv.backgroundColor = UIColor.clearColor;
+    tv.textColor = UIColor.labelColor;
+    tv.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
+    tv.textContainerInset = UIEdgeInsetsMake(14, 14, 24, 14);
+    tv.text = text;
+    [self.view addSubview:tv];
+    [NSLayoutConstraint activateConstraints:@[
+        [tv.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [tv.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [tv.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [tv.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    ]];
 }
-
-// Auto-select the sideload-safe strategy from validated capability checks.
-- (SCICPatchStrategy)resolveStrategy {
-    NSString *n = self.entry.name ?: @"";
-    if (self.entry.objcSelectorName.length) return SCICPatchStrategyObjC;
-    if ([SCICSymbolStub isForceableSymbol:n]) return SCICPatchStrategyBoolStub;
-    if ([SCICSymbolStub isTypedForceableSymbol:n]) return SCICPatchStrategyTyped;
-    if ([SCICSymbolStub isParamDescriptorSymbol:n]) return SCICPatchStrategyParamDesc;
-    // Runtime-confirmed descriptor: xref tied it to the boolean reader.
-    if (self.entry.data && self.consumerIsBoolReader && [SCICSymbolStub canForceAsParamDescriptor:n]) return SCICPatchStrategyParamDesc;
-    return SCICPatchStrategyNone;
-}
-
-- (NSString *)strategyLabel {
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC: return @"ObjC IMP swizzle (MSHookMessageEx)";
-        case SCICPatchStrategyBoolStub: return @"fishhook BOOL hardstub";
-        case SCICPatchStrategyTyped: return [NSString stringWithFormat:@"fishhook typed force (%@)", [SCICSymbolStub returnKindForSymbol:self.entry.name] ?: @"typed"];
-        case SCICPatchStrategyParamDesc: return @"MobileConfig descriptor reader-filter";
-        default: return @"none (sideload-safe patch unavailable)";
-    }
-}
-
-- (BOOL)currentlyApplied {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyBoolStub: return [SCICSymbolStub forceForSymbol:n] != nil;
-        case SCICPatchStrategyTyped: return [SCICSymbolStub typedForceForSymbol:n] != nil;
-        case SCICPatchStrategyParamDesc: return [SCICSymbolStub forceForParamDescriptorSymbol:n] != nil;
-        case SCICPatchStrategyObjC: return NO; // managed/reflected in ObjC browser
-        default: return NO;
-    }
-}
-
-#pragma mark Realtime xref scan
-
-- (void)runXrefScan {
-    if (self.scanState == 1 || !self.resolvedAddr) return;
-    self.scanState = 1;
-    [self.table reloadData];
-    __weak typeof(self) ws = self;
-    // Scan the image that DEFINES the descriptor (nil substring → owning image),
-    // bounded & off-main. Read-only; cannot crash the app.
-    [SCIRuntimeXrefScanner findConsumersOfAddress:self.resolvedAddr
-                                    imageSubstring:nil
-                                            budget:[SCIRuntimeXrefScanner defaultBudget]
-                                           maxHits:12
-                                        completion:^(NSArray<SCIXrefHit *> *hits, BOOL hitBudget) {
-        __strong typeof(ws) ss = ws; if (!ss) return;
-        ss.xrefHits = hits;
-        ss.scanHitBudget = hitBudget;
-        ss.scanState = 2;
-        BOOL boolReader = NO;
-        for (SCIXrefHit *h in hits) {
-            if ([h.calleeSymbol isEqualToString:@"IGMobileConfigBooleanValueForInternalUse"]) { boolReader = YES; break; }
-        }
-        ss.consumerIsBoolReader = boolReader;
-        ss.strategy = [ss resolveStrategy]; // may upgrade to ParamDesc now
-        [ss.table reloadData];
-    }];
-}
-
-#pragma mark Apply / Revert
-
-- (void)applyTapped {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC:
-            [SCISymbolBrowserEngine setOverride:@YES forClass:self.entry.objcClassName ?: @"" selector:self.entry.objcSelectorName ?: @"" isClassMethod:self.entry.objcClassMethod];
-            [SCIUtils showToastForDuration:1.0 title:@"ObjC override ON" subtitle:n];
-            break;
-        case SCICPatchStrategyBoolStub:
-            [SCICSymbolStub setForce:@YES forSymbol:n];
-            [SCIUtils showToastForDuration:1.0 title:@"BOOL forced YES" subtitle:n];
-            break;
-        case SCICPatchStrategyTyped:
-            [self promptTypedApply];
-            return; // prompt reloads itself
-        case SCICPatchStrategyParamDesc:
-            [SCICSymbolStub setParamDescriptorForce:@YES forSymbol:n];
-            [SCIUtils showToastForDuration:1.0 title:@"Param forced via reader" subtitle:n];
-            break;
-        default:
-            return;
-    }
-    [self refreshNow];
-}
-
-- (void)revertTapped {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC:
-            [SCISymbolBrowserEngine setOverride:nil forClass:self.entry.objcClassName ?: @"" selector:self.entry.objcSelectorName ?: @"" isClassMethod:self.entry.objcClassMethod];
-            break;
-        case SCICPatchStrategyBoolStub:
-            [SCICSymbolStub setForce:nil forSymbol:n];
-            break;
-        case SCICPatchStrategyTyped:
-            [SCICSymbolStub setTypedForceValue:nil returnKind:([SCICSymbolStub returnKindForSymbol:n] ?: @"int64") forSymbol:n];
-            break;
-        case SCICPatchStrategyParamDesc:
-            [SCICSymbolStub setParamDescriptorForce:nil forSymbol:n];
-            break;
-        default: break;
-    }
-    [SCIUtils showToastForDuration:1.0 title:@"Reverted" subtitle:n];
-    [self refreshNow];
-}
-
-- (void)promptTypedApply {
-    NSString *n = self.entry.name ?: @"";
-    NSString *kind = [SCICSymbolStub returnKindForSymbol:n] ?: @"int64";
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Force %@", kind] message:n preferredStyle:UIAlertControllerStyleAlert];
-    NSString *ph = [kind isEqualToString:@"double"] ? @"1.0" : ([kind isEqualToString:@"string"] ? @"forced" : @"1");
-    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = ph;
-        NSDictionary *cur = [SCICSymbolStub typedForceForSymbol:n];
-        id v = cur[@"value"]; tf.text = v ? [v description] : ph;
-        if ([kind isEqualToString:@"int64"] || [kind isEqualToString:@"double"]) tf.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-    }];
-    __weak typeof(self) ws = self;
-    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
-        NSString *t = a.textFields.firstObject.text ?: @"";
-        id value = t;
-        if ([kind isEqualToString:@"int64"]) value = @([t longLongValue]);
-        else if ([kind isEqualToString:@"double"]) value = @([t doubleValue]);
-        [SCICSymbolStub setTypedForceValue:value returnKind:kind forSymbol:n];
-        [SCIUtils showToastForDuration:1.0 title:@"Typed force applied" subtitle:n];
-        [ws refreshNow];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
-}
-
-- (void)copyReport {
-    NSMutableString *s = [NSMutableString string];
-    [s appendFormat:@"%@\n", self.entry.name ?: @""];
-    for (NSArray *r in self.resolutionRows) [s appendFormat:@"%@: %@\n", r[0], r[1]];
-    [s appendFormat:@"Strategy: %@\nApplied: %@\n", [self strategyLabel], [self currentlyApplied] ? @"YES" : @"NO"];
-    if (self.xrefHits.count) {
-        [s appendString:@"\nConsumers (xref):\n"];
-        for (SCIXrefHit *h in self.xrefHits) [s appendFormat:@"  %@  (caller %@, load 0x%lx)\n", h.calleeSymbol ?: @"?", h.callerSymbol ?: @"?", (unsigned long)h.loadPC];
-    }
-    [s appendFormat:@"\n%@\n", self.disasmText ?: @""];
-    UIPasteboard.generalPasteboard.string = s;
-    [SCIUtils showToastForDuration:1.0 title:@"Report copied" subtitle:nil];
-}
-
-#pragma mark Table
-
-// 0 Resolution, 1 Patch, 2 Xref, 3 Disassembly
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 4; }
-
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
-    switch (s) { case 0: return @"Resolution"; case 1: return @"Patch"; case 2: return @"Realtime xref / consumer"; default: return @"Disassembly / bytes"; }
-}
-
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
-    if (s == 0) return self.resolutionRows.count;
-    if (s == 1) {
-        if (self.strategy == SCICPatchStrategyNone) return 1;          // reason
-        if (self.strategy == SCICPatchStrategyObjC) return 3;          // strategy + apply + revert
-        return 4;                                                      // strategy + apply + revert + state
-    }
-    if (s == 2) {
-        if (self.scanState == 0) return 1;                             // "scan" button
-        if (self.scanState == 1) return 1;                             // scanning…
-        if (self.xrefHits.count == 0) return 1;                        // "no consumer" (mentions budget)
-        return self.xrefHits.count + (self.scanHitBudget ? 1 : 0);
-    }
-    return 1;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"c"];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
-    cell.backgroundColor = [UIColor.secondarySystemBackgroundColor colorWithAlphaComponent:0.5];
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.textLabel.numberOfLines = 0;
-    cell.detailTextLabel.numberOfLines = 0;
-    cell.textLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    cell.detailTextLabel.font = [UIFont systemFontOfSize:11.5];
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.textLabel.text = nil; cell.detailTextLabel.text = nil;
-
-    if (ip.section == 0) {
-        NSArray *r = self.resolutionRows[ip.row];
-        cell.textLabel.text = r[0]; cell.detailTextLabel.text = r[1];
-        return cell;
-    }
-    if (ip.section == 1) {
-        if (self.strategy == SCICPatchStrategyNone) {
-            cell.textLabel.text = @"No sideload-safe patch";
-            NSString *why = [SCICSymbolStub notForceableReasonForSymbol:self.entry.name] ?: @"Swift direct-dispatch / __TEXT code: patchable only under jailbreak. Observe/xref only.";
-            cell.detailTextLabel.text = why;
-            return cell;
-        }
-        if (ip.row == 0) { cell.textLabel.text = @"Strategy"; cell.detailTextLabel.text = [self strategyLabel]; return cell; }
-        if (ip.row == 1) {
-            BOOL applied = [self currentlyApplied];
-            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-            cell.textLabel.textColor = self.view.tintColor;
-            if (self.strategy == SCICPatchStrategyTyped) cell.textLabel.text = applied ? @"Set forced value… (re-apply)" : @"Set forced value… (apply)";
-            else cell.textLabel.text = applied ? @"Applied ✓ (tap to re-apply)" : @"Apply patch (persisted)";
-            // Honest persistence semantics: ObjC overrides reapply at cold launch;
-            // C-symbol stubs are re-attached in-session by deliberate crash-safety
-            // design (forcing MobileConfig/MCI readers at cold launch crashed).
-            cell.detailTextLabel.text = (self.strategy == SCICPatchStrategyObjC)
-                ? @"Persisted with backup; re-applied automatically at cold launch."
-                : @"Persisted with backup; re-attached in-session (not at cold launch, by crash-safety design).";
-            return cell;
-        }
-        if (ip.row == 2) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = UIColor.systemRedColor; cell.textLabel.text = @"Revert patch"; return cell; }
-        // row 3: state
-        NSUInteger readerHits = [SCICSymbolStub callCountForSymbol:(self.strategy == SCICPatchStrategyParamDesc ? @"IGMobileConfigBooleanValueForInternalUse" : self.entry.name)];
-        cell.textLabel.text = @"State";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"installed=%@ · hits=%lu", [SCICSymbolStub hookInstalledForSymbol:(self.strategy == SCICPatchStrategyParamDesc ? @"IGMobileConfigBooleanValueForInternalUse" : self.entry.name)] ? @"yes" : @"no", (unsigned long)readerHits];
-        return cell;
-    }
-    if (ip.section == 2) {
-        if (self.scanState == 0) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = self.view.tintColor; cell.textLabel.text = @"Resolve consumers (xref scan)"; cell.detailTextLabel.text = @"Bounded, read-only scan of the defining image's __text."; return cell; }
-        if (self.scanState == 1) { cell.textLabel.text = @"Scanning…"; cell.detailTextLabel.text = @"Resolving adrp/add → bl reader in background."; return cell; }
-        if (self.xrefHits.count == 0) { cell.textLabel.text = @"No consumer resolved"; cell.detailTextLabel.text = self.scanHitBudget ? @"Budget reached before a hit. Tap to rescan." : @"No direct adrp/add+bl reference found. Use capture, or it may be GOT/Swift-dispatched."; cell.selectionStyle = UITableViewCellSelectionStyleDefault; return cell; }
-        if (self.scanHitBudget && ip.row == (NSInteger)self.xrefHits.count) { cell.textLabel.text = @"⚠ budget reached"; cell.detailTextLabel.text = @"More consumers may exist beyond the scan budget."; return cell; }
-        SCIXrefHit *h = self.xrefHits[ip.row];
-        cell.textLabel.text = h.calleeSymbol ?: [NSString stringWithFormat:@"0x%lx", (unsigned long)h.calleeAddress];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"caller %@ · load 0x%lx · %@", h.callerSymbol ?: @"?", (unsigned long)h.loadPC, h.image ?: @"?"];
-        return cell;
-    }
-    cell.textLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
-    cell.textLabel.text = self.disasmText ?: @"";
-    return cell;
-}
-
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [tv deselectRowAtIndexPath:ip animated:YES];
-    if (ip.section == 1 && self.strategy != SCICPatchStrategyNone) {
-        if (ip.row == 1) [self applyTapped];
-        else if (ip.row == 2) [self revertTapped];
-    } else if (ip.section == 2) {
-        if (self.scanState != 1) [self runXrefScan];
-    }
-}
-
 @end
-
 
 static BOOL SCICNameLooksSwiftOrCXX(NSString *name) {
     if (![name isKindOfClass:NSString.class]) return NO;
