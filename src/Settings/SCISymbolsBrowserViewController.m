@@ -2,6 +2,7 @@
 #import "SCISymbolsBrowserViewController.h"
 #import "../Utils.h"
 #import "../Features/Gating/SCICSymbolStub.h"
+#import "../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
@@ -20,16 +21,15 @@
 @property (nonatomic, assign) BOOL swiftLike;
 @property (nonatomic, assign) BOOL resolvable;
 @property (nonatomic, assign) uintptr_t address;
+@property (nonatomic, copy) NSString *objcClassName;
+@property (nonatomic, copy) NSString *objcSelectorName;
+@property (nonatomic, assign) BOOL objcClassMethod;
 @end
 @implementation SCICSymbolEntry @end
 
 static NSString *SCICModeTitle(SCICSymbolsBrowserMode mode) {
-    switch (mode) {
-        case SCICSymbolsBrowserModeDataParams: return @"DATA / Params";
-        case SCICSymbolsBrowserModeSwiftDisassembly: return @"Swift / Disassembly";
-        case SCICSymbolsBrowserModeCFunctions:
-        default: return @"C Functions / ABI";
-    }
+    (void)mode;
+    return @"Unified Runtime Browser";
 }
 
 static NSString *scic_section_label(const struct section_64 *sec) {
@@ -265,6 +265,7 @@ static NSString *SCICHookPlanForName(NSString *name, BOOL function, NSString *se
 }
 
 static NSArray<NSString *> *SCICDefaultFiltersForMode(SCICSymbolsBrowserMode mode) {
+    if (mode == SCICSymbolsBrowserModeObjCMethods) return @[@"MobileConfig", @"Gating", @"Employee", @"Dogfood", @"Internal", @"Debug", @"Plus", @"IGDS", @"Launcher"];
     if (mode == SCICSymbolsBrowserModeDataParams) return @[@"ig_is_employee", @"ig_user_session", @"xav_switcher", @"mc_team", @"MapFields", @"MapSchema", @"OpenSettings", @"DeveloperAccount", @"FeatureFlags"];
     if (mode == SCICSymbolsBrowserModeSwiftDisassembly) return @[@"$s", @"_Tt", @"ConsumerSubs", @"MobileConfig", @"Dogfood", @"Eligibility", @"FeatureFlags"];
     return @[@"MobileConfig", @"EasyGating", @"MSGC", @"MCI", @"TALEvents", @"RegisterMappings", @"UpdateConfigs", @"SetConfigOverrides", @"InternalApps", @"Minos"];
@@ -320,6 +321,33 @@ static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex, NSMutableArray
     }
 }
 
+
+static NSArray<SCICSymbolEntry *> *SCICEnumerateObjCEntriesForImage(SCISymbolImage image) {
+    NSMutableArray<SCICSymbolEntry *> *out = [NSMutableArray array];
+    NSString *imgName = image == SCISymbolImageInstagram ? @"Instagram" : @"FBSharedFramework";
+    NSArray<SCISymbolClass *> *classes = [SCISymbolBrowserEngine classesForImage:image] ?: @[];
+    for (SCISymbolClass *cls in classes) {
+        for (SCISymbolGetter *g in cls.getters ?: @[]) {
+            SCICSymbolEntry *e = [SCICSymbolEntry new];
+            e.name = [NSString stringWithFormat:@"%@%@#%@", g.isClassMethod ? @"+" : @"", cls.className ?: @"", g.selectorName ?: @""];
+            e.image = imgName;
+            e.section = @"ObjC runtime";
+            e.kind = @"ObjC BOOL getter";
+            e.function = YES;
+            e.data = NO;
+            e.swiftLike = NO;
+            e.resolvable = YES;
+            e.abi = @"ObjC dispatch BOOL getter: id self, SEL _cmd -> BOOL w0; hook via SCISymbolBrowserEngine/MSHookMessageEx.";
+            e.hookPlan = @"Force ON/OFF through ObjC runtime browser override. No C stub.";
+            e.objcClassName = cls.className ?: @"";
+            e.objcSelectorName = g.selectorName ?: @"";
+            e.objcClassMethod = g.isClassMethod;
+            [out addObject:e];
+        }
+    }
+    return out.copy;
+}
+
 static NSArray<SCICSymbolEntry *> *SCICEnumerateInstagramAndFBSharedSymbols(void) {
     NSMutableArray *out = [NSMutableArray array];
     uint32_t count = _dyld_image_count();
@@ -341,9 +369,11 @@ static char kSCICSymbolRowPayloadKey;
     NSArray<SCICSymbolEntry *> *_allSymbols;
     NSString *_query;
     UIActivityIndicatorView *_spinner;
+    UISegmentedControl *_imageSegment;
+    UISegmentedControl *_kindSegment;
 }
 
-- (instancetype)init { return [self initWithMode:SCICSymbolsBrowserModeCFunctions]; }
+- (instancetype)init { return [self initWithMode:SCICSymbolsBrowserModeObjCMethods]; }
 - (instancetype)initWithMode:(SCICSymbolsBrowserMode)mode {
     self = [super initWithTitle:SCICModeTitle(mode)];
     if (self) { _mode = mode; self.reduceTopInset = NO; }
@@ -360,13 +390,16 @@ static char kSCICSymbolRowPayloadKey;
     self.navigationItem.searchController = sc;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshRuntimeSymbols)];
+    [self configureUnifiedTabs];
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.center = self.view.center;
     _spinner.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin|UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;
     [self.view addSubview:_spinner];
     [_spinner startAnimating];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *symbols = SCICEnumerateInstagramAndFBSharedSymbols();
+        NSMutableArray *symbols = [SCICEnumerateInstagramAndFBSharedSymbols() mutableCopy];
+        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageInstagram)];
+        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageFBShared)];
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_allSymbols = symbols;
             [self->_spinner stopAnimating];
@@ -376,10 +409,47 @@ static char kSCICSymbolRowPayloadKey;
 }
 
 
+
+- (void)configureUnifiedTabs {
+    _imageSegment = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Exec", @"FBShared"]];
+    _imageSegment.selectedSegmentIndex = 0;
+    [_imageSegment addTarget:self action:@selector(unifiedTabChanged:) forControlEvents:UIControlEventValueChanged];
+    SCIUIKit26ConfigureSegmentedControl(_imageSegment);
+
+    _kindSegment = [[UISegmentedControl alloc] initWithItems:@[@"ObjC", @"C", @"DATA", @"Swift"]];
+    _kindSegment.selectedSegmentIndex = MAX(0, MIN(3, (NSInteger)_mode));
+    [_kindSegment addTarget:self action:@selector(unifiedTabChanged:) forControlEvents:UIControlEventValueChanged];
+    SCIUIKit26ConfigureSegmentedControl(_kindSegment);
+
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_imageSegment, _kindSegment]];
+    stack.axis = UILayoutConstraintAxisVertical;
+    stack.spacing = 8.0;
+    stack.layoutMargins = UIEdgeInsetsMake(8, 16, 8, 16);
+    stack.layoutMarginsRelativeArrangement = YES;
+    UIView *wrap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 92)];
+    wrap.backgroundColor = UIColor.clearColor;
+    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [wrap addSubview:stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [stack.topAnchor constraintEqualToAnchor:wrap.topAnchor],
+        [stack.leadingAnchor constraintEqualToAnchor:wrap.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:wrap.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor],
+    ]];
+    self.tableView.tableHeaderView = wrap;
+}
+
+- (void)unifiedTabChanged:(__unused id)sender {
+    _mode = (SCICSymbolsBrowserMode)_kindSegment.selectedSegmentIndex;
+    [self rebuildSections];
+}
+
 - (void)refreshRuntimeSymbols {
     [_spinner startAnimating];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *symbols = SCICEnumerateInstagramAndFBSharedSymbols();
+        NSMutableArray *symbols = [SCICEnumerateInstagramAndFBSharedSymbols() mutableCopy];
+        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageInstagram)];
+        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageFBShared)];
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_allSymbols = symbols;
             [self->_spinner stopAnimating];
@@ -402,9 +472,12 @@ static char kSCICSymbolRowPayloadKey;
 }
 
 - (BOOL)entryMatchesMode:(SCICSymbolEntry *)e {
-    if (_mode == SCICSymbolsBrowserModeCFunctions) return e.function && !e.swiftLike;
+    if (_imageSegment.selectedSegmentIndex == 1 && ![e.image isEqualToString:@"Instagram"]) return NO;
+    if (_imageSegment.selectedSegmentIndex == 2 && ![e.image isEqualToString:@"FBSharedFramework"]) return NO;
+    if (_mode == SCICSymbolsBrowserModeObjCMethods) return e.objcSelectorName.length > 0;
+    if (_mode == SCICSymbolsBrowserModeCFunctions) return e.function && !e.swiftLike && e.objcSelectorName.length == 0;
     if (_mode == SCICSymbolsBrowserModeDataParams) return e.data;
-    return e.function && e.swiftLike;
+    return e.function && e.swiftLike && e.objcSelectorName.length == 0;
 }
 
 - (BOOL)entry:(SCICSymbolEntry *)e matchesTokens:(NSArray<NSString *> *)tokens {
@@ -414,7 +487,8 @@ static char kSCICSymbolRowPayloadKey;
 }
 
 - (BOOL)entryMatchesDefaultFilters:(SCICSymbolEntry *)e {
-    if ([SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
+    if (e.objcSelectorName.length) { NSString *k=[NSString stringWithFormat:@"%@%@", e.objcClassMethod?@"+":@"", [NSString stringWithFormat:@"%@#%@", e.objcClassName?:@"", e.objcSelectorName?:@""]]; if ([SCISymbolBrowserEngine overrideForKey:k] != nil) return YES; }
+    if ([SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub forceForParamDescriptorSymbol:e.name] != nil || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
     for (NSString *f in SCICDefaultFiltersForMode(_mode)) if ([e.name.lowercaseString containsString:f.lowercaseString] || [e.abi.lowercaseString containsString:f.lowercaseString]) return YES;
     return NO;
 }
@@ -424,10 +498,16 @@ static char kSCICSymbolRowPayloadKey;
     [bits addObject:e.image ?: @"Image"];
     [bits addObject:e.section ?: @"section?"];
     [bits addObject:e.kind ?: @"kind?"];
-    if (e.resolvable) [bits addObject:@"dlsym OK"];
+    if (e.objcSelectorName.length) {
+        NSNumber *forced = [SCISymbolBrowserEngine overrideForKey:[NSString stringWithFormat:@"%@%@#%@", e.objcClassMethod?@"+":@"", e.objcClassName?:@"", e.objcSelectorName?:@""]];
+        [bits addObject:forced ? (forced.boolValue ? @"ObjC forced ON" : @"ObjC forced OFF") : @"ObjC live/passthrough"];
+    } else if (e.resolvable) [bits addObject:@"dlsym OK"];
+    NSNumber *pf = [SCICSymbolStub forceForParamDescriptorSymbol:e.name];
     NSDictionary *typed = [SCICSymbolStub typedForceForSymbol:e.name];
-    if ([SCICSymbolStub forceForSymbol:e.name] != nil) [bits addObject:@"BOOL forced"];
+    if (pf) [bits addObject:[NSString stringWithFormat:@"param forced %@", pf.boolValue?@"YES":@"NO"]];
+    else if ([SCICSymbolStub forceForSymbol:e.name] != nil) [bits addObject:@"BOOL forced"];
     else if (typed) [bits addObject:[NSString stringWithFormat:@"%@ forced %@", typed[@"kind"] ?: @"typed", typed[@"value"] ?: @""]];
+    else if ([SCICSymbolStub isParamDescriptorSymbol:e.name]) [bits addObject:@"param force via MC bool reader"];
     else if (e.function && [SCICSymbolStub isForceableSymbol:e.name]) [bits addObject:@"BOOL hardstub allowed"];
     else if (e.function && [SCICSymbolStub isTypedForceableSymbol:e.name]) [bits addObject:[NSString stringWithFormat:@"%@ force allowed", [SCICSymbolStub returnKindForSymbol:e.name] ?: @"typed"]];
     else [bits addObject:e.abi ?: @"ABI unknown"];
@@ -435,6 +515,7 @@ static char kSCICSymbolRowPayloadKey;
 }
 
 - (NSString *)detailForEntry:(SCICSymbolEntry *)e {
+    if (e.objcSelectorName.length) return [NSString stringWithFormat:@"%@\n\nImage: %@\nKind: %@\nClass: %@\nSelector: %@\nClass method: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.kind?:@"", e.objcClassName?:@"", e.objcSelectorName?:@"", e.objcClassMethod?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
     return [NSString stringWithFormat:@"%@\n\nImage: %@\nSection: %@\nAddress: 0x%llx\nKind: %@\nResolvable: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.section?:@"", (unsigned long long)e.address, e.kind?:@"", e.resolvable?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
 }
 
@@ -443,6 +524,24 @@ static char kSCICSymbolRowPayloadKey;
     [self.navigationController pushViewController:[[SCICRealtimeDetailViewController alloc] initWithEntry:entry] animated:YES];
 }
 
+
+
+- (NSString *)objcOverrideKeyForEntry:(SCICSymbolEntry *)entry {
+    if (!entry.objcSelectorName.length) return nil;
+    return [NSString stringWithFormat:@"%@%@#%@", entry.objcClassMethod ? @"+" : @"", entry.objcClassName ?: @"", entry.objcSelectorName ?: @""];
+}
+
+- (void)setObjCEntry:(SCICSymbolEntry *)entry force:(NSNumber *)value {
+    if (!entry.objcSelectorName.length) return;
+    [SCISymbolBrowserEngine setOverride:value forClass:entry.objcClassName ?: @"" selector:entry.objcSelectorName ?: @"" isClassMethod:entry.objcClassMethod];
+    [self rebuildSections];
+}
+
+- (void)setParamEntry:(SCICSymbolEntry *)entry force:(NSNumber *)value {
+    if (![SCICSymbolStub isParamDescriptorSymbol:entry.name]) return;
+    [SCICSymbolStub setParamDescriptorForce:value forSymbol:entry.name];
+    [self rebuildSections];
+}
 
 - (void)promptTypedForceForEntry:(SCICSymbolEntry *)entry {
     NSString *kind = [SCICSymbolStub returnKindForSymbol:entry.name] ?: @"unknown";
@@ -477,7 +576,15 @@ static char kSCICSymbolRowPayloadKey;
     UIAlertController *a = [UIAlertController alertControllerWithTitle:entry.name message:[self detailForEntry:entry] preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
     [a addAction:[UIAlertAction actionWithTitle:@"Realtime resolve/disassemble" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf pushRealtimeDetailForEntry:entry]; }]];
-    if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
+    if (entry.objcSelectorName.length) {
+        [a addAction:[UIAlertAction actionWithTitle:@"Force ObjC BOOL ON" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setObjCEntry:entry force:@YES]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Force ObjC BOOL OFF" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setObjCEntry:entry force:@NO]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Clear ObjC override" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [weakSelf setObjCEntry:entry force:nil]; }]];
+    } else if ([SCICSymbolStub isParamDescriptorSymbol:entry.name]) {
+        [a addAction:[UIAlertAction actionWithTitle:@"Force param YES via MobileConfig BOOL reader" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:@YES]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Force param NO via MobileConfig BOOL reader" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:@NO]; }]];
+        [a addAction:[UIAlertAction actionWithTitle:@"Clear param force" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *act){ [weakSelf setParamEntry:entry force:nil]; }]];
+    } else if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL YES (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Force BOOL NO (hardstub)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setForce:@NO forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         [a addAction:[UIAlertAction actionWithTitle:@"Observe only" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act){ [SCICSymbolStub setObserve:YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
@@ -539,7 +646,13 @@ static char kSCICSymbolRowPayloadKey;
     return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu * _Nullable(__unused NSArray<UIMenuElement *> *suggestedActions) {
         NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
         [items addObject:[UIAction actionWithTitle:@"Realtime resolve/disassemble" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf pushRealtimeDetailForEntry:entry]; }]];
-        if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
+        if (entry.objcSelectorName.length) {
+            [items addObject:[UIAction actionWithTitle:@"Force ObjC BOOL ON" image:[UIImage systemImageNamed:@"switch.2"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setObjCEntry:entry force:@YES]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear ObjC override" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setObjCEntry:entry force:nil]; }]];
+        } else if ([SCICSymbolStub isParamDescriptorSymbol:entry.name]) {
+            [items addObject:[UIAction actionWithTitle:@"Force param YES via reader" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setParamEntry:entry force:@YES]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear param force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf setParamEntry:entry force:nil]; }]];
+        } else if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
             [items addObject:[UIAction actionWithTitle:@"Force BOOL YES (hardstub)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
             [items addObject:[UIAction actionWithTitle:@"Clear BOOL force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         } else if (entry.function && [SCICSymbolStub isTypedForceableSymbol:entry.name]) {

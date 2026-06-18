@@ -100,3 +100,10 @@
 - Added observe-only action hooks for registration/update actions.
 - Browser rows now show forced typed values and expose typed force from tap/context menu.
 - DATA/param descriptors remain separated from function hooks; they must be routed through the consuming reader.
+
+## v33
+- Unified runtime browser: one Liquid Glass browser for Instagram executable + FBSharedFramework.
+- Tabs for image scope: All / Exec / FBShared.
+- Tabs for symbol kind: ObjC / C / DATA / Swift.
+- DATA MobileConfig params can now be forced through IGMobileConfigBooleanValueForInternalUse descriptor matching, not by treating DATA as a function.
+- ObjC BOOL getter overrides are surfaced in the same unified browser.

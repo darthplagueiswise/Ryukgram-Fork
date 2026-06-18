@@ -37,6 +37,11 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)reinstallPersistedStubs;
 + (void)refreshCacheFromDefaults;
 
++ (BOOL)isParamDescriptorSymbol:(NSString *)name;
++ (nullable NSNumber *)forceForParamDescriptorSymbol:(NSString *)name;
++ (BOOL)setParamDescriptorForce:(nullable NSNumber *)value forSymbol:(NSString *)name;
++ (NSArray<NSString *> *)forcedParamDescriptorSymbols;
+
 @end
 
 NS_ASSUME_NONNULL_END

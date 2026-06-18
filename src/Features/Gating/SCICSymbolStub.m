@@ -14,6 +14,7 @@
 static NSString *const kForceOverrides = @"sci_csym_stub_overrides";       // { name: @(1|0) }
 static NSString *const kTypedOverrides = @"sci_csym_stub_typed_overrides"; // { name: { kind, value } }
 static NSString *const kObserveOverrides = @"sci_csym_stub_observe";       // { name: @YES }
+static NSString *const kParamBoolOverrides = @"sci_csym_param_bool_overrides"; // { DATA symbol: @(1|0) }
 
 typedef NS_ENUM(NSInteger, SCICStubProfile) {
     SCICStubProfileUnknown = 0,
@@ -40,6 +41,100 @@ typedef NS_ENUM(NSInteger, SCICReturnKind) {
     SCICReturnKindString,
     SCICReturnKindAction,
 };
+
+
+static NSArray<NSString *> *SCIParamDescriptorSymbols(void) {
+    static NSArray<NSString *> *syms = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        syms = @[
+            @"ig_is_employee",
+            @"ig_is_employee_or_test_user",
+            @"ig_user_session_canary_test",
+            @"ig_user_session_ep_test_1",
+            @"ig_user_session_ep_test_2",
+            @"ig_user_session_ep_test_3",
+            @"ig_user_session_ep_test_4",
+            @"xav_switcher_ig_ios_test_user_check_fdid",
+            @"mc_team_mixed_fb_user_igfbidv2_test_config",
+            @"mc_team_mixed_fb_user_igfbidv2_test_config_1",
+        ];
+    });
+    return syms;
+}
+
+static BOOL SCIParamDescriptorSymbolKnown(NSString *name) {
+    return [SCIParamDescriptorSymbols() containsObject:name ?: @""];
+}
+
+typedef struct {
+    char name[128];
+    void *addr;
+    atomic_int force; // -1 none, 0/1 forced
+    atomic_uint hits;
+} SCIParamDescriptorSlot;
+
+#define MAX_PARAM_DESCRIPTOR_STUBS 32
+static SCIParamDescriptorSlot g_param_slots[MAX_PARAM_DESCRIPTOR_STUBS];
+static int g_param_slot_count = 0;
+
+static SCIParamDescriptorSlot *param_slot_for_name(const char *name) {
+    if (!name) return NULL;
+    for (int i = 0; i < g_param_slot_count; i++) if (strcmp(g_param_slots[i].name, name) == 0) return &g_param_slots[i];
+    return NULL;
+}
+
+static NSDictionary *SCIParamBoolPref(void) { NSDictionary *d = [SCIUtils getDictPref:kParamBoolOverrides]; return [d isKindOfClass:NSDictionary.class] ? d : @{}; }
+
+static void SCIParamDescriptorRefreshCache(void) {
+    NSDictionary *prefs = SCIParamBoolPref();
+    for (int i = 0; i < g_param_slot_count; i++) {
+        NSString *key = [NSString stringWithUTF8String:g_param_slots[i].name] ?: @"";
+        id v = prefs[key];
+        atomic_store(&g_param_slots[i].force, [v isKindOfClass:NSNumber.class] ? ([v boolValue] ? 1 : 0) : -1);
+        if (!g_param_slots[i].addr) {
+            void *p = dlsym(RTLD_DEFAULT, g_param_slots[i].name);
+            if (!p) {
+                NSString *under = [@"_" stringByAppendingString:key];
+                p = dlsym(RTLD_DEFAULT, under.UTF8String);
+            }
+            g_param_slots[i].addr = p;
+        }
+    }
+}
+
+static void SCIParamDescriptorInstallSlotsForPersisted(void) {
+    NSDictionary *prefs = SCIParamBoolPref();
+    for (NSString *name in prefs.allKeys) {
+        if (!SCIParamDescriptorSymbolKnown(name) || param_slot_for_name(name.UTF8String)) continue;
+        if (g_param_slot_count >= MAX_PARAM_DESCRIPTOR_STUBS) break;
+        SCIParamDescriptorSlot *slot = &g_param_slots[g_param_slot_count++];
+        memset(slot, 0, sizeof(*slot));
+        strncpy(slot->name, name.UTF8String, sizeof(slot->name)-1);
+        atomic_store(&slot->force, [prefs[name] boolValue] ? 1 : 0);
+        atomic_store(&slot->hits, 0);
+        slot->addr = dlsym(RTLD_DEFAULT, slot->name);
+        if (!slot->addr) {
+            NSString *under = [@"_" stringByAppendingString:name];
+            slot->addr = dlsym(RTLD_DEFAULT, under.UTF8String);
+        }
+    }
+}
+
+static int SCIParamDescriptorForcedValueForMobileConfigBoolArgs(void *a0, void *a1, void *a2, void *a3) {
+    (void)a1; (void)a3;
+    SCIParamDescriptorInstallSlotsForPersisted();
+    SCIParamDescriptorRefreshCache();
+    for (int i = 0; i < g_param_slot_count; i++) {
+        int f = atomic_load(&g_param_slots[i].force);
+        if (f < 0 || !g_param_slots[i].addr) continue;
+        if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) {
+            atomic_fetch_add(&g_param_slots[i].hits, 1);
+            return f;
+        }
+    }
+    return -1;
+}
 
 static NSString *SCIStubBlacklistReason(NSString *name) {
     static NSDictionary *bl = nil;
@@ -206,7 +301,7 @@ static void call_orig_action(SCICStubSlot *s, void *a0, void *a1, void *a2, void
 
 #define DEFINE_BOOL_STUB(i) \
 static bool stub_bool_##i(void *a0,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6,void *a7){ \
-    SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); bool real=call_orig_bool(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedBool, real?1:0); int f=atomic_load(&s->forceBool); return f<0 ? real : (f!=0); }
+    SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); if(s->profile==SCICStubProfileIGMobileConfigBoolean){ int pf=SCIParamDescriptorForcedValueForMobileConfigBoolArgs(a0,a1,a2,a3); if(pf>=0){ atomic_store(&s->observedBool,pf?1:0); return pf!=0; }} bool real=call_orig_bool(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedBool, real?1:0); int f=atomic_load(&s->forceBool); return f<0 ? real : (f!=0); }
 #define DEFINE_INT64_STUB(i) \
 static int64_t stub_i64_##i(void *a0,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6,void *a7){ \
     SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); int64_t real=call_orig_int64(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedInt64, real); return atomic_load(&s->hasTypedForce)?atomic_load(&s->forceInt64):real; }
@@ -263,6 +358,7 @@ static void SCIStubApplyTypedToSlot(SCICStubSlot *slot, NSDictionary *typed) {
 }
 
 static void SCIStubRefreshCache(void) {
+    SCIParamDescriptorRefreshCache();
     NSDictionary *ov = SCIDictPref(kForceOverrides);
     NSDictionary *typed = SCIDictPref(kTypedOverrides);
     for (int i = 0; i < g_slot_count; i++) {
@@ -303,10 +399,31 @@ static void SCIStubRefreshCache(void) {
 + (id)observedTypedValueForSymbol:(NSString *)name { SCICStubSlot *s=slot_for(name.UTF8String); if(!s)return nil; SCICReturnKind k=SCIReturnKindForProfile(s->profile); if(k==SCICReturnKindInt64)return @(atomic_load(&s->observedInt64)); if(k==SCICReturnKindDouble)return @(atomic_load(&s->observedDouble)); if(k==SCICReturnKindString && s->observedString)return [NSString stringWithFormat:@"%p",s->observedString]; return nil; }
 + (void)refreshCacheFromDefaults { SCIStubRefreshCache(); }
 
+
++ (BOOL)isParamDescriptorSymbol:(NSString *)name { return SCIParamDescriptorSymbolKnown(name); }
++ (NSNumber *)forceForParamDescriptorSymbol:(NSString *)name { id v = SCIParamBoolPref()[name ?: @""]; return [v isKindOfClass:NSNumber.class] ? v : nil; }
++ (BOOL)setParamDescriptorForce:(NSNumber *)value forSymbol:(NSString *)name {
+    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolKnown(name)) return NO;
+    NSMutableDictionary *d = [SCIParamBoolPref() mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (value) d[name] = value; else [d removeObjectForKey:name];
+    [SCIUtils setPref:d forKey:kParamBoolOverrides];
+    if (value && ![self hookInstalledForSymbol:@"IGMobileConfigBooleanValueForInternalUse"]) [self installStubForSymbol:@"IGMobileConfigBooleanValueForInternalUse"];
+    if (value && !param_slot_for_name(name.UTF8String) && g_param_slot_count < MAX_PARAM_DESCRIPTOR_STUBS) {
+        SCIParamDescriptorSlot *slot = &g_param_slots[g_param_slot_count++];
+        memset(slot, 0, sizeof(*slot));
+        strncpy(slot->name, name.UTF8String, sizeof(slot->name)-1);
+    }
+    SCIParamDescriptorRefreshCache();
+    return YES;
+}
++ (NSArray<NSString *> *)forcedParamDescriptorSymbols { return SCIParamBoolPref().allKeys ?: @[]; }
+
+
 + (void *)replacementForKind:(SCICReturnKind)kind index:(int)idx { if(idx<0||idx>=MAX_STUBS)return NULL; if(kind==SCICReturnKindBool)return g_bool_repls[idx]; if(kind==SCICReturnKindInt64)return g_i64_repls[idx]; if(kind==SCICReturnKindDouble)return g_double_repls[idx]; if(kind==SCICReturnKindString)return g_ptr_repls[idx]; if(kind==SCICReturnKindAction)return g_action_repls[idx]; return NULL; }
 
 + (NSUInteger)installStubsForSymbols:(NSSet<NSString *> *)wanted { if(![wanted isKindOfClass:NSSet.class]||wanted.count==0)return 0; NSDictionary *forced=SCIDictPref(kForceOverrides); NSDictionary *typed=SCIDictPref(kTypedOverrides); struct rebinding rebs[MAX_STUBS]; int nreb=0; for(NSString *name in wanted){ if(nreb>=MAX_STUBS||g_slot_count>=MAX_STUBS)break; if(![name isKindOfClass:NSString.class]||!name.length)continue; SCICStubProfile profile=SCIStubProfileForSymbol(name); SCICReturnKind kind=SCIReturnKindForProfile(profile); if(kind==SCICReturnKindUnknown){SLOG("skip non-hookable %{public}s",name.UTF8String);continue;} if(slot_for(name.UTF8String)){SCIStubRefreshCache();continue;} NSString *under=[@"_" stringByAppendingString:name]; if(dlsym(RTLD_DEFAULT,name.UTF8String)==NULL&&dlsym(RTLD_DEFAULT,under.UTF8String)==NULL){SLOG("skip %{public}s — not resolvable via dlsym",name.UTF8String);continue;} SCICStubSlot *slot=&g_slots[g_slot_count]; memset(slot,0,sizeof(*slot)); strncpy(slot->name,name.UTF8String,sizeof(slot->name)-1); slot->profile=profile; atomic_store(&slot->forceBool,-1); atomic_store(&slot->hasTypedForce,0); atomic_store(&slot->hits,0); atomic_store(&slot->observedBool,-1); id v=forced[name]; if([v isKindOfClass:NSNumber.class]&&kind==SCICReturnKindBool)atomic_store(&slot->forceBool,[v boolValue]?1:0); SCIStubApplyTypedToSlot(slot,typed); slot->orig=NULL; rebs[nreb].name=slot->name; rebs[nreb].replacement=[self replacementForKind:kind index:g_slot_count]; rebs[nreb].replaced=(void **)&slot->orig; g_slot_count++; nreb++; SLOG("runtime rebind %{public}s kind=%{public}s forceBool=%d typed=%d",name.UTF8String,SCIReturnKindString(kind).UTF8String,atomic_load(&slot->forceBool),atomic_load(&slot->hasTypedForce)); } if(nreb==0)return 0; int rc=rebind_symbols(rebs,nreb); SLOG("runtime rebind_symbols installed=%d rc=%d",nreb,rc); return (NSUInteger)nreb; }
 + (BOOL)installStubForSymbol:(NSString *)name { if(![name isKindOfClass:NSString.class]||!name.length)return NO; if(![self isHookableSymbol:name])return NO; if(slot_for(name.UTF8String)){SCIStubRefreshCache();return YES;} return [self installStubsForSymbols:[NSSet setWithObject:name]]>0; }
-+ (void)reinstallPersistedStubs { NSMutableSet *wanted=[NSMutableSet set]; [wanted addObjectsFromArray:SCIDictPref(kObserveOverrides).allKeys?:@[]]; [wanted addObjectsFromArray:SCIDictPref(kForceOverrides).allKeys?:@[]]; [wanted addObjectsFromArray:SCIDictPref(kTypedOverrides).allKeys?:@[]]; if(wanted.count==0){SLOG("no persisted stubs");return;} [self installStubsForSymbols:wanted]; }
++ (void)reinstallPersistedStubs { NSMutableSet *wanted=[NSMutableSet set]; [wanted addObjectsFromArray:SCIDictPref(kObserveOverrides).allKeys?:@[]]; [wanted addObjectsFromArray:SCIDictPref(kForceOverrides).allKeys?:@[]]; [wanted addObjectsFromArray:SCIDictPref(kTypedOverrides).allKeys?:@[]];
+    if (SCIParamBoolPref().count) [wanted addObject:@"IGMobileConfigBooleanValueForInternalUse"]; if(wanted.count==0){SLOG("no persisted stubs");return;} [self installStubsForSymbols:wanted]; }
 
 @end
