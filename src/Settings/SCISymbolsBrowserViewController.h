@@ -1,11 +1,18 @@
 // SCISymbolsBrowserViewController.h
-// Runtime browser for FBSharedFramework C symbols.
+// ABI-aware Mach-O browser for Instagram/FBShared symbols.
 
 #import "SCIBaseSettingsListViewController.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSInteger, SCICSymbolsBrowserMode) {
+    SCICSymbolsBrowserModeCFunctions = 0,
+    SCICSymbolsBrowserModeDataParams = 1,
+    SCICSymbolsBrowserModeSwiftDisassembly = 2,
+};
+
 @interface SCISymbolsBrowserViewController : SCIBaseSettingsListViewController <UISearchBarDelegate, UIContextMenuInteractionDelegate>
+- (instancetype)initWithMode:(SCICSymbolsBrowserMode)mode;
 @end
 
 NS_ASSUME_NONNULL_END

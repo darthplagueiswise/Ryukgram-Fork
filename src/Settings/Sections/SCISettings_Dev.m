@@ -194,10 +194,18 @@
 							   subtitle:SCILocalized(@"Classes in FBSharedFramework → hookable BOOL getters, live state, force toggles.")
 								   icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"shippingbox"]
 							viewController:[[SCISymbolBrowserViewController alloc] initWithImage:SCISymbolImageFBShared]],
-								[SCISetting navigationCellWithTitle:SCILocalized(@"FBShared C Symbols Browser")
-							   subtitle:SCILocalized(@"Exported FBShared C symbols; fishhook BOOL reader stubs with persisted C-cache force.")
+								[SCISetting navigationCellWithTitle:SCILocalized(@"C functions / ABI Browser")
+							   subtitle:SCILocalized(@"Instagram + FBShared exports/imports. BOOL hardstub only when ABI is validated; int/double/string/action show typed plan.")
 							       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"function"]
-							viewController:[SCISymbolsBrowserViewController new]],
+							viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeCFunctions]],
+								[SCISetting navigationCellWithTitle:SCILocalized(@"DATA / Param Descriptor Browser")
+							   subtitle:SCILocalized(@"ig_is_employee, schemas, keys and param descriptors. These are not functions; hook their consumers/readers.")
+							       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"tag"]
+							viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeDataParams]],
+								[SCISetting navigationCellWithTitle:SCILocalized(@"Swift / Direct Dispatch Browser")
+							   subtitle:SCILocalized(@"Swift/C++/mangled symbols for disassembly and xref planning. No fake BOOL toggles.")
+							       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"chevron.left.forwardslash.chevron.right"]
+							viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeSwiftDisassembly]],
 											]
 										},
 										@{
