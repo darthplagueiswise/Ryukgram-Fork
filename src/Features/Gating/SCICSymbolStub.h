@@ -38,12 +38,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)refreshCacheFromDefaults;
 
 + (BOOL)isParamDescriptorSymbol:(NSString *)name;
++ (BOOL)canForceAsParamDescriptor:(NSString *)name; // known list OR dlsym-resolvable (pointer-matched, safe to widen)
 + (nullable NSNumber *)forceForParamDescriptorSymbol:(NSString *)name;
 + (BOOL)setParamDescriptorForce:(nullable NSNumber *)value forSymbol:(NSString *)name;
 + (NSArray<NSString *> *)forcedParamDescriptorSymbols;
-+ (BOOL)observeForParamDescriptorSymbol:(NSString *)name;
-+ (BOOL)setParamDescriptorObserve:(BOOL)value forSymbol:(NSString *)name;
-+ (NSUInteger)paramDescriptorCallCountForSymbol:(NSString *)name;
 
 @end
 
