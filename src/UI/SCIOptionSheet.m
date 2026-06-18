@@ -14,21 +14,13 @@
 
 @implementation SCIOptionSheetVC
 
-- (CGFloat)rowHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 74.0;
-	NSString *desc = [opt[@"description"] isKindOfClass:NSString.class] ? opt[@"description"] : nil;
-	return desc.length ? 78.0 : 56.0;
-}
-
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 74.0 : 56.0;
+	return self.wordmarkMode ? 68.0 : 54.0;
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? 346.0 : 336.0;
-	CGFloat total = 16.0;
-	for (NSDictionary *opt in self.options) total += [self rowHeightForOption:opt];
-	CGFloat height = MIN(MAX(96.0, total), 430.0);
+	CGFloat width = self.wordmarkMode ? 330.0 : 300.0;
+	CGFloat height = MIN(MAX(72.0, [self rowHeight] * MAX((NSUInteger)1, self.options.count)), 390.0);
 	return CGSizeMake(width, height);
 }
 
@@ -84,7 +76,7 @@
 - (void)dismissSelf { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self rowHeightForOption:self.options[(NSUInteger)indexPath.row]]; }
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self rowHeight]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
@@ -109,17 +101,17 @@
 		cfg.secondaryText = nil;
 		cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		cfg.imageProperties.tintColor = UIColor.labelColor;
-		cfg.imageProperties.maximumSize = CGSizeMake(300.0, 52.0);
+		cfg.imageProperties.maximumSize = CGSizeMake(210.0, 46.0);
 		cfg.imageToTextPadding = 0.0;
 	} else {
 		cfg.text = opt[@"title"] ?: opt[@"value"];
 		cfg.textProperties.color = UIColor.labelColor;
-		cfg.textProperties.numberOfLines = 2;
+		cfg.textProperties.numberOfLines = 0;
 		NSString *desc = opt[@"description"];
 		cfg.secondaryText = desc.length ? desc : nil;
 		cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-		cfg.secondaryTextProperties.numberOfLines = 3;
-		cfg.textToSecondaryTextVerticalPadding = 6.0;
+		cfg.secondaryTextProperties.numberOfLines = 0;
+		cfg.textToSecondaryTextVerticalPadding = 4.5;
 		if (image) {
 			cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 			cfg.imageProperties.tintColor = UIColor.labelColor;

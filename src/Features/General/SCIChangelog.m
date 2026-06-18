@@ -185,10 +185,9 @@ static NSAttributedString *sciRenderMarkdown(NSString *md) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	SCIUIKit26ConfigureViewController(self);
-	SCIConfigureNavigationChromeForGlass(self);
 
 	self.title = SCILocalized(@"What's new in RyukGram");
-	self.view.backgroundColor = UIColor.clearColor;
+	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
 
 	NSString *name = self.releaseJSON[@"name"] ?: self.releaseJSON[@"tag_name"] ?: @"?";
@@ -204,7 +203,6 @@ static NSAttributedString *sciRenderMarkdown(NSString *md) {
 	tv.bounces = YES;
 	tv.showsVerticalScrollIndicator = YES;
 	tv.backgroundColor = UIColor.clearColor;
-	tv.opaque = NO;
 	SCIUIKit26ConfigureScrollView(tv);
 	tv.textContainerInset = UIEdgeInsetsMake(16, 16, 24, 16);
 	tv.translatesAutoresizingMaskIntoConstraints = NO;
@@ -240,9 +238,6 @@ static NSAttributedString *sciRenderMarkdown(NSString *md) {
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Release notes");
-	SCIUIKit26ConfigureViewController(self);
-	SCIConfigureNavigationChromeForGlass(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.rowHeight = 60;
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
 

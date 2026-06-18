@@ -24,9 +24,19 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
         @"sci_force_ig_launch_debug_info_v2",
         @"sci_force_ig_story_debug_underlay",
         kSCIMobileConfigMasterKey,
+        @"sci_force_all_mc_gates",
         @"sci_force_mc_internal_use_boolean",
         @"sci_force_ig_internal_apps_installed_after_ios18",
         @"sci_force_minos_dogfood_mek_encryption",
+        @"sci_force_easy_gating_all",
+        @"sci_force_easy_gating_internal",
+        @"sci_force_easy_gating_auth",
+        @"sci_force_easy_gating_mcq",
+        @"sci_force_easy_gating_platform",
+        @"sci_force_sessioned_mc_all",
+        @"sci_force_msgc_sessioned_boolean",
+        @"sci_force_mci_experiment_boolean",
+        @"sci_force_mci_extension_boolean",
         @"sci_force_mobileconfig_overrides",
         @"sci_force_mobileconfig_try_update",
         @"sci_force_mobileconfig_force_update",
@@ -98,6 +108,7 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
             [SCIUtils setPref:disabled.array forKey:kSCIInternalGateCrashDisabledKeysKey];
             [SCIUtils setPref:nil forKey:kSCIInternalGateCrashPendingKeysKey];
             [SCIUtils setPref:@"previous launch did not reach stable marker" forKey:kSCIInternalGateCrashLastSourceKey];
+            [NSUserDefaults.standardUserDefaults synchronize];
             return;
         }
 
@@ -106,6 +117,7 @@ static NSString *const kSCIMobileConfigCustomOverridesKey = @"sci_mobileconfig_c
 
         [SCIUtils setPref:active forKey:kSCIInternalGateCrashPendingKeysKey];
         [SCIUtils setPref:@"armed" forKey:kSCIInternalGateCrashLastSourceKey];
+        [NSUserDefaults.standardUserDefaults synchronize];
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             NSArray<NSString *> *current = [SCIUtils getArrayPref:kSCIInternalGateCrashPendingKeysKey];
