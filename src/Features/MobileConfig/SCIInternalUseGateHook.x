@@ -48,8 +48,12 @@ static inline BOOL SCIPrefOn(NSUserDefaults *ud, NSString *key) {
 // One tiny replacement for every BOOL gate. It is intentionally naked so there
 // is no prologue, no stack touch, no ObjC, no callout, and no ABI dependency on
 // incoming arguments. Every caller expects a BOOL in w0.
-__attribute__((naked)) static void SCIAlwaysTrueW0Stub(void) {
+//
+// `bti c` gives a valid Branch Target Identification landing pad on arm64e;
+// on CPUs/OS paths where BTI is not enforced it behaves as a harmless hint.
+__attribute__((naked, noinline, used)) static void SCIAlwaysTrueBoolW0Stub(void) {
     __asm__ volatile(
+        ".inst 0xd503245f\n" // bti c
         "mov w0, #1\n"
         "ret\n"
     );
@@ -58,7 +62,7 @@ __attribute__((naked)) static void SCIAlwaysTrueW0Stub(void) {
 static void SCIAddRebind(struct rebinding *rbs, size_t *count, const char *symbol) {
     if (!symbol || !count || *count >= 16) return;
     rbs[*count].name = symbol;
-    rbs[*count].replacement = (void *)SCIAlwaysTrueW0Stub;
+    rbs[*count].replacement = (void *)SCIAlwaysTrueBoolW0Stub;
     rbs[*count].replaced = NULL; // never call orig in hard-stub mode
     (*count)++;
     SCILOG("armed hard stub %{public}s", symbol);
