@@ -150,7 +150,7 @@ static NSString *SCICDecodeARM64(uint32_t insn, uintptr_t pc) {
         unsigned rt = insn & 31, rn = (insn >> 5) & 31, imm = ((insn >> 10) & 0xfff) << 3;
         return [NSString stringWithFormat:@"ldr %@, [%@,#0x%x]", SCICRegisterName(rt, YES), SCICRegisterName(rn, YES), imm];
     }
-    if ((insn & 0xfffffc00) == 0xaa0003e0) {
+    if ((insn & 0xffe0ffe0) == 0xaa0003e0) {
         unsigned rd = insn & 31, rn = (insn >> 16) & 31;
         return [NSString stringWithFormat:@"mov %@, %@", SCICRegisterName(rd, YES), SCICRegisterName(rn, YES)];
     }
@@ -499,7 +499,7 @@ static char kSCICSymbolRowPayloadKey;
         [items addObject:[UIAction actionWithTitle:@"Realtime resolve/disassemble" image:[UIImage systemImageNamed:@"waveform.path.ecg"] identifier:nil handler:^(__unused UIAction *action) { [weakSelf pushRealtimeDetailForEntry:entry]; }]];
         if (entry.function && [SCICSymbolStub isForceableSymbol:entry.name]) {
             [items addObject:[UIAction actionWithTitle:@"Force BOOL YES (hardstub)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:@YES forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
-            [items addObject:[UIAction actionWithTitle:@"Clear force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil attributes:UIMenuElementAttributesDestructive handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
+            [items addObject:[UIAction actionWithTitle:@"Clear force" image:[UIImage systemImageNamed:@"xmark.circle"] identifier:nil handler:^(__unused UIAction *action) { [SCICSymbolStub setForce:nil forSymbol:entry.name]; [weakSelf rebuildSections]; }]];
         }
         [items addObject:[UIAction actionWithTitle:@"Copy symbol" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = entry.name ?: @""; }]];
         [items addObject:[UIAction actionWithTitle:@"Copy ABI report" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(__unused UIAction *action) { UIPasteboard.generalPasteboard.string = [weakSelf detailForEntry:entry]; }]];
