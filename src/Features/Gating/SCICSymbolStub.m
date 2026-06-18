@@ -140,11 +140,11 @@ static int SCIParamDescriptorForcedValueForMobileConfigBoolArgs(void *a0, void *
     SCIParamDescriptorInstallSlotsForPersisted();
     SCIParamDescriptorRefreshCache();
     for (int i = 0; i < g_param_slot_count; i++) {
-        int f = atomic_load(&g_param_slots[i].force);
-        if (f < 0 || !g_param_slots[i].addr) continue;
+        if (!g_param_slots[i].addr) continue;
         if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) {
-            atomic_fetch_add(&g_param_slots[i].hits, 1);
-            return f;
+            atomic_fetch_add(&g_param_slots[i].hits, 1);   // count match even when only observing
+            int f = atomic_load(&g_param_slots[i].force);
+            return f;                                       // f>=0 forces; f<0 = observe (passthrough)
         }
     }
     return -1;
@@ -432,6 +432,33 @@ static void SCIStubRefreshCache(void) {
     return YES;
 }
 + (NSArray<NSString *> *)forcedParamDescriptorSymbols { return SCIParamBoolPref().allKeys ?: @[]; }
+
+// Observe a descriptor: ensure the boolean reader hook is installed and an
+// in-memory slot exists (force = -1) so the filter counts hits for it without
+// forcing. Session-only; the descriptor pointer must resolve via dlsym.
++ (BOOL)setParamDescriptorObserve:(BOOL)observe forSymbol:(NSString *)name {
+    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolForceable(name)) return NO;
+    if (observe) {
+        if (![self hookInstalledForSymbol:@"IGMobileConfigBooleanValueForInternalUse"]) [self installStubForSymbol:@"IGMobileConfigBooleanValueForInternalUse"];
+        if (!param_slot_for_name(name.UTF8String) && g_param_slot_count < MAX_PARAM_DESCRIPTOR_STUBS) {
+            SCIParamDescriptorSlot *slot = &g_param_slots[g_param_slot_count++];
+            memset(slot, 0, sizeof(*slot));
+            strncpy(slot->name, name.UTF8String, sizeof(slot->name)-1);
+            atomic_store(&slot->force, -1); // observe only
+        }
+        SCIParamDescriptorRefreshCache();
+    } else {
+        SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
+        if (s && [self forceForParamDescriptorSymbol:name] == nil) atomic_store(&s->force, -1);
+    }
+    return YES;
+}
+
++ (NSUInteger)paramDescriptorCallCountForSymbol:(NSString *)name {
+    if (![name isKindOfClass:NSString.class] || !name.length) return 0;
+    SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
+    return s ? (NSUInteger)atomic_load(&s->hits) : 0;
+}
 
 
 + (void *)replacementForKind:(SCICReturnKind)kind index:(int)idx { if(idx<0||idx>=MAX_STUBS)return NULL; if(kind==SCICReturnKindBool)return g_bool_repls[idx]; if(kind==SCICReturnKindInt64)return g_i64_repls[idx]; if(kind==SCICReturnKindDouble)return g_double_repls[idx]; if(kind==SCICReturnKindString)return g_ptr_repls[idx]; if(kind==SCICReturnKindAction)return g_action_repls[idx]; return NULL; }

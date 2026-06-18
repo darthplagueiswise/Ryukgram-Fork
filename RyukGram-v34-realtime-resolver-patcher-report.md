@@ -56,3 +56,30 @@ IMP swizzle (`SCISymbolBrowserEngine`). Originals are kept for revert.
   crash. ObjC overrides do reapply at cold launch. The Apply cell states which applies.
 - The xref scan resolves FB-internal consumers reliably; exec-side GOT/Swift-dispatched
   consumers may not resolve and are reported as such.
+
+## v34.1 — build fix + DATA/__TEXT research
+
+### Build fix
+`SCICRuntimePatchResolver.m` (from a prior session) called two methods that did
+not exist on `SCICSymbolStub`. Added, matching the call-site signatures:
+- `+ (BOOL)setParamDescriptorObserve:(BOOL)observe forSymbol:(NSString *)name;`
+- `+ (NSUInteger)paramDescriptorCallCountForSymbol:(NSString *)name;`
+
+The descriptor reader-filter now counts a hit on pointer-match even when only
+observing (force < 0), so observe + live hit counts work per descriptor.
+
+### Researched DATA / __TEXT landscape (correcting earlier over-conservatism)
+- **DATA byte-patch IS viable jailed**: `vm_protect(VM_PROT_READ|WRITE)` + memcpy on
+  `__DATA` works on stock iOS (data pages have no execute-signing enforcement).
+  Confirmed by no-JB frameworks (Titanox "memory patching, made to work on stock
+  iOS", Dobby CodePatch). Needs guards: `__DATA` only, known size, byte backup for revert.
+- **fishhook DATA**: GOT / `__nl_symbol_ptr` / `__la_symbol_ptr` rebinding — already used.
+- **Inline __TEXT jump in plain sideload (AltStore/Feather)**: needs code pages RWX,
+  which needs `CS_DEBUGGED` (the `ptrace(PT_TRACE_ME)` self-trace trick) — Apple
+  closed this around iOS 14. No-JB frameworks that "patch __TEXT" do it OFFLINE
+  (write a patched binary to Documents and replace+re-inject), not at runtime.
+  The runtime no-code-modify option is hardware-breakpoint hooks (ARM64 debug
+  registers, ElleKit-style, ~6 max), which still needs a debuggable process.
+- **Under jailbreak / TrollStore**: RWX/CS_DEBUGGED is available → inline __TEXT
+  hooks work normally. So the resolver should probe the runtime and only offer the
+  inline-jump strategy when the process can actually make code RWX.
