@@ -10,8 +10,6 @@
 // MobileConfig} units, all gated so nothing heavy runs during launch.
 
 #import "SCISettingsSections.h"
-#import <objc/runtime.h>
-#import <objc/message.h>
 #import "../SCIDogfoodBrowserViewController.h"
 #import "../SCIInternalActionsViewController.h"
 #import "../SCISymbolBrowserViewController.h"
@@ -20,7 +18,6 @@
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
-#import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 
 @implementation SCITweakSettings (Section_Dev)
 
@@ -36,8 +33,8 @@
 													[SCISetting switchCellWithTitle:SCILocalized(@"★ Internal & Dogfood Menus") subtitle:SCILocalized(@"Persists ON/OFF. Applies only when switched ON inside Settings; never auto-runs during launch.") defaultsKey:@"sci_internal_menus" requiresRestart:NO],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Internal hook crash guard") subtitle:SCILocalized(@"Auto-disables active internal gates if the previous launch crashed before becoming stable") defaultsKey:@"sci_internal_gate_crash_guard_enabled" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Force all IG-only/debug ObjC gates") subtitle:SCILocalized(@"Master switch for isEmployee, internal badges, launch debug info and story debug underlay") defaultsKey:@"sci_force_ig_internal_employee" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"sci_force_all_mc_gates — master único para IGMobileConfig, EasyGating, MCIExperimentCache, MSGCSessioned. Requer restart.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Force all MobileConfig BOOL gates") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"Master seguro: IGMobileConfigBooleanValueForInternalUse apenas. MCI/MCDDasm ficam bloqueados por crash.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force MobileConfig internal-use BOOL") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"MobileConfig internal-use BOOL") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_boolean" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:SCILocalized(@"Uses the exported installed-internal-apps symbol when available; requires restart.") defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK encryption") subtitle:@"" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
@@ -53,23 +50,23 @@
 										},
 										@{
 											@"header": SCILocalized(@"EasyGating C gates (FBSharedFramework)"),
-											@"footer": SCILocalized(@"Hooks BOOL-returning EasyGating C functions exported by FBSharedFramework and imported by Instagram via GOT. Flags are read once in %ctor; restart required."),
+											@"footer": SCILocalized(@"Só o reader EasyGatingGetBoolean_Internal_DoNotUseOrMock está ligado ao hook seguro. Auth/MCQ/Platform ficam fora até ABI/callsite completo."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL gates") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Internal DoNotUseOrMock") subtitle:@"" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Platform") subtitle:SCILocalized(@"EasyGatingPlatformGetBoolean") defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — AuthDataContext") subtitle:SCILocalized(@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — MCQ dispatch") subtitle:SCILocalized(@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_mcq" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force EasyGating internal BOOL") subtitle:SCILocalized(@"Alias seguro para EasyGatingGetBoolean_Internal_DoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Internal DoNotUseOrMock") subtitle:SCILocalized(@"fishhook seguro + cache C; requer restart") defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
+												[SCISetting staticCellWithTitle:SCILocalized(@"EasyGating — Platform") subtitle:SCILocalized(@"Bloqueado neste build: símbolo/callsite não entra no hook seguro.") icon:nil],
+												[SCISetting staticCellWithTitle:SCILocalized(@"EasyGating — AuthDataContext") subtitle:SCILocalized(@"Bloqueado neste build: ABI/contexto variam; usar só após análise isolada.") icon:nil],
+												[SCISetting staticCellWithTitle:SCILocalized(@"EasyGating — MCQ dispatch") subtitle:SCILocalized(@"Bloqueado neste build: dispatch interno não entra no hook seguro.") icon:nil],
 											]
 										},
 										@{
 											@"header": SCILocalized(@"Sessioned/MCI MobileConfig BOOL gates (FBSharedFramework)"),
-											@"footer": SCILocalized(@"fishhook de 3 gates BOOL do FBShared importados pelo Instagram. Flags são lidas uma vez no %ctor e exigem restart. MCIExperiment chama MCIExtension como tail-call."),
+											@"footer": SCILocalized(@"Só MSGCSessionedMobileConfigGetBoolean fica ativo. MCIExperiment/MCIExtension/MCDDasm são hot-path e abortam quando forçados."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Force all Sessioned/MCI BOOL gates") subtitle:SCILocalized(@"Master: MSGCSessionedMobileConfigGetBoolean + MCIExperiment + MCIExtension") defaultsKey:@"sci_force_sessioned_mc_all" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Force MSGC sessioned BOOL") subtitle:SCILocalized(@"Alias seguro para MSGCSessionedMobileConfigGetBoolean; não liga MCI.") defaultsKey:@"sci_force_sessioned_mc_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"MSGCSessionedMobileConfigGetBoolean") subtitle:SCILocalized(@"Gate booleano ligado à sessão de usuário (MSGC)") defaultsKey:@"sci_force_msgc_sessioned_boolean" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"MCIExtensionExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Helper interno do MCIExperiment") defaultsKey:@"sci_force_mci_extension_boolean" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"MCIExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Entry point externo do cache de experimento") defaultsKey:@"sci_force_mci_experiment_boolean" requiresRestart:YES],
+												[SCISetting staticCellWithTitle:SCILocalized(@"MCIExtensionExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Bloqueado: hot-path MCI; forçar causa abort em MCIStatsIncrement.") icon:nil],
+												[SCISetting staticCellWithTitle:SCILocalized(@"MCIExperimentCacheGetMobileConfigBoolean") subtitle:SCILocalized(@"Bloqueado: tail-call para MCIExtension/hot-path; não hookar por fishhook.") icon:nil],
 											]
 										},
 
@@ -141,21 +138,7 @@
 														if(top)[top presentViewController:a animated:YES completion:nil];
 													}
 												],
-												[SCISetting buttonCellWithTitle:SCILocalized(@"Open MetaLocalExperiment (native)")
-											   subtitle:SCILocalized(@"Abre o MetaLocalExperimentListViewController nativo do Instagram para inspecionar/forçar grupos de experimentos locais.")
-											       icon:[SCISymbol symbolWithIGName:@"flask" fallback:@"flask"]
-											     action:^(void) {
-												BOOL ok = [SCIDogfoodObjectRuntime tryOpenMetaLocalExperimentBrowser];
-												if (!ok) {
-													UIWindow *w=nil; for (UIScene *sc in UIApplication.sharedApplication.connectedScenes){ if([sc isKindOfClass:UIWindowScene.class]) for(UIWindow *win in ((UIWindowScene*)sc).windows) if(win.isKeyWindow){w=win;break;} if(w)break; }
-													UIViewController *top=w.rootViewController; while(top.presentedViewController) top=top.presentedViewController;
-													UIAlertController *a=[UIAlertController alertControllerWithTitle:SCILocalized(@"MetaLocalExperiment") message:SCILocalized(@"Não foi possível abrir o browser nativo. Veja Dogfood > Logs/Status.") preferredStyle:UIAlertControllerStyleAlert];
-													[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-													if(top)[top presentViewController:a animated:YES completion:nil];
-												}
-											}
-										],
-										[SCISetting switchCellWithTitle:SCILocalized(@"Show Internal Settings menu") subtitle:SCILocalized(@"Forces showInternalSettings=YES in IGBugReportMenuViewController (shake-to-report menu). Shake device to open it.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:NO],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Show Internal Settings menu") subtitle:SCILocalized(@"Forces showInternalSettings=YES in IGBugReportMenuViewController (shake-to-report menu). Shake device to open it.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"└ also when logged out") subtitle:SCILocalized(@"Also forces showLoggedOutInternalSettings=YES") defaultsKey:@"sci_force_internal_settings_loggedout" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Auto-apply on launch (native)") subtitle:SCILocalized(@"Re-applies a few seconds after login") defaultsKey:@"sci_apply_internal_native" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Enable debug footer") subtitle:SCILocalized(@"Gateway to internal/debug menus (applied by the button above)") defaultsKey:@"sci_apply_internal_native" requiresRestart:YES],

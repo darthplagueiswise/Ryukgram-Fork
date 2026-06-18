@@ -27,7 +27,6 @@ SCI_FILELOG ?= 1
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/Frameworks/Accelerate.framework/Frameworks $(SCI_TARGET_FLAGS) -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DSCI_FILELOG=$(SCI_FILELOG) -include src/SCIPrefix.h
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression
-$(TWEAK_NAME)_LDFLAGS += -lc++
 
 ifeq ($(FINALPACKAGE),1)
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-x

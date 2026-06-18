@@ -14,24 +14,21 @@
 
 @implementation SCIOptionSheetVC
 
-- (CGFloat)rowHeight {
-	return self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension;
+- (CGFloat)rowHeightForOption:(NSDictionary *)opt {
+	if (self.wordmarkMode) return 74.0;
+	NSString *desc = [opt[@"description"] isKindOfClass:NSString.class] ? opt[@"description"] : nil;
+	return desc.length ? 78.0 : 56.0;
 }
 
-- (CGFloat)estimatedRowHeight {
-	if (self.wordmarkMode) return 68.0;
-	BOOL hasDescriptions = NO;
-	for (NSDictionary *opt in self.options) {
-		NSString *desc = opt[@"description"];
-		if (desc.length) { hasDescriptions = YES; break; }
-	}
-	return hasDescriptions ? 82.0 : 56.0;
+- (CGFloat)rowHeight {
+	return self.wordmarkMode ? 74.0 : 56.0;
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? 330.0 : 300.0;
-	CGFloat perRow = self.wordmarkMode ? 68.0 : [self estimatedRowHeight];
-	CGFloat height = MIN(MAX(72.0, perRow * MAX((NSUInteger)1, self.options.count) + 16.0), 460.0);
+	CGFloat width = self.wordmarkMode ? 346.0 : 336.0;
+	CGFloat total = 16.0;
+	for (NSDictionary *opt in self.options) total += [self rowHeightForOption:opt];
+	CGFloat height = MIN(MAX(96.0, total), 430.0);
 	return CGSizeMake(width, height);
 }
 
@@ -62,9 +59,7 @@
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
 	self.tableView.alwaysBounceVertical = NO;
-	self.tableView.rowHeight = self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension;
-	self.tableView.estimatedRowHeight = [self estimatedRowHeight];
-	self.tableView.showsVerticalScrollIndicator = self.options.count > 5;
+	self.tableView.showsVerticalScrollIndicator = self.options.count > 7;
 	[self.panelView.contentView addSubview:self.tableView];
 
 	CGSize size = [self panelSize];
@@ -89,8 +84,7 @@
 - (void)dismissSelf { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
-- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension; }
-- (CGFloat)tableView:(UITableView *)tableView estimatedHeightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self estimatedRowHeight]; }
+- (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath { return [self rowHeightForOption:self.options[(NSUInteger)indexPath.row]]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
@@ -115,17 +109,17 @@
 		cfg.secondaryText = nil;
 		cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		cfg.imageProperties.tintColor = UIColor.labelColor;
-		cfg.imageProperties.maximumSize = CGSizeMake(210.0, 46.0);
+		cfg.imageProperties.maximumSize = CGSizeMake(300.0, 52.0);
 		cfg.imageToTextPadding = 0.0;
 	} else {
 		cfg.text = opt[@"title"] ?: opt[@"value"];
 		cfg.textProperties.color = UIColor.labelColor;
-		cfg.textProperties.numberOfLines = 0;
+		cfg.textProperties.numberOfLines = 2;
 		NSString *desc = opt[@"description"];
 		cfg.secondaryText = desc.length ? desc : nil;
 		cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-		cfg.secondaryTextProperties.numberOfLines = 0;
-		cfg.textToSecondaryTextVerticalPadding = 4.5;
+		cfg.secondaryTextProperties.numberOfLines = 3;
+		cfg.textToSecondaryTextVerticalPadding = 6.0;
 		if (image) {
 			cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 			cfg.imageProperties.tintColor = UIColor.labelColor;
@@ -135,8 +129,6 @@
 	}
 	cell.contentConfiguration = cfg;
 	cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-	cell.clipsToBounds = NO;
-	cell.contentView.clipsToBounds = NO;
 	return cell;
 }
 
