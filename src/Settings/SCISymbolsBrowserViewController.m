@@ -2,7 +2,7 @@
 #import "SCISymbolsBrowserViewController.h"
 #import "../Utils.h"
 #import "../Features/Gating/SCICSymbolStub.h"
-#import "../Features/Gating/SCIRuntimeXrefScanner.h"
+#import "../Features/Gating/SCICRuntimePatchResolver.h"
 #import "../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
@@ -23,11 +23,34 @@
 @property (nonatomic, assign) BOOL resolvable;
 @property (nonatomic, assign) BOOL hasBindPointer;
 @property (nonatomic, assign) uintptr_t address;
+@property (nonatomic, assign) NSUInteger dataSize;
 @property (nonatomic, copy) NSString *objcClassName;
 @property (nonatomic, copy) NSString *objcSelectorName;
 @property (nonatomic, assign) BOOL objcClassMethod;
 @end
 @implementation SCICSymbolEntry @end
+
+
+static NSDictionary<NSString *, id> *SCICResolverInfoForEntry(SCICSymbolEntry *e) {
+    if (!e) return @{};
+    return @{
+        @"symbol": e.name ?: @"",
+        @"image": e.image ?: @"",
+        @"section": e.section ?: @"",
+        @"kind": e.kind ?: @"",
+        @"abi": e.abi ?: @"",
+        @"function": @(e.function),
+        @"data": @(e.data),
+        @"swiftLike": @(e.swiftLike),
+        @"hasBindPointer": @(e.hasBindPointer),
+        @"runtimeAddress": @(e.address),
+        @"symtabAddress": @(e.address),
+        @"dataSize": @(e.dataSize),
+        @"objcClassName": e.objcClassName ?: @"",
+        @"objcSelectorName": e.objcSelectorName ?: @"",
+        @"objcClassMethod": @(e.objcClassMethod),
+    };
+}
 
 static NSString *SCICModeTitle(SCICSymbolsBrowserMode mode) {
     (void)mode;
@@ -257,7 +280,22 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
     SCICPatchStrategyTyped,       // fishhook typed force (int64/double/string)
     SCICPatchStrategyParamDesc,   // reader-filter on IGMobileConfigBooleanValueForInternalUse
     SCICPatchStrategyObserve,     // validated function observe hook, no value replacement
+    SCICPatchStrategyDataRebindString,
+    SCICPatchStrategyDataPatchBytes,
 };
+
+static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s) {
+    switch (s) {
+        case SCICRuntimePatchStrategyObjCBool: return SCICPatchStrategyObjC;
+        case SCICRuntimePatchStrategyFunctionBool: return SCICPatchStrategyBoolStub;
+        case SCICRuntimePatchStrategyFunctionTyped: return SCICPatchStrategyTyped;
+        case SCICRuntimePatchStrategyFunctionObserve: return SCICPatchStrategyObserve;
+        case SCICRuntimePatchStrategyDataReaderBool: return SCICPatchStrategyParamDesc;
+        case SCICRuntimePatchStrategyDataRebindString: return SCICPatchStrategyDataRebindString;
+        case SCICRuntimePatchStrategyDataPatchBytes: return SCICPatchStrategyDataPatchBytes;
+        default: return SCICPatchStrategyNone;
+    }
+}
 
 @interface SCICRealtimeDetailViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) SCICSymbolEntry *entry;
@@ -319,6 +357,9 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
     [rows addObject:@[@"Symtab addr", [NSString stringWithFormat:@"0x%llx", (unsigned long long)self.entry.address]]];
     [rows addObject:@[@"dlsym addr", runtime ? [NSString stringWithFormat:@"0x%llx", (unsigned long long)self.resolvedAddr] : @"unresolved"]];
     [rows addObject:@[@"Import/bind pointer", self.entry.hasBindPointer ? @"yes" : @"no"]];
+    if (self.entry.dataSize) [rows addObject:@[@"Known DATA size", [NSString stringWithFormat:@"%lu bytes", (unsigned long)self.entry.dataSize]]];
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    [rows addObject:@[@"Resolver", plan.reason ?: @"pending"]];
     [rows addObject:@[@"ABI", self.entry.abi ?: @"?"]];
     self.resolutionRows = rows;
 
@@ -332,40 +373,26 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
     [self.table reloadData];
 }
 
-// Auto-select the sideload-safe strategy from validated capability checks.
+// Auto-select the sideload-safe strategy from the central resolver.
+- (SCICRuntimePatchPlan *)currentRuntimePlan {
+    NSMutableDictionary *info = [SCICResolverInfoForEntry(self.entry) mutableCopy];
+    info[@"runtimeAddress"] = @(self.resolvedAddr ?: self.entry.address);
+    info[@"symtabAddress"] = @(self.entry.address);
+    return [SCICRuntimePatchResolver resolvePlanForEntryInfo:info xrefHits:self.xrefHits];
+}
+
 - (SCICPatchStrategy)resolveStrategy {
-    NSString *n = self.entry.name ?: @"";
-    if (self.entry.objcSelectorName.length) return SCICPatchStrategyObjC;
-    if (self.entry.hasBindPointer && [SCICSymbolStub isForceableSymbol:n]) return SCICPatchStrategyBoolStub;
-    if (self.entry.hasBindPointer && [SCICSymbolStub isTypedForceableSymbol:n]) return SCICPatchStrategyTyped;
-    if ([SCICSymbolStub isParamDescriptorSymbol:n]) return SCICPatchStrategyParamDesc;
-    // Runtime-confirmed descriptor: xref tied it to the boolean reader.
-    if (self.entry.data && self.consumerIsBoolReader && [SCICSymbolStub canForceAsParamDescriptor:n]) return SCICPatchStrategyParamDesc;
-    if (self.entry.function && self.entry.hasBindPointer && [SCICSymbolStub isHookableSymbol:n]) return SCICPatchStrategyObserve;
-    return SCICPatchStrategyNone;
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    self.consumerIsBoolReader = [plan.consumerSymbol isEqualToString:@"IGMobileConfigBooleanValueForInternalUse"] || [plan.consumerSymbol containsString:@"MobileConfigBoolean"];
+    return SCICPatchStrategyFromRuntime(plan.strategy);
 }
 
 - (NSString *)strategyLabel {
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC: return @"ObjC IMP swizzle (MSHookMessageEx)";
-        case SCICPatchStrategyBoolStub: return @"fishhook BOOL hardstub";
-        case SCICPatchStrategyTyped: return [NSString stringWithFormat:@"fishhook typed force (%@)", [SCICSymbolStub returnKindForSymbol:self.entry.name] ?: @"typed"];
-        case SCICPatchStrategyParamDesc: return @"MobileConfig descriptor reader-filter";
-        case SCICPatchStrategyObserve: return @"validated observe hook";
-        default: return @"none (sideload-safe patch unavailable)";
-    }
+    return [self currentRuntimePlan].strategyName ?: @"none (sideload-safe patch unavailable)";
 }
 
 - (BOOL)currentlyApplied {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyBoolStub: return [SCICSymbolStub forceForSymbol:n] != nil;
-        case SCICPatchStrategyTyped: return [SCICSymbolStub typedForceForSymbol:n] != nil;
-        case SCICPatchStrategyParamDesc: return [SCICSymbolStub forceForParamDescriptorSymbol:n] != nil || [SCICSymbolStub observeForParamDescriptorSymbol:n];
-        case SCICPatchStrategyObjC: return [SCISymbolBrowserEngine overrideForKey:[NSString stringWithFormat:@"%@%@#%@", self.entry.objcClassMethod?@"+":@"", self.entry.objcClassName?:@"", self.entry.objcSelectorName?:@""]] != nil;
-        case SCICPatchStrategyObserve: return [SCICSymbolStub observeForSymbol:n];
-        default: return NO;
-    }
+    return [SCICRuntimePatchResolver isAppliedPlan:[self currentRuntimePlan]];
 }
 
 #pragma mark Realtime xref scan
@@ -398,56 +425,42 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
 
 #pragma mark Apply / Revert
 
+- (void)showPatchError:(NSError *)error fallback:(NSString *)fallback {
+    [SCIUtils showToastForDuration:1.5 title:@"Patch failed" subtitle:(error.localizedDescription ?: fallback ?: @"unknown error")];
+}
+
 - (void)applyTapped {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC:
-            [SCISymbolBrowserEngine setOverride:@YES forClass:self.entry.objcClassName ?: @"" selector:self.entry.objcSelectorName ?: @"" isClassMethod:self.entry.objcClassMethod];
-            [SCIUtils showToastForDuration:1.0 title:@"ObjC override ON" subtitle:n];
-            break;
-        case SCICPatchStrategyBoolStub:
-            [SCICSymbolStub setForce:@YES forSymbol:n];
-            [SCIUtils showToastForDuration:1.0 title:@"BOOL forced YES" subtitle:n];
-            break;
-        case SCICPatchStrategyTyped:
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    NSError *error = nil;
+    switch (plan.strategy) {
+        case SCICRuntimePatchStrategyFunctionTyped:
             [self promptTypedApply];
-            return; // prompt reloads itself
-        case SCICPatchStrategyParamDesc:
-            [SCICSymbolStub setParamDescriptorForce:@YES forSymbol:n];
-            [SCIUtils showToastForDuration:1.0 title:@"Param forced via reader" subtitle:n];
-            break;
-        case SCICPatchStrategyObserve:
-            [SCICSymbolStub setObserve:YES forSymbol:n];
-            [SCIUtils showToastForDuration:1.0 title:@"Observe hook installed" subtitle:n];
+            return;
+        case SCICRuntimePatchStrategyDataRebindString:
+            [self promptDataStringRebind];
+            return;
+        case SCICRuntimePatchStrategyDataPatchBytes:
+            [self promptDataPatchBytes];
+            return;
+        case SCICRuntimePatchStrategyFunctionObserve:
+            if (![SCICRuntimePatchResolver applyPlan:plan value:nil error:&error]) { [self showPatchError:error fallback:plan.reason]; return; }
             break;
         default:
-            return;
+            if (![SCICRuntimePatchResolver applyPlan:plan value:@YES error:&error]) { [self showPatchError:error fallback:plan.reason]; return; }
+            break;
     }
+    [SCIUtils showToastForDuration:1.0 title:@"Patch applied" subtitle:plan.symbol];
     [self refreshNow];
 }
 
 - (void)revertTapped {
-    NSString *n = self.entry.name ?: @"";
-    switch (self.strategy) {
-        case SCICPatchStrategyObjC:
-            [SCISymbolBrowserEngine setOverride:nil forClass:self.entry.objcClassName ?: @"" selector:self.entry.objcSelectorName ?: @"" isClassMethod:self.entry.objcClassMethod];
-            break;
-        case SCICPatchStrategyBoolStub:
-            [SCICSymbolStub setForce:nil forSymbol:n];
-            break;
-        case SCICPatchStrategyTyped:
-            [SCICSymbolStub setTypedForceValue:nil returnKind:([SCICSymbolStub returnKindForSymbol:n] ?: @"int64") forSymbol:n];
-            break;
-        case SCICPatchStrategyParamDesc:
-            [SCICSymbolStub setParamDescriptorForce:nil forSymbol:n];
-            [SCICSymbolStub setParamDescriptorObserve:NO forSymbol:n];
-            break;
-        case SCICPatchStrategyObserve:
-            [SCICSymbolStub setObserve:NO forSymbol:n];
-            break;
-        default: break;
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    NSError *error = nil;
+    if (![SCICRuntimePatchResolver revertPlan:plan error:&error]) {
+        [self showPatchError:error fallback:@"revert failed"];
+        return;
     }
-    [SCIUtils showToastForDuration:1.0 title:@"Reverted" subtitle:n];
+    [SCIUtils showToastForDuration:1.0 title:@"Reverted" subtitle:plan.symbol];
     [self refreshNow];
 }
 
@@ -469,9 +482,56 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
         id value = t;
         if ([kind isEqualToString:@"int64"]) value = @([t longLongValue]);
         else if ([kind isEqualToString:@"double"]) value = @([t doubleValue]);
-        [SCICSymbolStub setTypedForceValue:value returnKind:kind forSymbol:n];
+        __strong typeof(ws) ss = ws; if (!ss) return;
+        NSError *error = nil;
+        SCICRuntimePatchPlan *plan = [ss currentRuntimePlan];
+        if (![SCICRuntimePatchResolver applyPlan:plan value:value error:&error]) { [ss showPatchError:error fallback:plan.reason]; return; }
         [SCIUtils showToastForDuration:1.0 title:@"Typed force applied" subtitle:n];
-        [ws refreshNow];
+        [ss refreshNow];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+
+- (void)promptDataStringRebind {
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Rebind DATA pointer" message:plan.symbol preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"replacement NSString";
+        id cur = [SCICRuntimePatchResolver currentForcedValueForPlan:plan];
+        tf.text = [cur isKindOfClass:NSString.class] ? cur : @"";
+    }];
+    __weak typeof(self) ws = self;
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+        __strong typeof(ws) ss = ws; if (!ss) return;
+        NSError *error = nil;
+        NSString *value = a.textFields.firstObject.text ?: @"";
+        if (![SCICRuntimePatchResolver applyPlan:plan value:value error:&error]) { [ss showPatchError:error fallback:plan.reason]; return; }
+        [SCIUtils showToastForDuration:1.0 title:@"DATA pointer rebound" subtitle:plan.symbol];
+        [ss refreshNow];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)promptDataPatchBytes {
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Patch DATA bytes" message:@"Hex bytes only. Snapshot is saved for revert." preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"01 or 0000000000000001";
+        id cur = [SCICRuntimePatchResolver currentForcedValueForPlan:plan];
+        tf.text = [cur isKindOfClass:NSString.class] ? cur : @"";
+        tf.keyboardType = UIKeyboardTypeASCIICapable;
+    }];
+    __weak typeof(self) ws = self;
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *act) {
+        __strong typeof(ws) ss = ws; if (!ss) return;
+        NSError *error = nil;
+        NSData *bytes = [SCICRuntimePatchResolver dataFromHexString:(a.textFields.firstObject.text ?: @"") error:&error];
+        if (!bytes.length || ![SCICRuntimePatchResolver applyPlan:plan value:bytes error:&error]) { [ss showPatchError:error fallback:plan.reason]; return; }
+        [SCIUtils showToastForDuration:1.0 title:@"DATA bytes patched" subtitle:plan.symbol];
+        [ss refreshNow];
     }]];
     [self presentViewController:a animated:YES completion:nil];
 }
@@ -533,12 +593,10 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
         return cell;
     }
     if (ip.section == 1) {
+        SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
         if (self.strategy == SCICPatchStrategyNone) {
             cell.textLabel.text = @"No sideload-safe patch";
-            NSString *why = nil;
-            if (self.entry.function && [SCICSymbolStub isHookableSymbol:self.entry.name] && !self.entry.hasBindPointer) why = @"ABI is known, but no imported GOT/bind pointer was resolved in Instagram/FBShared. fishhook would be a no-op; use xref/disassembly or a dedicated ObjC/consumer hook.";
-            if (!why) why = [SCICSymbolStub notForceableReasonForSymbol:self.entry.name] ?: @"Swift direct-dispatch / __TEXT code: patchable only under jailbreak. Observe/xref only.";
-            cell.detailTextLabel.text = why;
+            cell.detailTextLabel.text = plan.reason ?: @"Resolve xrefs/capture first; no safe backend selected.";
             return cell;
         }
         if (ip.row == 0) { cell.textLabel.text = @"Strategy"; cell.detailTextLabel.text = [self strategyLabel]; return cell; }
@@ -547,6 +605,8 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             cell.textLabel.textColor = self.view.tintColor;
             if (self.strategy == SCICPatchStrategyTyped) cell.textLabel.text = applied ? @"Set forced value… (re-apply)" : @"Set forced value… (apply)";
+            else if (self.strategy == SCICPatchStrategyDataRebindString) cell.textLabel.text = applied ? @"Set replacement string… (re-apply)" : @"Set replacement string…";
+            else if (self.strategy == SCICPatchStrategyDataPatchBytes) cell.textLabel.text = applied ? @"Set patch bytes… (re-apply)" : @"Set patch bytes…";
             else if (self.strategy == SCICPatchStrategyObserve) cell.textLabel.text = applied ? @"Observing ✓ (tap to refresh)" : @"Install observe hook";
             else cell.textLabel.text = applied ? @"Applied ✓ (tap to re-apply)" : @"Apply patch (persisted)";
             cell.detailTextLabel.text = @"Persisted with backup; hook/cache is installed live when the toggle changes and reinstalled from defaults at launch.";
@@ -554,12 +614,12 @@ typedef NS_ENUM(NSInteger, SCICPatchStrategy) {
         }
         if (ip.row == 2) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = UIColor.systemRedColor; cell.textLabel.text = @"Revert patch"; return cell; }
         // row 3: state
-        NSUInteger readerHits = (self.strategy == SCICPatchStrategyParamDesc) ? [SCICSymbolStub paramDescriptorCallCountForSymbol:self.entry.name] : [SCICSymbolStub callCountForSymbol:self.entry.name];
-        BOOL installed = (self.strategy == SCICPatchStrategyObjC)
-            ? [SCISymbolBrowserEngine hookInstalledForKey:[NSString stringWithFormat:@"%@%@#%@", self.entry.objcClassMethod?@"+":@"", self.entry.objcClassName?:@"", self.entry.objcSelectorName?:@""]]
-            : [SCICSymbolStub hookInstalledForSymbol:(self.strategy == SCICPatchStrategyParamDesc ? @"IGMobileConfigBooleanValueForInternalUse" : self.entry.name)];
+        NSUInteger readerHits = [SCICRuntimePatchResolver hitCountForPlan:plan];
+        BOOL installed = [SCICRuntimePatchResolver isHookInstalledForPlan:plan];
+        id forcedValue = [SCICRuntimePatchResolver currentForcedValueForPlan:plan];
+        NSString *forcedText = forcedValue ? [NSString stringWithFormat:@" · value=%@", forcedValue] : @"";
         cell.textLabel.text = @"State";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"installed=%@ · hits=%lu", installed ? @"yes" : @"no", (unsigned long)readerHits];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"installed=%@ · hits=%lu%@", installed ? @"yes" : @"no", (unsigned long)readerHits, forcedText];
         return cell;
     }
     if (ip.section == 2) {
@@ -637,6 +697,25 @@ static NSArray<NSString *> *SCICDefaultFiltersForMode(SCICSymbolsBrowserMode mod
     return @[@"MobileConfig", @"EasyGating", @"MSGC", @"MCI", @"TALEvents", @"RegisterMappings", @"UpdateConfigs", @"SetConfigOverrides", @"InternalApps", @"Minos"];
 }
 
+
+static NSUInteger SCICKnownDataSizeForSymbol(const struct nlist_64 *nl, uint32_t nsyms, uint32_t idx) {
+    if (!nl || idx >= nsyms) return 0;
+    uint8_t sect = nl[idx].n_sect;
+    uint64_t cur = nl[idx].n_value;
+    if (!sect || !cur) return 0;
+    uint64_t best = UINT64_MAX;
+    for (uint32_t j = 0; j < nsyms; j++) {
+        if (j == idx) continue;
+        if ((nl[j].n_type & N_STAB) || ((nl[j].n_type & N_TYPE) != N_SECT)) continue;
+        if (nl[j].n_sect != sect) continue;
+        uint64_t v = nl[j].n_value;
+        if (v > cur && v < best) best = v;
+    }
+    if (best == UINT64_MAX || best <= cur) return 0;
+    uint64_t delta = best - cur;
+    return (delta > 0 && delta <= 256) ? (NSUInteger)delta : 0;
+}
+
 static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex, NSMutableArray<SCICSymbolEntry *> *out) {
     const char *imageName = _dyld_get_image_name(imageIndex);
     if (!imageName) return;
@@ -679,6 +758,7 @@ static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex, NSMutableArray
         e.data = !isText;
         e.swiftLike = SCICNameLooksSwiftOrCXX(name);
         e.address = (uintptr_t)nl[i].n_value + (uintptr_t)slide;
+        e.dataSize = isText ? 0 : SCICKnownDataSizeForSymbol(nl, symtab->nsyms, i);
         e.kind = isText ? (e.swiftLike ? @"Swift/C++ function" : @"C/function") : @"DATA/const";
         e.abi = SCICABIForName(name, isText, section);
         e.hookPlan = SCICHookPlanForName(name, isText, section);
@@ -857,7 +937,7 @@ static char kSCICSymbolSwitchPayloadKey;
 
 - (BOOL)entryMatchesDefaultFilters:(SCICSymbolEntry *)e {
     if (e.objcSelectorName.length) { NSString *k=[NSString stringWithFormat:@"%@%@", e.objcClassMethod?@"+":@"", [NSString stringWithFormat:@"%@#%@", e.objcClassName?:@"", e.objcSelectorName?:@""]]; if ([SCISymbolBrowserEngine overrideForKey:k] != nil) return YES; }
-    if ([SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub forceForParamDescriptorSymbol:e.name] != nil || [SCICSymbolStub observeForParamDescriptorSymbol:e.name] || [SCICSymbolStub observeForSymbol:e.name] || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
+    if ([SCICRuntimePatchResolver persistedPatchForSymbol:e.name] != nil || [SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub forceForParamDescriptorSymbol:e.name] != nil || [SCICSymbolStub observeForParamDescriptorSymbol:e.name] || [SCICSymbolStub observeForSymbol:e.name] || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
     for (NSString *f in SCICDefaultFiltersForMode(_mode)) if ([e.name.lowercaseString containsString:f.lowercaseString] || [e.abi.lowercaseString containsString:f.lowercaseString]) return YES;
     return NO;
 }
@@ -882,7 +962,7 @@ static char kSCICSymbolSwitchPayloadKey;
         else if (bf) [bits addObject:[NSString stringWithFormat:@"BOOL=%@", bf.boolValue?@"YES":@"NO"]];
         else if (typed) [bits addObject:[NSString stringWithFormat:@"%@=%@", typed[@"kind"] ?: @"typed", typed[@"value"] ?: @""]];
         else if ([SCICSymbolStub observeForSymbol:e.name]) [bits addObject:@"observe"];
-        NSUInteger hits = [self inlineStrategyForEntry:e] == SCICPatchStrategyParamDesc ? [SCICSymbolStub paramDescriptorCallCountForSymbol:e.name] : [SCICSymbolStub callCountForSymbol:e.name];
+        NSUInteger hits = [SCICRuntimePatchResolver hitCountForPlan:[self resolverPlanForEntry:e]];
         if (hits) [bits addObject:[NSString stringWithFormat:@"hits=%lu", (unsigned long)hits]];
         if (![self entryHasInlineToggle:e]) [bits addObject:e.abi ?: @"ABI unknown"];
     }
@@ -914,41 +994,24 @@ static char kSCICSymbolSwitchPayloadKey;
     return [SCICSymbolStub canForceAsParamDescriptor:n];
 }
 
+- (SCICRuntimePatchPlan *)resolverPlanForEntry:(SCICSymbolEntry *)entry {
+    return [SCICRuntimePatchResolver resolvePlanForEntryInfo:SCICResolverInfoForEntry(entry) xrefHits:nil];
+}
+
 - (SCICPatchStrategy)inlineStrategyForEntry:(SCICSymbolEntry *)entry {
-    NSString *n = entry.name ?: @"";
-    if (entry.objcSelectorName.length) return SCICPatchStrategyObjC;
-    if (entry.function && entry.hasBindPointer && [SCICSymbolStub isForceableSymbol:n]) return SCICPatchStrategyBoolStub;
-    if (entry.function && entry.hasBindPointer && [SCICSymbolStub isTypedForceableSymbol:n]) return SCICPatchStrategyTyped;
-    if ([self entryLooksParamDescriptor:entry]) return SCICPatchStrategyParamDesc;
-    if (entry.function && entry.hasBindPointer && [SCICSymbolStub isHookableSymbol:n]) return SCICPatchStrategyObserve;
-    return SCICPatchStrategyNone;
+    return SCICPatchStrategyFromRuntime([self resolverPlanForEntry:entry].strategy);
 }
 
 - (BOOL)entryHasInlineToggle:(SCICSymbolEntry *)entry {
-    return [self inlineStrategyForEntry:entry] != SCICPatchStrategyNone;
+    return [self resolverPlanForEntry:entry].inlineToggleSafe;
 }
 
 - (BOOL)entrySwitchValue:(SCICSymbolEntry *)entry {
-    NSString *n = entry.name ?: @"";
-    switch ([self inlineStrategyForEntry:entry]) {
-        case SCICPatchStrategyObjC: return [SCISymbolBrowserEngine overrideForKey:[self objcOverrideKeyForEntry:entry]] != nil;
-        case SCICPatchStrategyBoolStub: return [SCICSymbolStub forceForSymbol:n] != nil;
-        case SCICPatchStrategyTyped: return [SCICSymbolStub typedForceForSymbol:n] != nil;
-        case SCICPatchStrategyParamDesc: return [SCICSymbolStub forceForParamDescriptorSymbol:n] != nil || [SCICSymbolStub observeForParamDescriptorSymbol:n];
-        case SCICPatchStrategyObserve: return [SCICSymbolStub observeForSymbol:n];
-        default: return NO;
-    }
+    return [SCICRuntimePatchResolver isAppliedPlan:[self resolverPlanForEntry:entry]];
 }
 
 - (NSString *)inlineStrategyShortLabelForEntry:(SCICSymbolEntry *)entry {
-    switch ([self inlineStrategyForEntry:entry]) {
-        case SCICPatchStrategyObjC: return @"ObjC live swizzle";
-        case SCICPatchStrategyBoolStub: return @"BOOL fishhook";
-        case SCICPatchStrategyTyped: return [NSString stringWithFormat:@"%@ fishhook", [SCICSymbolStub returnKindForSymbol:entry.name] ?: @"typed"];
-        case SCICPatchStrategyParamDesc: return @"DATA → MC reader";
-        case SCICPatchStrategyObserve: return @"observe hook";
-        default: return @"resolve only";
-    }
+    return [self resolverPlanForEntry:entry].shortStrategyName ?: @"resolve only";
 }
 
 - (NSString *)categoryForEntry:(SCICSymbolEntry *)entry {
@@ -984,56 +1047,48 @@ static char kSCICSymbolSwitchPayloadKey;
 }
 
 - (void)setEntry:(SCICSymbolEntry *)entry enabled:(BOOL)enabled sender:(UISwitch *)sender {
-    NSString *n = entry.name ?: @"";
-    SCICPatchStrategy strategy = [self inlineStrategyForEntry:entry];
+    SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:entry];
+    NSError *error = nil;
     if (!enabled) {
-        switch (strategy) {
-            case SCICPatchStrategyObjC: [self setObjCEntry:entry force:nil]; break;
-            case SCICPatchStrategyBoolStub: [SCICSymbolStub setForce:nil forSymbol:n]; break;
-            case SCICPatchStrategyTyped: [SCICSymbolStub setTypedForceValue:nil returnKind:([SCICSymbolStub returnKindForSymbol:n] ?: @"int64") forSymbol:n]; break;
-            case SCICPatchStrategyParamDesc: [SCICSymbolStub setParamDescriptorForce:nil forSymbol:n]; [SCICSymbolStub setParamDescriptorObserve:NO forSymbol:n]; break;
-            case SCICPatchStrategyObserve: [SCICSymbolStub setObserve:NO forSymbol:n]; break;
-            default: break;
+        if (![SCICRuntimePatchResolver revertPlan:plan error:&error]) {
+            sender.on = [SCICRuntimePatchResolver isAppliedPlan:plan];
+            [SCIUtils showToastForDuration:1.2 title:@"Revert failed" subtitle:error.localizedDescription ?: plan.symbol];
         }
         [self rebuildSections];
         return;
     }
-    switch (strategy) {
-        case SCICPatchStrategyObjC:
-            [self setObjCEntry:entry force:@YES];
-            break;
-        case SCICPatchStrategyBoolStub:
-            [SCICSymbolStub setForce:@YES forSymbol:n];
-            [self rebuildSections];
-            break;
-        case SCICPatchStrategyTyped:
-            sender.on = NO;
-            [self promptTypedForceForEntry:entry];
-            break;
-        case SCICPatchStrategyParamDesc:
-            [SCICSymbolStub setParamDescriptorForce:@YES forSymbol:n];
-            [self rebuildSections];
-            break;
-        case SCICPatchStrategyObserve:
-            [SCICSymbolStub setObserve:YES forSymbol:n];
-            [self rebuildSections];
-            break;
-        default:
-            sender.on = NO;
-            [self pushRealtimeDetailForEntry:entry];
-            break;
+    if (!plan.inlineToggleSafe) {
+        sender.on = NO;
+        [self pushRealtimeDetailForEntry:entry];
+        return;
     }
+    id value = (plan.strategy == SCICRuntimePatchStrategyFunctionObserve) ? nil : @YES;
+    if (![SCICRuntimePatchResolver applyPlan:plan value:value error:&error]) {
+        sender.on = NO;
+        [SCIUtils showToastForDuration:1.2 title:@"Patch failed" subtitle:error.localizedDescription ?: plan.reason];
+        [self rebuildSections];
+        return;
+    }
+    [self rebuildSections];
 }
 
 - (void)setObjCEntry:(SCICSymbolEntry *)entry force:(NSNumber *)value {
     if (!entry.objcSelectorName.length) return;
-    [SCISymbolBrowserEngine setOverride:value forClass:entry.objcClassName ?: @"" selector:entry.objcSelectorName ?: @"" isClassMethod:entry.objcClassMethod];
+    SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:entry];
+    NSError *error = nil;
+    if (value) [SCICRuntimePatchResolver applyPlan:plan value:value error:&error];
+    else [SCICRuntimePatchResolver revertPlan:plan error:&error];
+    if (error) [SCIUtils showToastForDuration:1.2 title:@"Patch failed" subtitle:error.localizedDescription ?: plan.symbol];
     [self rebuildSections];
 }
 
 - (void)setParamEntry:(SCICSymbolEntry *)entry force:(NSNumber *)value {
     if (![self entryLooksParamDescriptor:entry]) return;
-    [SCICSymbolStub setParamDescriptorForce:value forSymbol:entry.name];
+    SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:entry];
+    NSError *error = nil;
+    if (value) [SCICRuntimePatchResolver applyPlan:plan value:value error:&error];
+    else [SCICRuntimePatchResolver revertPlan:plan error:&error];
+    if (error) [SCIUtils showToastForDuration:1.2 title:@"Patch failed" subtitle:error.localizedDescription ?: plan.symbol];
     [self rebuildSections];
 }
 
@@ -1059,7 +1114,12 @@ static char kSCICSymbolSwitchPayloadKey;
         id value = text;
         if ([kind isEqualToString:@"int64"]) value = @([text longLongValue]);
         else if ([kind isEqualToString:@"double"]) value = @([text doubleValue]);
-        [SCICSymbolStub setTypedForceValue:value returnKind:kind forSymbol:entry.name];
+        NSError *error = nil;
+        SCICRuntimePatchPlan *plan = [weakSelf resolverPlanForEntry:entry];
+        if (![SCICRuntimePatchResolver applyPlan:plan value:value error:&error]) {
+            [SCIUtils showToastForDuration:1.2 title:@"Patch failed" subtitle:error.localizedDescription ?: plan.reason];
+            return;
+        }
         [weakSelf rebuildSections];
     }]];
     [self presentViewController:a animated:YES completion:nil];

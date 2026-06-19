@@ -1,12 +1,22 @@
 // SCICSymbolStubBootstrap.x
-// Relaunch-safe hard guard. The FBShared C-symbol browser is a runtime browser:
-// it enumerates when the screen opens and attaches only for the current session.
-// Never reinstall persisted C hooks at cold launch; old persisted toggles from
-// previous builds caused startup crashes in MobileConfig/MCI paths.
+// Cold-launch reinstall for the unified runtime patch resolver.
+//
+// Timing: read one cheap persisted-plan dictionary first. If empty, return.
+// The resolver reapplies only plans that were explicitly saved as safeAtLaunch
+// and revalidates the backend before installing anything.
 #import "../../Utils.h"
+#import "SCICRuntimePatchResolver.h"
 
 %ctor {
     @autoreleasepool {
+        NSDictionary *plans = [SCIUtils getDictPref:[SCICRuntimePatchResolver persistedPlansKey]];
+        if (![plans isKindOfClass:NSDictionary.class] || plans.count == 0) {
+            if ([SCIUtils getBoolPref:@"sci_csym_stub_install_at_launch"]) {
+                [SCIUtils setPref:@NO forKey:@"sci_csym_stub_install_at_launch"];
+            }
+            return;
+        }
+        [SCICRuntimePatchResolver reinstallSafePersistedPatchPlansAtLaunch];
         if ([SCIUtils getBoolPref:@"sci_csym_stub_install_at_launch"]) {
             [SCIUtils setPref:@NO forKey:@"sci_csym_stub_install_at_launch"];
         }

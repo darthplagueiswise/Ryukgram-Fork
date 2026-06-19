@@ -27,6 +27,36 @@ static inline int sci_decode_adrp(uint32_t instr, uint64_t pc, int *rd, uint64_t
     return 1;
 }
 
+
+// ADR xRd, #imm → PC + signed imm21
+static inline int sci_decode_adr(uint32_t instr, uint64_t pc, int *rd, uint64_t *addr) {
+    if ((instr & 0x9F000000u) != 0x10000000u) return 0;
+    *rd = (int)(instr & 0x1F);
+    uint32_t immlo = (instr >> 29) & 0x3;
+    uint32_t immhi = (instr >> 5) & 0x7FFFF;
+    int64_t imm = (int64_t)((immhi << 2) | immlo);
+    if (imm & (1LL << 20)) imm -= (1LL << 21);
+    *addr = pc + (uint64_t)imm;
+    return 1;
+}
+
+// LDR (unsigned immediate), 64-bit: ldr Xt, [Xn, #imm12<<3]
+static inline int sci_decode_ldr_imm64(uint32_t instr, int *rt, int *rn, uint64_t *imm) {
+    if ((instr & 0xFFC00000u) != 0xF9400000u) return 0;
+    *rt = (int)(instr & 0x1F);
+    *rn = (int)((instr >> 5) & 0x1F);
+    *imm = ((uint64_t)((instr >> 10) & 0xFFF)) << 3;
+    return 1;
+}
+
+// BLR Xn — indirect call. Callee cannot be resolved without register tracking,
+// but the hit still proves a loaded DATA value flows into a consumer region.
+static inline int sci_decode_blr(uint32_t instr, int *rn) {
+    if ((instr & 0xFFFFFC1Fu) != 0xD63F0000u) return 0;
+    *rn = (int)((instr >> 5) & 0x1F);
+    return 1;
+}
+
 // ADD (immediate), 64-bit
 static inline int sci_decode_add_imm(uint32_t instr, int *rd, int *rn, uint64_t *imm) {
     if ((instr & 0xFF800000u) != 0x91000000u) return 0;
@@ -92,6 +122,27 @@ static BOOL sci_text_bounds_for(uintptr_t probeAddress, NSString *imageSubstring
 
 #pragma mark - Scan core
 
+static SCIXrefHit *sci_make_hit(uint64_t loadPC, uint64_t callPC, uint64_t callee, NSString *image) {
+    SCIXrefHit *h = [SCIXrefHit new];
+    h.loadPC = (uintptr_t)loadPC;
+    h.callPC = (uintptr_t)callPC;
+    h.calleeAddress = (uintptr_t)callee;
+    h.image = image;
+    if (callee) {
+        Dl_info ci; memset(&ci, 0, sizeof(ci));
+        if (dladdr((const void *)(uintptr_t)callee, &ci) && ci.dli_sname) {
+            const char *cs = ci.dli_sname;
+            h.calleeSymbol = [NSString stringWithUTF8String:(cs[0] == '_') ? cs + 1 : cs];
+        }
+    }
+    Dl_info kr; memset(&kr, 0, sizeof(kr));
+    if (dladdr((const void *)(uintptr_t)loadPC, &kr) && kr.dli_sname) {
+        const char *ks = kr.dli_sname;
+        h.callerSymbol = [NSString stringWithUTF8String:(ks[0] == '_') ? ks + 1 : ks];
+    }
+    return h;
+}
+
 static NSArray<SCIXrefHit *> *sci_scan(const uint32_t *code, uint64_t base, size_t count,
                                        uint64_t target, uint64_t budget, int maxHits,
                                        NSString *image, BOOL *outHitBudget) {
@@ -101,35 +152,57 @@ static NSArray<SCIXrefHit *> *sci_scan(const uint32_t *code, uint64_t base, size
     BOOL budgetExhausted = NO;
     for (size_t i = 0; i + 1 < count; i++) {
         if (++scanned > budget) { budgetExhausted = YES; break; }
-        int rd; uint64_t page;
-        if (!sci_decode_adrp(code[i], base + i * 4, &rd, &page)) continue;
-        int ard, arn; uint64_t aimm;
-        if (!sci_decode_add_imm(code[i + 1], &ard, &arn, &aimm)) continue;
-        if (arn != rd) continue;
-        if (page + aimm != target) continue;
 
-        // Found a load of `target`. Look forward (bounded) for the bl reader call.
+        int loadedReg = -1;
+        uint64_t resolvedAddress = 0;
         uint64_t loadPC = base + i * 4;
-        for (size_t j = i + 2; j < count && j < i + 18; j++) {
-            uint64_t blPC = base + j * 4, blTarget;
-            if (!sci_decode_bl(code[j], blPC, &blTarget)) continue;
-            SCIXrefHit *h = [SCIXrefHit new];
-            h.loadPC = (uintptr_t)loadPC;
-            h.callPC = (uintptr_t)blPC;
-            h.calleeAddress = (uintptr_t)blTarget;
-            h.image = image;
-            Dl_info ci; memset(&ci, 0, sizeof(ci));
-            if (dladdr((const void *)(uintptr_t)blTarget, &ci) && ci.dli_sname) {
-                const char *s = ci.dli_sname;
-                h.calleeSymbol = [NSString stringWithUTF8String:(s[0] == '_') ? s + 1 : s];
+
+        // Pattern 1: adrp xN, page; add xN/xM, xN, off  → exact DATA address.
+        int rd; uint64_t page;
+        if (sci_decode_adrp(code[i], loadPC, &rd, &page)) {
+            int ard, arn; uint64_t aimm;
+            if (i + 1 < count && sci_decode_add_imm(code[i + 1], &ard, &arn, &aimm) && arn == rd) {
+                resolvedAddress = page + aimm;
+                loadedReg = ard;
+            } else {
+                // Pattern 2: adrp xN, page; ldr xM, [xN, off] — common for
+                // GOT/DATA pointer consumers. This matches when the referenced
+                // memory slot itself is the target.
+                int lrt, lrn; uint64_t limm;
+                if (i + 1 < count && sci_decode_ldr_imm64(code[i + 1], &lrt, &lrn, &limm) && lrn == rd) {
+                    resolvedAddress = page + limm;
+                    loadedReg = lrt;
+                }
             }
-            Dl_info kr; memset(&kr, 0, sizeof(kr));
-            if (dladdr((const void *)(uintptr_t)loadPC, &kr) && kr.dli_sname) {
-                const char *s = kr.dli_sname;
-                h.callerSymbol = [NSString stringWithUTF8String:(s[0] == '_') ? s + 1 : s];
+        }
+
+        // Pattern 3: adr xN, target — smaller functions / nearby literals.
+        if (!resolvedAddress) {
+            int adrReg; uint64_t adrAddr;
+            if (sci_decode_adr(code[i], loadPC, &adrReg, &adrAddr)) {
+                resolvedAddress = adrAddr;
+                loadedReg = adrReg;
             }
-            [hits addObject:h];
-            break; // one consumer per load site is enough
+        }
+
+        if (resolvedAddress != target) continue;
+
+        // Found a load/reference of `target`. Look forward for a direct BL or
+        // indirect BLR. Direct BL gives a concrete consumer; BLR still proves a
+        // runtime consumer but remains symbol-unknown.
+        for (size_t j = i + 1; j < count && j < i + 26; j++) {
+            uint64_t callPC = base + j * 4, blTarget = 0;
+            if (sci_decode_bl(code[j], callPC, &blTarget)) {
+                [hits addObject:sci_make_hit(loadPC, callPC, blTarget, image)];
+                break;
+            }
+            int rn = -1;
+            if (sci_decode_blr(code[j], &rn)) {
+                SCIXrefHit *h = sci_make_hit(loadPC, callPC, 0, image);
+                h.calleeSymbol = [NSString stringWithFormat:@"blr x%d", rn];
+                [hits addObject:h];
+                break;
+            }
         }
         if (maxHits > 0 && (int)hits.count >= maxHits) break;
     }
