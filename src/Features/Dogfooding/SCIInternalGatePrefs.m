@@ -19,6 +19,7 @@ static NSString *const kSCIInternalGateCrashSessionKey = @"sci_internal_gate_cra
 static NSString *const kSCIInternalGateCrashStableKey = @"sci_internal_gate_crash_stable_session_id";
 static NSString *const kSCIInternalGateCrashCleanExitKey = @"sci_internal_gate_crash_clean_exit_session_id";
 static NSString *const kSCIRuntimePatchPlansKey = @"sci_runtime_patch_plans";
+static const NSTimeInterval kSCIInternalGateCrashStableWindowSeconds = 4.0;
 
 static NSString *const kSCIForceIGObjCMasterKey = @"sci_force_ig_internal_employee";
 static NSString *const kSCIMobileConfigMasterKey = @"sci_force_mc_internal_use_all";
@@ -82,22 +83,42 @@ static void SCIUncaughtExceptionHandler(NSException *exception) {
     SCIWriteCrashMarker(SIGABRT);
 }
 
+static BOOL SCISigactionIsOurHandler(const struct sigaction *sa) {
+    if (!sa) return NO;
+    if ((sa->sa_flags & SA_SIGINFO) && sa->sa_sigaction == SCICrashSignalHandler) return YES;
+    return sa->sa_handler == (void (*)(int))SCICrashSignalHandler;
+}
+
+static void SCIInstallCrashHandlerForSignal(int signo, struct sigaction *oldStore) {
+    struct sigaction current;
+    memset(&current, 0, sizeof(current));
+    if (sigaction(signo, NULL, &current) == 0 && !SCISigactionIsOurHandler(&current) && oldStore) {
+        *oldStore = current;
+    }
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = SCICrashSignalHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigaction(signo, &sa, NULL);
+}
+
+static void SCIReinstallCrashSignalHandlers(void) {
+    SCIInstallCrashHandlerForSignal(SIGSEGV, &gSCIOldSIGSEGV);
+    SCIInstallCrashHandlerForSignal(SIGBUS, &gSCIOldSIGBUS);
+    SCIInstallCrashHandlerForSignal(SIGABRT, &gSCIOldSIGABRT);
+    SCIInstallCrashHandlerForSignal(SIGILL, &gSCIOldSIGILL);
+    SCIInstallCrashHandlerForSignal(SIGTRAP, &gSCIOldSIGTRAP);
+}
+
 static void SCIInstallCrashSignalHandlers(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSString *path = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches"] stringByAppendingPathComponent:@"ryukgram_internal_gate_crash.marker"];
         const char *fs = path.fileSystemRepresentation;
         if (fs) strncpy(gSCICrashMarkerPath, fs, sizeof(gSCICrashMarkerPath) - 1);
-        struct sigaction sa;
-        memset(&sa, 0, sizeof(sa));
-        sa.sa_sigaction = SCICrashSignalHandler;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-        sigaction(SIGSEGV, &sa, &gSCIOldSIGSEGV);
-        sigaction(SIGBUS, &sa, &gSCIOldSIGBUS);
-        sigaction(SIGABRT, &sa, &gSCIOldSIGABRT);
-        sigaction(SIGILL, &sa, &gSCIOldSIGILL);
-        sigaction(SIGTRAP, &sa, &gSCIOldSIGTRAP);
+        SCIReinstallCrashSignalHandlers();
         NSSetUncaughtExceptionHandler(&SCIUncaughtExceptionHandler);
     });
 }
@@ -196,16 +217,29 @@ static void SCIClearCrashMarker(void) {
     dispatch_once(&once, ^{
         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
         [nc addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
+            SCIReinstallCrashSignalHandlers();
             NSString *sid = [SCIUtils getStringPref:kSCIInternalGateCrashSessionKey];
             if (!sid.length) return;
             [SCIUtils setPref:sid forKey:kSCIInternalGateCrashStableKey];
-            // This guard is a crash detector, not a short-session detector. Once
-            // the app reaches foreground-active, a later user close must not be
-            // interpreted as a crash simply because it happened before a timer.
-            [SCIUtils setPref:nil forKey:kSCIInternalGateCrashPendingKeysKey];
-            [SCIUtils setPref:nil forKey:kSCIInternalGateCrashPendingRuntimePlansKey];
-            [SCIUtils setPref:@"stable foreground reached" forKey:kSCIInternalGateCrashLastSourceKey];
+            [SCIUtils setPref:@"foreground active; still armed until 4s stable window completes" forKey:kSCIInternalGateCrashLastSourceKey];
             [NSUserDefaults.standardUserDefaults synchronize];
+
+            // Do not clear pending immediately on foreground-active. The crash in
+            // Instagram-2026-06-19-023942.ips aborts from an async FBShared queue
+            // after launch/foreground, so clearing here makes the next launch see
+            // a crash marker with no pending keys and therefore nothing to disable.
+            // User exits are handled by background/terminate notifications and
+            // previous short sessions without a signal marker are ignored on next
+            // launch, so this stable timer does not recreate the old false positive.
+            // This timer only clears pending state; it never disables gates by time.
+            [NSTimer scheduledTimerWithTimeInterval:kSCIInternalGateCrashStableWindowSeconds repeats:NO block:^(__unused NSTimer *timer) {
+                NSString *current = [SCIUtils getStringPref:kSCIInternalGateCrashSessionKey];
+                if (!current.length || ![current isEqualToString:sid]) return;
+                [SCIUtils setPref:nil forKey:kSCIInternalGateCrashPendingKeysKey];
+                [SCIUtils setPref:nil forKey:kSCIInternalGateCrashPendingRuntimePlansKey];
+                [SCIUtils setPref:@"4s stable window completed" forKey:kSCIInternalGateCrashLastSourceKey];
+                [NSUserDefaults.standardUserDefaults synchronize];
+            }];
         }];
         [nc addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
             [self markCrashGuardCleanExitForSession:[SCIUtils getStringPref:kSCIInternalGateCrashSessionKey] reason:@"entered background / user exit"];
@@ -246,10 +280,16 @@ static void SCIClearCrashMarker(void) {
 
         NSArray<NSString *> *pending = [SCIUtils getArrayPref:kSCIInternalGateCrashPendingKeysKey];
         NSDictionary *pendingPlans = [SCIUtils getDictPref:kSCIInternalGateCrashPendingRuntimePlansKey];
+        NSArray<NSString *> *active = [self activeGateKeys];
+        NSDictionary *runtimePlans = [self activeRuntimePatchPlans];
+
         BOOL hadPending = pending.count > 0 || pendingPlans.count > 0;
-        BOOL confirmedCrash = hadPending && SCICrashMarkerExists();
-        if (confirmedCrash) {
-            [self disablePendingKeys:pending runtimePlans:pendingPlans source:@"confirmed SIGSEGV/SIGBUS/SIGABRT crash marker from previous run"];
+        BOOL hadCrashMarker = SCICrashMarkerExists();
+        if (hadCrashMarker && (hadPending || active.count || runtimePlans.count)) {
+            NSArray<NSString *> *keysToDisable = pending.count ? pending : active;
+            NSDictionary *plansToDisable = pendingPlans.count ? pendingPlans : runtimePlans;
+            NSString *source = hadPending ? @"confirmed SIGSEGV/SIGBUS/SIGABRT crash marker from previous run" : @"confirmed crash marker with no pending state; disabling currently active gates";
+            [self disablePendingKeys:keysToDisable runtimePlans:plansToDisable source:source];
             SCIClearCrashMarker();
             return;
         }
@@ -265,8 +305,6 @@ static void SCIClearCrashMarker(void) {
         }
         SCIClearCrashMarker();
 
-        NSArray<NSString *> *active = [self activeGateKeys];
-        NSDictionary *runtimePlans = [self activeRuntimePatchPlans];
         if (!active.count && !runtimePlans.count) return;
 
         NSString *session = [NSString stringWithFormat:@"%.0f-%u", NSDate.date.timeIntervalSince1970 * 1000.0, arc4random_uniform(UINT32_MAX)];
