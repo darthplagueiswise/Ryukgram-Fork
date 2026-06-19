@@ -4,7 +4,7 @@
 #import <mach-o/loader.h>
 #import <mach-o/getsect.h>
 #import <mach/mach.h>
-#import <mach/mach_vm.h>
+#import <mach/vm_map.h>
 #import <dlfcn.h>
 #import <os/log.h>
 #import <stdint.h>
@@ -139,9 +139,9 @@ static BOOL sci_address_is_in_text(uintptr_t address) {
 
 static BOOL sci_safe_read_ptr(uint64_t address, uint64_t *outValue) {
     if (!address || !outValue) return NO;
-    mach_vm_size_t outSize = 0;
+    vm_size_t outSize = 0;
     uint64_t value = 0;
-    kern_return_t kr = mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address, sizeof(value), (mach_vm_address_t)&value, &outSize);
+    kern_return_t kr = vm_read_overwrite(mach_task_self(), (vm_address_t)address, (vm_size_t)sizeof(value), (vm_address_t)&value, &outSize);
     if (kr != KERN_SUCCESS || outSize != sizeof(value)) return NO;
     *outValue = value;
     return YES;
