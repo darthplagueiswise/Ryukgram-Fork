@@ -267,7 +267,10 @@ static BOOL SCICPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
         return NO;
     }
     memcpy((void *)address, bytes.bytes, bytes.length);
-    __builtin___clear_cache((char *)address, (char *)(address + bytes.length));
+    // DATA patch only: no instruction-cache flush here. Some Theos/iOS SDK
+    // toolchains lower that builtin to an unresolved arm64 runtime symbol, and
+    // cache invalidation is only required for executable-code patching, which this
+    // resolver intentionally does not perform.
     vm_protect(mach_task_self(), pageStart, span, false, VM_PROT_READ);
     return YES;
 }
