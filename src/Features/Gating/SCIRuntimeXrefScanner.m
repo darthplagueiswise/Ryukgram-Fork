@@ -198,6 +198,10 @@ static NSArray<SCIXrefHit *> *sci_scan(const uint32_t *code, uint64_t base, size
             }
             int rn = -1;
             if (sci_decode_blr(code[j], &rn)) {
+                // For indirect calls, only count BLR when it branches through the
+                // register that received the resolved address. This keeps the
+                // scanner from treating an unrelated later BLR as a consumer.
+                if (loadedReg >= 0 && rn != loadedReg) continue;
                 SCIXrefHit *h = sci_make_hit(loadPC, callPC, 0, image);
                 h.calleeSymbol = [NSString stringWithFormat:@"blr x%d", rn];
                 [hits addObject:h];
