@@ -113,14 +113,11 @@
 													   subtitle:SCILocalized(@"Restores gates auto-disabled after a crash. Tap after enabling toggles that were reset.")
 													       icon:[SCISymbol symbolWithName:@"arrow.counterclockwise.circle"]
 													     action:^(void) {
-														NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
-														NSArray *d = [ud arrayForKey:@"sci_internal_gate_crash_disabled_keys"] ?: @[];
-														for (NSString *key in d) [ud setBool:YES forKey:key];
-														[ud removeObjectForKey:@"sci_internal_gate_crash_pending_keys"];
-														[ud removeObjectForKey:@"sci_internal_gate_crash_disabled_keys"];
-														[ud removeObjectForKey:@"sci_internal_gate_crash_last_source"];
-														NSString *msg = d.count ? [NSString stringWithFormat:@"Restored %lu gate(s):\n%@",(unsigned long)d.count,[d componentsJoinedByString:@"\n"]] : @"No disabled gates. Guard cleared.";
-														UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class])for(UIWindow *win in((UIWindowScene*)sc).windows)if(win.isKeyWindow){w=win;break;}if(w)break;}
+														NSArray *d = [NSUserDefaults.standardUserDefaults arrayForKey:@"sci_internal_gate_crash_disabled_keys"] ?: @[];
+												NSDictionary *plans = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"sci_internal_gate_crash_disabled_runtime_plans"] ?: @{};
+												[SCIInternalGatePrefs resetCrashGuardAndRestoreKeys];
+												NSString *msg = (d.count || plans.count) ? [NSString stringWithFormat:@"Restored %lu gate(s) and %lu runtime patch plan(s):\n%@",(unsigned long)d.count,(unsigned long)plans.count,[d componentsJoinedByString:@"\n"]] : @"No disabled gates or runtime plans. Guard cleared.";
+												UIWindow *w=nil; for(UIScene *sc in UIApplication.sharedApplication.connectedScenes){if([sc isKindOfClass:UIWindowScene.class])for(UIWindow *win in((UIWindowScene*)sc).windows)if(win.isKeyWindow){w=win;break;}if(w)break;}
 														UIViewController *top=w.rootViewController; while(top.presentedViewController)top=top.presentedViewController;
 														UIAlertController *a=[UIAlertController alertControllerWithTitle:@"Crash guard reset" message:msg preferredStyle:UIAlertControllerStyleAlert];
 														[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
@@ -187,13 +184,9 @@
 											@"footer": SCILocalized(@"Browses classes in the selected loaded image. Search scans the full cached class index and BOOL getter names; no 80-row cap."),
 											@"rows": @[
 												[SCISetting navigationCellWithTitle:SCILocalized(@"Unified Runtime Browser")
-			   subtitle:SCILocalized(@"Instagram exec + FBShared in one screen. Classes grouped (IG·/FB· headers) with BOOL getters; each switch shows the LIVE value and forces it (persisted, re-applied at launch). Long-press for Force OFF / Undo.")
-			       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"]
-			viewController:[[SCISymbolBrowserViewController alloc] initUnified]],
-												[SCISetting navigationCellWithTitle:SCILocalized(@"C / DATA / ABI Browser (experimental)")
-			   subtitle:SCILocalized(@"C functions, DATA/param descriptors and Swift symbols with ABI-aware fishhook actions. Experimental; fragile vs the ObjC browser above.")
-			       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"]
-			viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeCFunctions]],
+							   subtitle:SCILocalized(@"Exec + FBShared in one Liquid Glass browser. Tabs: image scope and ObjC/C/DATA/Swift, with safe ABI-aware actions.")
+							       icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"]
+							viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeObjCMethods]],
 											]
 										},
 										@{
