@@ -73,6 +73,9 @@ typedef NS_ENUM(NSInteger, SCICRuntimePatchStrategy) {
 + (NSUInteger)hitCountForPlan:(SCICRuntimePatchPlan *)plan;
 + (BOOL)isHookInstalledForPlan:(SCICRuntimePatchPlan *)plan;
 + (nullable id)currentForcedValueForPlan:(SCICRuntimePatchPlan *)plan;
++ (nullable id)currentNativeValueForPlan:(SCICRuntimePatchPlan *)plan;
++ (BOOL)isEffectivelyEnabledForPlan:(SCICRuntimePatchPlan *)plan;
++ (NSString *)stateSummaryForPlan:(SCICRuntimePatchPlan *)plan;
 
 // `value` is strategy-specific:
 // ObjC/function BOOL/DATA reader BOOL -> NSNumber BOOL.

@@ -30,6 +30,12 @@
 @end
 @implementation SCICSymbolEntry @end
 
+@interface SCICSymbolGroup : NSObject
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, copy) NSArray<SCICSymbolEntry *> *entries;
+@end
+@implementation SCICSymbolGroup @end
+
 
 static NSDictionary<NSString *, id> *SCICResolverInfoForEntry(SCICSymbolEntry *e) {
     if (!e) return @{};
@@ -208,9 +214,19 @@ static NSString *SCICRegisterName(unsigned r, BOOL wide) {
 }
 
 static NSString *SCICDecodeARM64(uint32_t insn, uintptr_t pc) {
+    static NSArray<NSString *> *conds;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ conds = @[@"eq",@"ne",@"hs",@"lo",@"mi",@"pl",@"vs",@"vc",@"hi",@"ls",@"ge",@"lt",@"gt",@"le",@"al",@"nv"]; });
     if (insn == 0xd503245f) return @"bti c";
     if (insn == 0xd503201f) return @"nop";
     if (insn == 0xd65f03c0) return @"ret";
+    if ((insn & 0xffc00000) == 0xa9000000 || (insn & 0xffc00000) == 0xa9800000 || (insn & 0xffc00000) == 0xa9400000) {
+        BOOL load = (insn & 0x00400000) != 0;
+        unsigned rt = insn & 31, rn = (insn >> 5) & 31, rt2 = (insn >> 10) & 31;
+        int imm7 = (int)((insn >> 15) & 0x7f); if (imm7 & 0x40) imm7 -= 0x80;
+        NSString *mode = ((insn & 0xffc00000) == 0xa9800000) ? @"!" : @"";
+        return [NSString stringWithFormat:@"%@ %@, %@, [%@,#%d]%@", load?@"ldp":@"stp", SCICRegisterName(rt, YES), SCICRegisterName(rt2, YES), SCICRegisterName(rn, YES), imm7 * 8, mode];
+    }
     if ((insn & 0x7f800000) == 0x52800000) {
         unsigned rd = insn & 31;
         unsigned imm = (insn >> 5) & 0xffff;
@@ -219,19 +235,39 @@ static NSString *SCICDecodeARM64(uint32_t insn, uintptr_t pc) {
     }
     if ((insn & 0xfc000000) == 0x94000000) {
         int64_t imm = SCICSignExtend((int64_t)(insn & 0x03ffffff), 26) << 2;
-        return [NSString stringWithFormat:@"bl 0x%llx", (unsigned long long)(pc + imm)];
+        uintptr_t dst = pc + imm;
+        return [NSString stringWithFormat:@"bl %@", [SCIRuntimeXrefScanner describeAddress:dst]];
     }
     if ((insn & 0xfc000000) == 0x14000000) {
         int64_t imm = SCICSignExtend((int64_t)(insn & 0x03ffffff), 26) << 2;
-        return [NSString stringWithFormat:@"b 0x%llx", (unsigned long long)(pc + imm)];
+        return [NSString stringWithFormat:@"b %@", [SCIRuntimeXrefScanner describeAddress:(pc + imm)]];
+    }
+    if ((insn & 0xff000010) == 0x54000000) {
+        int64_t imm = SCICSignExtend((int64_t)((insn >> 5) & 0x7ffff), 19) << 2;
+        unsigned cond = insn & 0xf;
+        return [NSString stringWithFormat:@"b.%@ %@", cond < conds.count ? conds[cond] : @"?", [SCIRuntimeXrefScanner describeAddress:(pc + imm)]];
     }
     if ((insn & 0x9f000000) == 0x90000000) {
         unsigned rd = insn & 31;
         return [NSString stringWithFormat:@"adrp %@, <page>", SCICRegisterName(rd, YES)];
     }
+    if ((insn & 0x9f000000) == 0x10000000) {
+        unsigned rd = insn & 31;
+        return [NSString stringWithFormat:@"adr %@, <addr>", SCICRegisterName(rd, YES)];
+    }
     if ((insn & 0xffc00000) == 0x91000000) {
         unsigned rd = insn & 31, rn = (insn >> 5) & 31, imm = (insn >> 10) & 0xfff;
         return [NSString stringWithFormat:@"add %@, %@, #0x%x", SCICRegisterName(rd, YES), SCICRegisterName(rn, YES), imm];
+    }
+    if ((insn & 0xffc00000) == 0xd1000000) {
+        unsigned rd = insn & 31, rn = (insn >> 5) & 31, imm = (insn >> 10) & 0xfff;
+        return [NSString stringWithFormat:@"sub %@, %@, #0x%x", SCICRegisterName(rd, YES), SCICRegisterName(rn, YES), imm];
+    }
+    if ((insn & 0xffc00000) == 0xb1000000 || (insn & 0xffc00000) == 0xf1000000) {
+        BOOL wide = (insn & 0x40000000) != 0;
+        unsigned rd = insn & 31, rn = (insn >> 5) & 31, imm = (insn >> 10) & 0xfff;
+        if (rd == 31) return [NSString stringWithFormat:@"cmn %@, #0x%x", SCICRegisterName(rn, wide), imm];
+        return [NSString stringWithFormat:@"adds %@, %@, #0x%x", SCICRegisterName(rd, wide), SCICRegisterName(rn, wide), imm];
     }
     if ((insn & 0xffc00000) == 0xb9400000) {
         unsigned rt = insn & 31, rn = (insn >> 5) & 31, imm = ((insn >> 10) & 0xfff) << 2;
@@ -340,8 +376,8 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
         [self.table.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
     [self refreshNow];
-    // DATA symbols: auto-run the xref consumer scan once on open.
-    if (self.entry.data && self.resolvedAddr) [self runXrefScan];
+    // Auto-run once on open: DATA needs consumer readers; TEXT needs callers.
+    if (self.resolvedAddr) [self runXrefScan];
 }
 
 - (void)refreshNow {
@@ -402,8 +438,8 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
     self.scanState = 1;
     [self.table reloadData];
     __weak typeof(self) ws = self;
-    // Scan the image that DEFINES the descriptor (nil substring → owning image),
-    // bounded & off-main. Read-only; cannot crash the app.
+    // Scan all supported images (Instagram + FBShared) because callers/import slots
+    // can live outside the image defining the symbol. Bounded & off-main.
     [SCIRuntimeXrefScanner findConsumersOfAddress:self.resolvedAddr
                                     imageSubstring:nil
                                             budget:[SCIRuntimeXrefScanner defaultBudget]
@@ -424,6 +460,25 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
 }
 
 #pragma mark Apply / Revert
+
+- (void)detailSwitchChanged:(UISwitch *)sender {
+    SCICRuntimePatchPlan *plan = [self currentRuntimePlan];
+    if (sender.isOn) {
+        if (plan.requiresPromptValue) { sender.on = [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:plan]; [self applyTapped]; return; }
+        NSError *error = nil;
+        if (![SCICRuntimePatchResolver applyPlan:plan value:(plan.strategy == SCICRuntimePatchStrategyFunctionObserve ? nil : @YES) error:&error]) {
+            sender.on = [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:plan];
+            [self showPatchError:error fallback:plan.reason];
+        }
+    } else {
+        NSError *error = nil;
+        id native = [SCICRuntimePatchResolver currentNativeValueForPlan:plan];
+        BOOL shouldForceOff = [native isKindOfClass:NSNumber.class] && [native boolValue] && (plan.strategy == SCICRuntimePatchStrategyObjCBool || plan.strategy == SCICRuntimePatchStrategyFunctionBool || plan.strategy == SCICRuntimePatchStrategyDataReaderBool);
+        BOOL ok = shouldForceOff ? [SCICRuntimePatchResolver applyPlan:plan value:@NO error:&error] : [SCICRuntimePatchResolver revertPlan:plan error:&error];
+        if (!ok) { sender.on = [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:plan]; [self showPatchError:error fallback:plan.reason]; }
+    }
+    [self refreshNow];
+}
 
 - (void)showPatchError:(NSError *)error fallback:(NSString *)fallback {
     [SCIUtils showToastForDuration:1.5 title:@"Patch failed" subtitle:(error.localizedDescription ?: fallback ?: @"unknown error")];
@@ -563,7 +618,7 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
     if (s == 0) return self.resolutionRows.count;
     if (s == 1) {
         if (self.strategy == SCICPatchStrategyNone) return 1;          // reason
-        return 4;                                                      // strategy + apply + revert + state
+        return 5;                                                      // strategy + toggle + apply + revert + state
     }
     if (s == 2) {
         if (self.scanState == 0) return 1;                             // "scan" button
@@ -578,6 +633,7 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"c"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
     cell.backgroundColor = [UIColor.secondarySystemBackgroundColor colorWithAlphaComponent:0.5];
+    cell.accessoryView = nil;
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     cell.textLabel.numberOfLines = 0;
@@ -601,6 +657,17 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
         }
         if (ip.row == 0) { cell.textLabel.text = @"Strategy"; cell.detailTextLabel.text = [self strategyLabel]; return cell; }
         if (ip.row == 1) {
+            cell.textLabel.text = @"Enabled";
+            cell.detailTextLabel.text = @"Reflects native ON or override ON. Turning OFF native-ON BOOL entries writes Force OFF; otherwise clears override.";
+            UISwitch *sw = [UISwitch new];
+            sw.on = [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:plan];
+            sw.enabled = !plan.requiresPromptValue || [SCICRuntimePatchResolver isAppliedPlan:plan];
+            sw.onTintColor = [SCIUtils SCIColor_Primary];
+            [sw addTarget:self action:@selector(detailSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = sw;
+            return cell;
+        }
+        if (ip.row == 2) {
             BOOL applied = [self currentlyApplied];
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             cell.textLabel.textColor = self.view.tintColor;
@@ -609,27 +676,23 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
             else if (self.strategy == SCICPatchStrategyDataPatchBytes) cell.textLabel.text = applied ? @"Set patch bytes… (re-apply)" : @"Set patch bytes…";
             else if (self.strategy == SCICPatchStrategyObserve) cell.textLabel.text = applied ? @"Observing ✓ (tap to refresh)" : @"Install observe hook";
             else cell.textLabel.text = applied ? @"Applied ✓ (tap to re-apply)" : @"Apply patch (persisted)";
-            cell.detailTextLabel.text = @"Persisted with backup; hook/cache is installed live when the toggle changes and reinstalled from defaults at launch.";
+            cell.detailTextLabel.text = @"Persisted with backup; hook/cache is installed live and reinstalled from defaults at launch.";
             return cell;
         }
-        if (ip.row == 2) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = UIColor.systemRedColor; cell.textLabel.text = @"Revert patch"; return cell; }
-        // row 3: state
-        NSUInteger readerHits = [SCICRuntimePatchResolver hitCountForPlan:plan];
-        BOOL installed = [SCICRuntimePatchResolver isHookInstalledForPlan:plan];
-        id forcedValue = [SCICRuntimePatchResolver currentForcedValueForPlan:plan];
-        NSString *forcedText = forcedValue ? [NSString stringWithFormat:@" · value=%@", forcedValue] : @"";
+        if (ip.row == 3) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = UIColor.systemRedColor; cell.textLabel.text = @"Revert patch / clear override"; return cell; }
+        // row 4: state
         cell.textLabel.text = @"State";
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"installed=%@ · hits=%lu%@", installed ? @"yes" : @"no", (unsigned long)readerHits, forcedText];
+        cell.detailTextLabel.text = [SCICRuntimePatchResolver stateSummaryForPlan:plan];
         return cell;
     }
     if (ip.section == 2) {
         if (self.scanState == 0) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = self.view.tintColor; cell.textLabel.text = @"Resolve consumers (xref scan)"; cell.detailTextLabel.text = @"Bounded, read-only scan of the defining image's __text."; return cell; }
-        if (self.scanState == 1) { cell.textLabel.text = @"Scanning…"; cell.detailTextLabel.text = @"Resolving adrp/add → bl reader in background."; return cell; }
-        if (self.xrefHits.count == 0) { cell.textLabel.text = @"No consumer resolved"; cell.detailTextLabel.text = self.scanHitBudget ? @"Budget reached before a hit. Tap to rescan." : @"No direct adrp/add+bl reference found. Use capture, or it may be GOT/Swift-dispatched."; cell.selectionStyle = UITableViewCellSelectionStyleDefault; return cell; }
+        if (self.scanState == 1) { cell.textLabel.text = @"Scanning…"; cell.detailTextLabel.text = @"Scanning Instagram + FBShared for direct BL callers, GOT loads, ADR/ADRP/ADD/LDR consumers and BLR indirect calls."; return cell; }
+        if (self.xrefHits.count == 0) { cell.textLabel.text = @"No consumer resolved"; cell.detailTextLabel.text = self.scanHitBudget ? @"Budget reached before a hit. Tap to rescan." : @"No direct BL/GOT/ADR consumer found in Instagram/FBShared. Use live capture if the path is lazy, Swift-dispatched or generated."; cell.selectionStyle = UITableViewCellSelectionStyleDefault; return cell; }
         if (self.scanHitBudget && ip.row == (NSInteger)self.xrefHits.count) { cell.textLabel.text = @"⚠ budget reached"; cell.detailTextLabel.text = @"More consumers may exist beyond the scan budget."; return cell; }
         SCIXrefHit *h = self.xrefHits[ip.row];
-        cell.textLabel.text = h.calleeSymbol ?: [NSString stringWithFormat:@"0x%lx", (unsigned long)h.calleeAddress];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"caller %@ · load 0x%lx · %@", h.callerSymbol ?: @"?", (unsigned long)h.loadPC, h.image ?: @"?"];
+        cell.textLabel.text = h.calleeSymbol ?: [SCIRuntimeXrefScanner describeAddress:h.calleeAddress];
+        cell.detailTextLabel.text = h.detail ?: [NSString stringWithFormat:@"%@ · caller %@ · load %@ · %@", h.referenceKind ?: @"xref", h.callerSymbol ?: @"?", [SCIRuntimeXrefScanner describeAddress:h.loadPC], h.image ?: @"?"];
         return cell;
     }
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
@@ -640,8 +703,8 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tv deselectRowAtIndexPath:ip animated:YES];
     if (ip.section == 1 && self.strategy != SCICPatchStrategyNone) {
-        if (ip.row == 1) [self applyTapped];
-        else if (ip.row == 2) [self revertTapped];
+        if (ip.row == 2) [self applyTapped];
+        else if (ip.row == 3) [self revertTapped];
     } else if (ip.section == 2) {
         if (self.scanState != 1) [self runXrefScan];
     }
@@ -809,6 +872,7 @@ static NSArray<SCICSymbolEntry *> *SCICEnumerateInstagramAndFBSharedSymbols(void
 
 static char kSCICSymbolRowPayloadKey;
 static char kSCICSymbolSwitchPayloadKey;
+static char kSCICSymbolGroupPayloadKey;
 
 @interface SCISymbolsBrowserViewController () <UISearchResultsUpdating>
 @end
@@ -943,31 +1007,16 @@ static char kSCICSymbolSwitchPayloadKey;
 }
 
 - (NSString *)subtitleForEntry:(SCICSymbolEntry *)e {
+    SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:e];
     NSMutableArray *bits = [NSMutableArray array];
-    [bits addObject:e.image ?: @"Image"];
     [bits addObject:e.section ?: @"section?"];
-    [bits addObject:[self inlineStrategyShortLabelForEntry:e]];
-    if (e.objcSelectorName.length) {
-        NSNumber *forced = [SCISymbolBrowserEngine overrideForKey:[self objcOverrideKeyForEntry:e]];
-        [bits addObject:forced ? (forced.boolValue ? @"forced ON" : @"forced OFF") : @"passthrough"];
-        [bits addObject:[SCISymbolBrowserEngine hookInstalledForKey:[self objcOverrideKeyForEntry:e]] ? @"installed" : @"not installed"];
-    } else {
-        if (e.resolvable) [bits addObject:@"dlsym OK"];
-        if (e.function) [bits addObject:e.hasBindPointer ? @"import OK" : @"no import slot"];
-        NSNumber *pf = [SCICSymbolStub forceForParamDescriptorSymbol:e.name];
-        NSDictionary *typed = [SCICSymbolStub typedForceForSymbol:e.name];
-        NSNumber *bf = [SCICSymbolStub forceForSymbol:e.name];
-        if (pf) [bits addObject:[NSString stringWithFormat:@"param=%@", pf.boolValue?@"YES":@"NO"]];
-        else if ([SCICSymbolStub observeForParamDescriptorSymbol:e.name]) [bits addObject:@"param observe"];
-        else if (bf) [bits addObject:[NSString stringWithFormat:@"BOOL=%@", bf.boolValue?@"YES":@"NO"]];
-        else if (typed) [bits addObject:[NSString stringWithFormat:@"%@=%@", typed[@"kind"] ?: @"typed", typed[@"value"] ?: @""]];
-        else if ([SCICSymbolStub observeForSymbol:e.name]) [bits addObject:@"observe"];
-        NSUInteger hits = [SCICRuntimePatchResolver hitCountForPlan:[self resolverPlanForEntry:e]];
-        if (hits) [bits addObject:[NSString stringWithFormat:@"hits=%lu", (unsigned long)hits]];
-        if (![self entryHasInlineToggle:e]) [bits addObject:e.abi ?: @"ABI unknown"];
-    }
+    [bits addObject:plan.shortStrategyName ?: @"resolve only"];
+    [bits addObject:[SCICRuntimePatchResolver stateSummaryForPlan:plan]];
+    if (plan.consumerSymbol.length) [bits addObject:[NSString stringWithFormat:@"consumer %@", plan.consumerSymbol]];
+    if (![self entryHasInlineToggle:e] && e.abi.length) [bits addObject:e.abi];
     return [bits componentsJoinedByString:@" · "];
 }
+
 
 - (NSString *)detailForEntry:(SCICSymbolEntry *)e {
     if (e.objcSelectorName.length) return [NSString stringWithFormat:@"%@\n\nImage: %@\nKind: %@\nClass: %@\nSelector: %@\nClass method: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.kind?:@"", e.objcClassName?:@"", e.objcSelectorName?:@"", e.objcClassMethod?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
@@ -1007,7 +1056,7 @@ static char kSCICSymbolSwitchPayloadKey;
 }
 
 - (BOOL)entrySwitchValue:(SCICSymbolEntry *)entry {
-    return [SCICRuntimePatchResolver isAppliedPlan:[self resolverPlanForEntry:entry]];
+    return [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:[self resolverPlanForEntry:entry]];
 }
 
 - (NSString *)inlineStrategyShortLabelForEntry:(SCICSymbolEntry *)entry {
@@ -1050,9 +1099,12 @@ static char kSCICSymbolSwitchPayloadKey;
     SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:entry];
     NSError *error = nil;
     if (!enabled) {
-        if (![SCICRuntimePatchResolver revertPlan:plan error:&error]) {
-            sender.on = [SCICRuntimePatchResolver isAppliedPlan:plan];
-            [SCIUtils showToastForDuration:1.2 title:@"Revert failed" subtitle:error.localizedDescription ?: plan.symbol];
+        id native = [SCICRuntimePatchResolver currentNativeValueForPlan:plan];
+        BOOL shouldForceOff = [native isKindOfClass:NSNumber.class] && [native boolValue] && (plan.strategy == SCICRuntimePatchStrategyObjCBool || plan.strategy == SCICRuntimePatchStrategyFunctionBool || plan.strategy == SCICRuntimePatchStrategyDataReaderBool);
+        BOOL ok = shouldForceOff ? [SCICRuntimePatchResolver applyPlan:plan value:@NO error:&error] : [SCICRuntimePatchResolver revertPlan:plan error:&error];
+        if (!ok) {
+            sender.on = [SCICRuntimePatchResolver isEffectivelyEnabledForPlan:plan];
+            [SCIUtils showToastForDuration:1.2 title:shouldForceOff ? @"Force OFF failed" : @"Revert failed" subtitle:error.localizedDescription ?: plan.symbol];
         }
         [self rebuildSections];
         return;
@@ -1164,13 +1216,97 @@ static char kSCICSymbolSwitchPayloadKey;
     [self presentViewController:a animated:YES completion:nil];
 }
 
+
+- (NSString *)entityKeyForEntry:(SCICSymbolEntry *)entry {
+    NSString *n = entry.name ?: @"";
+    if (entry.objcClassName.length) return entry.objcClassName;
+    if ([n containsString:@"IGMobileConfig"]) return @"IGMobileConfig";
+    if ([n containsString:@"EasyGating"]) return @"EasyGating";
+    if ([n containsString:@"MSGCSessioned"]) return @"MSGCSessionedMobileConfig";
+    if ([n containsString:@"MCIExperiment"] || [n containsString:@"MCIExtension"]) return @"MCI experiment cache";
+    if ([n containsString:@"MCDDasm"]) return @"MCDDasm adapters";
+    if ([n containsString:@"TALEvents"]) return @"TALEvents";
+    if ([n containsString:@"RegisterMappings"] || [n containsString:@"UpdateConfigs"] || [n containsString:@"SetConfigOverrides"]) return @"MobileConfig actions";
+    if ([n containsString:@"SUBSBenefit"]) return @"SUBSBenefitDataProvider";
+    if ([n containsString:@"Employee"] || [n hasPrefix:@"ig_is_employee"] || [n containsString:@"employee"]) return @"Employee / test user";
+    if ([n containsString:@"Dogfood"] || [n containsString:@"dogfood"] || [n containsString:@"Minos"]) return @"Dogfood / Minos";
+    if ([n hasPrefix:@"ig_user_session"]) return @"IG user session params";
+    if ([n hasPrefix:@"xav_"]) return @"XAV params";
+    if ([n hasPrefix:@"mc_team_"]) return @"MC team params";
+    NSRange r = [n rangeOfString:@"_" options:0];
+    if (r.location != NSNotFound && r.location > 2) return [n substringToIndex:r.location];
+    return [self categoryForEntry:entry] ?: @"Runtime symbols";
+}
+
+- (NSArray<SCICSymbolEntry *> *)controllableEntriesInGroup:(NSArray<SCICSymbolEntry *> *)entries {
+    NSMutableArray *out = [NSMutableArray array];
+    for (SCICSymbolEntry *e in entries ?: @[]) {
+        SCICRuntimePatchPlan *p = [self resolverPlanForEntry:e];
+        if (p.inlineToggleSafe && p.strategy != SCICRuntimePatchStrategyNone) [out addObject:e];
+    }
+    return out.copy;
+}
+
+- (NSString *)groupSubtitleForEntries:(NSArray<SCICSymbolEntry *> *)entries {
+    NSUInteger safe = 0, effective = 0, forced = 0, nativeOn = 0, hits = 0;
+    for (SCICSymbolEntry *e in entries ?: @[]) {
+        SCICRuntimePatchPlan *p = [self resolverPlanForEntry:e];
+        if (p.inlineToggleSafe && p.strategy != SCICRuntimePatchStrategyNone) safe++;
+        id f = [SCICRuntimePatchResolver currentForcedValueForPlan:p];
+        id n = [SCICRuntimePatchResolver currentNativeValueForPlan:p];
+        if (f) forced++;
+        if ([n isKindOfClass:NSNumber.class] && [n boolValue]) nativeOn++;
+        if ([SCICRuntimePatchResolver isEffectivelyEnabledForPlan:p]) effective++;
+        hits += [SCICRuntimePatchResolver hitCountForPlan:p];
+    }
+    return [NSString stringWithFormat:@"%lu entries · %lu controllable · %lu active/effective · %lu native ON · %lu overridden · hits %lu", (unsigned long)entries.count, (unsigned long)safe, (unsigned long)effective, (unsigned long)nativeOn, (unsigned long)forced, (unsigned long)hits];
+}
+
+- (BOOL)groupSwitchValueForEntries:(NSArray<SCICSymbolEntry *> *)entries {
+    NSArray *safe = [self controllableEntriesInGroup:entries];
+    if (!safe.count) return NO;
+    for (SCICSymbolEntry *e in safe) if (![self entrySwitchValue:e]) return NO;
+    return YES;
+}
+
+- (UIView *)switchAccessoryForGroup:(SCICSymbolGroup *)group {
+    UISwitch *sw = [UISwitch new];
+    sw.on = [self groupSwitchValueForEntries:group.entries];
+    sw.onTintColor = [SCIUtils SCIColor_Primary];
+    objc_setAssociatedObject(sw, &kSCICSymbolGroupPayloadKey, group, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [sw addTarget:self action:@selector(runtimePatchGroupSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    return sw;
+}
+
+- (void)runtimePatchGroupSwitchChanged:(UISwitch *)sender {
+    SCICSymbolGroup *group = objc_getAssociatedObject(sender, &kSCICSymbolGroupPayloadKey);
+    if (!group) return;
+    NSArray *safe = [self controllableEntriesInGroup:group.entries];
+    NSUInteger ok = 0;
+    for (SCICSymbolEntry *e in safe) {
+        SCICRuntimePatchPlan *p = [self resolverPlanForEntry:e];
+        NSError *error = nil;
+        BOOL success = NO;
+        if (sender.isOn) success = [SCICRuntimePatchResolver applyPlan:p value:(p.strategy == SCICRuntimePatchStrategyFunctionObserve ? nil : @YES) error:&error];
+        else {
+            id native = [SCICRuntimePatchResolver currentNativeValueForPlan:p];
+            if ([native isKindOfClass:NSNumber.class] && [native boolValue] && (p.strategy == SCICRuntimePatchStrategyObjCBool || p.strategy == SCICRuntimePatchStrategyFunctionBool || p.strategy == SCICRuntimePatchStrategyDataReaderBool)) {
+                success = [SCICRuntimePatchResolver applyPlan:p value:@NO error:&error];
+            } else success = [SCICRuntimePatchResolver revertPlan:p error:&error];
+        }
+        if (success) ok++;
+    }
+    [SCIUtils showToastForDuration:1.0 title:sender.isOn ? @"Group forced" : @"Group reverted/forced off" subtitle:[NSString stringWithFormat:@"%lu/%lu applied", (unsigned long)ok, (unsigned long)safe.count]];
+    [self rebuildSections];
+}
+
 - (void)rebuildSections {
     if (!_allSymbols) return;
     NSArray *tokens = [self queryTokens];
-    NSUInteger limit = tokens.count ? 900 : 360;
+    NSUInteger limit = tokens.count ? 1200 : 420;
     NSUInteger shown = 0;
     NSMutableArray<NSString *> *order = [NSMutableArray array];
-    NSMutableDictionary<NSString *, NSMutableArray<SCIBaseSettingsRow *> *> *buckets = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSMutableArray<SCICSymbolEntry *> *> *buckets = [NSMutableDictionary dictionary];
 
     for (SCICSymbolEntry *e in _allSymbols) {
         if (![self entryMatchesMode:e]) continue;
@@ -1178,29 +1314,43 @@ static char kSCICSymbolSwitchPayloadKey;
         else if (![self entryMatchesDefaultFilters:e]) continue;
         if (shown++ >= limit) break;
 
-        NSString *cat = [self categoryForEntry:e] ?: @"Symbols";
-        NSString *header = [NSString stringWithFormat:@"%@ — %@", e.image ?: @"Image", cat];
-        NSMutableArray *rows = buckets[header];
-        if (!rows) {
-            rows = [NSMutableArray array];
-            buckets[header] = rows;
+        NSString *entity = [self entityKeyForEntry:e] ?: @"Runtime";
+        NSString *header = [NSString stringWithFormat:@"%@ — %@", e.image ?: @"Image", entity];
+        NSMutableArray *entries = buckets[header];
+        if (!entries) {
+            entries = [NSMutableArray array];
+            buckets[header] = entries;
             [order addObject:header];
         }
-
-        __weak typeof(self) weakSelf = self;
-        SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:e.name subtitle:nil action:^(__unused UIViewController *vc){ [weakSelf pushRealtimeDetailForEntry:e]; }];
-        row.dynamicSubtitle = ^NSString *{ return [weakSelf subtitleForEntry:e]; };
-        if ([self entryHasInlineToggle:e]) {
-            row.accessoryType = UITableViewCellAccessoryNone;
-            row.accessoryProvider = ^UIView *{ return [weakSelf switchAccessoryForEntry:e]; };
-        }
-        objc_setAssociatedObject(row, &kSCICSymbolRowPayloadKey, e, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [rows addObject:row];
+        [entries addObject:e];
     }
 
     NSMutableArray<SCIBaseSettingsSection *> *sections = [NSMutableArray array];
     for (NSString *header in order) {
-        [sections addObject:[SCIBaseSettingsSection sectionWithHeader:header footer:nil rows:buckets[header]]];
+        NSArray<SCICSymbolEntry *> *entries = buckets[header] ?: @[];
+        NSMutableArray<SCIBaseSettingsRow *> *rows = [NSMutableArray array];
+        SCICSymbolGroup *group = [SCICSymbolGroup new];
+        group.title = header;
+        group.entries = entries;
+        __weak typeof(self) weakSelf = self;
+        SCIBaseSettingsRow *groupRow = [SCIBaseSettingsRow rowWithTitle:@"Stub / observe all safe entries" subtitle:nil action:nil];
+        groupRow.dynamicSubtitle = ^NSString *{ return [weakSelf groupSubtitleForEntries:entries]; };
+        if ([self controllableEntriesInGroup:entries].count) {
+            groupRow.accessoryType = UITableViewCellAccessoryNone;
+            groupRow.accessoryProvider = ^UIView *{ return [weakSelf switchAccessoryForGroup:group]; };
+        }
+        [rows addObject:groupRow];
+        for (SCICSymbolEntry *e in entries) {
+            SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:e.name subtitle:nil action:^(__unused UIViewController *vc){ [weakSelf pushRealtimeDetailForEntry:e]; }];
+            row.dynamicSubtitle = ^NSString *{ return [weakSelf subtitleForEntry:e]; };
+            if ([self entryHasInlineToggle:e]) {
+                row.accessoryType = UITableViewCellAccessoryNone;
+                row.accessoryProvider = ^UIView *{ return [weakSelf switchAccessoryForEntry:e]; };
+            }
+            objc_setAssociatedObject(row, &kSCICSymbolRowPayloadKey, e, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [rows addObject:row];
+        }
+        [sections addObject:[SCIBaseSettingsSection sectionWithHeader:header footer:nil rows:rows]];
     }
 
     if (!sections.count) {
@@ -1208,9 +1358,8 @@ static char kSCICSymbolSwitchPayloadKey;
             [SCIBaseSettingsRow rowWithTitle:@"No matching runtime entries" subtitle:@"Search MobileConfig, EasyGating, Employee, Dogfood, SUBSBenefitDataProvider, ig_is_employee…" action:nil]
         ]]];
     } else {
-        NSString *footer = @"Inline switch = resolver chose a safe backend and installs it now: ObjC swizzle, fishhook BOOL/typed, DATA descriptor reader-filter, or observe hook. Tap any row for realtime xrefs/disassembly and Force OFF / typed value / copy report.";
         SCIBaseSettingsSection *last = sections.lastObject;
-        last.footer = footer;
+        last.footer = @"Each section is one runtime entity/function family/class. The first switch stubs/observes all safe children; child switches control individual selectors/symbols. Switch ON reflects native ON or override ON. Turning OFF native-ON BOOL rows writes Force OFF; otherwise it clears the override.";
     }
 
     self.sections = sections;

@@ -86,6 +86,7 @@ typedef struct {
     char name[128];
     void *addr;
     atomic_int force; // -1 none, 0/1 forced
+    atomic_int observedBool; // -1 unknown, 0/1 last native value
     atomic_uint hits;
 } SCIParamDescriptorSlot;
 
@@ -126,6 +127,7 @@ static void SCIParamDescriptorEnsureSlot(NSString *name) {
     memset(slot, 0, sizeof(*slot));
     strncpy(slot->name, name.UTF8String, sizeof(slot->name)-1);
     atomic_store(&slot->force, -1);
+    atomic_store(&slot->observedBool, -1);
     atomic_store(&slot->hits, 0);
     slot->addr = dlsym(RTLD_DEFAULT, slot->name);
     if (!slot->addr) {
@@ -141,19 +143,15 @@ static void SCIParamDescriptorInstallSlotsForPersisted(void) {
     for (NSString *name in names) SCIParamDescriptorEnsureSlot(name);
     SCIParamDescriptorRefreshCache();
 }
-static int SCIParamDescriptorForcedValueForMobileConfigBoolArgs(void *a0, void *a1, void *a2, void *a3) {
+static SCIParamDescriptorSlot *SCIParamDescriptorSlotForMobileConfigBoolArgs(void *a0, void *a1, void *a2, void *a3) {
     (void)a1; (void)a3;
     // Hot path: no NSUserDefaults and no slot creation. Slots/cache are mounted
     // by setParamDescriptorForce/Observe and reinstallPersistedStubs.
     for (int i = 0; i < g_param_slot_count; i++) {
         if (!g_param_slots[i].addr) continue;
-        if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) {
-            atomic_fetch_add(&g_param_slots[i].hits, 1);   // count match even when only observing
-            int f = atomic_load(&g_param_slots[i].force);
-            return f;                                       // f>=0 forces; f<0 = observe (passthrough)
-        }
+        if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) return &g_param_slots[i];
     }
-    return -1;
+    return NULL;
 }
 
 static NSString *SCIStubBlacklistReason(NSString *name) {
@@ -321,7 +319,7 @@ static void call_orig_action(SCICStubSlot *s, void *a0, void *a1, void *a2, void
 
 #define DEFINE_BOOL_STUB(i) \
 static bool stub_bool_##i(void *a0,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6,void *a7){ \
-    SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); if(s->profile==SCICStubProfileIGMobileConfigBoolean){ int pf=SCIParamDescriptorForcedValueForMobileConfigBoolArgs(a0,a1,a2,a3); if(pf>=0){ atomic_store(&s->observedBool,pf?1:0); return pf!=0; }} bool real=call_orig_bool(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedBool, real?1:0); int f=atomic_load(&s->forceBool); return f<0 ? real : (f!=0); }
+    SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); SCIParamDescriptorSlot *ps=NULL; if(s->profile==SCICStubProfileIGMobileConfigBoolean) ps=SCIParamDescriptorSlotForMobileConfigBoolArgs(a0,a1,a2,a3); bool real=call_orig_bool(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedBool, real?1:0); if(ps){ atomic_fetch_add(&ps->hits,1); atomic_store(&ps->observedBool, real?1:0); int pf=atomic_load(&ps->force); if(pf>=0) return pf!=0; } int f=atomic_load(&s->forceBool); return f<0 ? real : (f!=0); }
 #define DEFINE_INT64_STUB(i) \
 static int64_t stub_i64_##i(void *a0,void *a1,void *a2,void *a3,void *a4,void *a5,void *a6,void *a7){ \
     SCICStubSlot *s=&g_slots[i]; atomic_fetch_add(&s->hits,1); int64_t real=call_orig_int64(s,a0,a1,a2,a3,a4,a5,a6,a7); atomic_store(&s->observedInt64, real); return atomic_load(&s->hasTypedForce)?atomic_load(&s->forceInt64):real; }
@@ -458,7 +456,13 @@ static void SCIStubRefreshCache(void) {
     SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
     return s ? (NSUInteger)atomic_load(&s->hits) : 0;
 }
-
++ (NSNumber *)observedValueForParamDescriptorSymbol:(NSString *)name {
+    if (![name isKindOfClass:NSString.class] || !name.length) return nil;
+    SCIParamDescriptorSlot *s = param_slot_for_name(name.UTF8String);
+    if (!s) return nil;
+    int ov = atomic_load(&s->observedBool);
+    return ov < 0 ? nil : @(ov != 0);
+}
 
 + (void *)replacementForKind:(SCICReturnKind)kind index:(int)idx { if(idx<0||idx>=MAX_STUBS)return NULL; if(kind==SCICReturnKindBool)return g_bool_repls[idx]; if(kind==SCICReturnKindInt64)return g_i64_repls[idx]; if(kind==SCICReturnKindDouble)return g_double_repls[idx]; if(kind==SCICReturnKindString)return g_ptr_repls[idx]; if(kind==SCICReturnKindAction)return g_action_repls[idx]; return NULL; }
 

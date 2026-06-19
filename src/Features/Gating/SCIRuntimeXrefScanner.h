@@ -29,6 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *calleeSymbol;  // consumer/reader name (dladdr)
 @property (nonatomic, copy, nullable) NSString *callerSymbol;  // function containing the bl (dladdr)
 @property (nonatomic, copy, nullable) NSString *image;         // owning image short name
+@property (nonatomic, copy, nullable) NSString *referenceKind; // direct-call, address-load, got-load, indirect-call
+@property (nonatomic, copy, nullable) NSString *detail;        // UI-friendly resolved summary
 @end
 
 @interface SCIRuntimeXrefScanner : NSObject
@@ -36,10 +38,12 @@ NS_ASSUME_NONNULL_BEGIN
 // Default instruction budget per scan (keeps a single scan fast and bounded).
 + (uint64_t)defaultBudget;
 
-// Resolve consumers of `targetAddress`. If `imageSubstring` is nil, the image
-// that defines `targetAddress` (via dladdr) is scanned — that is where the
-// internal reader call sites for FBShared descriptors live. Completion is
-// always called on the main queue. Safe to call repeatedly; cancels nothing.
+// Resolve consumers of `targetAddress`. If `imageSubstring` is nil, every
+// loaded runtime image in the supported scope (Instagram exec + FBShared) is
+// scanned. This is necessary because DATA descriptors often live in FBShared
+// while callers/import slots can be in Instagram, and function xrefs are BL/BLR
+// callsites instead of DATA loads. Completion is always called on the main
+// queue. Safe to call repeatedly; cancels nothing.
 + (void)findConsumersOfAddress:(uintptr_t)targetAddress
                  imageSubstring:(nullable NSString *)imageSubstring
                          budget:(uint64_t)budget

@@ -403,6 +403,46 @@ static BOOL SCICPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
     }
 }
 
++ (id)currentNativeValueForPlan:(SCICRuntimePatchPlan *)plan {
+    if (!plan.symbol.length) return nil;
+    switch (plan.strategy) {
+        case SCICRuntimePatchStrategyObjCBool:
+            return [SCISymbolBrowserEngine liveValueForClass:plan.objcClassName ?: @"" selector:plan.objcSelectorName ?: @"" isClassMethod:plan.objcClassMethod];
+        case SCICRuntimePatchStrategyFunctionBool:
+            return [SCICSymbolStub observedValueForSymbol:plan.symbol];
+        case SCICRuntimePatchStrategyFunctionTyped:
+            return [SCICSymbolStub observedTypedValueForSymbol:plan.symbol];
+        case SCICRuntimePatchStrategyDataReaderBool:
+            return [SCICSymbolStub observedValueForParamDescriptorSymbol:plan.symbol];
+        default:
+            return nil;
+    }
+}
+
++ (BOOL)isEffectivelyEnabledForPlan:(SCICRuntimePatchPlan *)plan {
+    id forced = [self currentForcedValueForPlan:plan];
+    if ([forced isKindOfClass:NSNumber.class]) return [forced boolValue];
+    id native = [self currentNativeValueForPlan:plan];
+    if ([native isKindOfClass:NSNumber.class]) return [native boolValue];
+    return [self isAppliedPlan:plan];
+}
+
++ (NSString *)stateSummaryForPlan:(SCICRuntimePatchPlan *)plan {
+    NSMutableArray<NSString *> *bits = [NSMutableArray array];
+    id native = [self currentNativeValueForPlan:plan];
+    id forced = [self currentForcedValueForPlan:plan];
+    if ([native isKindOfClass:NSNumber.class]) [bits addObject:[NSString stringWithFormat:@"native %@", [native boolValue] ? @"ON" : @"OFF"]];
+    else if (native) [bits addObject:[NSString stringWithFormat:@"native %@", native]];
+    else [bits addObject:@"native unknown"];
+    if ([forced isKindOfClass:NSNumber.class]) [bits addObject:[NSString stringWithFormat:@"override %@", [forced boolValue] ? @"ON" : @"OFF"]];
+    else if (forced) [bits addObject:[NSString stringWithFormat:@"override %@", forced]];
+    else [bits addObject:@"no override"];
+    [bits addObject:[self isHookInstalledForPlan:plan] ? @"hook installed" : @"hook not installed"];
+    NSUInteger hits = [self hitCountForPlan:plan];
+    if (hits) [bits addObject:[NSString stringWithFormat:@"hits %lu", (unsigned long)hits]];
+    return [bits componentsJoinedByString:@" · "];
+}
+
 + (BOOL)applyPlan:(SCICRuntimePatchPlan *)plan value:(id)value error:(NSError **)error {
     if (!plan.symbol.length || plan.strategy == SCICRuntimePatchStrategyNone) return NO;
     BOOL ok = NO;
