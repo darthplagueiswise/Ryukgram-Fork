@@ -207,7 +207,7 @@ static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
 																  subtitle:@""
 															defaultsKey:@"sci_statusbar_oldschool"
 														requiresRestart:NO];
-								s.icon = [SCISymbol symbolWithName:@"rectangle.topthird.inset.filled"];
+								s.iconImage = SCISettingsBundleTemplateImage(@"throwback-oldschool-icon");
 								s;
 							}),
 							({
@@ -222,7 +222,7 @@ static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
 								SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 						 subtitle:@""
 						     menu:[self menus][@"ig_wordmark_variant"]];
-							s.icon = [SCISymbol symbolWithName:@"textformat"];
+							s.iconImage = SCISettingsBundleTemplateImage(@"custom-feed-header-icon");
 							s;
 							}),
 

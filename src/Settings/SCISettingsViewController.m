@@ -7,8 +7,23 @@
 #import "../SCIImageCache.h"
 #import "../Tweak.h"
 #import "../UI/SCIColorPicker.h"
+#import "../UI/SCIOptionSheet.h"
 
 static char kSCIRowKey;
+
+static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
+	if (!menu || !defaultsKey.length) return NO;
+	for (UIMenuElement *el in menu.children) {
+		if ([el isKindOfClass:UIMenu.class]) {
+			if (SCIMenuContainsDefaultsKey((UIMenu *)el, defaultsKey)) return YES;
+			continue;
+		}
+		if (![el isKindOfClass:UICommand.class]) continue;
+		NSDictionary *props = [((UICommand *)el).propertyList isKindOfClass:NSDictionary.class] ? ((UICommand *)el).propertyList : nil;
+		if ([props[@"defaultsKey"] isEqualToString:defaultsKey]) return YES;
+	}
+	return NO;
+}
 
 #pragma mark - Language Picker
 
@@ -559,8 +574,15 @@ static char kSCIRowKey;
 			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 			b.configuration = bc;
-			b.menu = [row menuForButton:b];
-			b.showsMenuAsPrimaryAction = YES;
+			UIMenu *resolvedMenu = [row menuForButton:b];
+			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			if (SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant")) {
+				b.showsMenuAsPrimaryAction = NO;
+				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+			} else {
+				b.menu = resolvedMenu;
+				b.showsMenuAsPrimaryAction = YES;
+			}
 			[b.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
 			[b.widthAnchor constraintLessThanOrEqualToConstant:156.0].active = YES;
 			[b sizeToFit];
@@ -646,6 +668,18 @@ static char kSCIRowKey;
 	if (!row.defaultsKey.length) return;
 	[NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:row.defaultsKey];
 	[self reloadCellForView:sender animated:NO];
+}
+
+- (void)menuButtonTapped:(UIButton *)sender {
+	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
+	if (!row || !row.baseMenu) return;
+	UIMenu *menu = [row menuForButton:sender];
+	__weak typeof(self) weakSelf = self;
+	[SCIOptionSheet presentFrom:self title:row.title menu:menu onPick:^(UICommand *command) {
+		__strong typeof(weakSelf) self = weakSelf;
+		if (!self || !command) return;
+		[self menuChanged:command];
+	}];
 }
 
 - (void)menuChanged:(UICommand *)command {

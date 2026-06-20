@@ -1,6 +1,13 @@
 #import "SCIOptionSheet.h"
 #import "../Utils.h"
 
+static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
+	if (![name isKindOfClass:NSString.class] || name.length == 0) return nil;
+	NSBundle *bundle = SCILocalizationBundle();
+	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
+}
+
 @interface SCIOptionSheetVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
 @property (nonatomic, copy, nullable) NSString *defaultsKey;
@@ -15,11 +22,11 @@
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 84.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 112.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 84.0;
+	if (self.wordmarkMode) return 112.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 348.0 - 16.0 - 16.0;
@@ -37,12 +44,12 @@
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 48.0, 390.0) : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 32.0, 430.0) : 348.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 160.0, 560.0);
-	CGFloat height = MIN(MAX(96.0, rows + 16.0), MAX(220.0, maxHeight));
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 120.0, 640.0);
+	CGFloat height = MIN(MAX(128.0, rows + 20.0), MAX(280.0, maxHeight));
 	return CGSizeMake(width, height);
 }
 
@@ -73,7 +80,7 @@
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 84.0 : 82.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 112.0 : 82.0;
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	[self.panelView.contentView addSubview:self.tableView];
@@ -106,7 +113,7 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 84.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 112.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -117,6 +124,8 @@
 	if (self.wordmarkMode && current.length == 0) current = @"off";
 	BOOL selected = [value isEqualToString:current];
 	UIImage *image = [opt[@"image"] isKindOfClass:UIImage.class] ? opt[@"image"] : nil;
+	NSString *wordmarkImageName = [opt[@"wordmarkImageName"] isKindOfClass:NSString.class] ? opt[@"wordmarkImageName"] : nil;
+	if (self.wordmarkMode && wordmarkImageName.length) image = SCIOptionSheetBundleTemplateImage(wordmarkImageName);
 
 	if (self.wordmarkMode && image) {
 		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"wordmarkOpt"];
@@ -126,6 +135,7 @@
 			cell.contentView.backgroundColor = UIColor.clearColor;
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 			cell.preservesSuperviewLayoutMargins = YES;
+			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
 			if (@available(iOS 14.0, *)) {
 				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 			}
@@ -136,13 +146,26 @@
 			preview.contentMode = UIViewContentModeScaleAspectFit;
 			preview.backgroundColor = UIColor.clearColor;
 			preview.opaque = NO;
+			preview.tintColor = UIColor.labelColor;
 			[cell.contentView addSubview:preview];
 
+			UIImageView *check = [[UIImageView alloc] initWithImage:[[UIImage systemImageNamed:@"checkmark"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]];
+			check.tag = 9002;
+			check.translatesAutoresizingMaskIntoConstraints = NO;
+			check.contentMode = UIViewContentModeScaleAspectFit;
+			check.tintColor = UIColor.labelColor;
+			[cell.contentView addSubview:check];
+
 			[NSLayoutConstraint activateConstraints:@[
-				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:2.0],
-				[preview.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-42.0],
+				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-2.0],
+				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+				[check.widthAnchor constraintEqualToConstant:24.0],
+				[check.heightAnchor constraintEqualToConstant:24.0],
+
+				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
+				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-14.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.heightAnchor constraintEqualToConstant:48.0],
+				[preview.heightAnchor constraintEqualToConstant:82.0],
 			]];
 		}
 
@@ -150,10 +173,13 @@
 		cell.backgroundColor = UIColor.clearColor;
 		cell.contentView.backgroundColor = UIColor.clearColor;
 		cell.tintColor = UIColor.labelColor;
+		cell.accessoryType = UITableViewCellAccessoryNone;
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
 		preview.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		preview.tintColor = UIColor.labelColor;
-		cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
+		check.hidden = !selected;
+		check.tintColor = UIColor.labelColor;
 		return cell;
 	}
 
@@ -229,6 +255,7 @@
 		opt[@"value"] = value;
 		if (props[@"defaultsKey"]) opt[@"defaultsKey"] = props[@"defaultsKey"];
 		if (cmd.image) opt[@"image"] = cmd.image;
+		if (props[@"wordmarkImageName"]) opt[@"wordmarkImageName"] = props[@"wordmarkImageName"];
 		opt[@"command"] = cmd;
 		[out addObject:opt];
 	}
