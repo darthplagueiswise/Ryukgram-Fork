@@ -44,7 +44,9 @@
 
 	NSBundle *bundle = SCILocalizationBundle();
 	UIImage *bundled = bundle ? [UIImage imageNamed:self.name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-	return [bundled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	if (!bundled) bundled = [UIImage imageNamed:self.name];
+	if (!bundled) return nil;
+	return SCIIconScale([bundled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate], (self.size > 0 ? self.size + 6.0 : 0));
 }
 
 // MARK: - Factories

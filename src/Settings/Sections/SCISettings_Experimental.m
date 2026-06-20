@@ -2,12 +2,6 @@
 #import "../../Features/Experimental/SCIExperimentalGuard.h"
 
 
-static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
-	NSBundle *bundle = SCILocalizationBundle();
-	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
-}
-
 @implementation SCITweakSettings (Section_Experimental)
 
 // MARK: - Advanced experimental features
@@ -101,8 +95,7 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Friends Maps")
 											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
 											defaultsKey:@"igt_directnotes_friendmap"];
-					// Match the standard settings icon rail used by Apply/Reset.
-					s.icon = [SCISymbol symbolWithName:@"globe" color:UIColor.labelColor size:22.0];
+					s.icon = [SCISymbol symbolWithName:@"globe" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -110,14 +103,14 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 											   subtitle:@""
 											defaultsKey:@"sci_story_tray"
 										requiresRestart:NO];
-					s.iconImage = SCIExperimentalBundleTemplateImage(@"story-tray-icon");
+					s.icon = [SCISymbol symbolWithName:@"story-tray-icon" color:UIColor.labelColor];
 					s;
 				}),
 				({
 					SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 											subtitle:@""
 												menu:[self menus][@"ig_wordmark_variant"]];
-					s.iconImage = SCIExperimentalBundleTemplateImage(@"custom-feed-header-icon");
+					s.icon = [SCISymbol symbolWithName:@"custom-feed-header-icon" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -125,7 +118,7 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 											   subtitle:@""
 											defaultsKey:@"sci_statusbar_oldschool"
 										requiresRestart:NO];
-					s.iconImage = SCIExperimentalBundleTemplateImage(@"throwback-oldschool-icon");
+					s.icon = [SCISymbol symbolWithName:@"throwback-oldschool-icon" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -133,7 +126,7 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 									   subtitle:SCILocalized(@"Forces all client-side Instagram Plus benefit getters")
 									defaultsKey:@"sci_force_igplus_all"
 									requiresRestart:YES];
-					s.icon = [SCISymbol symbolWithName:@"plus.circle" color:UIColor.labelColor size:22.0];
+					s.icon = [SCISymbol symbolWithName:@"plus.circle" color:UIColor.labelColor];
 					s;
 				}),
 			]

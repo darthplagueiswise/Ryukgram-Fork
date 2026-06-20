@@ -11,6 +11,11 @@
 
 static char kSCIRowKey;
 
+static const CGFloat kSCISettingsStandardIconBox = 23.0;
+static const CGFloat kSCISettingsWordmarkAccessoryWidth = 148.0;
+static const CGFloat kSCISettingsWordmarkAccessoryHeight = 34.0;
+
+
 static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
 	if (!menu || !defaultsKey.length) return NO;
 	for (UIMenuElement *el in menu.children) {
@@ -25,6 +30,16 @@ static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
 	return NO;
 }
 
+
+static NSString *SCISettingsWordmarkDisplayTitleForValue(NSString *value, NSString *fallback) {
+	if ([value isEqualToString:@"off"]) return SCILocalized(@"Default");
+	if ([value isEqualToString:@"1a"]) return SCILocalized(@"Wordmark 1");
+	if ([value isEqualToString:@"1a_alt"]) return SCILocalized(@"Wordmark 1A");
+	if ([value isEqualToString:@"1b"]) return SCILocalized(@"Wordmark 2");
+	if ([value isEqualToString:@"1b_alt"]) return SCILocalized(@"Wordmark 2A");
+	return fallback ?: @"";
+}
+
 static NSString *SCISettingsWordmarkImageNameForValue(NSString *value) {
 	NSString *v = value.length ? value : @"off";
 	if ([v isEqualToString:@"1a"]) return @"instagram-wordmark-1a";
@@ -34,14 +49,22 @@ static NSString *SCISettingsWordmarkImageNameForValue(NSString *value) {
 	return @"instagram-wordmark-default";
 }
 
-static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
+static UIImage *SCISettingsBundleImageNamed(NSString *name) {
 	NSBundle *bundle = SCILocalizationBundle();
 	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+	if (!img) img = [UIImage imageNamed:name];
+	return img;
+}
+
+static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
+	UIImage *img = SCISettingsBundleImageNamed(name);
 	if (!img) return nil;
 	CGSize size = img.size;
 	if (size.width <= 0.0 || size.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 	CGFloat ratio = MIN(maxSize.width / size.width, maxSize.height / size.height);
 	if (ratio <= 0.0) ratio = 1.0;
+	// Downscale and upscale intentionally here. The closed accessory is a preview,
+	// not the source asset; it must visually fill the same right-side slot every time.
 	CGSize target = CGSizeMake(ceil(size.width * ratio), ceil(size.height * ratio));
 	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
 	fmt.opaque = NO;
@@ -513,18 +536,11 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		config.image = [row.iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		config.imageProperties.tintColor = UIColor.labelColor;
 
-		BOOL isFriendsMaps = [row.defaultsKey isEqualToString:@"igt_directnotes_friendmap"];
-		BOOL isStoriesTray = [row.defaultsKey isEqualToString:@"sci_story_tray"];
-		BOOL isOldSchool = [row.defaultsKey isEqualToString:@"sci_statusbar_oldschool"];
-		BOOL isFeedHeader = SCIMenuContainsDefaultsKey(row.baseMenu, @"sci_ig_wordmark_variant");
-		BOOL isAdvancedIcon = isFriendsMaps || isStoriesTray || isOldSchool || isFeedHeader;
-
-		// Keep asset-backed rows on the same icon rail as the standard
-		// Apply/Reset rows. No per-row negative margins, no oversized canvases.
-		// The artwork itself is centered in its 44pt canvas and UIKit scales it
-		// to the same visual box as SF/IG symbol rows.
-		config.imageProperties.maximumSize = isAdvancedIcon ? CGSizeMake(31.0, 31.0) : CGSizeMake(32.0, 32.0);
-		config.imageToTextPadding = 14.0;
+		// Match the rest of the tweak: settings icons sit on the standard
+		// UIListContentConfiguration image rail. Asset-backed icons are capped
+		// to the same visual box as SCISymbol/Apply/Reset rows; no negative
+		// margins and no per-row left offsets.
+		config.imageProperties.maximumSize = CGSizeMake(kSCISettingsStandardIconBox, kSCISettingsStandardIconBox);
 	}
 	if (row.icon) {
 		config.image = [row.icon image];
@@ -612,27 +628,21 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
 			UIButtonConfiguration *bc;
 			if (isWordmarkMenu) {
-				// Use UIKit's native UIButton.menu path for the standard iOS 26/Liquid Glass
-				// opening animation. The closed accessory itself stays plain so the
-				// selected wordmark never expands into a giant glass bubble.
 				bc = UIButtonConfiguration.plainButtonConfiguration;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 8.0, 6.0, 8.0);
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(4.0, 4.0, 4.0, 4.0);
 				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(142.0, 30.0));
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 10.0, kSCISettingsWordmarkAccessoryHeight - 6.0));
 				if (wordmark) {
-					[b setTitle:nil forState:UIControlStateNormal];
-					[b setImage:wordmark forState:UIControlStateNormal];
-					b.tintColor = UIColor.labelColor;
 					bc.title = nil;
 					bc.image = wordmark;
 					bc.imagePlacement = NSDirectionalRectEdgeLeading;
+					bc.imagePadding = 0.0;
+					b.tintColor = UIColor.labelColor;
 				} else {
-					bc.title = @"Wordmark";
+					bc.title = SCISettingsWordmarkDisplayTitleForValue(saved, @"Wordmark");
 				}
 				b.configuration = bc;
-				// Native UIMenu caps command image size to tiny glyphs. Keep the closed
-				// accessory native/plain, but open the dedicated Liquid Glass option sheet
-				// so each Instagram wordmark can fill its row.
+				b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
 				SCIUIKit26ConfigureButton(b);
@@ -644,9 +654,9 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				b.showsMenuAsPrimaryAction = YES;
 			}
 			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? 112.0 : 74.0)].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 158.0 : 156.0)].active = YES;
-			[b.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
+			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 74.0)].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 156.0)].active = YES;
+			[b.heightAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryHeight : 36.0)].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;

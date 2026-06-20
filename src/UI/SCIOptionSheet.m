@@ -22,11 +22,11 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 84.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 60.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 84.0;
+	if (self.wordmarkMode) return 60.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 348.0 - 16.0 - 16.0;
@@ -44,12 +44,12 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 56.0, 338.0) : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 86.0, 330.0) : 348.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 120.0, 640.0);
-	CGFloat height = MIN(MAX(128.0, rows + 20.0), MAX(280.0, maxHeight));
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 180.0, self.wordmarkMode ? 360.0 : 640.0);
+	CGFloat height = MIN(MAX(self.wordmarkMode ? 96.0 : 128.0, rows + 16.0), MAX(self.wordmarkMode ? 180.0 : 280.0, maxHeight));
 	return CGSizeMake(width, height);
 }
 
@@ -65,11 +65,11 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	self.tableView.backgroundColor = UIColor.clearColor;
 	self.tableView.opaque = NO;
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 14.0 : 18.0, 0.0, self.wordmarkMode ? 14.0 : 18.0);
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 18.0 : 18.0, 0.0, self.wordmarkMode ? 18.0 : 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 84.0 : 82.0;
-	self.tableView.alwaysBounceVertical = NO;
-	self.tableView.showsVerticalScrollIndicator = self.options.count > 4;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 60.0 : 82.0;
+	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
+	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	SCIUIKit26ConfigureTableView(self.tableView);
 
 
@@ -115,7 +115,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 84.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 60.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -137,7 +137,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 			cell.contentView.backgroundColor = UIColor.clearColor;
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 			cell.preservesSuperviewLayoutMargins = YES;
-			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 14.0, 0.0, 14.0);
+			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 18.0, 0.0, 14.0);
 			if (@available(iOS 14.0, *)) {
 				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 			}
@@ -161,13 +161,13 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 			[NSLayoutConstraint activateConstraints:@[
 				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-2.0],
 				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[check.widthAnchor constraintEqualToConstant:22.0],
-				[check.heightAnchor constraintEqualToConstant:22.0],
+				[check.widthAnchor constraintEqualToConstant:20.0],
+				[check.heightAnchor constraintEqualToConstant:20.0],
 
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
-				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-8.0],
+				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-10.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.heightAnchor constraintEqualToConstant:76.0],
+				[preview.heightAnchor constraintEqualToConstant:50.0],
 			]];
 		}
 
@@ -298,7 +298,6 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 
 + (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter {
 	vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-	vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
 	[presenter presentViewController:vc animated:YES completion:nil];
 }
 
