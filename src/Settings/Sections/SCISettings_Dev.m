@@ -196,7 +196,7 @@ static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
 								SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 						 subtitle:@""
 						     menu:[self menus][@"ig_wordmark_variant"]];
-							s.icon = [SCISymbol symbolWithName:@"rectangle.topthird.inset.filled" color:UIColor.labelColor size:21.0];
+							s.iconImage = SCISettingsBundleTemplateImage(@"custom-feed-header-icon");
 							s;
 							}),
 

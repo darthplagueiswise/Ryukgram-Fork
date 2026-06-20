@@ -597,15 +597,17 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.titleLabel.numberOfLines = 1;
 			b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-			SCIUIKit26ConfigureButton(b);
-			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
-			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
+			UIButtonConfiguration *bc;
 			if (isWordmarkMenu) {
+				// Use UIKit's native UIButton.menu path for the standard iOS 26/Liquid Glass
+				// opening animation. The closed accessory itself stays plain so the
+				// selected wordmark never expands into a giant glass bubble.
+				bc = UIButtonConfiguration.plainButtonConfiguration;
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 8.0, 6.0, 8.0);
 				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(146.0, 34.0));
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(112.0, 24.0));
 				if (wordmark) {
 					[b setTitle:nil forState:UIControlStateNormal];
 					[b setImage:wordmark forState:UIControlStateNormal];
@@ -613,21 +615,25 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 					bc.title = nil;
 					bc.image = wordmark;
 					bc.imagePlacement = NSDirectionalRectEdgeLeading;
-					bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 14.0, 8.0, 14.0);
+				} else {
+					bc.title = @"Wordmark";
 				}
-			}
-			b.configuration = bc;
-			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-			if (isWordmarkMenu) {
-				b.showsMenuAsPrimaryAction = NO;
-				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+				b.configuration = bc;
+				b.menu = resolvedMenu;
+				b.showsMenuAsPrimaryAction = YES;
 			} else {
+				SCIUIKit26ConfigureButton(b);
+				bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
+				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+				b.configuration = bc;
 				b.menu = resolvedMenu;
 				b.showsMenuAsPrimaryAction = YES;
 			}
-			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? 126.0 : 74.0)].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 176.0 : 156.0)].active = YES;
-			[b.heightAnchor constraintGreaterThanOrEqualToConstant:40.0].active = YES;
+			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? 112.0 : 74.0)].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 132.0 : 156.0)].active = YES;
+			[b.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;

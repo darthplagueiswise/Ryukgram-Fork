@@ -98,7 +98,7 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 			@"header": SCILocalized(@"Instagram UI"),
 			@"rows": @[
 				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Maps")
+					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Friends Maps")
 											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
 											defaultsKey:@"igt_directnotes_friendmap"];
 					s.iconImage = [[UIImage systemImageNamed:@"globe"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -116,7 +116,7 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 					SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 											subtitle:@""
 												menu:[self menus][@"ig_wordmark_variant"]];
-					s.icon = [SCISymbol symbolWithName:@"rectangle.topthird.inset.filled" color:UIColor.labelColor size:21.0];
+					s.iconImage = SCIExperimentalBundleTemplateImage(@"custom-feed-header-icon");
 					s;
 				}),
 				({
@@ -128,8 +128,8 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 					s;
 				}),
 				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"IGPlus")
-									   subtitle:SCILocalized(@"Forces all client-side IGPlus benefit getters")
+					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Instagram Plus")
+									   subtitle:SCILocalized(@"Forces all client-side Instagram Plus benefit getters")
 									defaultsKey:@"sci_force_igplus_all"
 									requiresRestart:YES];
 					s.icon = [SCISymbol symbolWithName:@"plus.circle" color:UIColor.labelColor size:22.0];
