@@ -67,6 +67,12 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *SCIIconFriendlyMap(void)
             @"history":      @[@"ig_icon_history_pano_outline_24", @"ig_icon_history_outline_24"],
             @"globe":        @[@"bcn_globe_outline_24"],
             @"friends_maps": @[@"bcn_globe_outline_24"],
+            // Advanced menu aliases resolve through the same FB catalog/SF pipeline
+            // as the rest of the tweak. Do not fall back to low-resolution custom
+            // PNGs for row icons unless these catalog icons disappear.
+            @"story_tray":   @[@"ig_icon_story_pano_outline_24", @"ig_icon_story_outline_24"],
+            @"custom_feed_header": @[@"ig_icon_layout_outline_24", @"ig_icon_feeds_outline_24"],
+            @"statusbar_oldschool": @[@"ig_icon_camera_outline_24"],
             @"instagram_plus": @[@"ig_icon_add_pano_outline_24", @"ig_icon_add_outline_24"],
             @"action_button": @[@"ig_icon_app_instants_archive_outline_24"],
             @"hashtag":      @[@"bcn_hashtag_outline_24"],
@@ -145,12 +151,11 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *SCIIconBundleAssetMap(vo
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         map = @{
-            @"story_tray": @[@"story-tray-icon"],
+            // Raw asset names stay available for direct bundle lookup, but the
+            // friendly setting aliases above intentionally resolve to catalog/SF
+            // icons first so row icons match the global tweak icon rail.
             @"story-tray-icon": @[@"story-tray-icon"],
-            @"custom_feed_header": @[@"custom-feed-header-icon"],
             @"custom-feed-header-icon": @[@"custom-feed-header-icon"],
-            @"statusbar_oldschool": @[@"throwback-oldschool-icon"],
-            @"throwback_oldschool": @[@"throwback-oldschool-icon"],
             @"throwback-oldschool-icon": @[@"throwback-oldschool-icon"],
         };
     });

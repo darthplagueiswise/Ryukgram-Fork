@@ -290,10 +290,10 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		if (value.length && [value isEqualToString:saved]) {
 			command.state = UIMenuElementStateOn;
 
-			// A SCITableCellMenu has a single owner: UIKit's native UIButton.menu.
-			// The open wordmark menu uses image-only entries, but the closed
-			// accessory button still shows the readable original variant name.
-			if (![props[@"noTitle"] boolValue]) {
+			// Wordmark rows own their closed accessory image in
+			// SCISettingsViewController. Do not mutate that button here or UIKit will
+			// append the selected label ("Default") next to the preview image.
+			if (!isWordmark && ![props[@"noTitle"] boolValue]) {
 				[button setImage:nil forState:UIControlStateNormal];
 				[button setTitle:displayTitle forState:UIControlStateNormal];
 				button.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
