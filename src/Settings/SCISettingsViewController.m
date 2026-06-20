@@ -467,7 +467,9 @@ static char kSCIRowKey;
 
 - (void)configureIconForRow:(SCISetting *)row config:(UIListContentConfiguration *)config indexPath:(NSIndexPath *)ip tableView:(UITableView *)tv {
 	if (row.iconImage) {
-		config.image = row.iconImage;
+		config.image = [row.iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+		config.imageProperties.tintColor = UIColor.labelColor;
+		config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
 		config.imageToTextPadding = 14.0;
 	}
 	if (row.icon) {

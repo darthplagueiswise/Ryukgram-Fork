@@ -1,6 +1,13 @@
 #import "SCISettingsSections.h"
 #import "../../Features/Experimental/SCIExperimentalGuard.h"
 
+
+static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
+	NSBundle *bundle = SCILocalizationBundle();
+	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
+}
+
 @implementation SCITweakSettings (Section_Experimental)
 
 // MARK: - Advanced experimental features
@@ -88,30 +95,38 @@
 			@"rows": @[]
 		},
 		@{
-			@"header": SCILocalized(@"Notes & QuickSnap"),
+			@"header": SCILocalized(@"Instagram UI"),
 			@"rows": @[
 				({
-					SCISetting *qs = [SCISetting switchCellWithTitle:SCILocalized(@"QuickSnap (Instants)")
-														   subtitle:SCILocalized(@"Forces the QuickSnap / Instants surface on in feed, inbox, stories, and notes tray")
-														defaultsKey:@"igt_quicksnap"];
-					qs.disabled = YES;
-					qs;
+					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Maps")
+											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
+											defaultsKey:@"igt_directnotes_friendmap"];
+					s.icon = [SCISymbol symbolWithName:@"map"];
+					s;
 				}),
-				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Friend Map")
-									   subtitle:SCILocalized(@"Shows the friend map entry in Direct Notes")
-									defaultsKey:@"igt_directnotes_friendmap"],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Audio reply")
-									   subtitle:SCILocalized(@"Enables the audio-note reply type")
-									defaultsKey:@"igt_directnotes_audio_reply"],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Avatar reply")
-									   subtitle:SCILocalized(@"Enables the avatar reply type")
-									defaultsKey:@"igt_directnotes_avatar_reply"],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — GIFs & stickers reply")
-									   subtitle:SCILocalized(@"Enables GIF/sticker replies")
-									defaultsKey:@"igt_directnotes_gifs_reply"],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Photo reply")
-									   subtitle:SCILocalized(@"Enables photo replies")
-									defaultsKey:@"igt_directnotes_photo_reply"],
+				({
+					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Stories Tray")
+											   subtitle:@""
+											defaultsKey:@"sci_story_tray"
+										requiresRestart:NO];
+					s.iconImage = SCIExperimentalBundleTemplateImage(@"story-tray-icon");
+					s;
+				}),
+				({
+					SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
+											subtitle:@""
+												menu:[self menus][@"ig_wordmark_variant"]];
+					s.icon = [SCISymbol symbolWithName:@"textformat"];
+					s;
+				}),
+				({
+					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School")
+											   subtitle:@""
+											defaultsKey:@"sci_statusbar_oldschool"
+										requiresRestart:NO];
+					s.icon = [SCISymbol symbolWithName:@"rectangle.topthird.inset.filled"];
+					s;
+				}),
 			]
 		},
 		@{

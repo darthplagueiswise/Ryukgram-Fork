@@ -15,11 +15,11 @@
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 68.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 84.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 68.0;
+	if (self.wordmarkMode) return 84.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 348.0 - 16.0 - 16.0;
@@ -37,7 +37,7 @@
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? 330.0 : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 48.0, 390.0) : 348.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
@@ -73,7 +73,7 @@
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 68.0 : 82.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 84.0 : 82.0;
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	[self.panelView.contentView addSubview:self.tableView];
@@ -99,54 +99,90 @@
 
 - (void)dismissSelf { [self dismissViewControllerAnimated:YES completion:nil]; }
 
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+	[super traitCollectionDidChange:previousTraitCollection];
+	if (self.wordmarkMode) [self.tableView reloadData];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 68.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 84.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+	NSDictionary *opt = self.options[(NSUInteger)indexPath.row];
+	NSString *value = opt[@"value"] ?: @"";
+	NSString *key = opt[@"defaultsKey"] ?: self.defaultsKey;
+	NSString *current = key.length ? ([[NSUserDefaults standardUserDefaults] stringForKey:key] ?: @"") : self.currentValue;
+	if (self.wordmarkMode && current.length == 0) current = @"off";
+	BOOL selected = [value isEqualToString:current];
+	UIImage *image = [opt[@"image"] isKindOfClass:UIImage.class] ? opt[@"image"] : nil;
+
+	if (self.wordmarkMode && image) {
+		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"wordmarkOpt"];
+		if (!cell) {
+			cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"wordmarkOpt"];
+			cell.backgroundColor = UIColor.clearColor;
+			cell.contentView.backgroundColor = UIColor.clearColor;
+			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+			cell.preservesSuperviewLayoutMargins = YES;
+			if (@available(iOS 14.0, *)) {
+				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
+			}
+
+			UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectZero];
+			preview.tag = 9001;
+			preview.translatesAutoresizingMaskIntoConstraints = NO;
+			preview.contentMode = UIViewContentModeScaleAspectFit;
+			preview.backgroundColor = UIColor.clearColor;
+			preview.opaque = NO;
+			[cell.contentView addSubview:preview];
+
+			[NSLayoutConstraint activateConstraints:@[
+				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:2.0],
+				[preview.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-42.0],
+				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+				[preview.heightAnchor constraintEqualToConstant:48.0],
+			]];
+		}
+
+		cell.contentConfiguration = nil;
+		cell.backgroundColor = UIColor.clearColor;
+		cell.contentView.backgroundColor = UIColor.clearColor;
+		cell.tintColor = UIColor.labelColor;
+		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
+		preview.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+		preview.tintColor = UIColor.labelColor;
+		cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+		return cell;
+	}
+
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
 	SCIUIKit26ConfigureTableCell(cell);
 
-	NSDictionary *opt = self.options[(NSUInteger)indexPath.row];
 	cell.backgroundColor = UIColor.clearColor;
 	cell.contentView.backgroundColor = UIColor.clearColor;
 	cell.tintColor = [UIColor systemBlueColor];
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 
-	NSString *value = opt[@"value"] ?: @"";
-	NSString *key = opt[@"defaultsKey"] ?: self.defaultsKey;
-	NSString *current = key.length ? ([[NSUserDefaults standardUserDefaults] stringForKey:key] ?: @"") : self.currentValue;
-	BOOL selected = [value isEqualToString:current];
-	UIImage *image = [opt[@"image"] isKindOfClass:UIImage.class] ? opt[@"image"] : nil;
-
 	UIListContentConfiguration *cfg = cell.defaultContentConfiguration;
-	if (self.wordmarkMode && image) {
-		cfg.text = @"";
-		cfg.secondaryText = nil;
+	cfg.text = opt[@"title"] ?: opt[@"value"];
+	cfg.textProperties.color = UIColor.labelColor;
+	cfg.textProperties.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightRegular];
+	cfg.textProperties.numberOfLines = 0;
+	NSString *desc = opt[@"description"];
+	cfg.secondaryText = desc.length ? desc : nil;
+	cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+	cfg.secondaryTextProperties.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
+	cfg.secondaryTextProperties.numberOfLines = 0;
+	cfg.textToSecondaryTextVerticalPadding = 5.0;
+	cfg.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
+	if (image) {
 		cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		cfg.imageProperties.tintColor = UIColor.labelColor;
-		cfg.imageProperties.maximumSize = CGSizeMake(210.0, 46.0);
-		cfg.imageToTextPadding = 0.0;
-	} else {
-		cfg.text = opt[@"title"] ?: opt[@"value"];
-		cfg.textProperties.color = UIColor.labelColor;
-		cfg.textProperties.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightRegular];
-		cfg.textProperties.numberOfLines = 0;
-		NSString *desc = opt[@"description"];
-		cfg.secondaryText = desc.length ? desc : nil;
-		cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-		cfg.secondaryTextProperties.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
-		cfg.secondaryTextProperties.numberOfLines = 0;
-		cfg.textToSecondaryTextVerticalPadding = 5.0;
-		cfg.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
-		if (image) {
-			cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-			cfg.imageProperties.tintColor = UIColor.labelColor;
-			cfg.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
-			cfg.imageToTextPadding = 14.0;
-		}
+		cfg.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
+		cfg.imageToTextPadding = 14.0;
 	}
 	cell.contentConfiguration = cfg;
 	cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;

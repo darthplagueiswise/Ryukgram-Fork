@@ -15,10 +15,10 @@ static BOOL SCIIsWordmarkMenuCommand(NSDictionary *props) {
 
 static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fallback) {
 	if ([value isEqualToString:@"off"]) return SCILocalized(@"Default");
-	if ([value isEqualToString:@"1a_alt"]) return SCILocalized(@"Custom 1");
-	if ([value isEqualToString:@"1a"]) return SCILocalized(@"Custom 1A");
-	if ([value isEqualToString:@"1b_alt"]) return SCILocalized(@"Custom 2");
-	if ([value isEqualToString:@"1b"]) return SCILocalized(@"Custom 2A");
+	if ([value isEqualToString:@"1a"]) return SCILocalized(@"Wordmark 1");
+	if ([value isEqualToString:@"1a_alt"]) return SCILocalized(@"Wordmark 1A");
+	if ([value isEqualToString:@"1b"]) return SCILocalized(@"Wordmark 2");
+	if ([value isEqualToString:@"1b_alt"]) return SCILocalized(@"Wordmark 2A");
 	return fallback ?: @"";
 }
 

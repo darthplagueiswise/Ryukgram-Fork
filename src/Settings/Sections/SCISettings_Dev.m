@@ -19,6 +19,13 @@
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 
+
+static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
+	NSBundle *bundle = SCILocalizationBundle();
+	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
+}
+
 @implementation SCITweakSettings (Section_Dev)
 
 + (SCISetting *)devNavCell {
@@ -195,17 +202,29 @@
 											@"rows": @[
 												[self experimentalEntryCell],
 
-							[SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School")
-										   subtitle:@""
-									defaultsKey:@"sci_statusbar_oldschool"
-								requiresRestart:NO],
-							[SCISetting switchCellWithTitle:SCILocalized(@"Story Tray")
-										   subtitle:@""
-									defaultsKey:@"sci_story_tray"
-								requiresRestart:NO],
-							[SCISetting menuCellWithTitle:SCILocalized(@"Instagram wordmark")
+							({
+								SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School")
+																  subtitle:@""
+															defaultsKey:@"sci_statusbar_oldschool"
+														requiresRestart:NO];
+								s.icon = [SCISymbol symbolWithName:@"rectangle.topthird.inset.filled"];
+								s;
+							}),
+							({
+								SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Stories Tray")
+																  subtitle:@""
+															defaultsKey:@"sci_story_tray"
+														requiresRestart:NO];
+								s.iconImage = SCISettingsBundleTemplateImage(@"story-tray-icon");
+								s;
+							}),
+							({
+								SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 						 subtitle:@""
-						     menu:[self menus][@"ig_wordmark_variant"]],
+						     menu:[self menus][@"ig_wordmark_variant"]];
+							s.icon = [SCISymbol symbolWithName:@"textformat"];
+							s;
+							}),
 
 									[SCISetting navigationCellWithTitle:SCILocalized(@"IGDSLauncherConfig")
 							   subtitle:@""
