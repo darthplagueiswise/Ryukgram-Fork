@@ -22,11 +22,11 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 40.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 34.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 40.0;
+	if (self.wordmarkMode) return 34.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 348.0 - 16.0 - 16.0;
@@ -44,12 +44,12 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 128.0, 286.0) : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 148.0, 252.0) : 348.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 220.0, self.wordmarkMode ? 230.0 : 640.0);
-	CGFloat height = MIN(MAX(self.wordmarkMode ? 72.0 : 128.0, rows + 12.0), MAX(self.wordmarkMode ? 120.0 : 280.0, maxHeight));
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 240.0, self.wordmarkMode ? 188.0 : 640.0);
+	CGFloat height = MIN(MAX(self.wordmarkMode ? 58.0 : 128.0, rows + 10.0), MAX(self.wordmarkMode ? 104.0 : 280.0, maxHeight));
 	return CGSizeMake(width, height);
 }
 
@@ -65,13 +65,16 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	self.tableView.backgroundColor = UIColor.clearColor;
 	self.tableView.opaque = NO;
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 12.0 : 18.0, 0.0, self.wordmarkMode ? 12.0 : 18.0);
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 14.0 : 18.0, 0.0, self.wordmarkMode ? 14.0 : 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 40.0 : 82.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 34.0 : 82.0;
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	SCIUIKit26ConfigureTableView(self.tableView);
-
+	if (self.wordmarkMode) {
+		self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+		self.tableView.separatorColor = SCIUIKit26SeparatorColor();
+	}
 
 	UIControl *dismissLayer = [UIControl new];
 	dismissLayer.translatesAutoresizingMaskIntoConstraints = NO;
@@ -99,10 +102,10 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 		[self.panelView.widthAnchor constraintEqualToConstant:size.width],
 		[self.panelView.heightAnchor constraintEqualToConstant:size.height],
 
-		[self.tableView.topAnchor constraintEqualToAnchor:self.panelView.contentView.topAnchor constant:(self.wordmarkMode ? 6.0 : 8.0)],
-		[self.tableView.leadingAnchor constraintEqualToAnchor:self.panelView.contentView.leadingAnchor constant:(self.wordmarkMode ? 6.0 : 8.0)],
-		[self.tableView.trailingAnchor constraintEqualToAnchor:self.panelView.contentView.trailingAnchor constant:-(self.wordmarkMode ? 6.0 : 8.0)],
-		[self.tableView.bottomAnchor constraintEqualToAnchor:self.panelView.contentView.bottomAnchor constant:-(self.wordmarkMode ? 6.0 : 8.0)],
+		[self.tableView.topAnchor constraintEqualToAnchor:self.panelView.contentView.topAnchor constant:(self.wordmarkMode ? 5.0 : 8.0)],
+		[self.tableView.leadingAnchor constraintEqualToAnchor:self.panelView.contentView.leadingAnchor constant:(self.wordmarkMode ? 5.0 : 8.0)],
+		[self.tableView.trailingAnchor constraintEqualToAnchor:self.panelView.contentView.trailingAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
+		[self.tableView.bottomAnchor constraintEqualToAnchor:self.panelView.contentView.bottomAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
 	]];
 }
 
@@ -115,7 +118,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 40.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 34.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -161,13 +164,13 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 			[NSLayoutConstraint activateConstraints:@[
 				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-2.0],
 				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[check.widthAnchor constraintEqualToConstant:17.0],
-				[check.heightAnchor constraintEqualToConstant:17.0],
+				[check.widthAnchor constraintEqualToConstant:15.0],
+				[check.heightAnchor constraintEqualToConstant:15.0],
 
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
 				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-8.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.heightAnchor constraintEqualToConstant:31.0],
+				[preview.heightAnchor constraintEqualToConstant:22.0],
 			]];
 		}
 
@@ -179,8 +182,9 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 		if (@available(iOS 14.0, *)) {
 			UIBackgroundConfiguration *bg = [UIBackgroundConfiguration clearConfiguration];
 			if (selected) {
-				bg.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.08];
-				bg.cornerRadius = 12.0;
+				bg.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.10];
+				bg.visualEffect = SCIUIKit26GlassEffect(YES, YES, nil);
+				bg.cornerRadius = 10.0;
 			}
 			cell.backgroundConfiguration = bg;
 		}

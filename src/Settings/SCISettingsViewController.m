@@ -12,8 +12,8 @@
 static char kSCIRowKey;
 
 static const CGFloat kSCISettingsStandardIconBox = 23.0;
-static const CGFloat kSCISettingsWordmarkAccessoryWidth = 118.0;
-static const CGFloat kSCISettingsWordmarkAccessoryHeight = 30.0;
+static const CGFloat kSCISettingsWordmarkAccessoryWidth = 96.0;
+static const CGFloat kSCISettingsWordmarkAccessoryHeight = 24.0;
 
 
 static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
@@ -545,6 +545,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	if (row.icon) {
 		config.image = [row.icon image];
 		config.imageProperties.tintColor = row.icon.color;
+		config.imageProperties.maximumSize = CGSizeMake(kSCISettingsStandardIconBox, kSCISettingsStandardIconBox);
 	}
 	if (row.imageUrl) {
 		config.imageToTextPadding = 14.0;
@@ -618,7 +619,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		}
 		case SCITableCellMenu: {
 			UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-			[b setTitle:@"•••" forState:UIControlStateNormal];
 			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
 			b.titleLabel.numberOfLines = 1;
@@ -626,27 +626,28 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			UIButtonConfiguration *bc;
 			if (isWordmarkMenu) {
-				bc = UIButtonConfiguration.plainButtonConfiguration;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(4.0, 4.0, 4.0, 4.0);
 				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 10.0, kSCISettingsWordmarkAccessoryHeight - 6.0));
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 8.0, kSCISettingsWordmarkAccessoryHeight - 4.0));
+				[b setTitle:nil forState:UIControlStateNormal];
+				[b setAttributedTitle:nil forState:UIControlStateNormal];
+				b.titleLabel.hidden = YES;
+				b.clipsToBounds = YES;
+				b.tintColor = UIColor.labelColor;
+				b.backgroundColor = UIColor.clearColor;
+				b.contentEdgeInsets = UIEdgeInsetsZero;
 				if (wordmark) {
-					bc.title = nil;
-					bc.image = wordmark;
-					bc.imagePlacement = NSDirectionalRectEdgeLeading;
-					bc.imagePadding = 0.0;
-					b.tintColor = UIColor.labelColor;
+					[b setImage:wordmark forState:UIControlStateNormal];
+					b.imageView.contentMode = UIViewContentModeScaleAspectFit;
 				} else {
-					bc.title = SCISettingsWordmarkDisplayTitleForValue(saved, @"Wordmark");
+					[b setImage:[[UIImage systemImageNamed:@"textformat"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] forState:UIControlStateNormal];
 				}
-				b.configuration = bc;
-				b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+				b.configuration = nil;
 				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
+				[b setTitle:@"•••" forState:UIControlStateNormal];
 				SCIUIKit26ConfigureButton(b);
-				bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				b.configuration = bc;
@@ -662,6 +663,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
 			break;
 		}
+
 		case SCITableCellColor:
 			cell.accessoryView = [SCIColorPicker swatchViewForKey:row.defaultsKey defaultColor:row.defaultColor];
 			break;
