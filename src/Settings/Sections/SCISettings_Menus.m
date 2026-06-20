@@ -280,19 +280,19 @@ static UIImage *SCIWordmarkMenuImage(NSString *name) {
 								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-default") ?: [UIImage systemImageNamed:@"textformat"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"off", @"wordmarkImageName": @"instagram-wordmark-default"}],
-			[UICommand commandWithTitle:SCILocalized(@"Wordmark 1")
+			[UICommand commandWithTitle:SCILocalized(@"IGWordmark 1A")
 								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1a") ?: [UIImage systemImageNamed:@"1.circle.fill"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a", @"wordmarkImageName": @"instagram-wordmark-1a"}],
-			[UICommand commandWithTitle:SCILocalized(@"Wordmark 1A")
+			[UICommand commandWithTitle:SCILocalized(@"IGWordmark 1A Alt")
 								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1a-alt") ?: [UIImage systemImageNamed:@"1.circle"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1a_alt", @"wordmarkImageName": @"instagram-wordmark-1a-alt"}],
-			[UICommand commandWithTitle:SCILocalized(@"Wordmark 2")
+			[UICommand commandWithTitle:SCILocalized(@"IGWordmark 1B")
 								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1b") ?: [UIImage systemImageNamed:@"2.circle.fill"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b", @"wordmarkImageName": @"instagram-wordmark-1b"}],
-			[UICommand commandWithTitle:SCILocalized(@"Wordmark 2A")
+			[UICommand commandWithTitle:SCILocalized(@"IGWordmark 1B Alt")
 								  image:(SCIWordmarkMenuImage(@"instagram-wordmark-1b-alt") ?: [UIImage systemImageNamed:@"2.circle"])
 								 action:@selector(menuChanged:)
 						   propertyList:@{@"defaultsKey": @"sci_ig_wordmark_variant", @"value": @"1b_alt", @"wordmarkImageName": @"instagram-wordmark-1b-alt"}],

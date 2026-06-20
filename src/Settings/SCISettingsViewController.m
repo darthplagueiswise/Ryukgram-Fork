@@ -25,6 +25,34 @@ static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
 	return NO;
 }
 
+static NSString *SCISettingsWordmarkImageNameForValue(NSString *value) {
+	NSString *v = value.length ? value : @"off";
+	if ([v isEqualToString:@"1a"]) return @"instagram-wordmark-1a";
+	if ([v isEqualToString:@"1a_alt"]) return @"instagram-wordmark-1a-alt";
+	if ([v isEqualToString:@"1b"]) return @"instagram-wordmark-1b";
+	if ([v isEqualToString:@"1b_alt"]) return @"instagram-wordmark-1b-alt";
+	return @"instagram-wordmark-default";
+}
+
+static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
+	NSBundle *bundle = SCILocalizationBundle();
+	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
+	if (!img) return nil;
+	CGSize size = img.size;
+	if (size.width <= 0.0 || size.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGFloat ratio = MIN(maxSize.width / size.width, maxSize.height / size.height);
+	if (ratio <= 0.0) ratio = 1.0;
+	CGSize target = CGSizeMake(ceil(size.width * ratio), ceil(size.height * ratio));
+	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+	fmt.opaque = NO;
+	fmt.scale = UIScreen.mainScreen.scale;
+	UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:fmt];
+	UIImage *scaled = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull ctx) {
+		[img drawInRect:CGRectMake(0.0, 0.0, target.width, target.height)];
+	}];
+	return [scaled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 #pragma mark - Language Picker
 
 @interface SCILanguagePickerViewController : UITableViewController
@@ -573,18 +601,33 @@ static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
 			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
-			b.configuration = bc;
 			UIMenu *resolvedMenu = [row menuForButton:b];
+			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
+			if (isWordmarkMenu) {
+				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(146.0, 34.0));
+				if (wordmark) {
+					[b setTitle:nil forState:UIControlStateNormal];
+					[b setImage:wordmark forState:UIControlStateNormal];
+					b.tintColor = UIColor.labelColor;
+					bc.title = nil;
+					bc.image = wordmark;
+					bc.imagePlacement = NSDirectionalRectEdgeLeading;
+					bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 14.0, 8.0, 14.0);
+				}
+			}
+			b.configuration = bc;
 			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-			if (SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant")) {
+			if (isWordmarkMenu) {
 				b.showsMenuAsPrimaryAction = NO;
 				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
 				b.menu = resolvedMenu;
 				b.showsMenuAsPrimaryAction = YES;
 			}
-			[b.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:156.0].active = YES;
+			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? 126.0 : 74.0)].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 176.0 : 156.0)].active = YES;
+			[b.heightAnchor constraintGreaterThanOrEqualToConstant:40.0].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
