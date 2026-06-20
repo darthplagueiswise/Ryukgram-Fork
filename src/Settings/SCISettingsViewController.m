@@ -519,17 +519,12 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		BOOL isFeedHeader = SCIMenuContainsDefaultsKey(row.baseMenu, @"sci_ig_wordmark_variant");
 		BOOL isAdvancedIcon = isFriendsMaps || isStoriesTray || isOldSchool || isFeedHeader;
 
-		CGSize iconSize = CGSizeMake(34.0, 34.0);
-		if (isFriendsMaps) iconSize = CGSizeMake(46.0, 46.0);
-		else if (isStoriesTray) iconSize = CGSizeMake(42.0, 42.0);
-		else if (isFeedHeader || isOldSchool) iconSize = CGSizeMake(40.0, 40.0);
-		config.imageProperties.maximumSize = iconSize;
-		config.imageToTextPadding = isAdvancedIcon ? 10.0 : 12.0;
-
-		// The SF-symbol based Instagram Plus row is already visually correct.
-		// Asset/template rows need a small left nudge to line up with the same icon rail.
-		if (isAdvancedIcon)
-			config.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, -8.0, 0.0, 0.0);
+		// Keep asset-backed rows on the same icon rail as the standard
+		// Apply/Reset rows. No per-row negative margins, no oversized canvases.
+		// The artwork itself is centered in its 44pt canvas and UIKit scales it
+		// to the same visual box as SF/IG symbol rows.
+		config.imageProperties.maximumSize = isAdvancedIcon ? CGSizeMake(31.0, 31.0) : CGSizeMake(32.0, 32.0);
+		config.imageToTextPadding = 14.0;
 	}
 	if (row.icon) {
 		config.image = [row.icon image];

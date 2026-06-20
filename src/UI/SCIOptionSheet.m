@@ -22,11 +22,11 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 104.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 84.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 104.0;
+	if (self.wordmarkMode) return 84.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 348.0 - 16.0 - 16.0;
@@ -44,7 +44,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 28.0, 392.0) : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 56.0, 338.0) : 348.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
@@ -58,30 +58,20 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	SCIUIKit26ConfigureViewController(self);
 	self.view.backgroundColor = UIColor.clearColor;
 
-	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:(self.wordmarkMode ? UITableViewStyleInsetGrouped : UITableViewStylePlain)];
+	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
 	self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.backgroundColor = UIColor.clearColor;
 	self.tableView.opaque = NO;
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 24.0 : 18.0, 0.0, self.wordmarkMode ? 24.0 : 18.0);
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 14.0 : 18.0, 0.0, self.wordmarkMode ? 14.0 : 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 104.0 : 82.0;
-	self.tableView.alwaysBounceVertical = self.wordmarkMode ? YES : NO;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 84.0 : 82.0;
+	self.tableView.alwaysBounceVertical = NO;
 	self.tableView.showsVerticalScrollIndicator = self.options.count > 4;
 	SCIUIKit26ConfigureTableView(self.tableView);
 
-	if (self.wordmarkMode) {
-		[self.view addSubview:self.tableView];
-		[NSLayoutConstraint activateConstraints:@[
-			[self.tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:8.0],
-			[self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-			[self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-			[self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-		]];
-		return;
-	}
 
 	UIControl *dismissLayer = [UIControl new];
 	dismissLayer.translatesAutoresizingMaskIntoConstraints = NO;
@@ -125,7 +115,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 104.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 84.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -147,7 +137,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 			cell.contentView.backgroundColor = UIColor.clearColor;
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 			cell.preservesSuperviewLayoutMargins = YES;
-			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 18.0, 0.0, 18.0);
+			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 14.0, 0.0, 14.0);
 			if (@available(iOS 14.0, *)) {
 				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 			}
@@ -171,13 +161,13 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 			[NSLayoutConstraint activateConstraints:@[
 				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-2.0],
 				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[check.widthAnchor constraintEqualToConstant:24.0],
-				[check.heightAnchor constraintEqualToConstant:24.0],
+				[check.widthAnchor constraintEqualToConstant:22.0],
+				[check.heightAnchor constraintEqualToConstant:22.0],
 
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
-				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-10.0],
+				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-8.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.heightAnchor constraintEqualToConstant:86.0],
+				[preview.heightAnchor constraintEqualToConstant:76.0],
 			]];
 		}
 
@@ -307,20 +297,6 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 }
 
 + (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter {
-	if (vc.wordmarkMode) {
-		UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-		nav.modalPresentationStyle = UIModalPresentationPageSheet;
-		if (@available(iOS 15.0, *)) {
-			UISheetPresentationController *sheet = nav.sheetPresentationController;
-			sheet.detents = @[ UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent ];
-			sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierMedium;
-			sheet.prefersGrabberVisible = YES;
-			sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
-			if (@available(iOS 16.0, *)) sheet.preferredCornerRadius = 32.0;
-		}
-		[presenter presentViewController:nav animated:YES completion:nil];
-		return;
-	}
 	vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
 	vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
 	[presenter presentViewController:vc animated:YES completion:nil];

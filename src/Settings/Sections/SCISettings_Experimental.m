@@ -101,7 +101,8 @@ static UIImage *SCIExperimentalBundleTemplateImage(NSString *name) {
 					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Friends Maps")
 											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
 											defaultsKey:@"igt_directnotes_friendmap"];
-					s.iconImage = SCIExperimentalBundleTemplateImage(@"friends-maps-icon");
+					// Match the standard settings icon rail used by Apply/Reset.
+					s.icon = [SCISymbol symbolWithName:@"globe" color:UIColor.labelColor size:22.0];
 					s;
 				}),
 				({
