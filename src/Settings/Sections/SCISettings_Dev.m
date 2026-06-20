@@ -20,12 +20,6 @@
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 
 
-static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
-	NSBundle *bundle = SCILocalizationBundle();
-	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
-}
-
 @implementation SCITweakSettings (Section_Dev)
 
 + (SCISetting *)devNavCell {
@@ -181,7 +175,7 @@ static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
 																  subtitle:@""
 															defaultsKey:@"sci_statusbar_oldschool"
 														requiresRestart:NO];
-								s.iconImage = SCISettingsBundleTemplateImage(@"throwback-oldschool-icon");
+								s.icon = [SCISymbol symbolWithName:@"statusbar_oldschool" color:UIColor.labelColor];
 								s;
 							}),
 							({
@@ -189,14 +183,14 @@ static UIImage *SCISettingsBundleTemplateImage(NSString *name) {
 																  subtitle:@""
 															defaultsKey:@"sci_story_tray"
 														requiresRestart:NO];
-								s.iconImage = SCISettingsBundleTemplateImage(@"story-tray-icon");
+								s.icon = [SCISymbol symbolWithName:@"story_tray" color:UIColor.labelColor];
 								s;
 							}),
 							({
 								SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 						 subtitle:@""
 						     menu:[self menus][@"ig_wordmark_variant"]];
-							s.iconImage = SCISettingsBundleTemplateImage(@"custom-feed-header-icon");
+							s.icon = [SCISymbol symbolWithName:@"custom_feed_header" color:UIColor.labelColor];
 							s;
 							}),
 

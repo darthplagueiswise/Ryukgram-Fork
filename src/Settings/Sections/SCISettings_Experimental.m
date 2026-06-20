@@ -95,7 +95,7 @@
 					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Friends Maps")
 											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
 											defaultsKey:@"igt_directnotes_friendmap"];
-					s.icon = [SCISymbol symbolWithName:@"globe" color:UIColor.labelColor];
+					s.icon = [SCISymbol symbolWithName:@"friends_maps" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -103,14 +103,14 @@
 											   subtitle:@""
 											defaultsKey:@"sci_story_tray"
 										requiresRestart:NO];
-					s.icon = [SCISymbol symbolWithName:@"story-tray-icon" color:UIColor.labelColor];
+					s.icon = [SCISymbol symbolWithName:@"story_tray" color:UIColor.labelColor];
 					s;
 				}),
 				({
 					SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
 											subtitle:@""
 												menu:[self menus][@"ig_wordmark_variant"]];
-					s.icon = [SCISymbol symbolWithName:@"custom-feed-header-icon" color:UIColor.labelColor];
+					s.icon = [SCISymbol symbolWithName:@"custom_feed_header" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -118,7 +118,7 @@
 											   subtitle:@""
 											defaultsKey:@"sci_statusbar_oldschool"
 										requiresRestart:NO];
-					s.icon = [SCISymbol symbolWithName:@"throwback-oldschool-icon" color:UIColor.labelColor];
+					s.icon = [SCISymbol symbolWithName:@"statusbar_oldschool" color:UIColor.labelColor];
 					s;
 				}),
 				({
@@ -126,7 +126,7 @@
 									   subtitle:SCILocalized(@"Forces all client-side Instagram Plus benefit getters")
 									defaultsKey:@"sci_force_igplus_all"
 									requiresRestart:YES];
-					s.icon = [SCISymbol symbolWithName:@"plus.circle" color:UIColor.labelColor];
+					s.icon = [SCISymbol symbolWithName:@"instagram_plus" color:UIColor.labelColor];
 					s;
 				}),
 			]
