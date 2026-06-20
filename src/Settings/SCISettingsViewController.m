@@ -512,8 +512,24 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	if (row.iconImage) {
 		config.image = [row.iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		config.imageProperties.tintColor = UIColor.labelColor;
-		config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
-		config.imageToTextPadding = 14.0;
+
+		BOOL isFriendsMaps = [row.defaultsKey isEqualToString:@"igt_directnotes_friendmap"];
+		BOOL isStoriesTray = [row.defaultsKey isEqualToString:@"sci_story_tray"];
+		BOOL isOldSchool = [row.defaultsKey isEqualToString:@"sci_statusbar_oldschool"];
+		BOOL isFeedHeader = SCIMenuContainsDefaultsKey(row.baseMenu, @"sci_ig_wordmark_variant");
+		BOOL isAdvancedIcon = isFriendsMaps || isStoriesTray || isOldSchool || isFeedHeader;
+
+		CGSize iconSize = CGSizeMake(34.0, 34.0);
+		if (isFriendsMaps) iconSize = CGSizeMake(46.0, 46.0);
+		else if (isStoriesTray) iconSize = CGSizeMake(42.0, 42.0);
+		else if (isFeedHeader || isOldSchool) iconSize = CGSizeMake(40.0, 40.0);
+		config.imageProperties.maximumSize = iconSize;
+		config.imageToTextPadding = isAdvancedIcon ? 10.0 : 12.0;
+
+		// The SF-symbol based Instagram Plus row is already visually correct.
+		// Asset/template rows need a small left nudge to line up with the same icon rail.
+		if (isAdvancedIcon)
+			config.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, -8.0, 0.0, 0.0);
 	}
 	if (row.icon) {
 		config.image = [row.icon image];
@@ -607,7 +623,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc = UIButtonConfiguration.plainButtonConfiguration;
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 8.0, 6.0, 8.0);
 				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(112.0, 24.0));
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(142.0, 30.0));
 				if (wordmark) {
 					[b setTitle:nil forState:UIControlStateNormal];
 					[b setImage:wordmark forState:UIControlStateNormal];
@@ -619,8 +635,10 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 					bc.title = @"Wordmark";
 				}
 				b.configuration = bc;
-				b.menu = resolvedMenu;
-				b.showsMenuAsPrimaryAction = YES;
+				// Native UIMenu caps command image size to tiny glyphs. Keep the closed
+				// accessory native/plain, but open the dedicated Liquid Glass option sheet
+				// so each Instagram wordmark can fill its row.
+				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
 				SCIUIKit26ConfigureButton(b);
 				bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
@@ -632,7 +650,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			}
 			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? 112.0 : 74.0)].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 132.0 : 156.0)].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? 158.0 : 156.0)].active = YES;
 			[b.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
