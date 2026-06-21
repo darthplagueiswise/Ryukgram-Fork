@@ -133,7 +133,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 16.0 : 20.0, 0.0, self.wordmarkMode ? 16.0 : 20.0);
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
 	self.tableView.rowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : UITableViewAutomaticDimension;
 	self.tableView.estimatedRowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : 58.0;
 	self.tableView.alwaysBounceVertical = NO;
@@ -210,6 +210,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		preview.tintColor = UIColor.labelColor;
 		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
 		check.hidden = !selected;
+		SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
 		return cell;
 	}
 
@@ -239,6 +240,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	}
 	cell.contentConfiguration = cfg;
 	cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+	SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
 	return cell;
 }
 
@@ -298,11 +300,8 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 }
 
 + (BOOL)optionsAreWordmark:(NSArray<NSDictionary *> *)options fallbackKey:(NSString *)fallbackKey {
-	if ([fallbackKey isEqualToString:@"sci_ig_wordmark_variant"]) return YES;
-	for (NSDictionary *opt in options) {
-		NSString *key = opt[@"defaultsKey"] ?: fallbackKey;
-		if ([key isEqualToString:@"sci_ig_wordmark_variant"]) return YES;
-	}
+	(void)options;
+	(void)fallbackKey;
 	return NO;
 }
 

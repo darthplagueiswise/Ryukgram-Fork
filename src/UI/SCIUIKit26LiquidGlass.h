@@ -18,6 +18,7 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView);
 void SCIUIKit26ConfigureTableView(UITableView *tableView);
 void SCIUIKit26ConfigureCollectionView(UICollectionView *collectionView);
 void SCIUIKit26ConfigureTableCell(UITableViewCell *cell);
+void SCIUIKit26ApplyTableCellSelectionTint(UITableViewCell *cell, BOOL selected);
 void SCIStyleCollectionCellForGlass(UICollectionViewCell *cell);
 void SCIUIKit26ConfigureGlassView(UIView *view, CGFloat radius, BOOL interactive);
 void SCIUIKit26ConfigureButton(UIButton *button);
