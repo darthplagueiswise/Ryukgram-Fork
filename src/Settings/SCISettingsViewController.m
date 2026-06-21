@@ -105,17 +105,24 @@ static BOOL SCISettingsScanSelectedMenuTitle(UIMenu *menu, NSString **firstTitle
 	if (!menu || (matchedTitle && (*matchedTitle).length)) return YES;
 	for (UIMenuElement *el in menu.children) {
 		if ([el isKindOfClass:UIMenu.class]) {
-			if (SCISettingsScanSelectedMenuTitle((UIMenu *)el, firstTitle, matchedTitle)) return YES;
+			SCISettingsScanSelectedMenuTitle((UIMenu *)el, firstTitle, matchedTitle);
+			if (matchedTitle && (*matchedTitle).length) return YES;
 			continue;
 		}
 		if (![el isKindOfClass:UICommand.class]) continue;
 		UICommand *cmd = (UICommand *)el;
 		if (firstTitle && !(*firstTitle).length && cmd.title.length) *firstTitle = cmd.title;
+		if (cmd.state == UIMenuElementStateOn && cmd.title.length) {
+			if (matchedTitle) *matchedTitle = cmd.title;
+			return YES;
+		}
 		NSDictionary *props = [cmd.propertyList isKindOfClass:NSDictionary.class] ? cmd.propertyList : nil;
-		NSString *key = props[@"defaultsKey"];
+		NSString *key = [props[@"defaultsKey"] isKindOfClass:NSString.class] ? props[@"defaultsKey"] : nil;
 		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
 		if (!key.length || !value.length) continue;
-		NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:key] ?: @"";
+		id raw = [NSUserDefaults.standardUserDefaults objectForKey:key];
+		NSString *saved = [raw isKindOfClass:NSString.class] ? raw : nil;
+		if (!saved.length) saved = @"default";
 		if ([value isEqualToString:saved]) {
 			if (matchedTitle) *matchedTitle = cmd.title ?: @"";
 			return YES;
@@ -128,7 +135,9 @@ static NSString *SCISettingsSelectedMenuTitle(UIMenu *menu) {
 	NSString *firstTitle = nil;
 	NSString *matchedTitle = nil;
 	SCISettingsScanSelectedMenuTitle(menu, &firstTitle, &matchedTitle);
-	return matchedTitle.length ? matchedTitle : firstTitle;
+	if (matchedTitle.length) return matchedTitle;
+	if (firstTitle.length) return firstTitle;
+	return SCILocalized(@"Default");
 }
 
 static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
@@ -721,10 +730,10 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				b.configuration = nil;
 			} else {
 				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
-				[b setTitle:(selectedTitle.length ? selectedTitle : @"•••") forState:UIControlStateNormal];
+				[b setTitle:(selectedTitle.length ? selectedTitle : SCILocalized(@"Default")) forState:UIControlStateNormal];
 				SCIUIKit26ConfigureButton(b);
 				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-				bc.title = selectedTitle.length ? selectedTitle : @"•••";
+				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				b.configuration = bc;

@@ -54,10 +54,35 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 }
 
 
+
+static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
+	UIImage *trimmed = SCIOptionSheetTrimTransparentTemplateImage(image);
+	if (!trimmed) return nil;
+	CGSize source = trimmed.size;
+	if (source.width <= 0.0 || source.height <= 0.0) return trimmed;
+	static const CGFloat kPreviewWidth = 94.0;
+	static const CGFloat kPreviewMaxHeight = 23.0;
+	CGFloat scale = kPreviewWidth / source.width;
+	CGSize target = CGSizeMake(kPreviewWidth, ceil(source.height * scale));
+	if (target.height > kPreviewMaxHeight) {
+		scale = kPreviewMaxHeight / source.height;
+		target = CGSizeMake(ceil(source.width * scale), kPreviewMaxHeight);
+	}
+	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+	fmt.opaque = NO;
+	fmt.scale = UIScreen.mainScreen.scale;
+	UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:fmt];
+	UIImage *scaled = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull ctx) {
+		[trimmed drawInRect:CGRectMake(0.0, 0.0, target.width, target.height)];
+	}];
+	return [scaled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 static UIView *SCIOptionSheetSelectedGlassBackgroundView(CGFloat radius) {
 	SCIUIKit26GlassPanelView *bg = [[SCIUIKit26GlassPanelView alloc] initWithRadius:radius];
 	bg.sciGlassClearStyle = YES;
-	bg.sciGlassInteractive = NO;
+	bg.sciGlassInteractive = YES;
+	bg.sciGlassTintColor = [UIColor.labelColor colorWithAlphaComponent:0.10];
 	[bg applyLiquidGlassStyle];
 	bg.contentView.backgroundColor = UIColor.clearColor;
 	bg.backgroundColor = UIColor.clearColor;
@@ -86,11 +111,11 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 36.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 34.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 36.0;
+	if (self.wordmarkMode) return 34.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
 	CGFloat width = 328.0 - 16.0 - 16.0;
@@ -108,11 +133,11 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 214.0, 168.0) : 328.0;
+	CGFloat width = self.wordmarkMode ? 142.0 : 328.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 240.0, self.wordmarkMode ? 188.0 : 640.0);
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 240.0, self.wordmarkMode ? 178.0 : 640.0);
 	CGFloat height = MIN(MAX(self.wordmarkMode ? 58.0 : 128.0, rows + 10.0), MAX(self.wordmarkMode ? 112.0 : 280.0, maxHeight));
 	return CGSizeMake(width, height);
 }
@@ -131,10 +156,9 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 14.0 : 18.0, 0.0, self.wordmarkMode ? 14.0 : 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 36.0 : 82.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 34.0 : 82.0;
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.backgroundColor = UIColor.clearColor;
 	self.tableView.opaque = NO;
 	if (self.wordmarkMode) {
@@ -168,10 +192,10 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 		[self.panelView.widthAnchor constraintEqualToConstant:size.width],
 		[self.panelView.heightAnchor constraintEqualToConstant:size.height],
 
-		[self.tableView.topAnchor constraintEqualToAnchor:self.panelView.contentView.topAnchor constant:(self.wordmarkMode ? 5.0 : 8.0)],
-		[self.tableView.leadingAnchor constraintEqualToAnchor:self.panelView.contentView.leadingAnchor constant:(self.wordmarkMode ? 5.0 : 8.0)],
-		[self.tableView.trailingAnchor constraintEqualToAnchor:self.panelView.contentView.trailingAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
-		[self.tableView.bottomAnchor constraintEqualToAnchor:self.panelView.contentView.bottomAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
+		[self.tableView.topAnchor constraintEqualToAnchor:self.panelView.contentView.topAnchor constant:(self.wordmarkMode ? 4.0 : 8.0)],
+		[self.tableView.leadingAnchor constraintEqualToAnchor:self.panelView.contentView.leadingAnchor constant:(self.wordmarkMode ? 4.0 : 8.0)],
+		[self.tableView.trailingAnchor constraintEqualToAnchor:self.panelView.contentView.trailingAnchor constant:-(self.wordmarkMode ? 4.0 : 8.0)],
+		[self.tableView.bottomAnchor constraintEqualToAnchor:self.panelView.contentView.bottomAnchor constant:-(self.wordmarkMode ? 4.0 : 8.0)],
 	]];
 }
 
@@ -224,9 +248,9 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 			cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"wordmarkOpt"];
 			cell.backgroundColor = UIColor.clearColor;
 			cell.contentView.backgroundColor = UIColor.clearColor;
-			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+			cell.selectionStyle = UITableViewCellSelectionStyleNone;
 			cell.preservesSuperviewLayoutMargins = YES;
-			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 14.0, 0.0, 10.0);
+			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 8.0, 0.0, 8.0);
 			if (@available(iOS 14.0, *)) {
 				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 			}
@@ -248,14 +272,14 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 			[cell.contentView addSubview:check];
 
 			[NSLayoutConstraint activateConstraints:@[
-				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-2.0],
+				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-1.0],
 				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[check.widthAnchor constraintEqualToConstant:15.0],
-				[check.heightAnchor constraintEqualToConstant:15.0],
+				[check.widthAnchor constraintEqualToConstant:14.0],
+				[check.heightAnchor constraintEqualToConstant:14.0],
 
-				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
-				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-10.0],
+				[preview.centerXAnchor constraintEqualToAnchor:cell.contentView.centerXAnchor constant:-7.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+				[preview.widthAnchor constraintEqualToConstant:96.0],
 				[preview.heightAnchor constraintEqualToConstant:24.0],
 			]];
 		}
@@ -268,10 +292,10 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 		if (@available(iOS 14.0, *)) {
 			cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 		}
-		cell.backgroundView = selected ? SCIOptionSheetSelectedGlassBackgroundView(10.0) : nil;
+		cell.backgroundView = nil;
 		cell.selectedBackgroundView = SCIOptionSheetSelectedGlassBackgroundView(10.0);
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
-		preview.image = SCIOptionSheetTrimTransparentTemplateImage(image);
+		preview.image = SCIOptionSheetWordmarkPreviewImage(image);
 		preview.tintColor = UIColor.labelColor;
 		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
 		check.hidden = !selected;
@@ -281,15 +305,14 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
-	cell.backgroundView = selected ? SCIOptionSheetSelectedGlassBackgroundView(14.0) : nil;
+	cell.backgroundView = nil;
 	cell.selectedBackgroundView = SCIOptionSheetSelectedGlassBackgroundView(14.0);
 
 	cell.backgroundColor = UIColor.clearColor;
 	cell.contentView.backgroundColor = UIColor.clearColor;
 	cell.tintColor = [UIColor systemBlueColor];
-	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+	cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
 	UIListContentConfiguration *cfg = cell.defaultContentConfiguration;
 	cfg.text = opt[@"title"] ?: opt[@"value"];
@@ -419,7 +442,7 @@ static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
 		vc.hasSourceCenter = YES;
 	}
 	vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-	[presenter presentViewController:vc animated:YES completion:nil];
+	[presenter presentViewController:vc animated:NO completion:nil];
 }
 
 + (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter {
