@@ -335,7 +335,6 @@ static UIImage *SCIWordmarkCanvasImage(UIImage *image) {
 		}
 
 		if (value.length && [value isEqualToString:saved]) {
-			command.state = UIMenuElementStateOn;
 			if (isWordmark) {
 				UIImage *selectedImage = image ?: SCIWordmarkCanvasImage(SCIWordmarkTemplateImageNamed(SCIWordmarkImageNameForValue(value)));
 				[button setTitle:nil forState:UIControlStateNormal];
@@ -363,15 +362,12 @@ static UIImage *SCIWordmarkCanvasImage(UIImage *image) {
 				}
 			}
 		} else {
-			command.state = UIMenuElementStateOff;
 		}
 		[children addObject:command];
 	}
 
 	UIMenuOptions options = submenu.options;
-	if (hasSelectableValues) options |= UIMenuOptionsSingleSelection;
 	if (wordmarkMenu) {
-		if (@available(iOS 17.0, *)) options |= UIMenuOptionsDisplayAsPalette;
 	}
 	return [UIMenu menuWithTitle:submenu.title ?: @"" image:submenu.image identifier:submenu.identifier options:options children:children];
 }

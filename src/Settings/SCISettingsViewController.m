@@ -737,9 +737,10 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.image = nil;
 			}
 			b.configuration = bc;
-			b.menu = resolvedMenu;
-			b.showsMenuAsPrimaryAction = YES;
-			if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = YES;
+			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+			b.showsMenuAsPrimaryAction = NO;
+			b.menu = nil;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;

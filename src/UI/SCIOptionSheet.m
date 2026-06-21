@@ -109,12 +109,12 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 }
 
 - (CGSize)preferredSheetSize {
-	CGFloat width = self.wordmarkMode ? 260.0 : 328.0;
+	CGFloat width = self.wordmarkMode ? 260.0 : 300.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
 	CGFloat inset = self.wordmarkMode ? 12.0 : 16.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 180.0, self.wordmarkMode ? 260.0 : 520.0);
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 180.0, self.wordmarkMode ? 300.0 : 420.0);
 	CGFloat height = MIN(MAX(self.wordmarkMode ? 160.0 : 128.0, rows + inset), maxHeight);
 	return CGSizeMake(width, height);
 }
@@ -209,7 +209,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		preview.image = SCIOptionSheetWordmarkPreviewImage(image);
 		preview.tintColor = UIColor.labelColor;
 		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
-		check.hidden = !selected;
+		check.hidden = YES;
 		SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
 		return cell;
 	}
@@ -239,7 +239,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		cfg.imageToTextPadding = 14.0;
 	}
 	cell.contentConfiguration = cfg;
-	cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+	cell.accessoryType = UITableViewCellAccessoryNone;
 	SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
 	return cell;
 }
@@ -306,15 +306,14 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 }
 
 + (void)presentFrom:(UIViewController *)presenter title:(NSString *)title defaultsKey:(NSString *)defaultsKey options:(NSArray<NSDictionary<NSString *,NSString *> *> *)options onChange:(void (^)(NSString *))onChange {
-	if (!presenter || !options.count) return;
-	SCIOptionSheetVC *vc = [SCIOptionSheetVC new];
-	vc.options = options;
-	vc.title = title;
-	vc.defaultsKey = defaultsKey;
-	vc.currentValue = defaultsKey.length ? ([[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey] ?: @"") : @"";
-	vc.wordmarkMode = [self optionsAreWordmark:options fallbackKey:defaultsKey];
-	vc.onChange = onChange;
-	[self presentSheetVC:vc from:presenter sourceView:nil];
+	if ([fallbackKey isEqualToString:@"sci_ig_wordmark_variant"]) return YES;
+	for (NSDictionary *opt in options) {
+		id key = opt[@"defaultsKey"];
+		id imageName = opt[@"wordmarkImageName"];
+		if ([key isKindOfClass:NSString.class] && [key isEqualToString:@"sci_ig_wordmark_variant"]) return YES;
+		if ([imageName isKindOfClass:NSString.class] && [(NSString *)imageName length] > 0) return YES;
+	}
+	return NO;
 }
 
 + (void)presentFrom:(UIViewController *)presenter title:(NSString *)title menu:(UIMenu *)menu onPick:(void (^)(UICommand *command))onPick {
