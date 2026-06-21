@@ -184,20 +184,10 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 			preview.tintColor = UIColor.labelColor;
 			[cell.contentView addSubview:preview];
 
-			UIImageView *check = [[UIImageView alloc] initWithImage:[[UIImage systemImageNamed:@"checkmark"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]];
-			check.tag = 9002;
-			check.translatesAutoresizingMaskIntoConstraints = NO;
-			check.contentMode = UIViewContentModeScaleAspectFit;
-			check.tintColor = [UIColor systemBlueColor];
-			[cell.contentView addSubview:check];
 
 			[NSLayoutConstraint activateConstraints:@[
-				[check.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
-				[check.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[check.widthAnchor constraintEqualToConstant:13.0],
-				[check.heightAnchor constraintEqualToConstant:13.0],
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
-				[preview.trailingAnchor constraintLessThanOrEqualToAnchor:check.leadingAnchor constant:-4.0],
+				[preview.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-6.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
 				[preview.widthAnchor constraintEqualToConstant:82.0],
 				[preview.heightAnchor constraintEqualToConstant:22.0],
@@ -208,8 +198,6 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
 		preview.image = SCIOptionSheetWordmarkPreviewImage(image);
 		preview.tintColor = UIColor.labelColor;
-		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
-		check.hidden = YES;
 		SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
 		return cell;
 	}
@@ -300,12 +288,6 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 }
 
 + (BOOL)optionsAreWordmark:(NSArray<NSDictionary *> *)options fallbackKey:(NSString *)fallbackKey {
-	(void)options;
-	(void)fallbackKey;
-	return NO;
-}
-
-+ (void)presentFrom:(UIViewController *)presenter title:(NSString *)title defaultsKey:(NSString *)defaultsKey options:(NSArray<NSDictionary<NSString *,NSString *> *> *)options onChange:(void (^)(NSString *))onChange {
 	if ([fallbackKey isEqualToString:@"sci_ig_wordmark_variant"]) return YES;
 	for (NSDictionary *opt in options) {
 		id key = opt[@"defaultsKey"];
@@ -315,7 +297,17 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	}
 	return NO;
 }
-
++ (void)presentFrom:(UIViewController *)presenter title:(NSString *)title defaultsKey:(NSString *)defaultsKey options:(NSArray<NSDictionary<NSString *,NSString *> *> *)options onChange:(void (^)(NSString *))onChange {
+	if (!presenter || !options.count) return;
+	SCIOptionSheetVC *vc = [SCIOptionSheetVC new];
+	vc.options = options;
+	vc.title = title;
+	vc.defaultsKey = defaultsKey;
+	vc.currentValue = defaultsKey.length ? ([[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey] ?: @"") : @"";
+	vc.wordmarkMode = [self optionsAreWordmark:options fallbackKey:defaultsKey];
+	vc.onChange = onChange;
+	[self presentSheetVC:vc from:presenter sourceView:nil];
+}
 + (void)presentFrom:(UIViewController *)presenter title:(NSString *)title menu:(UIMenu *)menu onPick:(void (^)(UICommand *command))onPick {
 	NSArray *options = [self optionsFromMenu:menu prefix:nil];
 	if (!presenter || !options.count) return;
