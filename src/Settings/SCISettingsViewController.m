@@ -434,7 +434,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	self.searchController = sc;
 	self.navigationItem.searchController = sc;
 	SCIUIKit26ConfigureSearchNavigationItem(self.navigationItem);
-	self.definesPresentationContext = ![SCIUtils getBoolPref:@"liquid_glass_buttons"];
+	self.definesPresentationContext = YES;
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(sciDismissSettings)];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"globe"] style:UIBarButtonItemStylePlain target:self action:@selector(sciPresentLanguagePicker)];
 }
@@ -509,14 +509,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)willPresentSearchController:(UISearchController *)sc { self.searchBarStyled = NO; [self sciStyleSearchBar]; }
 
-- (void)didPresentSearchController:(UISearchController *)sc {
-	self.searchBarStyled = NO;
-	[self sciStyleSearchBar];
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		self.searchBarStyled = NO;
-		[self sciStyleSearchBar];
-	});
-}
+- (void)didPresentSearchController:(UISearchController *)sc { self.searchBarStyled = NO; [self sciStyleSearchBar]; }
 
 - (void)sciShowFirstRunAlertIfNeeded {
 	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -737,10 +730,9 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.image = nil;
 			}
 			b.configuration = bc;
-			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-			[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-			b.showsMenuAsPrimaryAction = NO;
-			b.menu = nil;
+			b.menu = resolvedMenu;
+			b.showsMenuAsPrimaryAction = YES;
+			if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = NO;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -825,18 +817,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	if (!row.defaultsKey.length) return;
 	[NSUserDefaults.standardUserDefaults setDouble:sender.value forKey:row.defaultsKey];
 	[self reloadCellForView:sender animated:NO];
-}
-
-- (void)menuButtonTapped:(UIButton *)sender {
-	SCISetting *row = objc_getAssociatedObject(sender, &kSCIRowKey);
-	if (!row || !row.baseMenu) return;
-	UIMenu *menu = [row menuForButton:sender];
-	__weak typeof(self) weakSelf = self;
-	[SCIOptionSheet presentFrom:self title:row.title menu:menu sourceView:sender onPick:^(UICommand *command) {
-		__strong typeof(weakSelf) self = weakSelf;
-		if (!self || !command) return;
-		[self menuChanged:command];
-	}];
 }
 
 - (void)menuChanged:(UICommand *)command {

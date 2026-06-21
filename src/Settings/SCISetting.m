@@ -357,7 +357,6 @@ static UIImage *SCIWordmarkCanvasImage(UIImage *image) {
 					button.configuration = cfg;
 				}
 			}
-		} else {
 		}
 		[children addObject:command];
 	}

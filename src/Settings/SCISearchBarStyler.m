@@ -44,7 +44,8 @@
 	if (!searchBar) return;
 
 	if ([self shouldUseNativeGlass]) {
-		[self resetSearchBar:searchBar];
+		// iOS 26 owns the collapsible/morphing search chrome. Do not add a second
+		// custom field surface on top of the native presentation.
 		return;
 	}
 

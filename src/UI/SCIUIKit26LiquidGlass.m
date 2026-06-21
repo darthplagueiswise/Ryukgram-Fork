@@ -145,7 +145,7 @@ UIColor *SCIUIKit26SeparatorColor(void) {
 }
 
 static UIColor *SCIUIKit26CellSelectedFillColor(void) {
-    return [[SCIUtils SCIColor_Primary] colorWithAlphaComponent:0.16];
+    return [UIColor.labelColor colorWithAlphaComponent:0.10];
 }
 
 static UIColor *SCIUIKit26CellPressedFillColor(void) {
@@ -305,7 +305,7 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView) {
         if (@available(iOS 26.0, *)) {
             SEL setBackgroundEffect = NSSelectorFromString(@"setBackgroundEffect:");
             if ([tableView respondsToSelector:setBackgroundEffect]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(tableView, setBackgroundEffect, SCIUIKit26GlassEffect(YES, NO, nil));
+                ((void (*)(id, SEL, id))objc_msgSend)(tableView, setBackgroundEffect, nil);
             }
         }
     }
@@ -421,9 +421,9 @@ void SCIUIKit26ConfigureSearchNavigationItem(UINavigationItem *navigationItem) {
         }
         SEL setPreferred = NSSelectorFromString(@"setPreferredSearchBarPlacement:");
         if ([navigationItem respondsToSelector:setPreferred]) {
-            // 0 is the UIKit automatic placement. It lets iPhone collapse to a toolbar button
-            // and regular-width layouts integrate search at the navigation bar edge.
-            ((void (*)(id, SEL, NSInteger))objc_msgSend)(navigationItem, setPreferred, 4);
+            // 1 is UINavigationItemSearchBarPlacementIntegrated on iOS 26.
+            // Do not force IntegratedButton here: it creates a bottom floating search surface.
+            ((void (*)(id, SEL, NSInteger))objc_msgSend)(navigationItem, setPreferred, 1);
         }
     }
 }
@@ -463,7 +463,7 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
 
     UIView *selected = [UIView new];
     selected.backgroundColor = SCIUIKit26CellPressedFillColor();
-    selected.layer.cornerRadius = 12.0;
+    selected.layer.cornerRadius = 0.0;
     if ([selected.layer respondsToSelector:@selector(setCornerCurve:)]) selected.layer.cornerCurve = kCACornerCurveContinuous;
     selected.clipsToBounds = YES;
     cell.selectedBackgroundView = selected;
@@ -471,7 +471,7 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
     if (@available(iOS 14.0, *)) {
         UIBackgroundConfiguration *bg = [UIBackgroundConfiguration listGroupedCellConfiguration];
         bg.backgroundColor = SCIUIKit26PanelFillColor();
-        bg.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, nil) : nil;
+        bg.visualEffect = nil;
         bg.strokeColor = UIColor.clearColor;
         bg.strokeWidth = 0.0;
         cell.backgroundConfiguration = bg;
@@ -486,7 +486,7 @@ void SCIUIKit26ApplyTableCellSelectionTint(UITableViewCell *cell, BOOL selected)
     if (@available(iOS 14.0, *)) {
         UIBackgroundConfiguration *bg = cell.backgroundConfiguration ?: [UIBackgroundConfiguration listGroupedCellConfiguration];
         bg.backgroundColor = selected ? SCIUIKit26CellSelectedFillColor() : SCIUIKit26PanelFillColor();
-        bg.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, nil) : nil;
+        bg.visualEffect = nil;
         bg.strokeColor = UIColor.clearColor;
         bg.strokeWidth = 0.0;
         cell.backgroundConfiguration = bg;
