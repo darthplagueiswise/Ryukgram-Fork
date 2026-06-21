@@ -101,33 +101,33 @@ static UIImage *SCISettingsTrimTransparentTemplateImage(UIImage *image) {
 	return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
-static NSString *SCISettingsSelectedMenuTitle(UIMenu *menu) {
-	__block NSString *firstTitle = nil;
-	__block NSString *matchedTitle = nil;
-	__block void (^scan)(UIMenu *) = nil;
-	scan = ^(UIMenu *m) {
-		if (matchedTitle.length) return;
-		for (UIMenuElement *el in m.children) {
-			if ([el isKindOfClass:UIMenu.class]) {
-				scan((UIMenu *)el);
-				if (matchedTitle.length) return;
-				continue;
-			}
-			if (![el isKindOfClass:UICommand.class]) continue;
-			UICommand *cmd = (UICommand *)el;
-			if (!firstTitle.length && cmd.title.length) firstTitle = cmd.title;
-			NSDictionary *props = [cmd.propertyList isKindOfClass:NSDictionary.class] ? cmd.propertyList : nil;
-			NSString *key = props[@"defaultsKey"];
-			NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
-			if (!key.length || !value.length) continue;
-			NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:key] ?: @"";
-			if ([value isEqualToString:saved]) {
-				matchedTitle = cmd.title ?: @"";
-				return;
-			}
+static BOOL SCISettingsScanSelectedMenuTitle(UIMenu *menu, NSString **firstTitle, NSString **matchedTitle) {
+	if (!menu || (matchedTitle && (*matchedTitle).length)) return YES;
+	for (UIMenuElement *el in menu.children) {
+		if ([el isKindOfClass:UIMenu.class]) {
+			if (SCISettingsScanSelectedMenuTitle((UIMenu *)el, firstTitle, matchedTitle)) return YES;
+			continue;
 		}
-	};
-	scan(menu);
+		if (![el isKindOfClass:UICommand.class]) continue;
+		UICommand *cmd = (UICommand *)el;
+		if (firstTitle && !(*firstTitle).length && cmd.title.length) *firstTitle = cmd.title;
+		NSDictionary *props = [cmd.propertyList isKindOfClass:NSDictionary.class] ? cmd.propertyList : nil;
+		NSString *key = props[@"defaultsKey"];
+		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
+		if (!key.length || !value.length) continue;
+		NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:key] ?: @"";
+		if ([value isEqualToString:saved]) {
+			if (matchedTitle) *matchedTitle = cmd.title ?: @"";
+			return YES;
+		}
+	}
+	return NO;
+}
+
+static NSString *SCISettingsSelectedMenuTitle(UIMenu *menu) {
+	NSString *firstTitle = nil;
+	NSString *matchedTitle = nil;
+	SCISettingsScanSelectedMenuTitle(menu, &firstTitle, &matchedTitle);
 	return matchedTitle.length ? matchedTitle : firstTitle;
 }
 
