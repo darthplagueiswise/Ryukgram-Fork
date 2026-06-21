@@ -12,8 +12,6 @@
 static char kSCIRowKey;
 
 static const CGFloat kSCISettingsStandardIconBox = 23.0;
-static const CGFloat kSCISettingsWordmarkAccessoryWidth = 84.0;
-static const CGFloat kSCISettingsWordmarkAccessoryHeight = 22.0;
 
 
 static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
