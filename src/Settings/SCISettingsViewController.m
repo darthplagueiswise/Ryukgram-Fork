@@ -12,8 +12,8 @@
 static char kSCIRowKey;
 
 static const CGFloat kSCISettingsStandardIconBox = 23.0;
-static const CGFloat kSCISettingsWordmarkAccessoryWidth = 96.0;
-static const CGFloat kSCISettingsWordmarkAccessoryHeight = 24.0;
+static const CGFloat kSCISettingsWordmarkAccessoryWidth = 84.0;
+static const CGFloat kSCISettingsWordmarkAccessoryHeight = 22.0;
 
 
 static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
@@ -719,7 +719,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 					[b setImage:[[UIImage systemImageNamed:@"textformat"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] forState:UIControlStateNormal];
 				}
 				b.configuration = nil;
-				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
 				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
 				[b setTitle:(selectedTitle.length ? selectedTitle : @"•••") forState:UIControlStateNormal];
@@ -729,9 +728,8 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				b.configuration = bc;
-				b.menu = resolvedMenu;
-				b.showsMenuAsPrimaryAction = YES;
 			}
+			[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 74.0)].active = YES;
 			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 156.0)].active = YES;
@@ -827,7 +825,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	if (!row || !row.baseMenu) return;
 	UIMenu *menu = [row menuForButton:sender];
 	__weak typeof(self) weakSelf = self;
-	[SCIOptionSheet presentFrom:self title:row.title menu:menu onPick:^(UICommand *command) {
+	[SCIOptionSheet presentFrom:self title:row.title menu:menu sourceView:sender onPick:^(UICommand *command) {
 		__strong typeof(weakSelf) self = weakSelf;
 		if (!self || !command) return;
 		[self menuChanged:command];

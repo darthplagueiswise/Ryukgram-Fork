@@ -53,6 +53,21 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 	return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
+
+static UIView *SCIOptionSheetSelectedGlassBackgroundView(CGFloat radius) {
+	SCIUIKit26GlassPanelView *bg = [[SCIUIKit26GlassPanelView alloc] initWithRadius:radius];
+	bg.sciGlassClearStyle = YES;
+	bg.sciGlassInteractive = NO;
+	[bg applyLiquidGlassStyle];
+	bg.contentView.backgroundColor = UIColor.clearColor;
+	bg.backgroundColor = UIColor.clearColor;
+	return bg;
+}
+
+static CGFloat SCIClamp(CGFloat value, CGFloat minValue, CGFloat maxValue) {
+	return MAX(minValue, MIN(value, maxValue));
+}
+
 @interface SCIOptionSheetVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
 @property (nonatomic, copy, nullable) NSString *defaultsKey;
@@ -61,20 +76,24 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 @property (nonatomic, copy, nullable) void (^onPickCommand)(UICommand *command);
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) SCIUIKit26GlassPanelView *panelView;
+@property (nonatomic, weak, nullable) UIView *sourceView;
+@property (nonatomic) CGPoint sourceCenter;
+@property (nonatomic) BOOL hasSourceCenter;
 @property (nonatomic) BOOL wordmarkMode;
 @end
+
 
 @implementation SCIOptionSheetVC
 
 - (CGFloat)rowHeight {
-	return self.wordmarkMode ? 34.0 : UITableViewAutomaticDimension;
+	return self.wordmarkMode ? 36.0 : UITableViewAutomaticDimension;
 }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
-	if (self.wordmarkMode) return 34.0;
+	if (self.wordmarkMode) return 36.0;
 	NSString *title = opt[@"title"] ?: opt[@"value"] ?: @"";
 	NSString *desc = opt[@"description"] ?: @"";
-	CGFloat width = 348.0 - 16.0 - 16.0;
+	CGFloat width = 328.0 - 16.0 - 16.0;
 	if (desc.length) width -= 42.0; // checkmark/accessory reserve
 	CGRect titleRect = [title boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX)
 									 options:NSStringDrawingUsesLineFragmentOrigin
@@ -89,12 +108,12 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 }
 
 - (CGSize)panelSize {
-	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 148.0, 252.0) : 348.0;
+	CGFloat width = self.wordmarkMode ? MIN(UIScreen.mainScreen.bounds.size.width - 214.0, 168.0) : 328.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
 	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 240.0, self.wordmarkMode ? 188.0 : 640.0);
-	CGFloat height = MIN(MAX(self.wordmarkMode ? 58.0 : 128.0, rows + 10.0), MAX(self.wordmarkMode ? 104.0 : 280.0, maxHeight));
+	CGFloat height = MIN(MAX(self.wordmarkMode ? 58.0 : 128.0, rows + 10.0), MAX(self.wordmarkMode ? 112.0 : 280.0, maxHeight));
 	return CGSizeMake(width, height);
 }
 
@@ -112,7 +131,7 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
 	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 14.0 : 18.0, 0.0, self.wordmarkMode ? 14.0 : 18.0);
 	self.tableView.rowHeight = [self rowHeight];
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? 34.0 : 82.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? 36.0 : 82.0;
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	SCIUIKit26ConfigureTableView(self.tableView);
@@ -144,8 +163,8 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 		[dismissLayer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
 		[dismissLayer.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 
-		[self.panelView.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-		[self.panelView.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+		[self.panelView.centerXAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:[self panelCenterXForSize:size]],
+		[self.panelView.centerYAnchor constraintEqualToAnchor:self.view.topAnchor constant:[self panelCenterYForSize:size]],
 		[self.panelView.widthAnchor constraintEqualToConstant:size.width],
 		[self.panelView.heightAnchor constraintEqualToConstant:size.height],
 
@@ -154,6 +173,26 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 		[self.tableView.trailingAnchor constraintEqualToAnchor:self.panelView.contentView.trailingAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
 		[self.tableView.bottomAnchor constraintEqualToAnchor:self.panelView.contentView.bottomAnchor constant:-(self.wordmarkMode ? 5.0 : 8.0)],
 	]];
+}
+
+
+- (CGPoint)sourceCenterInView {
+	if (self.hasSourceCenter) return self.sourceCenter;
+	return CGPointMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds));
+}
+
+- (CGFloat)panelCenterXForSize:(CGSize)size {
+	CGFloat safeLeft = self.view.safeAreaInsets.left + 18.0 + size.width * 0.5;
+	CGFloat safeRight = CGRectGetWidth(self.view.bounds) - self.view.safeAreaInsets.right - 18.0 - size.width * 0.5;
+	return SCIClamp([self sourceCenterInView].x, safeLeft, MAX(safeLeft, safeRight));
+}
+
+- (CGFloat)panelCenterYForSize:(CGSize)size {
+	CGFloat safeTop = self.view.safeAreaInsets.top + 18.0 + size.height * 0.5;
+	CGFloat safeBottom = CGRectGetHeight(self.view.bounds) - self.view.safeAreaInsets.bottom - 18.0 - size.height * 0.5;
+	CGFloat y = [self sourceCenterInView].y;
+	if (self.wordmarkMode) y += 2.0;
+	return SCIClamp(y, safeTop, MAX(safeTop, safeBottom));
 }
 
 - (void)dismissSelf { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -165,7 +204,7 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return (NSInteger)self.options.count; }
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return self.wordmarkMode ? 34.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
+	return self.wordmarkMode ? 36.0 : [self estimatedHeightForOption:self.options[(NSUInteger)indexPath.row]];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -187,7 +226,7 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 			cell.contentView.backgroundColor = UIColor.clearColor;
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 			cell.preservesSuperviewLayoutMargins = YES;
-			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 12.0, 0.0, 10.0);
+			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 14.0, 0.0, 10.0);
 			if (@available(iOS 14.0, *)) {
 				cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 			}
@@ -215,9 +254,9 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 				[check.heightAnchor constraintEqualToConstant:15.0],
 
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor constant:0.0],
-				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-8.0],
+				[preview.trailingAnchor constraintEqualToAnchor:check.leadingAnchor constant:-10.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.heightAnchor constraintEqualToConstant:22.0],
+				[preview.heightAnchor constraintEqualToConstant:24.0],
 			]];
 		}
 
@@ -229,10 +268,8 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 		if (@available(iOS 14.0, *)) {
 			cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 		}
-		UIView *selectedView = [UIView new];
-		selectedView.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.07];
-		selectedView.layer.cornerRadius = 10.0;
-		cell.selectedBackgroundView = selectedView;
+		cell.backgroundView = selected ? SCIOptionSheetSelectedGlassBackgroundView(10.0) : nil;
+		cell.selectedBackgroundView = SCIOptionSheetSelectedGlassBackgroundView(10.0);
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
 		preview.image = SCIOptionSheetTrimTransparentTemplateImage(image);
 		preview.tintColor = UIColor.labelColor;
@@ -246,6 +283,8 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
 	SCIUIKit26ConfigureTableCell(cell);
 	if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
+	cell.backgroundView = selected ? SCIOptionSheetSelectedGlassBackgroundView(14.0) : nil;
+	cell.selectedBackgroundView = SCIOptionSheetSelectedGlassBackgroundView(14.0);
 
 	cell.backgroundColor = UIColor.clearColor;
 	cell.contentView.backgroundColor = UIColor.clearColor;
@@ -293,6 +332,12 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 	[self dismissSelf];
 }
 
+@end
+
+
+@interface SCIOptionSheet ()
++ (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter;
++ (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter sourceView:(UIView * _Nullable)sourceView;
 @end
 
 @implementation SCIOptionSheet
@@ -354,9 +399,31 @@ static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
 	[self presentSheetVC:vc from:presenter];
 }
 
-+ (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter {
+
++ (void)presentFrom:(UIViewController *)presenter title:(NSString *)title menu:(UIMenu *)menu sourceView:(UIView *)sourceView onPick:(void (^)(UICommand *command))onPick {
+	NSArray *options = [self optionsFromMenu:menu prefix:nil];
+	if (!presenter || !options.count) return;
+	SCIOptionSheetVC *vc = [SCIOptionSheetVC new];
+	vc.options = options;
+	vc.title = title;
+	vc.wordmarkMode = [self optionsAreWordmark:options fallbackKey:nil];
+	vc.onPickCommand = onPick;
+	[self presentSheetVC:vc from:presenter sourceView:sourceView];
+}
+
++ (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter sourceView:(UIView *)sourceView {
+	vc.sourceView = sourceView;
+	if (sourceView && sourceView.superview && presenter.view) {
+		CGRect r = [sourceView.superview convertRect:sourceView.frame toView:presenter.view];
+		vc.sourceCenter = CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r));
+		vc.hasSourceCenter = YES;
+	}
 	vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
 	[presenter presentViewController:vc animated:YES completion:nil];
+}
+
++ (void)presentSheetVC:(SCIOptionSheetVC *)vc from:(UIViewController *)presenter {
+	[self presentSheetVC:vc from:presenter sourceView:nil];
 }
 
 @end
