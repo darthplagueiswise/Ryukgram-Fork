@@ -713,7 +713,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
 			if (isWordmarkMenu) {
 				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 8.0, kSCISettingsWordmarkAccessoryHeight - 4.0));
+				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 10.0, kSCISettingsWordmarkAccessoryHeight - 4.0));
 				[b setTitle:nil forState:UIControlStateNormal];
 				[b setAttributedTitle:nil forState:UIControlStateNormal];
 				b.titleLabel.hidden = YES;
@@ -728,18 +728,20 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 					[b setImage:[[UIImage systemImageNamed:@"textformat"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] forState:UIControlStateNormal];
 				}
 				b.configuration = nil;
+				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+				objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			} else {
 				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
-				[b setTitle:(selectedTitle.length ? selectedTitle : SCILocalized(@"Default")) forState:UIControlStateNormal];
 				SCIUIKit26ConfigureButton(b);
 				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
 				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
+				bc.image = nil;
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				b.configuration = bc;
+				b.menu = resolvedMenu;
+				b.showsMenuAsPrimaryAction = YES;
 			}
-			[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-			objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 74.0)].active = YES;
 			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 156.0)].active = YES;
 			[b.heightAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryHeight : 36.0)].active = YES;
