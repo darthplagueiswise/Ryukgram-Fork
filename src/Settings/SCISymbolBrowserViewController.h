@@ -11,7 +11,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface SCISymbolBrowserViewController : SCIBaseSettingsListViewController <UISearchBarDelegate>
+@interface SCISymbolBrowserViewController : SCIBaseSettingsListViewController <UISearchResultsUpdating>
 - (instancetype)initWithImage:(SCISymbolImage)image;
 @end
 

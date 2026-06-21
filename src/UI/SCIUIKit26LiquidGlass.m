@@ -22,8 +22,8 @@ static NSInteger const kSCIUIKit26TitleBubbleTag = 0x51C260;
     if (self) {
         self.tag = kSCIUIKit26TitleBubbleTag;
         self.backgroundColor = UIColor.clearColor;
-        self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
-        self.layer.cornerRadius = 20.0;
+        self.contentView.backgroundColor = UIColor.clearColor;
+        self.layer.cornerRadius = 18.0;
         if ([self.layer respondsToSelector:@selector(setCornerCurve:)]) self.layer.cornerCurve = kCACornerCurveContinuous;
         self.layer.masksToBounds = YES;
         self.clipsToBounds = YES;
@@ -37,17 +37,19 @@ static NSInteger const kSCIUIKit26TitleBubbleTag = 0x51C260;
         _label.textAlignment = NSTextAlignmentCenter;
         _label.textColor = UIColor.labelColor;
         _label.adjustsFontForContentSizeCategory = YES;
-        _label.font = [UIFontMetrics.defaultMetrics scaledFontForFont:[UIFont systemFontOfSize:20.0 weight:UIFontWeightBold]];
-        _label.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        _label.font = [UIFontMetrics.defaultMetrics scaledFontForFont:[UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold]];
+        _label.adjustsFontSizeToFitWidth = YES;
+        _label.minimumScaleFactor = 0.86;
+        _label.lineBreakMode = NSLineBreakByTruncatingTail;
         _label.numberOfLines = 1;
         [self.contentView addSubview:_label];
 
         [NSLayoutConstraint activateConstraints:@[
-            [_label.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:6.5],
-            [_label.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:18.0],
-            [_label.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-18.0],
-            [_label.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6.5],
-            [self.heightAnchor constraintGreaterThanOrEqualToConstant:39.0],
+            [_label.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:5.0],
+            [_label.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:14.0],
+            [_label.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-14.0],
+            [_label.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-5.0],
+            [self.heightAnchor constraintGreaterThanOrEqualToConstant:36.0],
         ]];
         [self configureWithTitle:title];
     }
@@ -56,10 +58,10 @@ static NSInteger const kSCIUIKit26TitleBubbleTag = 0x51C260;
 
 - (CGSize)intrinsicContentSize {
     NSString *title = self.label.text ?: @"";
-    CGSize textSize = [title sizeWithAttributes:@{ NSFontAttributeName: self.label.font ?: [UIFont boldSystemFontOfSize:20.0] }];
-    CGFloat maxWidth = MIN(UIScreen.mainScreen.bounds.size.width - 150.0, 300.0);
-    CGFloat width = MIN(MAX(78.0, ceil(textSize.width) + 38.0), MAX(120.0, maxWidth));
-    return CGSizeMake(width, 40.0);
+    CGSize textSize = [title sizeWithAttributes:@{ NSFontAttributeName: self.label.font ?: [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold] }];
+    CGFloat maxWidth = MIN(UIScreen.mainScreen.bounds.size.width - 132.0, 280.0);
+    CGFloat width = MIN(MAX(64.0, ceil(textSize.width) + 28.0), MAX(100.0, maxWidth));
+    return CGSizeMake(width, 36.0);
 }
 
 - (CGSize)sizeThatFits:(CGSize)size { return self.intrinsicContentSize; }
@@ -67,7 +69,7 @@ static NSInteger const kSCIUIKit26TitleBubbleTag = 0x51C260;
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
     self.effect = SCIUIKit26GlassEffect(NO, YES, nil);
-    self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+    self.contentView.backgroundColor = UIColor.clearColor;
 }
 
 - (void)configureWithTitle:(NSString *)title {
@@ -209,11 +211,11 @@ void SCIConfigureNavigationChromeForGlass(UIViewController *vc) {
             UINavigationBarAppearance *appearance = [UINavigationBarAppearance new];
             [appearance configureWithTransparentBackground];
             appearance.backgroundColor = UIColor.clearColor;
-            appearance.backgroundEffect = SCIUIKit26GlassEffect(NO, NO, nil);
+            appearance.backgroundEffect = nil;
             appearance.shadowColor = UIColor.clearColor;
             NSDictionary *titleAttrs = @{
                 NSForegroundColorAttributeName: UIColor.labelColor,
-                NSFontAttributeName: [UIFont systemFontOfSize:19.0 weight:UIFontWeightBold]
+                NSFontAttributeName: [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold]
             };
             appearance.titleTextAttributes = titleAttrs;
             appearance.buttonAppearance.normal.titleTextAttributes = titleAttrs;
@@ -230,7 +232,7 @@ void SCIConfigureNavigationChromeForGlass(UIViewController *vc) {
         UIToolbarAppearance *appearance = [UIToolbarAppearance new];
         [appearance configureWithTransparentBackground];
         appearance.backgroundColor = UIColor.clearColor;
-        appearance.backgroundEffect = SCIUIKit26GlassEffect(NO, NO, nil);
+        appearance.backgroundEffect = nil;
         appearance.shadowColor = UIColor.clearColor;
         toolbar.standardAppearance = appearance;
         if (@available(iOS 15.0, *)) toolbar.scrollEdgeAppearance = appearance;
@@ -296,8 +298,8 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView) {
         UITableView *tableView = (UITableView *)scrollView;
         tableView.backgroundView = nil;
         tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-        tableView.separatorColor = SCIUIKit26SeparatorColor();
-        tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+        tableView.separatorColor = nil;
+        tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 0.0);
         if (@available(iOS 11.0, *)) tableView.separatorInsetReference = UITableViewSeparatorInsetFromCellEdges;
         if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 0.0;
         if (@available(iOS 26.0, *)) {
@@ -315,8 +317,8 @@ void SCIUIKit26ConfigureTableView(UITableView *tableView) {
     tableView.backgroundColor = UIColor.clearColor;
     tableView.backgroundView = nil;
     tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-    tableView.separatorColor = SCIUIKit26SeparatorColor();
-    tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+    tableView.separatorColor = nil;
+    tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 0.0);
     if (@available(iOS 11.0, *)) tableView.separatorInsetReference = UITableViewSeparatorInsetFromCellEdges;
     tableView.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
     tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -348,17 +350,16 @@ void SCIUIKit26ConfigureButton(UIButton *button) {
         UIButtonConfiguration *cfg = nil;
         if (@available(iOS 26.0, *)) {
             Class cls = UIButtonConfiguration.class;
-            SEL clearGlass = NSSelectorFromString(@"clearGlassButtonConfiguration");
             SEL plainGlass = NSSelectorFromString(@"glassButtonConfiguration");
-            if ([cls respondsToSelector:clearGlass]) {
-                cfg = ((id (*)(id, SEL))objc_msgSend)(cls, clearGlass);
-            } else if ([cls respondsToSelector:plainGlass]) {
+            SEL clearGlass = NSSelectorFromString(@"clearGlassButtonConfiguration");
+            if ([cls respondsToSelector:plainGlass]) {
                 cfg = ((id (*)(id, SEL))objc_msgSend)(cls, plainGlass);
+            } else if ([cls respondsToSelector:clearGlass]) {
+                cfg = ((id (*)(id, SEL))objc_msgSend)(cls, clearGlass);
             }
         }
         if (!cfg) cfg = button.configuration ?: [UIButtonConfiguration plainButtonConfiguration];
         cfg.background.backgroundColor = UIColor.clearColor;
-        cfg.background.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, nil) : nil;
         cfg.baseForegroundColor = [SCIUtils SCIColor_Primary];
         button.configuration = cfg;
     }
@@ -378,8 +379,8 @@ void SCIStyleControlForGlass(UIControl *control) {
 void SCIUIKit26ConfigureSearchBar(UISearchBar *searchBar) {
     if (!searchBar) return;
     searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    searchBar.backgroundImage = UIImage.new;
-    searchBar.barTintColor = UIColor.clearColor;
+    searchBar.backgroundImage = nil;
+    searchBar.barTintColor = nil;
     searchBar.backgroundColor = UIColor.clearColor;
     searchBar.translucent = YES;
 
@@ -387,11 +388,11 @@ void SCIUIKit26ConfigureSearchBar(UISearchBar *searchBar) {
     if (!field) return;
     field.textColor = UIColor.labelColor;
     field.tintColor = [SCIUtils SCIColor_Primary];
-    field.borderStyle = UITextBorderStyleNone;
+    field.borderStyle = UITextBorderStyleRoundedRect;
     field.background = nil;
     field.disabledBackground = nil;
-    field.backgroundColor = UIColor.clearColor;
-    field.layer.backgroundColor = UIColor.clearColor.CGColor;
+    field.backgroundColor = nil;
+    field.layer.backgroundColor = nil;
     field.layer.cornerRadius = 0.0;
     field.layer.borderWidth = 0.0;
     field.layer.masksToBounds = NO;
@@ -403,6 +404,28 @@ void SCIUIKit26ConfigureSearchBar(UISearchBar *searchBar) {
     field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder attributes:@{
         NSForegroundColorAttributeName: UIColor.secondaryLabelColor
     }];
+}
+
+void SCIUIKit26ConfigureSearchNavigationItem(UINavigationItem *navigationItem) {
+    if (!navigationItem) return;
+    navigationItem.hidesSearchBarWhenScrolling = YES;
+    UISearchController *searchController = navigationItem.searchController;
+    if (searchController) {
+        searchController.obscuresBackgroundDuringPresentation = NO;
+        SCIUIKit26ConfigureSearchBar(searchController.searchBar);
+    }
+    if (@available(iOS 26.0, *)) {
+        SEL allowsExternal = NSSelectorFromString(@"setSearchBarPlacementAllowsExternalIntegration:");
+        if ([navigationItem respondsToSelector:allowsExternal]) {
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(navigationItem, allowsExternal, YES);
+        }
+        SEL setPreferred = NSSelectorFromString(@"setPreferredSearchBarPlacement:");
+        if ([navigationItem respondsToSelector:setPreferred]) {
+            // 0 is the UIKit automatic placement. It lets iPhone collapse to a toolbar button
+            // and regular-width layouts integrate search at the navigation bar edge.
+            ((void (*)(id, SEL, NSInteger))objc_msgSend)(navigationItem, setPreferred, 0);
+        }
+    }
 }
 
 void SCIUIKit26ConfigureSegmentedControl(UISegmentedControl *control) {
@@ -423,7 +446,7 @@ void SCIUIKit26ConfigureTabBar(UITabBar *tabBar) {
         UITabBarAppearance *appearance = [UITabBarAppearance new];
         [appearance configureWithTransparentBackground];
         appearance.backgroundColor = UIColor.clearColor;
-        appearance.backgroundEffect = SCIUIKit26GlassEffect(NO, NO, nil);
+        appearance.backgroundEffect = nil;
         appearance.shadowColor = UIColor.clearColor;
         tabBar.standardAppearance = appearance;
         if (@available(iOS 15.0, *)) tabBar.scrollEdgeAppearance = appearance;
@@ -435,8 +458,8 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
     cell.preservesSuperviewLayoutMargins = YES;
-    cell.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
-    cell.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+    cell.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 0.0);
+    cell.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 0.0);
 
     UIView *selected = [UIView new];
     selected.backgroundColor = SCIUIKit26CellPressedFillColor();
@@ -447,8 +470,8 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
 
     if (@available(iOS 14.0, *)) {
         UIBackgroundConfiguration *bg = [UIBackgroundConfiguration listGroupedCellConfiguration];
-        bg.backgroundColor = SCIUIKit26PanelFillColor();
-        bg.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, nil) : nil;
+        bg.backgroundColor = UIColor.clearColor;
+        bg.visualEffect = nil;
         bg.strokeColor = UIColor.clearColor;
         bg.strokeWidth = 0.0;
         cell.backgroundConfiguration = bg;
@@ -462,8 +485,8 @@ void SCIUIKit26ApplyTableCellSelectionTint(UITableViewCell *cell, BOOL selected)
     if (!cell) return;
     if (@available(iOS 14.0, *)) {
         UIBackgroundConfiguration *bg = cell.backgroundConfiguration ?: [UIBackgroundConfiguration listGroupedCellConfiguration];
-        bg.backgroundColor = selected ? SCIUIKit26CellSelectedFillColor() : SCIUIKit26PanelFillColor();
-        bg.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, selected ? [[SCIUtils SCIColor_Primary] colorWithAlphaComponent:0.12] : nil) : nil;
+        bg.backgroundColor = selected ? SCIUIKit26CellSelectedFillColor() : UIColor.clearColor;
+        bg.visualEffect = nil;
         bg.strokeColor = UIColor.clearColor;
         bg.strokeWidth = 0.0;
         cell.backgroundConfiguration = bg;
