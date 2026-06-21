@@ -8,6 +8,51 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	return img ? [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] : nil;
 }
 
+static UIImage *SCIOptionSheetTrimTransparentTemplateImage(UIImage *image) {
+	if (!image) return nil;
+	CGImageRef cg = image.CGImage;
+	if (!cg) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	size_t width = CGImageGetWidth(cg);
+	size_t height = CGImageGetHeight(cg);
+	if (width == 0 || height == 0 || width > 4096 || height > 4096) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	size_t bytesPerRow = width * 4;
+	NSMutableData *data = [NSMutableData dataWithLength:bytesPerRow * height];
+	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bytesPerRow, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (colorSpace) CGColorSpaceRelease(colorSpace);
+	if (!ctx) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
+	CGContextRelease(ctx);
+	const UInt8 *bytes = (const UInt8 *)data.bytes;
+	size_t minX = width, minY = height, maxX = 0, maxY = 0;
+	BOOL found = NO;
+	for (size_t y = 0; y < height; y++) {
+		const UInt8 *row = bytes + y * bytesPerRow;
+		for (size_t x = 0; x < width; x++) {
+			UInt8 alpha = row[x * 4 + 3];
+			if (alpha <= 8) continue;
+			found = YES;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+	}
+	if (!found) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGFloat pad = 2.0 * MAX(image.scale, 1.0);
+	CGFloat originX = MAX(0.0, (CGFloat)minX - pad);
+	CGFloat originY = MAX(0.0, (CGFloat)minY - pad);
+	CGFloat endX = MIN((CGFloat)width, (CGFloat)maxX + 1.0 + pad);
+	CGFloat endY = MIN((CGFloat)height, (CGFloat)maxY + 1.0 + pad);
+	CGRect cropRect = CGRectMake(originX, originY, MAX(1.0, endX - originX), MAX(1.0, endY - originY));
+	if (CGRectEqualToRect(cropRect, CGRectMake(0, 0, width, height))) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGImageRef cropped = CGImageCreateWithImageInRect(cg, cropRect);
+	if (!cropped) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	UIImage *trimmed = [UIImage imageWithCGImage:cropped scale:image.scale orientation:image.imageOrientation];
+	CGImageRelease(cropped);
+	return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 @interface SCIOptionSheetVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
 @property (nonatomic, copy, nullable) NSString *defaultsKey;
@@ -71,6 +116,8 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	self.tableView.alwaysBounceVertical = !self.wordmarkMode;
 	self.tableView.showsVerticalScrollIndicator = !self.wordmarkMode && self.options.count > 4;
 	SCIUIKit26ConfigureTableView(self.tableView);
+	self.tableView.backgroundColor = UIColor.clearColor;
+	self.tableView.opaque = NO;
 	if (self.wordmarkMode) {
 		self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
 		self.tableView.separatorColor = SCIUIKit26SeparatorColor();
@@ -78,7 +125,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 
 	UIControl *dismissLayer = [UIControl new];
 	dismissLayer.translatesAutoresizingMaskIntoConstraints = NO;
-	dismissLayer.backgroundColor = self.wordmarkMode ? UIColor.clearColor : [UIColor colorWithWhite:0.0 alpha:0.10];
+	dismissLayer.backgroundColor = UIColor.clearColor;
 	[dismissLayer addTarget:self action:@selector(dismissSelf) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:dismissLayer];
 
@@ -180,16 +227,14 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 		cell.tintColor = UIColor.labelColor;
 		cell.accessoryType = UITableViewCellAccessoryNone;
 		if (@available(iOS 14.0, *)) {
-			UIBackgroundConfiguration *bg = [UIBackgroundConfiguration clearConfiguration];
-			if (selected) {
-				bg.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.10];
-				bg.visualEffect = SCIUIKit26GlassEffect(YES, YES, nil);
-				bg.cornerRadius = 10.0;
-			}
-			cell.backgroundConfiguration = bg;
+			cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 		}
+		UIView *selectedView = [UIView new];
+		selectedView.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.07];
+		selectedView.layer.cornerRadius = 10.0;
+		cell.selectedBackgroundView = selectedView;
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
-		preview.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+		preview.image = SCIOptionSheetTrimTransparentTemplateImage(image);
 		preview.tintColor = UIColor.labelColor;
 		UIImageView *check = (UIImageView *)[cell.contentView viewWithTag:9002];
 		check.hidden = !selected;
@@ -200,6 +245,7 @@ static UIImage *SCIOptionSheetBundleTemplateImage(NSString *name) {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
 	SCIUIKit26ConfigureTableCell(cell);
+	if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 
 	cell.backgroundColor = UIColor.clearColor;
 	cell.contentView.backgroundColor = UIColor.clearColor;

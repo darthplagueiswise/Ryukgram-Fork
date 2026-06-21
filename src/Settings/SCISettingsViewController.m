@@ -56,9 +56,85 @@ static UIImage *SCISettingsBundleImageNamed(NSString *name) {
 	return img;
 }
 
+static UIImage *SCISettingsTrimTransparentTemplateImage(UIImage *image) {
+	if (!image) return nil;
+	CGImageRef cg = image.CGImage;
+	if (!cg) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	size_t width = CGImageGetWidth(cg);
+	size_t height = CGImageGetHeight(cg);
+	if (width == 0 || height == 0 || width > 4096 || height > 4096) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	size_t bytesPerRow = width * 4;
+	NSMutableData *data = [NSMutableData dataWithLength:bytesPerRow * height];
+	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bytesPerRow, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (colorSpace) CGColorSpaceRelease(colorSpace);
+	if (!ctx) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
+	CGContextRelease(ctx);
+	const UInt8 *bytes = (const UInt8 *)data.bytes;
+	size_t minX = width, minY = height, maxX = 0, maxY = 0;
+	BOOL found = NO;
+	for (size_t y = 0; y < height; y++) {
+		const UInt8 *row = bytes + y * bytesPerRow;
+		for (size_t x = 0; x < width; x++) {
+			UInt8 alpha = row[x * 4 + 3];
+			if (alpha <= 8) continue;
+			found = YES;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+	}
+	if (!found) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGFloat pad = 2.0 * MAX(image.scale, 1.0);
+	CGFloat originX = MAX(0.0, (CGFloat)minX - pad);
+	CGFloat originY = MAX(0.0, (CGFloat)minY - pad);
+	CGFloat endX = MIN((CGFloat)width, (CGFloat)maxX + 1.0 + pad);
+	CGFloat endY = MIN((CGFloat)height, (CGFloat)maxY + 1.0 + pad);
+	CGRect cropRect = CGRectMake(originX, originY, MAX(1.0, endX - originX), MAX(1.0, endY - originY));
+	if (CGRectEqualToRect(cropRect, CGRectMake(0, 0, width, height))) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGImageRef cropped = CGImageCreateWithImageInRect(cg, cropRect);
+	if (!cropped) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	UIImage *trimmed = [UIImage imageWithCGImage:cropped scale:image.scale orientation:image.imageOrientation];
+	CGImageRelease(cropped);
+	return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+static NSString *SCISettingsSelectedMenuTitle(UIMenu *menu) {
+	__block NSString *firstTitle = nil;
+	__block NSString *matchedTitle = nil;
+	__block void (^scan)(UIMenu *) = nil;
+	scan = ^(UIMenu *m) {
+		if (matchedTitle.length) return;
+		for (UIMenuElement *el in m.children) {
+			if ([el isKindOfClass:UIMenu.class]) {
+				scan((UIMenu *)el);
+				if (matchedTitle.length) return;
+				continue;
+			}
+			if (![el isKindOfClass:UICommand.class]) continue;
+			UICommand *cmd = (UICommand *)el;
+			if (!firstTitle.length && cmd.title.length) firstTitle = cmd.title;
+			NSDictionary *props = [cmd.propertyList isKindOfClass:NSDictionary.class] ? cmd.propertyList : nil;
+			NSString *key = props[@"defaultsKey"];
+			NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
+			if (!key.length || !value.length) continue;
+			NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:key] ?: @"";
+			if ([value isEqualToString:saved]) {
+				matchedTitle = cmd.title ?: @"";
+				return;
+			}
+		}
+	};
+	scan(menu);
+	return matchedTitle.length ? matchedTitle : firstTitle;
+}
+
 static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
 	UIImage *img = SCISettingsBundleImageNamed(name);
 	if (!img) return nil;
+	img = SCISettingsTrimTransparentTemplateImage(img);
 	CGSize size = img.size;
 	if (size.width <= 0.0 || size.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 	CGFloat ratio = MIN(maxSize.width / size.width, maxSize.height / size.height);
@@ -645,9 +721,11 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				b.configuration = nil;
 				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 			} else {
-				[b setTitle:@"•••" forState:UIControlStateNormal];
+				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
+				[b setTitle:(selectedTitle.length ? selectedTitle : @"•••") forState:UIControlStateNormal];
 				SCIUIKit26ConfigureButton(b);
 				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+				bc.title = selectedTitle.length ? selectedTitle : @"•••";
 				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
 				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				b.configuration = bc;
