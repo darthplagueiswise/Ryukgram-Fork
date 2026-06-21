@@ -724,40 +724,21 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			if (isWordmarkMenu) {
-				NSString *saved = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				UIImage *wordmark = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(saved), CGSizeMake(kSCISettingsWordmarkAccessoryWidth - 10.0, kSCISettingsWordmarkAccessoryHeight - 4.0));
-				[b setTitle:nil forState:UIControlStateNormal];
-				[b setAttributedTitle:nil forState:UIControlStateNormal];
-				b.titleLabel.hidden = YES;
-				b.clipsToBounds = YES;
-				b.tintColor = UIColor.labelColor;
-				b.backgroundColor = UIColor.clearColor;
-				b.contentEdgeInsets = UIEdgeInsetsZero;
-				if (wordmark) {
-					[b setImage:wordmark forState:UIControlStateNormal];
-					b.imageView.contentMode = UIViewContentModeScaleAspectFit;
-				} else {
-					[b setImage:[[UIImage systemImageNamed:@"textformat"] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate] forState:UIControlStateNormal];
-				}
-				b.configuration = nil;
-				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-				objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-			} else {
-				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
-				SCIUIKit26ConfigureButton(b);
-				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
-				bc.image = nil;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
-				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
-				b.configuration = bc;
-				b.menu = resolvedMenu;
-				b.showsMenuAsPrimaryAction = YES;
-			}
-			[b.widthAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 74.0)].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryWidth : 156.0)].active = YES;
-			[b.heightAnchor constraintGreaterThanOrEqualToConstant:(isWordmarkMenu ? kSCISettingsWordmarkAccessoryHeight : 36.0)].active = YES;
+			NSString *selectedTitle = isWordmarkMenu
+				? SCISettingsWordmarkDisplayTitleForValue([NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off", SCISettingsSelectedMenuTitle(resolvedMenu))
+				: SCISettingsSelectedMenuTitle(resolvedMenu);
+			SCIUIKit26ConfigureButton(b);
+			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+			bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
+			bc.image = nil;
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
+			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+			b.configuration = bc;
+			b.menu = resolvedMenu;
+			b.showsMenuAsPrimaryAction = YES;
+			[b.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
+			[b.widthAnchor constraintLessThanOrEqualToConstant:156.0].active = YES;
+			[b.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;

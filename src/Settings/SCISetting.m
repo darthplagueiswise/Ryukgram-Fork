@@ -280,7 +280,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
 		BOOL isWordmark = SCIIsWordmarkMenuCommand(props);
 		NSString *displayTitle = isWordmark ? SCIWordmarkDisplayTitleForValue(value, child.title) : child.title;
-		NSString *menuTitle = isWordmark ? @"" : child.title;
+		NSString *menuTitle = child.title ?: @"";
 
 		UICommand *command = [UICommand commandWithTitle:menuTitle
 											   image:child.image
@@ -290,10 +290,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		if (value.length && [value isEqualToString:saved]) {
 			command.state = UIMenuElementStateOn;
 
-			// Wordmark rows own their closed accessory image in
-			// SCISettingsViewController. Do not mutate that button here or UIKit will
-			// append the selected label ("Default") next to the preview image.
-			if (!isWordmark && ![props[@"noTitle"] boolValue]) {
+			if (![props[@"noTitle"] boolValue]) {
 				[button setImage:nil forState:UIControlStateNormal];
 				[button setTitle:displayTitle forState:UIControlStateNormal];
 				button.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
