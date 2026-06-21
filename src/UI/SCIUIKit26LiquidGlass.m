@@ -129,11 +129,14 @@ UIColor *SCIUIKit26BaseSurfaceColor(void) {
 }
 
 UIColor *SCIUIKit26PanelFillColor(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.0 alpha:0.20]
-            : [UIColor colorWithWhite:1.0 alpha:0.34];
-    }];
+    if (@available(iOS 13.0, *)) {
+        return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+            return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+                ? UIColor.tertiarySystemGroupedBackgroundColor
+                : UIColor.secondarySystemGroupedBackgroundColor;
+        }];
+    }
+    return [UIColor colorWithWhite:1.0 alpha:0.10];
 }
 
 UIColor *SCIUIKit26SeparatorColor(void) {
@@ -145,11 +148,11 @@ UIColor *SCIUIKit26SeparatorColor(void) {
 }
 
 static UIColor *SCIUIKit26CellSelectedFillColor(void) {
-    return [UIColor.labelColor colorWithAlphaComponent:0.10];
+    return [UIColor.labelColor colorWithAlphaComponent:0.075];
 }
 
 static UIColor *SCIUIKit26CellPressedFillColor(void) {
-    return [UIColor.labelColor colorWithAlphaComponent:0.10];
+    return [UIColor.labelColor colorWithAlphaComponent:0.075];
 }
 
 static UIColor *SCIUIKit26BorderColor(void) {
@@ -298,9 +301,6 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView) {
         UITableView *tableView = (UITableView *)scrollView;
         tableView.backgroundView = nil;
         tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-        tableView.separatorColor = nil;
-        tableView.separatorInset = UIEdgeInsetsMake(0.0, 64.0, 0.0, 24.0);
-        if (@available(iOS 11.0, *)) tableView.separatorInsetReference = UITableViewSeparatorInsetFromCellEdges;
         if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 0.0;
         if (@available(iOS 26.0, *)) {
             SEL setBackgroundEffect = NSSelectorFromString(@"setBackgroundEffect:");
@@ -317,9 +317,6 @@ void SCIUIKit26ConfigureTableView(UITableView *tableView) {
     tableView.backgroundColor = UIColor.clearColor;
     tableView.backgroundView = nil;
     tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-    tableView.separatorColor = nil;
-    tableView.separatorInset = UIEdgeInsetsMake(0.0, 64.0, 0.0, 24.0);
-    if (@available(iOS 11.0, *)) tableView.separatorInsetReference = UITableViewSeparatorInsetFromCellEdges;
     tableView.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
     tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
 }
@@ -458,8 +455,6 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
     cell.preservesSuperviewLayoutMargins = YES;
-    cell.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 0.0);
-    cell.separatorInset = UIEdgeInsetsMake(0.0, 64.0, 0.0, 24.0);
 
     UIView *selected = [UIView new];
     selected.backgroundColor = SCIUIKit26CellPressedFillColor();

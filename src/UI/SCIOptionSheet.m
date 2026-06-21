@@ -132,8 +132,6 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	self.tableView.delegate = self;
 	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
-	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
 	self.tableView.rowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : UITableViewAutomaticDimension;
 	self.tableView.estimatedRowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : 58.0;
 	self.tableView.alwaysBounceVertical = NO;
@@ -172,8 +170,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 			cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"wordmarkOpt"];
 			SCIUIKit26ConfigureTableCell(cell);
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-			cell.preservesSuperviewLayoutMargins = NO;
-			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 6.0, 0.0, 6.0);
+			cell.preservesSuperviewLayoutMargins = YES;
 
 			UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectZero];
 			preview.tag = 9001;
