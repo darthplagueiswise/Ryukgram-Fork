@@ -31,7 +31,7 @@
 	searchBar.backgroundColor = UIColor.clearColor;
 
 	UITextField *field = searchBar.searchTextField;
-	field.borderStyle = UITextBorderStyleRoundedRect;
+	field.borderStyle = UITextBorderStyleNone;
 	field.background = nil;
 	field.disabledBackground = nil;
 	field.backgroundColor = nil;

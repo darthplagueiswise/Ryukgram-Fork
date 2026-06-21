@@ -712,28 +712,40 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.titleLabel.numberOfLines = 1;
 			b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-			SCIUIKit26ConfigureButton(b);
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
 			NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
-			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = isWordmarkMenu ? NSDirectionalEdgeInsetsMake(7.0, 10.0, 7.0, 10.0) : NSDirectionalEdgeInsetsMake(7.0, 11.0, 7.0, 11.0);
-			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+
 			if (isWordmarkMenu) {
+				// UIAction image-only menus render wordmarks as tiny glyphs inside a huge
+				// native menu. Keep the closed accessory compact and open the dedicated
+				// vertical wordmark sheet instead.
+				b = [UIButton buttonWithType:UIButtonTypeCustom];
+				b.enabled = !row.disabled;
+				b.tintColor = UIColor.labelColor;
 				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				bc.title = nil;
-				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(82.0, 22.0));
-				bc.imagePlacement = NSDirectionalRectEdgeLeading;
+				UIImage *img = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(96.0, 24.0));
+				[b setImage:img forState:UIControlStateNormal];
 				b.accessibilityLabel = SCISettingsWordmarkDisplayTitleForValue(variant, SCILocalized(@"Default"));
+				b.frame = CGRectMake(0.0, 0.0, 112.0, 34.0);
+				b.imageView.contentMode = UIViewContentModeScaleAspectFit;
+				objc_setAssociatedObject(b, &kSCIRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+				[b addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+				b.showsMenuAsPrimaryAction = NO;
+				b.menu = nil;
 			} else {
+				SCIUIKit26ConfigureButton(b);
+				UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(7.0, 11.0, 7.0, 11.0);
+				bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
 				bc.image = nil;
+				b.configuration = bc;
+				b.menu = resolvedMenu;
+				b.showsMenuAsPrimaryAction = YES;
+				if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = NO;
+				[b sizeToFit];
 			}
-			b.configuration = bc;
-			b.menu = resolvedMenu;
-			b.showsMenuAsPrimaryAction = YES;
-			if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = NO;
-			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
 			break;

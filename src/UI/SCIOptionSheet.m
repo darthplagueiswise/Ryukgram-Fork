@@ -89,7 +89,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 
 @implementation SCIOptionSheetVC
 
-- (CGFloat)rowHeightForWordmark { return 44.0; }
+- (CGFloat)rowHeightForWordmark { return 52.0; }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
 	if (self.wordmarkMode) return [self rowHeightForWordmark];
@@ -186,8 +186,8 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 				[preview.leadingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
 				[preview.trailingAnchor constraintLessThanOrEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor constant:-6.0],
 				[preview.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-				[preview.widthAnchor constraintEqualToConstant:82.0],
-				[preview.heightAnchor constraintEqualToConstant:22.0],
+				[preview.widthAnchor constraintEqualToConstant:116.0],
+				[preview.heightAnchor constraintEqualToConstant:28.0],
 			]];
 		}
 		cell.contentConfiguration = nil;
@@ -195,7 +195,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
 		preview.image = SCIOptionSheetWordmarkPreviewImage(image);
 		preview.tintColor = UIColor.labelColor;
-		SCIUIKit26ApplyTableCellSelectionTint(cell, selected);
+		SCIUIKit26ApplyTableCellSelectionTint(cell, NO);
 		return cell;
 	}
 
