@@ -397,9 +397,11 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
+	SCIUIKit26ConfigureViewController(self);
 	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
+	SCIUIKit26InstallNavigationTitleBubble(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(sciCacheSizeDidUpdate) name:SCICacheSizeDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(sciReloadFromNotification) name:@"SCISettingsShouldReload" object:nil];
@@ -415,8 +417,12 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 - (void)setupTableView {
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	self.tableView.backgroundColor = self.view.backgroundColor;
-	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
+	SCIUIKit26ConfigureTableView(self.tableView);
+	self.tableView.rowHeight = UITableViewAutomaticDimension;
+	self.tableView.estimatedRowHeight = 52.0;
+	self.tableView.contentInset = UIEdgeInsetsZero;
+	self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
+	if (@available(iOS 11.0, *)) self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	[self.view addSubview:self.tableView];
@@ -438,6 +444,8 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
+	SCIConfigureNavigationChromeForGlass(self);
+	SCIUIKit26RefreshNavigationTitleBubble(self);
 	if (self.isRoot) self.sections = [self filteredSections:[SCITweakSettings sections]];
 	[self.tableView reloadData];
 	[self sciStyleSearchBar];
@@ -483,6 +491,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)sciApplyLanguageChange {
 	self.title = SCILocalized(@"settings.title");
+	SCIUIKit26RefreshNavigationTitleBubble(self);
 	self.searchController.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
 	self.sections = [self filteredSections:[SCITweakSettings sections]];
 	self.searchIndex = [self buildSearchIndexFromSections:self.sections breadcrumb:@""];
@@ -574,6 +583,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		return row.customCellProvider(tv, ip);
 
 	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+	SCIUIKit26ConfigureTableCell(cell);
 	UIListContentConfiguration *config = cell.defaultContentConfiguration;
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
@@ -582,6 +592,9 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
+	config.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+	config.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+	config.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
 
 	NSString *rowSubtitle = row.dynamicSubtitle ? row.dynamicSubtitle() : row.subtitle;
 	NSString *subtitle = ([self isSearching] && breadcrumb.length) ? breadcrumb : rowSubtitle;

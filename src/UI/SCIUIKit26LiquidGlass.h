@@ -12,6 +12,8 @@ UIColor *SCIUIKit26SeparatorColor(void);
 void SCIUIKit26ApplyContainerBackgroundToViewController(UIViewController *vc);
 void SCIUIKit26ConfigureViewController(UIViewController *vc);
 void SCIConfigureNavigationChromeForGlass(UIViewController *vc);
+void SCIUIKit26InstallNavigationTitleBubble(UIViewController *vc);
+void SCIUIKit26RefreshNavigationTitleBubble(UIViewController *vc);
 void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView);
 void SCIUIKit26ConfigureTableView(UITableView *tableView);
 void SCIUIKit26ConfigureCollectionView(UICollectionView *collectionView);

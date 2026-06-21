@@ -89,7 +89,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 
 @implementation SCIOptionSheetVC
 
-- (CGFloat)rowHeightForWordmark { return 32.0; }
+- (CGFloat)rowHeightForWordmark { return 44.0; }
 
 - (CGFloat)estimatedHeightForOption:(NSDictionary *)opt {
 	if (self.wordmarkMode) return [self rowHeightForWordmark];
@@ -98,7 +98,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	CGFloat width = 292.0;
 	CGRect titleRect = [title boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX)
 									 options:NSStringDrawingUsesLineFragmentOrigin
-								attributes:@{NSFontAttributeName:[UIFont systemFontOfSize:19.0 weight:UIFontWeightRegular]}
+								attributes:@{NSFontAttributeName:[UIFont preferredFontForTextStyle:UIFontTextStyleBody]}
 									 context:nil];
 	CGRect descRect = desc.length ? [desc boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX)
 									 options:NSStringDrawingUsesLineFragmentOrigin
@@ -109,13 +109,13 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 }
 
 - (CGSize)preferredSheetSize {
-	CGFloat width = self.wordmarkMode ? 118.0 : 328.0;
+	CGFloat width = self.wordmarkMode ? 260.0 : 328.0;
 	CGFloat rows = 0.0;
 	for (NSDictionary *opt in self.options) rows += [self estimatedHeightForOption:opt];
 	if (rows <= 0.0) rows = 72.0;
-	CGFloat inset = self.wordmarkMode ? 8.0 : 16.0;
-	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 180.0, self.wordmarkMode ? 174.0 : 520.0);
-	CGFloat height = MIN(MAX(self.wordmarkMode ? 96.0 : 128.0, rows + inset), maxHeight);
+	CGFloat inset = self.wordmarkMode ? 12.0 : 16.0;
+	CGFloat maxHeight = MIN(UIScreen.mainScreen.bounds.size.height - 180.0, self.wordmarkMode ? 260.0 : 520.0);
+	CGFloat height = MIN(MAX(self.wordmarkMode ? 160.0 : 128.0, rows + inset), maxHeight);
 	return CGSizeMake(width, height);
 }
 
@@ -123,41 +123,29 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 	[super viewDidLoad];
 	self.view.backgroundColor = UIColor.clearColor;
 	self.view.opaque = NO;
+	SCIUIKit26ApplyContainerBackgroundToViewController(self);
 	self.preferredContentSize = [self preferredSheetSize];
 
-	UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemMaterial];
-	self.effectView = [[UIVisualEffectView alloc] initWithEffect:blur];
-	self.effectView.translatesAutoresizingMaskIntoConstraints = NO;
-	self.effectView.clipsToBounds = YES;
-	self.effectView.layer.cornerRadius = self.wordmarkMode ? 18.0 : 24.0;
-	if (@available(iOS 13.0, *)) self.effectView.layer.cornerCurve = kCACornerCurveContinuous;
-	[self.view addSubview:self.effectView];
-
-	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+	self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
-	self.tableView.backgroundColor = UIColor.clearColor;
-	self.tableView.opaque = NO;
+	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
 	self.tableView.separatorColor = SCIUIKit26SeparatorColor();
-	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 10.0 : 18.0, 0.0, self.wordmarkMode ? 10.0 : 18.0);
+	self.tableView.separatorInset = UIEdgeInsetsMake(0.0, self.wordmarkMode ? 16.0 : 20.0, 0.0, self.wordmarkMode ? 16.0 : 20.0);
 	self.tableView.rowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : UITableViewAutomaticDimension;
-	self.tableView.estimatedRowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : 72.0;
+	self.tableView.estimatedRowHeight = self.wordmarkMode ? [self rowHeightForWordmark] : 58.0;
 	self.tableView.alwaysBounceVertical = NO;
 	self.tableView.showsVerticalScrollIndicator = NO;
-	[self.effectView.contentView addSubview:self.tableView];
+	if (@available(iOS 11.0, *)) self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+	[self.view addSubview:self.tableView];
 
-	CGFloat pad = self.wordmarkMode ? 4.0 : 8.0;
 	[NSLayoutConstraint activateConstraints:@[
-		[self.effectView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-		[self.effectView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-		[self.effectView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-		[self.effectView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-		[self.tableView.topAnchor constraintEqualToAnchor:self.effectView.contentView.topAnchor constant:pad],
-		[self.tableView.leadingAnchor constraintEqualToAnchor:self.effectView.contentView.leadingAnchor constant:pad],
-		[self.tableView.trailingAnchor constraintEqualToAnchor:self.effectView.contentView.trailingAnchor constant:-pad],
-		[self.tableView.bottomAnchor constraintEqualToAnchor:self.effectView.contentView.bottomAnchor constant:-pad],
+		[self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+		[self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+		[self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+		[self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 	]];
 }
 
@@ -182,12 +170,10 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"wordmarkOpt"];
 		if (!cell) {
 			cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"wordmarkOpt"];
-			cell.backgroundColor = UIColor.clearColor;
-			cell.contentView.backgroundColor = UIColor.clearColor;
+			SCIUIKit26ConfigureTableCell(cell);
 			cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 			cell.preservesSuperviewLayoutMargins = NO;
 			cell.contentView.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 6.0, 0.0, 6.0);
-			if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
 
 			UIImageView *preview = [[UIImageView alloc] initWithFrame:CGRectZero];
 			preview.tag = 9001;
@@ -218,11 +204,7 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 			]];
 		}
 		cell.contentConfiguration = nil;
-		cell.backgroundColor = UIColor.clearColor;
-		cell.contentView.backgroundColor = UIColor.clearColor;
-		cell.backgroundView = nil;
-		cell.selectedBackgroundView = nil;
-		if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
+		SCIUIKit26ConfigureTableCell(cell);
 		UIImageView *preview = (UIImageView *)[cell.contentView viewWithTag:9001];
 		preview.image = SCIOptionSheetWordmarkPreviewImage(image);
 		preview.tintColor = UIColor.labelColor;
@@ -233,26 +215,22 @@ static UIImage *SCIOptionSheetWordmarkPreviewImage(UIImage *image) {
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"opt"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"opt"];
-	if (@available(iOS 14.0, *)) cell.backgroundConfiguration = [UIBackgroundConfiguration clearConfiguration];
-	cell.backgroundView = nil;
-	cell.selectedBackgroundView = nil;
-	cell.backgroundColor = UIColor.clearColor;
-	cell.contentView.backgroundColor = UIColor.clearColor;
+	SCIUIKit26ConfigureTableCell(cell);
 	cell.tintColor = [UIColor systemBlueColor];
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 
 	UIListContentConfiguration *cfg = cell.defaultContentConfiguration;
 	cfg.text = opt[@"title"] ?: opt[@"value"];
 	cfg.textProperties.color = UIColor.labelColor;
-	cfg.textProperties.font = [UIFont systemFontOfSize:19.0 weight:UIFontWeightRegular];
+	cfg.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
 	cfg.textProperties.numberOfLines = 1;
 	NSString *desc = opt[@"description"];
 	cfg.secondaryText = desc.length ? desc : nil;
 	cfg.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-	cfg.secondaryTextProperties.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
+	cfg.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
 	cfg.secondaryTextProperties.numberOfLines = 2;
 	cfg.textToSecondaryTextVerticalPadding = 5.0;
-	cfg.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
+	cfg.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(9.0, 16.0, 9.0, 16.0);
 	if (image) {
 		cfg.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 		cfg.imageProperties.tintColor = UIColor.labelColor;

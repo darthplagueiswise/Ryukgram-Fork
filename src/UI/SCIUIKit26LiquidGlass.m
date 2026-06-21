@@ -8,6 +8,76 @@ static NSInteger const kSCIUIKit26GlassBackgroundTag = 0x51C126;
 static UIColor *SCIUIKit26BorderColor(void);
 static UIVisualEffectView *SCIUIKit26EnsureGlassBackground(UIView *view, CGFloat radius, BOOL interactive, BOOL clearStyle, UIColor *tintColor);
 
+static NSInteger const kSCIUIKit26TitleBubbleTag = 0x51C260;
+
+@interface SCIUIKit26TitleBubbleView : UIVisualEffectView
+@property (nonatomic, strong) UILabel *label;
+- (void)configureWithTitle:(NSString *)title;
+@end
+
+@implementation SCIUIKit26TitleBubbleView
+
+- (instancetype)initWithTitle:(NSString *)title {
+    self = [super initWithEffect:SCIUIKit26GlassEffect(NO, YES, nil)];
+    if (self) {
+        self.tag = kSCIUIKit26TitleBubbleTag;
+        self.backgroundColor = UIColor.clearColor;
+        self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+        self.layer.cornerRadius = 21.0;
+        if ([self.layer respondsToSelector:@selector(setCornerCurve:)]) self.layer.cornerCurve = kCACornerCurveContinuous;
+        self.layer.masksToBounds = YES;
+        self.clipsToBounds = YES;
+        self.userInteractionEnabled = NO;
+        self.translatesAutoresizingMaskIntoConstraints = NO;
+        [self setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        [self setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+        _label = [UILabel new];
+        _label.translatesAutoresizingMaskIntoConstraints = NO;
+        _label.textAlignment = NSTextAlignmentCenter;
+        _label.textColor = UIColor.labelColor;
+        _label.adjustsFontForContentSizeCategory = YES;
+        _label.font = [UIFontMetrics.defaultMetrics scaledFontForFont:[UIFont systemFontOfSize:19.0 weight:UIFontWeightBold]];
+        _label.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        _label.numberOfLines = 1;
+        [self.contentView addSubview:_label];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [_label.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:7.0],
+            [_label.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:17.0],
+            [_label.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-17.0],
+            [_label.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-7.0],
+            [self.heightAnchor constraintGreaterThanOrEqualToConstant:40.0],
+        ]];
+        [self configureWithTitle:title];
+    }
+    return self;
+}
+
+- (CGSize)intrinsicContentSize {
+    NSString *title = self.label.text ?: @"";
+    CGSize textSize = [title sizeWithAttributes:@{ NSFontAttributeName: self.label.font ?: [UIFont boldSystemFontOfSize:19.0] }];
+    CGFloat maxWidth = MIN(UIScreen.mainScreen.bounds.size.width - 150.0, 270.0);
+    CGFloat width = MIN(MAX(76.0, ceil(textSize.width) + 34.0), MAX(110.0, maxWidth));
+    return CGSizeMake(width, 42.0);
+}
+
+- (CGSize)sizeThatFits:(CGSize)size { return self.intrinsicContentSize; }
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    self.effect = SCIUIKit26GlassEffect(NO, YES, nil);
+    self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+}
+
+- (void)configureWithTitle:(NSString *)title {
+    self.label.text = title ?: @"";
+    [self invalidateIntrinsicContentSize];
+    [self setNeedsLayout];
+}
+
+@end
+
 BOOL SCIUIKit26IsAvailable(void) {
     if (@available(iOS 26.0, *)) return YES;
     return NO;
@@ -59,8 +129,8 @@ UIColor *SCIUIKit26BaseSurfaceColor(void) {
 UIColor *SCIUIKit26PanelFillColor(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.0 alpha:0.42]
-            : [UIColor colorWithWhite:1.0 alpha:0.58];
+            ? [UIColor colorWithWhite:0.0 alpha:0.30]
+            : [UIColor colorWithWhite:1.0 alpha:0.44];
     }];
 }
 
@@ -92,8 +162,35 @@ void SCIUIKit26ApplyContainerBackgroundToViewController(UIViewController *vc) {
     }
 }
 
+void SCIUIKit26InstallNavigationTitleBubble(UIViewController *vc) {
+    if (!vc || !SCIUIKit26IsAvailable()) return;
+    NSString *title = vc.title ?: vc.navigationItem.title;
+    if (!title.length) return;
+
+    SCIUIKit26TitleBubbleView *bubble = nil;
+    if ([vc.navigationItem.titleView isKindOfClass:SCIUIKit26TitleBubbleView.class]) {
+        bubble = (SCIUIKit26TitleBubbleView *)vc.navigationItem.titleView;
+    } else {
+        bubble = [[SCIUIKit26TitleBubbleView alloc] initWithTitle:title];
+        vc.navigationItem.titleView = bubble;
+    }
+    [bubble configureWithTitle:title];
+}
+
+void SCIUIKit26RefreshNavigationTitleBubble(UIViewController *vc) {
+    if (!vc || !SCIUIKit26IsAvailable()) return;
+    NSString *title = vc.title ?: vc.navigationItem.title;
+    if (!title.length) return;
+    if ([vc.navigationItem.titleView isKindOfClass:SCIUIKit26TitleBubbleView.class]) {
+        [(SCIUIKit26TitleBubbleView *)vc.navigationItem.titleView configureWithTitle:title];
+    } else {
+        SCIUIKit26InstallNavigationTitleBubble(vc);
+    }
+}
+
 void SCIConfigureNavigationChromeForGlass(UIViewController *vc) {
     if (!vc) return;
+    SCIUIKit26InstallNavigationTitleBubble(vc);
 
     UINavigationBar *bar = vc.navigationController.navigationBar;
     if (bar) {
@@ -106,6 +203,13 @@ void SCIConfigureNavigationChromeForGlass(UIViewController *vc) {
             appearance.backgroundColor = UIColor.clearColor;
             appearance.backgroundEffect = SCIUIKit26GlassEffect(NO, NO, nil);
             appearance.shadowColor = UIColor.clearColor;
+            NSDictionary *titleAttrs = @{
+                NSForegroundColorAttributeName: UIColor.labelColor,
+                NSFontAttributeName: [UIFont systemFontOfSize:19.0 weight:UIFontWeightBold]
+            };
+            appearance.titleTextAttributes = titleAttrs;
+            appearance.buttonAppearance.normal.titleTextAttributes = titleAttrs;
+            bar.titleTextAttributes = titleAttrs;
             bar.standardAppearance = appearance;
             bar.scrollEdgeAppearance = appearance;
             bar.compactAppearance = appearance;
@@ -138,6 +242,11 @@ void SCIUIKit26ConfigureViewController(UIViewController *vc) {
         vc.view.layer.backgroundColor = [SCIUIKit26BaseSurfaceColor() resolvedColorWithTraitCollection:vc.view.traitCollection].CGColor;
     }
     SCIConfigureNavigationChromeForGlass(vc);
+    __weak UIViewController *weakVC = vc;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *strongVC = weakVC;
+        if (strongVC) SCIUIKit26RefreshNavigationTitleBubble(strongVC);
+    });
 }
 
 static void SCIUIKit26ConfigureScrollEdgeEffect(id edgeEffect, NSInteger style, BOOL hidden) {
@@ -160,6 +269,7 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView) {
     if (!scrollView) return;
     scrollView.backgroundColor = UIColor.clearColor;
     scrollView.opaque = NO;
+    if (@available(iOS 11.0, *)) scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 
     if (@available(iOS 26.0, *)) {
         SEL topSel = NSSelectorFromString(@"topEdgeEffect");
@@ -177,8 +287,8 @@ void SCIUIKit26ConfigureScrollView(UIScrollView *scrollView) {
     if ([scrollView isKindOfClass:UITableView.class]) {
         UITableView *tableView = (UITableView *)scrollView;
         tableView.backgroundView = nil;
-        tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
-        tableView.separatorColor = UIColor.clearColor;
+        tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+        tableView.separatorColor = SCIUIKit26SeparatorColor();
         if (@available(iOS 15.0, *)) tableView.sectionHeaderTopPadding = 0.0;
         if (@available(iOS 26.0, *)) {
             SEL setBackgroundEffect = NSSelectorFromString(@"setBackgroundEffect:");
@@ -194,7 +304,8 @@ void SCIUIKit26ConfigureTableView(UITableView *tableView) {
     SCIUIKit26ConfigureScrollView(tableView);
     tableView.backgroundColor = UIColor.clearColor;
     tableView.backgroundView = nil;
-    tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
+    tableView.separatorColor = SCIUIKit26SeparatorColor();
     tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
 }
 
@@ -310,20 +421,20 @@ void SCIUIKit26ConfigureTableCell(UITableViewCell *cell) {
     if (!cell) return;
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
+    cell.preservesSuperviewLayoutMargins = YES;
     UIView *selected = [UIView new];
     selected.backgroundColor = [UIColor.labelColor colorWithAlphaComponent:0.08];
     cell.selectedBackgroundView = selected;
     if (@available(iOS 14.0, *)) {
-        UIBackgroundConfiguration *bg = [UIBackgroundConfiguration clearConfiguration];
+        UIBackgroundConfiguration *bg = [UIBackgroundConfiguration listGroupedCellConfiguration];
         bg.backgroundColor = SCIUIKit26PanelFillColor();
-        bg.visualEffect = SCIUIKit26GlassEffect(NO, YES, nil);
-        bg.cornerRadius = 18.0;
-        bg.strokeColor = SCIUIKit26IsAvailable() ? UIColor.clearColor : SCIUIKit26BorderColor();
-        bg.strokeWidth = SCIUIKit26IsAvailable() ? 0.0 : 0.7;
+        bg.visualEffect = SCIUIKit26IsAvailable() ? SCIUIKit26GlassEffect(YES, YES, nil) : nil;
+        bg.strokeColor = UIColor.clearColor;
+        bg.strokeWidth = 0.0;
         cell.backgroundConfiguration = bg;
         cell.backgroundView = nil;
     } else {
-        SCIUIKit26EnsureGlassBackground(cell.contentView, 14.0, YES, NO, nil);
+        SCIUIKit26EnsureGlassBackground(cell.contentView, 12.0, YES, YES, nil);
     }
 }
 
