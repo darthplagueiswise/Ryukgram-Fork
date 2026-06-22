@@ -129,7 +129,7 @@ UIColor *SCIUIKit26BaseSurfaceColor(void) {
 UIColor *SCIUIKit26PanelFillColor(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         return tc.userInterfaceStyle == UIUserInterfaceStyleDark
-            ? [UIColor colorWithWhite:0.0 alpha:0.20]
+            ? [UIColor colorWithWhite:1.0 alpha:0.105]
             : [UIColor colorWithWhite:1.0 alpha:0.34];
     }];
 }
