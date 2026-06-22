@@ -93,7 +93,15 @@ static BOOL sciGroupInheritsSettingsLock(NSString *gid) {
 + (void)presentLockedVC:(UIViewController *)contentVC
                 forGroup:(NSString *)groupID
                     from:(UIViewController *)presenter {
+    [self presentLockedVC:contentVC forGroup:groupID from:presenter sourceView:nil];
+}
+
++ (void)presentLockedVC:(UIViewController *)contentVC
+                forGroup:(NSString *)groupID
+                    from:(UIViewController *)presenter
+              sourceView:(UIView *)sourceView {
     if (!contentVC) return;
+    (void)sourceView;
     [self runGated:groupID from:presenter then:^{
         SCILockedSurfaceNavigationController *nav = [[SCILockedSurfaceNavigationController alloc] initWithRootViewController:contentVC];
         nav.lockGroupID = groupID;
