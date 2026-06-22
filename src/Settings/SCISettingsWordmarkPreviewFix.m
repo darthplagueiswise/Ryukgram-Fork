@@ -26,19 +26,20 @@ static NSString *SCIWPImageNameForValue(NSString *value) {
     return @"instagram-wordmark-default";
 }
 
-static UIImage *SCIWPPreview(UIImage *img, CGSize maxSize) {
+static UIImage *SCIWPPreview(UIImage *img, CGSize canvas) {
     if (!img) return nil;
     CGSize size = img.size;
-    if (size.width <= 0.0 || size.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    CGFloat ratio = MIN(maxSize.width / size.width, maxSize.height / size.height);
-    if (ratio <= 0.0) ratio = 1.0;
-    CGSize target = CGSizeMake(ceil(size.width * ratio), ceil(size.height * ratio));
+    if (size.width <= 0.0 || size.height <= 0.0 || canvas.width <= 0.0 || canvas.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    CGFloat ratio = MIN(canvas.width / size.width, canvas.height / size.height);
+    if (ratio <= 0.0 || !isfinite(ratio)) ratio = 1.0;
+    CGSize target = CGSizeMake(floor(size.width * ratio), floor(size.height * ratio));
+    CGRect rect = CGRectMake((canvas.width - target.width) * 0.5, (canvas.height - target.height) * 0.5, target.width, target.height);
     UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
     fmt.opaque = NO;
     fmt.scale = UIScreen.mainScreen.scale;
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:fmt];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:canvas format:fmt];
     UIImage *scaled = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull ctx) {
-        [img drawInRect:CGRectMake(0, 0, target.width, target.height)];
+        [img drawInRect:rect];
     }];
     return [scaled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
@@ -63,6 +64,15 @@ static void SCIWPCollect(UIMenu *menu, NSMutableArray<UICommand *> *out) {
     }
 }
 
+static void SCIWPDeactivateSizingConstraints(UIView *view) {
+    NSMutableArray<NSLayoutConstraint *> *kill = [NSMutableArray array];
+    for (NSLayoutConstraint *c in view.constraints) {
+        if ((c.firstItem == view || c.secondItem == view)
+            && (c.firstAttribute == NSLayoutAttributeWidth || c.firstAttribute == NSLayoutAttributeHeight)) [kill addObject:c];
+    }
+    if (kill.count) [NSLayoutConstraint deactivateConstraints:kill];
+}
+
 @interface SCIWPButton : UIButton
 @property (nonatomic, weak) SCISettingsViewController *presenter;
 @property (nonatomic, strong) UIMenu *sourceMenu;
@@ -80,6 +90,7 @@ static void SCIWPCollect(UIMenu *menu, NSMutableArray<UICommand *> *out) {
     [super viewDidLoad];
     self.view.backgroundColor = SCIUIKit26PanelFillColor();
     self.view.layer.cornerRadius = 22.0;
+    if ([self.view.layer respondsToSelector:@selector(setCornerCurve:)]) self.view.layer.cornerCurve = kCACornerCurveContinuous;
     self.view.clipsToBounds = YES;
     SCIUIKit26ApplyContainerBackgroundToViewController(self);
     _tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
@@ -90,6 +101,8 @@ static void SCIWPCollect(UIMenu *menu, NSMutableArray<UICommand *> *out) {
     _tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     _tableView.backgroundColor = UIColor.clearColor;
     _tableView.alwaysBounceVertical = NO;
+    _tableView.showsVerticalScrollIndicator = NO;
+    if (@available(iOS 11.0, *)) _tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     [self.view addSubview:_tableView];
     [NSLayoutConstraint activateConstraints:@[
         [_tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:6.0],
@@ -134,11 +147,14 @@ static void SCIWPRefreshButton(SCIWPButton *button) {
     UIImage *image = SCIWPPreview(SCIWPImageNamed(SCIWPImageNameForValue(value)), CGSizeMake(118.0, 28.0));
     UIButtonConfiguration *cfg = button.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
     cfg.title = nil; cfg.subtitle = nil; cfg.image = image; cfg.imagePadding = 0.0;
-    cfg.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 12.0, 6.0, 12.0);
+    cfg.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
     cfg.background.backgroundColor = UIColor.clearColor;
     cfg.background.visualEffect = SCIUIKit26GlassEffect(YES, YES, nil);
     cfg.baseForegroundColor = UIColor.labelColor;
     button.configuration = cfg;
+    button.tintColor = UIColor.labelColor;
+    button.clipsToBounds = YES;
+    button.imageView.contentMode = UIViewContentModeScaleAspectFit;
 }
 
 @implementation SCISettingsViewController (SCIWordmarkPreviewFix)
@@ -149,14 +165,39 @@ static void SCIWPRefreshButton(SCIWPButton *button) {
 }
 - (UIListContentConfiguration *)sci_wp_configuredContent:(UIListContentConfiguration *)config forCell:(UITableViewCell *)cell row:(SCISetting *)row indexPath:(NSIndexPath *)indexPath {
     UIListContentConfiguration *out = [self sci_wp_configuredContent:config forCell:cell row:row indexPath:indexPath];
-    if (row.type != SCITableCellMenu || !SCIWPMenuHasWordmark(row.baseMenu)) return out;
+    if (row.type != SCITableCellMenu) return out;
+    BOOL wordmark = SCIWPMenuHasWordmark(row.baseMenu);
+    if (!wordmark) {
+        UIButton *menuButton = [cell.accessoryView isKindOfClass:UIButton.class] ? (UIButton *)cell.accessoryView : nil;
+        if (menuButton) {
+            if (@available(iOS 15.0, *)) menuButton.changesSelectionAsPrimaryAction = YES;
+            SCIWPDeactivateSizingConstraints(menuButton);
+            UIButtonConfiguration *cfg = menuButton.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
+            cfg.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
+            cfg.indicator = UIButtonConfigurationIndicatorPopup;
+            menuButton.configuration = cfg;
+        }
+        return out;
+    }
+
+    UIView *container = [UIView new];
+    container.translatesAutoresizingMaskIntoConstraints = NO;
+    container.clipsToBounds = YES;
     SCIWPButton *button = [SCIWPButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
     button.presenter = self; button.sourceMenu = row.baseMenu; button.showsMenuAsPrimaryAction = NO; button.menu = nil;
     SCIUIKit26ConfigureButton(button); SCIWPRefreshButton(button);
     [button addTarget:self action:@selector(sci_wp_openWordmarkPicker:) forControlEvents:UIControlEventTouchUpInside];
-    [button.widthAnchor constraintEqualToConstant:142.0].active = YES;
-    [button.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
-    cell.accessoryView = button;
+    [container addSubview:button];
+    [NSLayoutConstraint activateConstraints:@[
+        [container.widthAnchor constraintEqualToConstant:142.0],
+        [container.heightAnchor constraintEqualToConstant:38.0],
+        [button.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [button.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [button.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [button.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
+    ]];
+    cell.accessoryView = container;
     return out;
 }
 - (void)sci_wp_openWordmarkPicker:(SCIWPButton *)button {
