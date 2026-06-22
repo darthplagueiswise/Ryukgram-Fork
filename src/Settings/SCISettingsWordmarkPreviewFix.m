@@ -73,6 +73,12 @@ static void SCIWPDeactivateSizingConstraints(UIView *view) {
     if (kill.count) [NSLayoutConstraint deactivateConstraints:kill];
 }
 
+static void SCIWPNormalizeCellSeparator(UITableViewCell *cell) {
+    cell.preservesSuperviewLayoutMargins = NO;
+    cell.layoutMargins = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+    cell.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
+}
+
 @interface SCIWPButton : UIButton
 @property (nonatomic, weak) SCISettingsViewController *presenter;
 @property (nonatomic, strong) UIMenu *sourceMenu;
@@ -165,6 +171,7 @@ static void SCIWPRefreshButton(SCIWPButton *button) {
 }
 - (UIListContentConfiguration *)sci_wp_configuredContent:(UIListContentConfiguration *)config forCell:(UITableViewCell *)cell row:(SCISetting *)row indexPath:(NSIndexPath *)indexPath {
     UIListContentConfiguration *out = [self sci_wp_configuredContent:config forCell:cell row:row indexPath:indexPath];
+    SCIWPNormalizeCellSeparator(cell);
     if (row.type != SCITableCellMenu) return out;
     BOOL wordmark = SCIWPMenuHasWordmark(row.baseMenu);
     if (!wordmark) {
