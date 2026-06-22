@@ -288,6 +288,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 								propertyList:child.propertyList];
 
 		if (value.length && [value isEqualToString:saved]) {
+			command.state = UIMenuElementStateOn;
 
 			if (![props[@"noTitle"] boolValue]) {
 				[button setImage:nil forState:UIControlStateNormal];
@@ -310,7 +311,9 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		[children addObject:command];
 	}
 
-	return [UIMenu menuWithTitle:submenu.title image:nil identifier:nil options:submenu.options children:children];
+	UIMenuOptions options = submenu.options;
+	if (@available(iOS 15.0, *)) options |= UIMenuOptionsSingleSelection;
+	return [UIMenu menuWithTitle:submenu.title image:nil identifier:nil options:options children:children];
 }
 
 @end
