@@ -47,42 +47,52 @@
     }
 }
 
-// Native Dogfooding Settings opener, validated against the new Instagram binary
-// uploaded in this conversation. The current executable contains:
+// Native Dogfooding Settings opener — REVALIDADO no binário NOVO do Instagram
+// enviado nesta conversa (parser ObjC + chained-fixup + disassemble). Espelha
+// exatamente o FBInternalSettingsViewControllerFromSession do FBTweak: em vez
+// de ESPERAR capturar um config que nunca vem, CRIA o config e chama a factory
+// nativa do próprio app.
+//
+// Entrypoints confirmados no exec novo:
 //   +[IGDogfoodingSettings openWithConfig:onViewController:userSession:]
-//   -[IGDogfoodingSettingsViewController initWithConfig:userSession:]
-//   IGDogfoodingSettingsConfig
-// The config class is constructible with alloc/init in this build, so this mirrors
-// the Facebook tweak pattern: create the native config object and let the native
-// factory present the app's own internal settings surface.
+//       classe Swift registrada: _TtC20IGDogfoodingSettings20IGDogfoodingSettings
+//   -[IGDogfoodingSettingsViewController initWithConfig:userSession:]  (fallback)
+//       classe Swift registrada: _TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController
+//   IGDogfoodingSettingsConfig: instanceStart=8 instanceSize=8, 0 ivars ->
+//       [[cls alloc] init] é um config vazio VÁLIDO. O disassemble do init
+//       designado (0x10684fa10) mostra apenas swift_retain(config), swift_retain
+//       (userSession) e repasse ao init Swift real (0x10500baa0), que faz
+//       str x0,[self,#cfgIvar] / str userSession,[self,#sessIvar] e NUNCA
+//       faz ldr [config,#off] -> ele não lê nenhum campo do config.
+//
+// Sideload-safe: só chamada ObjC direta (NSClassFromString+alloc/init+msgSend),
+// nada de inline patch / fishhook. Mesmo perfil do opener do FB.
 + (NSString *)openDogfoodingSettingsVC {
     id session = [self session];
     if (!session) return @"no live user session (open after login)";
 
     Class cfgCls = NSClassFromString(@"IGDogfoodingSettingsConfig");
     id config = nil;
-    if (cfgCls) {
-        @try { config = [[cfgCls alloc] init]; }
-        @catch (id e) { config = nil; }
-    }
+    if (cfgCls) { @try { config = [[cfgCls alloc] init]; } @catch (id e) { config = nil; } }
 
     UIViewController *top = [self topVC];
 
+    // Caminho A (preferido): a factory do app monta E apresenta sozinha,
+    // igual ao FBInternalSettingsViewControllerFromSession.
     Class factory = NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
-    if (!factory) factory = NSClassFromString(@"IGDogfoodingSettings");
     SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
     if (factory && [factory respondsToSelector:openSel]) {
         @try {
             ((void(*)(id,SEL,id,id,id))objc_msgSend)(factory, openSel, config, top, session);
-            MLOG("dogfooding settings opened via native factory");
+            MLOG("dogfooding settings opened via factory");
             return @"opened native Dogfooding Settings";
         } @catch (id e) {
             MLOG("factory threw, trying VC init fallback");
         }
     }
 
+    // Caminho B (fallback): monta a VC pelo init designado e apresenta como sheet.
     Class vcCls = NSClassFromString(@"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController");
-    if (!vcCls) vcCls = NSClassFromString(@"IGDogfoodingSettingsViewController");
     SEL initSel = NSSelectorFromString(@"initWithConfig:userSession:");
     if (vcCls && [vcCls instancesRespondToSelector:initSel]) {
         @try {
@@ -104,7 +114,6 @@
             return [NSString stringWithFormat:@"threw: %@", e];
         }
     }
-
     return @"IGDogfoodingSettings entrypoints not found in this build";
 }
 
