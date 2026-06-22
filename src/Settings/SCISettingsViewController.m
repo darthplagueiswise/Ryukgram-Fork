@@ -717,21 +717,26 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			NSString *selectedTitle = isWordmarkMenu
-				? SCISettingsWordmarkDisplayTitleForValue([NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off", SCISettingsSelectedMenuTitle(resolvedMenu))
-				: SCISettingsSelectedMenuTitle(resolvedMenu);
 			SCIUIKit26ConfigureButton(b);
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
-			bc.image = nil;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 12.0, 8.0, 12.0);
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+			if (isWordmarkMenu) {
+				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
+				bc.title = nil;
+				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(118.0, 28.0));
+				bc.imagePadding = 0.0;
+				bc.baseForegroundColor = UIColor.labelColor;
+			} else {
+				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
+				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
+				bc.image = nil;
+				bc.indicator = UIButtonConfigurationIndicatorPopup;
+				if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = YES;
+			}
 			b.configuration = bc;
 			b.menu = resolvedMenu;
 			b.showsMenuAsPrimaryAction = YES;
-			[b.widthAnchor constraintGreaterThanOrEqualToConstant:74.0].active = YES;
-			[b.widthAnchor constraintLessThanOrEqualToConstant:156.0].active = YES;
-			[b.heightAnchor constraintGreaterThanOrEqualToConstant:36.0].active = YES;
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;

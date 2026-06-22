@@ -43,7 +43,8 @@ static void SCIInstallSwiftEmployeeLoggerHook(void) {
 }
 
 %ctor {
-    gSCIIGEmployeeInternalEnabled = [SCIUtils getBoolPref:@"sci_force_ig_is_employee"];
+    // Unified visible toggle plus legacy alias so old enabled installs keep working.
+    gSCIIGEmployeeInternalEnabled = [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"] || [SCIUtils getBoolPref:@"sci_force_ig_is_employee"];
     if (!gSCIIGEmployeeInternalEnabled) return;
 
     %init(SCIIGEmployeeInternalObjC);
