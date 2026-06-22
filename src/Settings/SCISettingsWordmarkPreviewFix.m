@@ -105,7 +105,7 @@ static void SCIWPCollect(UIMenu *menu, NSMutableArray<UICommand *> *out) {
     cell.contentConfiguration = nil;
     cell.backgroundColor = UIColor.clearColor;
     cell.contentView.backgroundColor = UIColor.clearColor;
-    UIImageView *iv = [cell.contentView viewWithTag:9181];
+    UIImageView *iv = (UIImageView *)[cell.contentView viewWithTag:9181];
     if (!iv) {
         iv = [[UIImageView alloc] init]; iv.tag = 9181; iv.translatesAutoresizingMaskIntoConstraints = NO; iv.contentMode = UIViewContentModeScaleAspectFit;
         [cell.contentView addSubview:iv];
