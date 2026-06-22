@@ -47,16 +47,65 @@
     }
 }
 
-// Native Dogfooding Settings opener. Uses only dump-confirmed selectors and only
-// calls the Swift entrypoint when the runtime has captured the real config object.
+// Native Dogfooding Settings opener, validated against the new Instagram binary
+// uploaded in this conversation. The current executable contains:
+//   +[IGDogfoodingSettings openWithConfig:onViewController:userSession:]
+//   -[IGDogfoodingSettingsViewController initWithConfig:userSession:]
+//   IGDogfoodingSettingsConfig
+// The config class is constructible with alloc/init in this build, so this mirrors
+// the Facebook tweak pattern: create the native config object and let the native
+// factory present the app's own internal settings surface.
 + (NSString *)openDogfoodingSettingsVC {
-    @try {
-        BOOL ok = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
-        return ok ? @"opened native Dogfooding Settings"
-                  : @"native Dogfooding Settings unavailable: missing captured IGDogfoodingSettingsConfig/session; open an authorized native dogfood surface first";
-    } @catch (id e) {
-        return [NSString stringWithFormat:@"threw: %@", e];
+    id session = [self session];
+    if (!session) return @"no live user session (open after login)";
+
+    Class cfgCls = NSClassFromString(@"IGDogfoodingSettingsConfig");
+    id config = nil;
+    if (cfgCls) {
+        @try { config = [[cfgCls alloc] init]; }
+        @catch (id e) { config = nil; }
     }
+
+    UIViewController *top = [self topVC];
+
+    Class factory = NSClassFromString(@"_TtC20IGDogfoodingSettings20IGDogfoodingSettings");
+    if (!factory) factory = NSClassFromString(@"IGDogfoodingSettings");
+    SEL openSel = NSSelectorFromString(@"openWithConfig:onViewController:userSession:");
+    if (factory && [factory respondsToSelector:openSel]) {
+        @try {
+            ((void(*)(id,SEL,id,id,id))objc_msgSend)(factory, openSel, config, top, session);
+            MLOG("dogfooding settings opened via native factory");
+            return @"opened native Dogfooding Settings";
+        } @catch (id e) {
+            MLOG("factory threw, trying VC init fallback");
+        }
+    }
+
+    Class vcCls = NSClassFromString(@"_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController");
+    if (!vcCls) vcCls = NSClassFromString(@"IGDogfoodingSettingsViewController");
+    SEL initSel = NSSelectorFromString(@"initWithConfig:userSession:");
+    if (vcCls && [vcCls instancesRespondToSelector:initSel]) {
+        @try {
+            UIViewController *vc = ((id(*)(id,SEL,id,id))objc_msgSend)([vcCls alloc], initSel, config, session);
+            if ([vc isKindOfClass:UIViewController.class]) {
+                UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+                nav.modalPresentationStyle = UIModalPresentationPageSheet;
+                if (!vc.navigationItem.leftBarButtonItem && [vc respondsToSelector:NSSelectorFromString(@"closeButtonTapped")]) {
+                    vc.navigationItem.leftBarButtonItem =
+                        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                                                                      target:vc
+                                                                      action:NSSelectorFromString(@"closeButtonTapped")];
+                }
+                [top presentViewController:nav animated:YES completion:nil];
+                MLOG("dogfooding settings opened via VC init");
+                return @"opened native Dogfooding Settings (VC)";
+            }
+        } @catch (id e) {
+            return [NSString stringWithFormat:@"threw: %@", e];
+        }
+    }
+
+    return @"IGDogfoodingSettings entrypoints not found in this build";
 }
 
 // +[IGURLHandler openInternalURL:presentationConfig:controller:animated:userSession:annotation:]
