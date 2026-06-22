@@ -280,12 +280,12 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
 		BOOL isWordmark = SCIIsWordmarkMenuCommand(props);
 		NSString *displayTitle = isWordmark ? SCIWordmarkDisplayTitleForValue(value, child.title) : child.title;
-		NSString *menuTitle = child.title ?: @"";
+		NSString *menuTitle = isWordmark ? @"" : (child.title ?: @"");
 
 		UICommand *command = [UICommand commandWithTitle:menuTitle
-											   image:child.image
-										  action:child.action
-									propertyList:child.propertyList];
+										   image:child.image
+									  action:child.action
+								propertyList:child.propertyList];
 
 		if (value.length && [value isEqualToString:saved]) {
 
@@ -307,11 +307,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 			command.state = UIMenuElementStateOff;
 		}
 
-		// UIKit exposes menu separators through inline sections. Wrapping each
-		// command keeps the native menu owner while adding a thin divider between
-		// rows, matching the main settings list style without a custom presenter.
-		UIMenu *section = [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[command]];
-		[children addObject:section];
+		[children addObject:command];
 	}
 
 	return [UIMenu menuWithTitle:submenu.title image:nil identifier:nil options:submenu.options children:children];
