@@ -16,7 +16,7 @@ static UIImage *SCIWordmarkMenuTrimScale(UIImage *img, CGSize box) {
     uint8_t *buf = (uint8_t *)calloc(w * h * 4, 1);
     UIImage *trimmed = img;
     if (buf && csp) {
-        CGContextRef ctx = CGBitmapContextCreate(buf, w, h, 8, w * 4, csp, kCGImageAlphaPremultipliedLast);
+        CGContextRef ctx = CGBitmapContextCreate(buf, w, h, 8, w * 4, csp, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
         if (ctx) {
             CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), cg);
             long minx = w, miny = h, maxx = -1, maxy = -1;
