@@ -358,6 +358,33 @@ void SCIUIKit26ConfigureButton(UIButton *button) {
     }
 }
 
+void SCIUIKit26ConfigureMenuButton(UIButton *button) {
+    if (!button) return;
+    button.backgroundColor = UIColor.clearColor;
+    button.layer.backgroundColor = UIColor.clearColor.CGColor;
+    button.tintColor = [SCIUtils SCIColor_Primary];
+
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *cfg = nil;
+        // Native glass button config morphs into the menu overlay automatically
+        // (WWDC25 "Build a UIKit app with the new design"). We must NOT replace
+        // its background with a custom interactive UIGlassEffect — that is what
+        // produced the broken morph (stray glass blob + empty width) next to the
+        // popup. Let the system own the background and the morph.
+        if (@available(iOS 26.0, *)) {
+            Class cls = UIButtonConfiguration.class;
+            SEL glassSel = NSSelectorFromString(@"glassButtonConfiguration");
+            if ([cls respondsToSelector:glassSel]) {
+                cfg = ((id (*)(id, SEL))objc_msgSend)(cls, glassSel);
+            }
+        }
+        if (!cfg) cfg = [UIButtonConfiguration tintedButtonConfiguration];
+        cfg.baseForegroundColor = UIColor.labelColor;
+        cfg.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+        button.configuration = cfg;
+    }
+}
+
 void SCIStyleControlForGlass(UIControl *control) {
     if (!control) return;
     if ([control isKindOfClass:UIButton.class]) {

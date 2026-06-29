@@ -717,19 +717,17 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			SCIUIKit26ConfigureButton(b);
+			SCIUIKit26ConfigureMenuButton(b);
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 12.0, 6.0, 12.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 			if (isWordmarkMenu) {
 				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				// Preview limpo: SEM glass (o glass interativo virava um "blob redondo"
-				// fora do lugar). Só a wordmark, compacta, no slot direito.
+				// Icon-only preview: the selected wordmark sits inside the native
+				// glass pill so it morphs into the menu like every other popup.
 				bc.title = nil;
-				bc.background.visualEffect = nil;
-				bc.background.backgroundColor = UIColor.clearColor;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(2.0, 8.0, 2.0, 8.0);
-				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(96.0, 22.0));
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(3.0, 12.0, 3.0, 12.0);
+				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(84.0, 20.0));
 				bc.imagePadding = 0.0;
 				bc.baseForegroundColor = UIColor.labelColor;
 			} else {
@@ -737,7 +735,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
 				bc.image = nil;
 				bc.indicator = UIButtonConfigurationIndicatorPopup;
-				if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = YES;
 			}
 			b.configuration = bc;
 			b.menu = resolvedMenu;
@@ -747,7 +744,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				// trava a altura no padrão de accessory pra a célula não estourar
 				CGRect fr = b.frame;
 				fr.size.height = MIN(fr.size.height, 34.0);
-				fr.size.width  = MIN(fr.size.width, 132.0);
+				fr.size.width  = MIN(fr.size.width, 140.0);
 				b.frame = fr;
 			}
 			cell.accessoryView = b;
