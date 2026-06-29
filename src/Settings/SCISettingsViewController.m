@@ -722,6 +722,10 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
 			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
+			// Sem cápsula de glass cinza no botão fechado — o UIGlassEffect não
+			// renderiza no processo do IG e vira uma máscara cinza "nada a ver".
+			bc.background.visualEffect = nil;
+			bc.background.backgroundColor = UIColor.clearColor;
 			if (isWordmarkMenu) {
 				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
 				// Preview limpo: SEM glass (o glass interativo virava um "blob redondo"

@@ -5,6 +5,69 @@
 static UIView *gSCIMenuOverlay = nil;
 static void (^gSCIMenuOnPick)(UICommand *) = nil;
 
+#pragma mark - Wordmark: normaliza todas as imagens para a MESMA altura
+
+static CGRect SCIMenuAlphaBounds(UIImage *image) {
+	CGImageRef cg = image.CGImage;
+	if (!cg) return CGRectZero;
+	size_t width = CGImageGetWidth(cg);
+	size_t height = CGImageGetHeight(cg);
+	if (width == 0 || height == 0 || width > 4096 || height > 4096) return CGRectZero;
+	size_t bpr = width * 4;
+	NSMutableData *data = [NSMutableData dataWithLength:bpr * height];
+	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bpr, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (cs) CGColorSpaceRelease(cs);
+	if (!ctx) return CGRectZero;
+	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
+	CGContextRelease(ctx);
+	const UInt8 *bytes = (const UInt8 *)data.bytes;
+	size_t minX = width, minY = height, maxX = 0, maxY = 0;
+	BOOL found = NO;
+	for (size_t y = 0; y < height; y++) {
+		const UInt8 *r = bytes + y * bpr;
+		for (size_t x = 0; x < width; x++) {
+			if (r[x * 4 + 3] <= 8) continue;
+			found = YES;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+	}
+	if (!found) return CGRectZero;
+	return CGRectMake(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+// Recorta a margem transparente e escala para `targetH` de altura, preservando
+// proporção. Assim todos os wordmarks ficam com a MESMA altura visual — o default
+// não fica minúsculo nem o último gigante.
+static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
+	if (!src) return nil;
+	UIImage *trimmed = src;
+	CGRect box = SCIMenuAlphaBounds(src);
+	CGImageRef cg = src.CGImage;
+	if (cg && !CGRectIsEmpty(box)) {
+		CGImageRef cropped = CGImageCreateWithImageInRect(cg, box);
+		if (cropped) {
+			trimmed = [UIImage imageWithCGImage:cropped scale:src.scale orientation:src.imageOrientation];
+			CGImageRelease(cropped);
+		}
+	}
+	CGSize s = trimmed.size;
+	if (s.height <= 0.0 || s.width <= 0.0) return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGFloat scale = targetH / s.height;
+	CGSize tgt = CGSizeMake(ceil(s.width * scale), ceil(s.height * scale));
+	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+	fmt.opaque = NO;
+	fmt.scale = UIScreen.mainScreen.scale;
+	UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:tgt format:fmt];
+	UIImage *out = [r imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull c) {
+		[trimmed drawInRect:CGRectMake(0, 0, tgt.width, tgt.height)];
+	}];
+	return [out imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 #pragma mark - Linha
 
 @interface SCIGlassMenuRow : UIControl
@@ -145,16 +208,14 @@ static void (^gSCIMenuOnPick)(UICommand *) = nil;
 		CGFloat bodyW = panelW - bodyX - hPad;
 
 		if (wordmark && cmd.image) {
-			UIImage *img = [cmd.image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-			CGFloat maxH = 34.0;
-			CGSize is = img.size;
-			CGFloat scale = (is.width > 0 && is.height > 0) ? MIN(bodyW / is.width, maxH / is.height) : 1.0;
-			if (scale <= 0) scale = 1.0;
-			CGSize tgt = CGSizeMake(floor(is.width * scale), floor(is.height * scale));
+			UIImage *img = SCIMenuWordmarkImage(cmd.image, 24.0);
+			CGSize tgt = img.size;
+			CGFloat w = tgt.width, h = tgt.height;
+			if (w > bodyW && w > 0) { CGFloat sc = bodyW / w; w = bodyW; h = h * sc; }
 			UIImageView *iv = [[UIImageView alloc] initWithImage:img];
 			iv.tintColor = UIColor.labelColor;
 			iv.contentMode = UIViewContentModeScaleAspectFit;
-			iv.frame = CGRectMake(bodyX, (rowH - tgt.height) / 2.0, tgt.width, tgt.height);
+			iv.frame = CGRectMake(bodyX, (rowH - h) / 2.0, w, h);
 			[row addSubview:iv];
 		} else {
 			UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(bodyX, 0, bodyW, rowH)];
@@ -176,12 +237,24 @@ static void (^gSCIMenuOnPick)(UICommand *) = nil;
 		[content addSubview:row];
 	}
 
-	// Painel glass.
+	// Painel SÓLIDO (sem glass/blur). O IG roda em UIDesignRequiresCompatibility,
+	// então UIGlassEffect real não renderiza aqui e o que sobra é uma máscara cinza
+	// translúcida que deixa o conteúdo de trás (toggles azuis) vazar. Fundo sólido
+	// = limpo, sem vazamento.
 	CGFloat maxPanelH = MIN(window.bounds.size.height * 0.6, 440.0);
 	CGFloat panelH = MIN(contentH, maxPanelH);
 
-	SCIUIKit26GlassPanelView *panel = [[SCIUIKit26GlassPanelView alloc] initWithRadius:18.0];
-	panel.sciGlassInteractive = NO;
+	UIView *panel = [[UIView alloc] init];
+	panel.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+		return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+			? [UIColor colorWithRed:0.17 green:0.17 blue:0.18 alpha:1.0]
+			: [UIColor colorWithRed:0.96 green:0.96 blue:0.97 alpha:1.0];
+	}];
+	panel.layer.cornerRadius = 13.0;
+	if ([panel.layer respondsToSelector:@selector(setCornerCurve:)]) panel.layer.cornerCurve = kCACornerCurveContinuous;
+	panel.layer.masksToBounds = YES;
+	panel.layer.borderWidth = 1.0 / MAX(UIScreen.mainScreen.scale, 1.0);
+	panel.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
 
 	UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, panelW, panelH)];
 	scroll.contentSize = CGSizeMake(panelW, contentH);
@@ -189,7 +262,7 @@ static void (^gSCIMenuOnPick)(UICommand *) = nil;
 	scroll.alwaysBounceVertical = (contentH > panelH);
 	scroll.backgroundColor = UIColor.clearColor;
 	[scroll addSubview:content];
-	[panel.contentView addSubview:scroll];
+	[panel addSubview:scroll];
 
 	// Posicionamento ancorado ao sourceView.
 	CGRect src = [sourceView convertRect:sourceView.bounds toView:window];
