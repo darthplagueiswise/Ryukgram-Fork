@@ -2,7 +2,7 @@
 #import "SCIWhatsNew.h"
 #import "../Features/Gating/SCIBulkGatingPresets.h"
 #import "../UI/SCIPopupChrome.h"
-#import "../UI/SCIOptionSheet.h"
+#import "../UI/SCIGlassMenuPopup.h"
 #import "SCISearchBarStyler.h"
 #import "../Features/General/SCICacheManager.h"
 #import "../SCIImageCache.h"
@@ -718,17 +718,19 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 			UIMenu *resolvedMenu = [row menuForButton:b];
 			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			SCIUIKit26ConfigureMenuButton(b);
+			SCIUIKit26ConfigureButton(b);
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 12.0, 6.0, 12.0);
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
 			if (isWordmarkMenu) {
 				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				// Icon-only preview: the selected wordmark sits inside the native
-				// glass pill so it morphs into the menu like every other popup.
+				// Preview limpo: SEM glass (o glass interativo virava um "blob redondo"
+				// fora do lugar). Só a wordmark, compacta, no slot direito.
 				bc.title = nil;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(3.0, 12.0, 3.0, 12.0);
-				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(84.0, 20.0));
+				bc.background.visualEffect = nil;
+				bc.background.backgroundColor = UIColor.clearColor;
+				bc.contentInsets = NSDirectionalEdgeInsetsMake(2.0, 8.0, 2.0, 8.0);
+				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(96.0, 22.0));
 				bc.imagePadding = 0.0;
 				bc.baseForegroundColor = UIColor.labelColor;
 			} else {
@@ -738,23 +740,23 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.indicator = UIButtonConfigurationIndicatorPopup;
 			}
 			b.configuration = bc;
-			// O Instagram roda em modo de compatibilidade de design (IGDS), então o
-			// chrome do UIMenu nativo nunca vira Liquid Glass dentro do processo — ele
-			// sai cinza, com void e o glass das células de trás vazando. Apresentamos
-			// um picker próprio (SCIOptionSheet) que controlamos por inteiro: container
-			// glass, largura fixa, separadores de tabela e ícones grandes.
+			// O Instagram seta UIDesignRequiresCompatibility=YES, então UIMenu nativo
+			// e popover do sistema saem cinza/legado neste processo, e empilhar popover
+			// + container vira "menu dentro de menu". Apresentamos um painel Liquid
+			// Glass 100% custom (UIGlassEffect explícito) direto na window.
 			b.showsMenuAsPrimaryAction = NO;
 			__weak typeof(self) wSelfMenu = self;
 			__weak UIButton *wAnchor = b;
 			UIMenu *capturedMenu = resolvedMenu;
+			BOOL capturedWordmark = isWordmarkMenu;
 			[b addAction:[UIAction actionWithTitle:@"" image:nil identifier:nil handler:^(__unused UIAction *act) {
 				typeof(self) sSelf = wSelfMenu;
-				if (!sSelf) return;
-				[SCIOptionSheet presentFrom:sSelf
-									  title:nil
-									   menu:capturedMenu
-								 sourceView:wAnchor
-									 onPick:^(UICommand *cmd) {
+				if (!sSelf || !wAnchor) return;
+				[SCIGlassMenuPopup presentMenu:capturedMenu
+								  currentValue:nil
+									  wordmark:capturedWordmark
+									sourceView:wAnchor
+										onPick:^(UICommand *cmd) {
 					typeof(self) s2 = wSelfMenu;
 					if (s2 && cmd) [s2 menuChanged:cmd];
 				}];
@@ -764,7 +766,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				// trava a altura no padrão de accessory pra a célula não estourar
 				CGRect fr = b.frame;
 				fr.size.height = MIN(fr.size.height, 34.0);
-				fr.size.width  = MIN(fr.size.width, 140.0);
+				fr.size.width  = MIN(fr.size.width, 132.0);
 				b.frame = fr;
 			}
 			cell.accessoryView = b;
