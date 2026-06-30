@@ -5,6 +5,80 @@
 static UIView *gSCIMenuOverlay = nil;
 static void (^gSCIMenuOnPick)(UICommand *) = nil;
 
+// Canvas fixo para todos os wordmarks: mesma convencao documentada em
+// 01-liquidglass-uikit-ios26.md (RGWordmarkCanvasImage, 82x22pt). Cada PNG de
+// origem tem padding transparente interno diferente, entao sem alpha-trim
+// primeiro a imagem "encolhe" pra dentro do canvas com tamanhos visuais
+// distintos (a 1a fica grande, a ultima pequena). Trim + fit-centralizado no
+// MESMO canvas garante tamanho final identico pra todas.
+static const CGFloat kSCIWordmarkCanvasW = 82.0;
+static const CGFloat kSCIWordmarkCanvasH = 22.0;
+
+static CGRect SCIMenuAlphaBounds(UIImage *image) {
+	CGImageRef cg = image.CGImage;
+	if (!cg) return CGRectZero;
+	size_t width = CGImageGetWidth(cg);
+	size_t height = CGImageGetHeight(cg);
+	if (width == 0 || height == 0 || width > 4096 || height > 4096) return CGRectZero;
+	size_t bpr = width * 4;
+	NSMutableData *data = [NSMutableData dataWithLength:bpr * height];
+	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bpr, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (cs) CGColorSpaceRelease(cs);
+	if (!ctx) return CGRectZero;
+	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
+	CGContextRelease(ctx);
+	const UInt8 *bytes = (const UInt8 *)data.bytes;
+	size_t minX = width, minY = height, maxX = 0, maxY = 0;
+	BOOL found = NO;
+	for (size_t y = 0; y < height; y++) {
+		const UInt8 *r = bytes + y * bpr;
+		for (size_t x = 0; x < width; x++) {
+			if (r[x * 4 + 3] <= 8) continue;
+			found = YES;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+	}
+	if (!found) return CGRectZero;
+	return CGRectMake(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+// Recorta a margem transparente e desenha CENTRALIZADO num canvas fixo
+// 82x22pt -- toda imagem resultante tem o MESMO CGSize final, entao todas as
+// linhas do menu wordmark ficam com tamanho identico, sem sobra assimetrica.
+static UIImage *SCIMenuWordmarkCanvasImage(UIImage *source) {
+	if (!source) return nil;
+	UIImage *trimmed = source;
+	CGRect box = SCIMenuAlphaBounds(source);
+	CGImageRef cg = source.CGImage;
+	if (cg && !CGRectIsEmpty(box)) {
+		CGImageRef cropped = CGImageCreateWithImageInRect(cg, box);
+		if (cropped) {
+			trimmed = [UIImage imageWithCGImage:cropped scale:source.scale orientation:source.imageOrientation];
+			CGImageRelease(cropped);
+		}
+	}
+	CGSize canvas = CGSizeMake(kSCIWordmarkCanvasW, kSCIWordmarkCanvasH);
+	CGSize s2 = trimmed.size;
+	if (s2.width <= 0 || s2.height <= 0) return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	CGFloat scale = MIN(canvas.width / s2.width, canvas.height / s2.height);
+	CGSize target = CGSizeMake(floor(s2.width * scale), floor(s2.height * scale));
+	CGRect rect = CGRectMake((canvas.width - target.width) / 2.0,
+	                         (canvas.height - target.height) / 2.0,
+	                         target.width, target.height);
+	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+	fmt.opaque = NO;
+	fmt.scale = UIScreen.mainScreen.scale;
+	UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:canvas format:fmt];
+	UIImage *img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+		[trimmed drawInRect:rect];
+	}];
+	return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 #pragma mark - Wordmark: normaliza todas as imagens para a MESMA altura
 
 static CGRect SCIMenuAlphaBounds(UIImage *image) {
