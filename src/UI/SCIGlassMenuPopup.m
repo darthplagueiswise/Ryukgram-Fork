@@ -166,7 +166,7 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 	// Largura do painel.
 	CGFloat panelW;
 	if (wordmark) {
-		panelW = 236.0;
+		panelW = hPad + checkW + kSCIWordmarkCanvasW + hPad;
 	} else {
 		CGFloat maxTitle = 0.0;
 		UIFont *f = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
