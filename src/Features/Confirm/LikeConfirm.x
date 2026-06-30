@@ -63,79 +63,79 @@ __attribute__((constructor)) static void _sciHookReelsLikeHandler(void) {
 // Liking posts
 %hook IGUFIButtonBarView
 - (void)_onLikeButtonPressed:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 - (void)_onLikeButtonPressed {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig());
 }
 %end
 %hook IGFeedPhotoView
 - (void)_onDoubleTap:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 - (void)_onDoubleTap {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig());
 }
 %end
 %hook IGVideoPlayerOverlayContainerView
 - (void)_handleDoubleTapGesture:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 %end
 
 // Liking reels
 %hook IGSundialViewerVideoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1));
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1, arg2));
 }
 %end
 %hook IGSundialViewerPhotoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1));
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1, arg2));
 }
 - (void)swift_photoCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1, arg2, arg3));
 }
 %end
 %hook IGSundialViewerCarouselCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1));
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1, arg2));
 }
 - (void)carouselCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    CONFIRMREELSLIKE(%orig);
+    CONFIRMREELSLIKE(%orig(arg1, arg2, arg3));
 }
 %end
 
 // Liking comments
 %hook IGCommentCellController
 - (void)commentCell:(id)arg1 didTapLikeButton:(id)arg2 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1, arg2));
 }
 - (void)commentCell:(id)arg1 didTapLikedByButtonForUser:(id)arg2 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1, arg2));
 }
 - (void)commentCellDidLongPressOnLikeButton:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 - (void)commentCellDidEndLongPressOnLikeButton:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 - (void)commentCellDidDoubleTap:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig(arg1));
 }
 %end
 %hook IGFeedItemPreviewCommentCell
 - (void)_didTapLikeButton {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig());
 }
 %end
 
@@ -144,6 +144,6 @@ __attribute__((constructor)) static void _sciHookReelsLikeHandler(void) {
 // DM like button
 %hook IGDirectThreadViewController
 - (void)_didTapLikeButton {
-    CONFIRMPOSTLIKE(%orig);
+    CONFIRMPOSTLIKE(%orig());
 }
 %end
