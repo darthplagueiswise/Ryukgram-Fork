@@ -79,69 +79,6 @@ static UIImage *SCIMenuWordmarkCanvasImage(UIImage *source) {
 	return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
-#pragma mark - Wordmark: normaliza todas as imagens para a MESMA altura
-
-static CGRect SCIMenuAlphaBounds(UIImage *image) {
-	CGImageRef cg = image.CGImage;
-	if (!cg) return CGRectZero;
-	size_t width = CGImageGetWidth(cg);
-	size_t height = CGImageGetHeight(cg);
-	if (width == 0 || height == 0 || width > 4096 || height > 4096) return CGRectZero;
-	size_t bpr = width * 4;
-	NSMutableData *data = [NSMutableData dataWithLength:bpr * height];
-	CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bpr, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-	if (cs) CGColorSpaceRelease(cs);
-	if (!ctx) return CGRectZero;
-	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
-	CGContextRelease(ctx);
-	const UInt8 *bytes = (const UInt8 *)data.bytes;
-	size_t minX = width, minY = height, maxX = 0, maxY = 0;
-	BOOL found = NO;
-	for (size_t y = 0; y < height; y++) {
-		const UInt8 *r = bytes + y * bpr;
-		for (size_t x = 0; x < width; x++) {
-			if (r[x * 4 + 3] <= 8) continue;
-			found = YES;
-			if (x < minX) minX = x;
-			if (y < minY) minY = y;
-			if (x > maxX) maxX = x;
-			if (y > maxY) maxY = y;
-		}
-	}
-	if (!found) return CGRectZero;
-	return CGRectMake(minX, minY, maxX - minX + 1, maxY - minY + 1);
-}
-
-// Recorta a margem transparente e escala para `targetH` de altura, preservando
-// proporção. Assim todos os wordmarks ficam com a MESMA altura visual — o default
-// não fica minúsculo nem o último gigante.
-static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
-	if (!src) return nil;
-	UIImage *trimmed = src;
-	CGRect box = SCIMenuAlphaBounds(src);
-	CGImageRef cg = src.CGImage;
-	if (cg && !CGRectIsEmpty(box)) {
-		CGImageRef cropped = CGImageCreateWithImageInRect(cg, box);
-		if (cropped) {
-			trimmed = [UIImage imageWithCGImage:cropped scale:src.scale orientation:src.imageOrientation];
-			CGImageRelease(cropped);
-		}
-	}
-	CGSize s = trimmed.size;
-	if (s.height <= 0.0 || s.width <= 0.0) return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	CGFloat scale = targetH / s.height;
-	CGSize tgt = CGSizeMake(ceil(s.width * scale), ceil(s.height * scale));
-	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
-	fmt.opaque = NO;
-	fmt.scale = UIScreen.mainScreen.scale;
-	UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:tgt format:fmt];
-	UIImage *out = [r imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull c) {
-		[trimmed drawInRect:CGRectMake(0, 0, tgt.width, tgt.height)];
-	}];
-	return [out imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-}
-
 #pragma mark - Linha
 
 @interface SCIGlassMenuRow : UIControl
@@ -240,6 +177,7 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 	// Largura do painel.
 	CGFloat panelW;
 	if (wordmark) {
+		// 16 (hPad) + 28 (checkW) + 82 (canvas wordmark) + 16 (hPad) = 142, largura justa.
 		panelW = hPad + checkW + kSCIWordmarkCanvasW + hPad;
 	} else {
 		CGFloat maxTitle = 0.0;
@@ -253,7 +191,7 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 		panelW = MAX(208.0, MIN(panelW, 300.0));
 	}
 
-	// Conteúdo (rows) num scroll view.
+	// Conteudo (rows) num scroll view.
 	CGFloat contentH = rowH * commands.count;
 	UIView *content = [[UIView alloc] initWithFrame:CGRectMake(0, 0, panelW, contentH)];
 	content.backgroundColor = UIColor.clearColor;
@@ -282,14 +220,12 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 		CGFloat bodyW = panelW - bodyX - hPad;
 
 		if (wordmark && cmd.image) {
-			UIImage *img = SCIMenuWordmarkImage(cmd.image, 24.0);
-			CGSize tgt = img.size;
-			CGFloat w = tgt.width, h = tgt.height;
-			if (w > bodyW && w > 0) { CGFloat sc = bodyW / w; w = bodyW; h = h * sc; }
+			UIImage *img = SCIMenuWordmarkCanvasImage(cmd.image);
+			CGSize tgt = img.size; // sempre 82x22pt -- igual pra todas as linhas
 			UIImageView *iv = [[UIImageView alloc] initWithImage:img];
 			iv.tintColor = UIColor.labelColor;
 			iv.contentMode = UIViewContentModeScaleAspectFit;
-			iv.frame = CGRectMake(bodyX, (rowH - h) / 2.0, w, h);
+			iv.frame = CGRectMake(bodyX, (rowH - tgt.height) / 2.0, tgt.width, tgt.height);
 			[row addSubview:iv];
 		} else {
 			UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(bodyX, 0, bodyW, rowH)];
@@ -300,7 +236,7 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 			[row addSubview:label];
 		}
 
-		// Separador (entre linhas, alinhado ao conteúdo).
+		// Separador (entre linhas, alinhado ao conteudo).
 		if (i + 1 < commands.count) {
 			UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(bodyX, rowH - hair, panelW - bodyX, hair)];
 			sep.backgroundColor = [UIColor.separatorColor colorWithAlphaComponent:0.45];
@@ -311,10 +247,10 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 		[content addSubview:row];
 	}
 
-	// Painel SÓLIDO (sem glass/blur). O IG roda em UIDesignRequiresCompatibility,
-	// então UIGlassEffect real não renderiza aqui e o que sobra é uma máscara cinza
-	// translúcida que deixa o conteúdo de trás (toggles azuis) vazar. Fundo sólido
-	// = limpo, sem vazamento.
+	// Painel SOLIDO (sem glass/blur). O Instagram roda em
+	// UIDesignRequiresCompatibility=YES, entao UIGlassEffect real nao renderiza
+	// nesse processo -- o que sobra e uma mascara cinza translucida que deixa o
+	// conteudo de tras (toggles azuis) vazar. Fundo solido = limpo, sem vazamento.
 	CGFloat maxPanelH = MIN(window.bounds.size.height * 0.6, 440.0);
 	CGFloat panelH = MIN(contentH, maxPanelH);
 
@@ -343,19 +279,19 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 	UIEdgeInsets safe = window.safeAreaInsets;
 	const CGFloat margin = 8.0;
 
-	CGFloat px = src.origin.x + src.size.width - panelW; // alinha borda direita ao botão
+	CGFloat px = src.origin.x + src.size.width - panelW; // alinha borda direita ao botao
 	px = MAX(safe.left + margin, MIN(px, window.bounds.size.width - safe.right - margin - panelW));
 
 	CGFloat belowY = CGRectGetMaxY(src) + 6.0;
 	CGFloat py;
 	if (belowY + panelH <= window.bounds.size.height - safe.bottom - margin) {
-		py = belowY; // abaixo do botão
+		py = belowY; // abaixo do botao
 	} else {
 		CGFloat aboveY = src.origin.y - 6.0 - panelH;
 		if (aboveY >= safe.top + margin) {
-			py = aboveY; // acima do botão
+			py = aboveY; // acima do botao
 		} else {
-			py = safe.top + margin; // não cabe: cola no topo seguro
+			py = safe.top + margin; // nao cabe: cola no topo seguro
 			panelH = MIN(panelH, window.bounds.size.height - safe.bottom - margin - py);
 			scroll.frame = CGRectMake(0, 0, panelW, panelH);
 			scroll.showsVerticalScrollIndicator = YES;
@@ -373,7 +309,7 @@ static UIImage *SCIMenuWordmarkImage(UIImage *src, CGFloat targetH) {
 	[window addSubview:overlay];
 	gSCIMenuOverlay = overlay;
 
-	// Animação de entrada.
+	// Animacao de entrada.
 	overlay.alpha = 0.0;
 	panel.transform = CGAffineTransformMakeScale(0.96, 0.96);
 	[UIView animateWithDuration:0.18 delay:0.0 options:UIViewAnimationOptionCurveEaseOut animations:^{
