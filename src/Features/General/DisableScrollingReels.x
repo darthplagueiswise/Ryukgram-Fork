@@ -16,7 +16,7 @@
         return %orig(NO);
     }
 
-    return %orig;
+    { %orig; return; }
 }
 %end
 

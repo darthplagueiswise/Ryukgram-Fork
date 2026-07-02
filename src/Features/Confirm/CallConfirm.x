@@ -59,7 +59,7 @@ static BOOL sciCallConfirmProceeding = NO;
             sciCallConfirmProceeding = YES; %orig; sciCallConfirmProceeding = NO;
         } title:SCILocalized(isVideo ? @"Confirm video call" : @"Confirm voice call")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 
@@ -70,7 +70,7 @@ static BOOL sciCallConfirmProceeding = NO;
             sciCallConfirmProceeding = YES; %orig; sciCallConfirmProceeding = NO;
         } title:SCILocalized(@"Confirm voice call")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 
@@ -80,7 +80,7 @@ static BOOL sciCallConfirmProceeding = NO;
             sciCallConfirmProceeding = YES; %orig; sciCallConfirmProceeding = NO;
         } title:SCILocalized(@"Confirm video call")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 
@@ -91,7 +91,7 @@ static BOOL sciCallConfirmProceeding = NO;
             sciCallConfirmProceeding = YES; %orig; sciCallConfirmProceeding = NO;
         } title:SCILocalized(@"Confirm voice call")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 
@@ -101,7 +101,7 @@ static BOOL sciCallConfirmProceeding = NO;
             sciCallConfirmProceeding = YES; %orig; sciCallConfirmProceeding = NO;
         } title:SCILocalized(@"Confirm video call")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 %end

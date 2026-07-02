@@ -6,14 +6,14 @@
     if ([SCIUtils getBoolPref:@"change_direct_theme_confirm"]) {
         [SCIUtils showConfirmation:^(void) { %orig; } title:SCILocalized(@"Confirm changing theme")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 - (void)themePickerSectionController:(id)arg1 didSelectThemeId:(id)arg2 {
     if ([SCIUtils getBoolPref:@"change_direct_theme_confirm"]) {
         [SCIUtils showConfirmation:^(void) { %orig; } title:SCILocalized(@"Confirm changing theme")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 %end
@@ -23,7 +23,7 @@
     if ([SCIUtils getBoolPref:@"change_direct_theme_confirm"]) {
         [SCIUtils showConfirmation:^(void) { %orig; } title:SCILocalized(@"Confirm changing theme")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 %end

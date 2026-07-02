@@ -5,7 +5,7 @@
     if ([SCIUtils getBoolPref:@"post_comment_confirm"]) {
         [SCIUtils showConfirmation:^(void) { %orig; } title:SCILocalized(@"Confirm posting comment")];
     } else {
-        return %orig;
+        { %orig; return; }
     }
 }
 %end

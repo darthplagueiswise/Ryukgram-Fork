@@ -52,8 +52,8 @@ static BOOL sciTapIsReactionSticker(id target) {
     BOOL highlight = sciTapIsHighlight(self);
     NSString *mode = [SCIUtils getStringPref:highlight ? @"sticker_interact_highlights_mode"
                                                        : @"sticker_interact_stories_mode"];
-    if (!mode.length || [mode isEqualToString:@"off"]) return %orig;
-    if ([mode isEqualToString:@"reactions"] && !sciTapIsReactionSticker(self)) return %orig;
+    if (!mode.length || [mode isEqualToString:@"off"]) { %orig; return; }
+    if ([mode isEqualToString:@"reactions"] && !sciTapIsReactionSticker(self)) { %orig; return; }
 
     NSString *title = highlight ? SCILocalized(@"Confirm sticker interaction (highlights)")
                                 : SCILocalized(@"Confirm sticker interaction (stories)");

@@ -465,21 +465,21 @@ static void sciInstallProgressiveBlurHooks(void) {
 %hook IGFeedItemUFICell
 
 - (void)UFIButtonBarDidTapOnLike:(id)arg1 {
-	if (!SCI_PREF(@"like_confirm")) return %orig;
+	if (!SCI_PREF(@"like_confirm")) { %orig; return; }
 	[SCIUtils showConfirmation:^{ %orig; } title:SCILocalized(@"Confirm like: Posts")];
 }
 
 - (void)UFIButtonBarDidTapOnRepost:(id)arg1 {
-	if (!SCI_PREF(@"repost_confirm")) return %orig;
+	if (!SCI_PREF(@"repost_confirm")) { %orig; return; }
 	[SCIUtils showConfirmation:^{ %orig; } title:SCILocalized(@"Confirm repost")];
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 {
-	if (!SCI_PREF(@"repost_confirm")) return %orig;
+	if (!SCI_PREF(@"repost_confirm")) { %orig; return; }
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 withGestureRecognizer:(id)arg2 {
-	if (!SCI_PREF(@"repost_confirm")) return %orig;
+	if (!SCI_PREF(@"repost_confirm")) { %orig; return; }
 }
 
 %end
@@ -497,15 +497,15 @@ static void sciInstallProgressiveBlurHooks(void) {
 
 %hook IGSundialViewerVerticalUFI
 - (void)_didTapLikeButton:(id)arg1 {
-	if (!SCI_PREF(@"like_confirm_reels")) return %orig;
+	if (!SCI_PREF(@"like_confirm_reels")) { %orig; return; }
 	[SCIUtils showConfirmation:^{ %orig; } title:SCILocalized(@"Confirm like: Reels")];
 }
 - (void)_didLongPressLikeButton:(id)arg1 {
-	if (!SCI_PREF(@"like_confirm_reels")) return %orig;
+	if (!SCI_PREF(@"like_confirm_reels")) { %orig; return; }
 }
 - (void)_didTapRepostButton {
 	if (SCI_PREF(@"hide_reels_repost")) return;
-	if (!SCI_PREF(@"repost_confirm")) return %orig;
+	if (!SCI_PREF(@"repost_confirm")) { %orig; return; }
 	[SCIUtils showConfirmation:^{ %orig; } title:SCILocalized(@"Confirm repost")];
 }
 
