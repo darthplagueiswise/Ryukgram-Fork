@@ -2,7 +2,6 @@
 #import "SCIWhatsNew.h"
 #import "../Features/Gating/SCIBulkGatingPresets.h"
 #import "../UI/SCIPopupChrome.h"
-#import "../UI/SCIGlassMenuPopup.h"
 #import "SCISearchBarStyler.h"
 #import "../Features/General/SCICacheManager.h"
 #import "../SCIImageCache.h"
@@ -722,10 +721,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
 			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
 			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
-			// Sem cápsula de glass cinza no botão fechado — o UIGlassEffect não
-			// renderiza no processo do IG e vira uma máscara cinza "nada a ver".
-			bc.background.visualEffect = nil;
-			bc.background.backgroundColor = UIColor.clearColor;
 			if (isWordmarkMenu) {
 				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
 				// Preview limpo: SEM glass (o glass interativo virava um "blob redondo"
@@ -744,27 +739,13 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 				bc.indicator = UIButtonConfigurationIndicatorPopup;
 			}
 			b.configuration = bc;
-			// O Instagram seta UIDesignRequiresCompatibility=YES, então UIMenu nativo
-			// e popover do sistema saem cinza/legado neste processo, e empilhar popover
-			// + container vira "menu dentro de menu". Apresentamos um painel Liquid
-			// Glass 100% custom (UIGlassEffect explícito) direto na window.
-			b.showsMenuAsPrimaryAction = NO;
-			__weak typeof(self) wSelfMenu = self;
-			__weak UIButton *wAnchor = b;
-			UIMenu *capturedMenu = resolvedMenu;
-			BOOL capturedWordmark = isWordmarkMenu;
-			[b addAction:[UIAction actionWithTitle:@"" image:nil identifier:nil handler:^(__unused UIAction *act) {
-				typeof(self) sSelf = wSelfMenu;
-				if (!sSelf || !wAnchor) return;
-				[SCIGlassMenuPopup presentMenu:capturedMenu
-								  currentValue:nil
-									  wordmark:capturedWordmark
-									sourceView:wAnchor
-										onPick:^(UICommand *cmd) {
-					typeof(self) s2 = wSelfMenu;
-					if (s2 && cmd) [s2 menuChanged:cmd];
-				}];
-			}] forControlEvents:UIControlEventPrimaryActionTriggered];
+			// Menu NATIVO: UIButton.menu + showsMenuAsPrimaryAction da o morphing
+			// automatico do iOS 26, selecao via UIMenuOptionsSingleSelection +
+			// UIAction.state (ja montados em menuForButton), e separadores nativos
+			// via inline sections. Nao usar popover/painel custom para menu simples.
+			b.menu = resolvedMenu;
+			b.showsMenuAsPrimaryAction = YES;
+			if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = NO;
 			[b sizeToFit];
 			if (isWordmarkMenu) {
 				// trava a altura no padrão de accessory pra a célula não estourar

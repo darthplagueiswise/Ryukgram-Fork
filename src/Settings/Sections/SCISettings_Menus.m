@@ -42,11 +42,18 @@ static UIImage *SCIWordmarkMenuTrimScale(UIImage *img, CGSize box) {
     CGFloat r = MIN(box.width / sz.width, box.height / sz.height);
     if (r <= 0) r = 1.0;
     CGSize target = CGSizeMake(ceil(sz.width * r), ceil(sz.height * r));
+    // Canvas FIXO = box: desenha a wordmark (ja aspect-fit) CENTRALIZADA dentro
+    // da mesma caixa para toda variante. Assim todas as UIImage saem com o MESMO
+    // CGSize final (box), e o menu nativo mostra todos os icones do mesmo tamanho
+    // -- corrige "primeira grande, ultima pequena".
     UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
     fmt.opaque = NO;
-    UIGraphicsImageRenderer *rnd = [[UIGraphicsImageRenderer alloc] initWithSize:target format:fmt];
+    UIGraphicsImageRenderer *rnd = [[UIGraphicsImageRenderer alloc] initWithSize:box format:fmt];
     UIImage *out = [rnd imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull c) {
-        [trimmed drawInRect:CGRectMake(0, 0, target.width, target.height)];
+        CGRect r2 = CGRectMake((box.width - target.width) / 2.0,
+                               (box.height - target.height) / 2.0,
+                               target.width, target.height);
+        [trimmed drawInRect:r2];
     }];
     return [out imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
