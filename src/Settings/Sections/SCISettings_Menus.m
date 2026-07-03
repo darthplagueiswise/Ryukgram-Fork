@@ -3,10 +3,14 @@
 // Wordmark thumbnails ship in the tweak bundle (BundleAssets). Template-rendered
 // so they tint with the menu. Returns nil if the asset is missing → caller falls
 // back to an SF Symbol.
-// Corta o transparente e normaliza num canvas consistente em pontos, pra a
-// wordmark PREENCHER o slot de ícone do UIMenu (sem isso fica minúscula porque o
-// PNG vem com muito padding transparente). Template -> tinge com o menu.
-static UIImage *SCIWordmarkMenuTrimScale(UIImage *img, CGSize box) {
+// So recorta a margem transparente. Cada PNG vem com uma quantidade diferente
+// de padding, e ISSO -- nao o tamanho do glyph em si -- era a causa de "1a
+// grande, ultima pequena": duas wordmarks do mesmo tamanho de glyph com
+// padding diferente pareciam diferentes. Depois do trim, NAO forca canvas;
+// devolve a imagem no tamanho natural (pos-trim) e deixa o UIMenu nativo
+// decidir a largura/altura do slot -- e ele mesmo quem sabe o tamanho certo
+// pro icone dentro do menu, forcar um canvas nosso so atrapalhava.
+static UIImage *SCIWordmarkMenuTrim(UIImage *img) {
     if (!img) return nil;
     CGImageRef cg = img.CGImage;
     if (!cg) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
@@ -37,41 +41,13 @@ static UIImage *SCIWordmarkMenuTrimScale(UIImage *img, CGSize box) {
     }
     if (buf) free(buf);
     if (csp) CGColorSpaceRelease(csp);
-    CGSize sz = trimmed.size;
-    if (sz.width <= 0 || sz.height <= 0) return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-    // Escala por ALTURA FIXA, nao por "fit" nas duas dimensoes da caixa. O MIN()
-    // das duas proporcoes pegava a mais restritiva -- wordmarks com proporcao
-    // largura:altura mais "esticada" apos o trim batiam no limite de LARGURA
-    // primeiro e saiam mais baixas que as outras (era a causa exata da 1a/ultima
-    // ficarem menores). Fixando por altura, toda wordmark sai com a MESMA altura
-    // visual; a guarda de largura so entra em acao num asset anormalmente largo.
-    CGFloat r = box.height / sz.height;
-    CGFloat rw = box.width / sz.width;
-    if (rw < r) r = rw;
-    if (r <= 0) r = 1.0;
-    CGSize target = CGSizeMake(ceil(sz.width * r), ceil(sz.height * r));
-    // Canvas FIXO = box: desenha a wordmark (ja aspect-fit) CENTRALIZADA dentro
-    // da mesma caixa para toda variante. Assim todas as UIImage saem com o MESMO
-    // CGSize final (box), e o menu nativo mostra todos os icones do mesmo tamanho
-    // -- corrige "primeira grande, ultima pequena".
-    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
-    fmt.opaque = NO;
-    UIGraphicsImageRenderer *rnd = [[UIGraphicsImageRenderer alloc] initWithSize:box format:fmt];
-    UIImage *out = [rnd imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull c) {
-        CGRect r2 = CGRectMake((box.width - target.width) / 2.0,
-                               (box.height - target.height) / 2.0,
-                               target.width, target.height);
-        [trimmed drawInRect:r2];
-    }];
-    return [out imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
 static UIImage *SCIWordmarkMenuImage(NSString *name) {
     NSBundle *bundle = SCILocalizationBundle();
     UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-    // Canvas alvo: alto o suficiente pra preencher o slot do menu (UIMenu limita a
-    // altura ~22pt; cortar o padding faz a wordmark ocupar o slot inteiro).
-    return img ? SCIWordmarkMenuTrimScale(img, CGSizeMake(200.0, 44.0)) : nil;
+    return img ? SCIWordmarkMenuTrim(img) : nil;
 }
 
 @implementation SCITweakSettings (Section_Menus)
