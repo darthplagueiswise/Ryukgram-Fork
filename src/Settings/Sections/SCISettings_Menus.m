@@ -3,19 +3,23 @@
 // Wordmark thumbnails ship in the tweak bundle (BundleAssets). Template-rendered
 // so they tint with the menu. Returns nil if the asset is missing → caller falls
 // back to an SF Symbol.
-// So recorta a margem transparente. Cada PNG vem com uma quantidade diferente
-// de padding, e ISSO -- nao o tamanho do glyph em si -- era a causa de "1a
-// grande, ultima pequena": duas wordmarks do mesmo tamanho de glyph com
-// padding diferente pareciam diferentes. Depois do trim, NAO forca canvas;
-// devolve a imagem no tamanho natural (pos-trim) e deixa o UIMenu nativo
-// decidir a largura/altura do slot -- e ele mesmo quem sabe o tamanho certo
-// pro icone dentro do menu, forcar um canvas nosso so atrapalhava.
+// Canvas fixo 82x22pt -- convencao documentada (01-liquidglass-uikit-ios26.md
+// secao 5, RGWordmarkCanvasImage). Todo wordmark PRECISA sair com o MESMO
+// UIImage.size final (checklist secao 12). Passos: (1) alpha-trim -- cada PNG
+// de origem tem padding transparente diferente, e ISSO -- nao o glyph em si --
+// causava "1a grande, ultima pequena"; (2) escala por ALTURA FIXA, nao pelo
+// MIN() ingenuo das duas proporcoes (que ainda teria o mesmo bug se os
+// glyphs, ja trimados, tiverem proporcoes largura:altura diferentes); (3)
+// desenha centralizado no canvas fixo.
+static const CGFloat kSCIWordmarkCanvasW = 82.0;
+static const CGFloat kSCIWordmarkCanvasH = 22.0;
+
 static UIImage *SCIWordmarkMenuTrim(UIImage *img) {
-    if (!img) return nil;
+    if (!img) return img;
     CGImageRef cg = img.CGImage;
-    if (!cg) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (!cg) return img;
     size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-    if (!w || !h) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (!w || !h) return img;
     CGColorSpaceRef csp = CGColorSpaceCreateDeviceRGB();
     uint8_t *buf = (uint8_t *)calloc(w * h * 4, 1);
     UIImage *trimmed = img;
@@ -41,13 +45,36 @@ static UIImage *SCIWordmarkMenuTrim(UIImage *img) {
     }
     if (buf) free(buf);
     if (csp) CGColorSpaceRelease(csp);
-    return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    return trimmed;
+}
+
+static UIImage *SCIWordmarkMenuCanvasImage(UIImage *source) {
+    if (!source) return nil;
+    UIImage *trimmed = SCIWordmarkMenuTrim(source);
+    CGSize canvas = CGSizeMake(kSCIWordmarkCanvasW, kSCIWordmarkCanvasH);
+    CGSize sz = trimmed.size;
+    if (sz.width <= 0 || sz.height <= 0) return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    CGFloat r = canvas.height / sz.height;
+    CGFloat rw = canvas.width / sz.width;
+    if (rw < r) r = rw;
+    if (r <= 0) r = 1.0;
+    CGSize target = CGSizeMake(floor(sz.width * r), floor(sz.height * r));
+    CGRect rect = CGRectMake((canvas.width - target.width) / 2.0,
+                             (canvas.height - target.height) / 2.0,
+                             target.width, target.height);
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+    fmt.opaque = NO;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:canvas format:fmt];
+    UIImage *img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        [trimmed drawInRect:rect];
+    }];
+    return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
 static UIImage *SCIWordmarkMenuImage(NSString *name) {
     NSBundle *bundle = SCILocalizationBundle();
     UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-    return img ? SCIWordmarkMenuTrim(img) : nil;
+    return img ? SCIWordmarkMenuCanvasImage(img) : nil;
 }
 
 @implementation SCITweakSettings (Section_Menus)
