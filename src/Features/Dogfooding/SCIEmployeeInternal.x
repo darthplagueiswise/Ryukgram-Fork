@@ -45,17 +45,23 @@ static BOOL ei_ig_is_employee_or_test_user(void) { return YES; }
 // ── (2) Getters ObjC conhecidos -> YES (resolvidos por nome; safe se ausentes) ──
 %group SCIEmployeeObjCGroup
 %hook IGFacebookUserInfo
-- (BOOL)isEmployee { return EIOn() ? YES : %orig; }
+- (BOOL)isEmployee {
+	return EIOn() ? YES : %orig;
+}
 %end
 %hook IGAdPlatformLogger_objc
-- (BOOL)isEmployee { return EIOn() ? YES : %orig; }
+- (BOOL)isEmployee {
+	return EIOn() ? YES : %orig;
+}
 %end
 %end
 
 // ── (3) Getter Swift @objc -> YES (classe mangled, alias em runtime) ──
 %group SCIEmployeeSwiftGroup
 %hook IGAdPlatformLogger_swift
-- (BOOL)isEmployee { return EIOn() ? YES : %orig; }
+- (BOOL)isEmployee {
+	return EIOn() ? YES : %orig;
+}
 %end
 %end
 
