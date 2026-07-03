@@ -371,10 +371,16 @@ void SCIUIKit26ConfigureMenuButton(UIButton *button) {
         // its background with a custom interactive UIGlassEffect — that is what
         // produced the broken morph (stray glass blob + empty width) next to the
         // popup. Let the system own the background and the morph.
+        // clearGlass primeiro: mais transparente/discreto que o glass padrao,
+        // que ainda mostra tonalidade acinzentada sobre fundo escuro do IG.
+        // Cai para glassButtonConfiguration se clearGlass nao existir no runtime.
         if (@available(iOS 26.0, *)) {
             Class cls = UIButtonConfiguration.class;
+            SEL clearGlassSel = NSSelectorFromString(@"clearGlassButtonConfiguration");
             SEL glassSel = NSSelectorFromString(@"glassButtonConfiguration");
-            if ([cls respondsToSelector:glassSel]) {
+            if ([cls respondsToSelector:clearGlassSel]) {
+                cfg = ((id (*)(id, SEL))objc_msgSend)(cls, clearGlassSel);
+            } else if ([cls respondsToSelector:glassSel]) {
                 cfg = ((id (*)(id, SEL))objc_msgSend)(cls, glassSel);
             }
         }
