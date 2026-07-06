@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <substrate.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "../../Utils.h"
