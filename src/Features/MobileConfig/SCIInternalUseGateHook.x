@@ -34,7 +34,8 @@ static NSString * const kEasyAll        = @"sci_force_easy_gating_all";
 static NSString * const kEasyInternal   = @"sci_force_easy_gating_internal";
 static NSString * const kEasyAuth       = @"sci_force_easy_gating_auth";
 static NSString * const kEasyMCQ        = @"sci_force_easy_gating_mcq";
-static NSString * const kEasyPlatform   = @"sci_force_easy_gating_platform"; // no validated import in this build
+static NSString * const kEasyPlatform   = @"sci_force_easy_gating_platform";
+static NSString * const kMetaExtBool    = @"sci_force_meta_ext_experiment";
 
 static NSString * const kSessionedAll   = @"sci_force_sessioned_mc_all";
 static NSString * const kMSGCBoolean    = @"sci_force_msgc_sessioned_boolean";
@@ -96,6 +97,32 @@ static bool sci_eg_mcq_repl(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void
     return true;
 }
 
+// EasyGatingPlatformGetBoolean: ABI confirmada por desassembly no FBSharedFramework
+// (@0x6599f4): BOOL(void* param, void* a1, BOOL default), retorno BOOL em w0, com
+// lazy-init interna (3x bl) => MESMO caso dos EasyGating internos: hard-stub crasha,
+// usar call-orig. No binário 203.0.0.0.1 o símbolo ESTÁ importado (validação antiga
+// era de um build sem ele).
+static SCIEGBoolFn orig_eg_platform = NULL;
+static bool sci_eg_platform_repl(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){
+    if (orig_eg_platform) (void)orig_eg_platform(a0,a1,a2,a3,a4,a5,a6,a7);
+    return true;
+}
+
+// METAExtensionsExperimentGetBoolean / WithoutExposure: readers BOOL de experiment de
+// extensão, definidos no FBSharedFramework e importados pelo IG. Mesma ABI de reader
+// (retorno BOOL em w0, args ignorados). call-orig por segurança (deixa o orig rodar
+// exposure/side-effects; força true).
+static SCIEGBoolFn orig_meta_ext        = NULL;
+static SCIEGBoolFn orig_meta_ext_noexp  = NULL;
+static bool sci_meta_ext_repl(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){
+    if (orig_meta_ext) (void)orig_meta_ext(a0,a1,a2,a3,a4,a5,a6,a7);
+    return true;
+}
+static bool sci_meta_ext_noexp_repl(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){
+    if (orig_meta_ext_noexp) (void)orig_meta_ext_noexp(a0,a1,a2,a3,a4,a5,a6,a7);
+    return true;
+}
+
 static void SCIAddRebindCallOrig(struct rebinding *rbs, size_t *count, const char *symbol, void *repl, void **origSlot) {
     if (!symbol || !count || *count >= 16) return;
     rbs[*count].name = symbol;
@@ -133,6 +160,7 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     BOOL forceMSGC   = sessionedAll || SCIPrefOn(ud, kMSGCBoolean);
     BOOL forceMCIExp = sessionedAll || SCIPrefOn(ud, kMCIExpBool);
     BOOL forceMCIExt = sessionedAll || SCIPrefOn(ud, kMCIExtBool);
+    BOOL forceMetaExt = SCIPrefOn(ud, kMetaExtBool);
 
     struct rebinding rbs[16];
     memset(rbs, 0, sizeof(rbs));
@@ -145,13 +173,18 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     if (forceEasyInternal) SCIAddRebindCallOrig(rbs, &count, "EasyGatingGetBoolean_Internal_DoNotUseOrMock", (void *)sci_eg_internal_repl, (void **)&orig_eg_internal);
     if (forceEasyAuth)     SCIAddRebindCallOrig(rbs, &count, "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", (void *)sci_eg_auth_repl, (void **)&orig_eg_auth);
     if (forceEasyMCQ)      SCIAddRebindCallOrig(rbs, &count, "MCQEasyGatingGetBooleanInternalDoNotUseOrMock", (void *)sci_eg_mcq_repl, (void **)&orig_eg_mcq);
-    // Current framework/exec validation does not show a stable EasyGatingPlatformGetBoolean import.
-    // Leave the UI key crash-guarded but do not bind an unknown symbol.
-    if (forceEasyPlatform) SCILOG("EasyGatingPlatform requested but no validated import; skip");
+    // Validado no binário 203.0.0.0.1: EasyGatingPlatformGetBoolean É importado (def no
+    // FBSharedFramework @0x6599f4). ABI confirmada por desassembly: call-orig.
+    if (forceEasyPlatform) SCIAddRebindCallOrig(rbs, &count, "EasyGatingPlatformGetBoolean", (void *)sci_eg_platform_repl, (void **)&orig_eg_platform);
 
     if (forceMSGC)   SCIAddRebind(rbs, &count, "MSGCSessionedMobileConfigGetBoolean");
     if (forceMCIExp) SCIAddRebind(rbs, &count, "MCIExperimentCacheGetMobileConfigBoolean");
     if (forceMCIExt) SCIAddRebind(rbs, &count, "MCIExtensionExperimentCacheGetMobileConfigBoolean");
+
+    if (forceMetaExt) {
+        SCIAddRebindCallOrig(rbs, &count, "METAExtensionsExperimentGetBoolean", (void *)sci_meta_ext_repl, (void **)&orig_meta_ext);
+        SCIAddRebindCallOrig(rbs, &count, "METAExtensionsExperimentGetBooleanWithoutExposure", (void *)sci_meta_ext_noexp_repl, (void **)&orig_meta_ext_noexp);
+    }
 
     if (!count) {
         SCILOG("skip install: no enabled C hard stubs");

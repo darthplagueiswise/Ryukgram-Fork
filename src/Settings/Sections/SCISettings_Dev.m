@@ -59,6 +59,7 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL gates") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Internal DoNotUseOrMock") subtitle:@"" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — Platform") subtitle:SCILocalized(@"EasyGatingPlatformGetBoolean") defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"META Extensions Experiment") subtitle:SCILocalized(@"METAExtensionsExperimentGetBoolean (+WithoutExposure) — força BOOL true, call-orig") defaultsKey:@"sci_force_meta_ext_experiment" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — AuthDataContext") subtitle:SCILocalized(@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"EasyGating — MCQ dispatch") subtitle:SCILocalized(@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock") defaultsKey:@"sci_force_easy_gating_mcq" requiresRestart:YES],
 											]
