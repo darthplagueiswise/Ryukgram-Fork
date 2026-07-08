@@ -154,7 +154,7 @@ static void SCIClearCrashMarker(void) {
         @"sci_force_easy_gating_auth",
         @"sci_force_easy_gating_mcq",
         @"sci_force_easy_gating_platform",
-        @"sci_force_meta_ext_experiment",
+        @"sci_mc_native_override_apply_on_launch",
         @"sci_force_sessioned_mc_all",
         @"sci_force_msgc_sessioned_boolean",
         @"sci_force_mci_experiment_boolean",

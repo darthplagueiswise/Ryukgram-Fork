@@ -1,7 +1,9 @@
 #import "SCIMobileConfigRuntime.h"
+#import "SCINativeMobileConfigOverride.h"
 #import "../../Utils.h"
 #import <objc/runtime.h>
 #import <substrate.h>
+#import <UIKit/UIKit.h>
 
 #define SCI_MC_RECORD(pid, kind, ret, def) \
     [SCIMobileConfigRuntime recordParamID:(unsigned long long)(pid) type:(kind) returned:(ret) defaultValue:(def) sourceObject:self selector:NSStringFromSelector(_cmd)]
@@ -49,16 +51,19 @@ DEFINE_MC_SLOT(3)
 DEFINE_MC_SLOT(4)
 DEFINE_MC_SLOT(5)
 DEFINE_MC_SLOT(6)
+DEFINE_MC_SLOT(7)
 
 static NSMutableSet<NSString *> *sInstalled;
 
 static void sciHook(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
     if (!cls || !selName.length || !newImp || !origOut) return;
     SEL sel = NSSelectorFromString(selName);
+    // Class may not be loaded yet (framework not mapped). Do NOT mark installed
+    // in that case, so a later install pass can retry once the class exists.
     if (!class_getInstanceMethod(cls, sel)) return;
     if (!sInstalled) sInstalled = [NSMutableSet new];
     NSString *key = [NSString stringWithFormat:@"%@:%@", NSStringFromClass(cls), selName];
-    if ([sInstalled containsObject:key]) return;
+    if ([sInstalled containsObject:key]) return;   // truly already hooked
     [sInstalled addObject:key];
     MSHookMessageEx(cls, sel, newImp, origOut);
 }
@@ -131,6 +136,10 @@ static void sciInstallMobileConfigRuntimeHooks(void) {
     Class c4 = NSClassFromString(@"FBMobileConfigSessionlessContext");
     Class c5 = NSClassFromString(@"FBMobileConfigContext");
     Class c6 = NSClassFromString(@"FBMobileConfigAPI");
+    // c7: the CENTRAL startup-configs reader/writer. This is the single point all
+    // internal/dogfood/tools menus read through. ABI-identical selectors
+    // (getBool:withDefault: etc.) so it reuses the same slot machinery.
+    Class c7 = NSClassFromString(@"FBMobileConfigStartupConfigs");
     INSTALL_SLOT(c0, 0);
     INSTALL_SLOT(c1, 1);
     INSTALL_SLOT(c2, 2);
@@ -138,6 +147,7 @@ static void sciInstallMobileConfigRuntimeHooks(void) {
     INSTALL_SLOT(c4, 4);
     INSTALL_SLOT(c5, 5);
     INSTALL_SLOT(c6, 6);
+    INSTALL_SLOT(c7, 7);
     sciInstallMobileConfigLiveContextHooks();
 }
 
@@ -146,6 +156,54 @@ void SCIInstallMobileConfigRuntimeHooksIfNeeded(void) {
     sciInstallMobileConfigRuntimeHooks();
 }
 
+// Cheap pref gate: is the native override path requested to apply at launch?
+// This mirrors the stable SCIInternalUseGateHook pattern - a cheap NSUserDefaults
+// read in %ctor, early-return when off, and only then do the native apply.
+static NSString * const kSCINativeApplyKey = @"sci_mc_native_override_apply_on_launch";
+
 %ctor {
-    // Runtime capture is installed on demand by SCIMobileConfigBrowserViewController.
+    @autoreleasepool {
+        // MOMENT 1 (launch, if persisted): apply native overrides via the app's own
+        // overrides table, then force one config update. This is the robust path
+        // (doc 03 §12) - it persists in the app and affects every reader, not just
+        // the ones we intercept. Guarded by a cheap pref read; no dispatch_after,
+        // no runtime scan, no ObjC-heavy work when off.
+        NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+        if (![ud boolForKey:kSCINativeApplyKey]) return;
+
+        // Crash guard: if the previous launch armed the guard and never became
+        // stable, back off this launch instead of applying again.
+        if ([SCIMobileConfigRuntime checkAndArmCrashGuard]) {
+            // guard tripped -> disable native apply this run to recover
+            return;
+        }
+
+        // Apply once now: at %ctor the app binary and @rpath frameworks are mapped,
+        // so FBMobileConfigStartupConfigs is usually available. If the class is not
+        // yet registered, applyAllPersistedNativeOverrides early-returns cleanly
+        // (no crash) and the DidBecomeActive pass below covers it.
+        [SCINativeMobileConfigOverride applyAllPersistedNativeOverrides];
+
+        // One-shot lifecycle observer (NOT dispatch_after - docs THEOS.md forbid
+        // dispatch_after in %ctor). By the first UIApplicationDidBecomeActive the
+        // full framework graph and ObjC classes are guaranteed registered, so we
+        // (1) re-apply the native overrides idempotently to cover the case where
+        //     the class was not ready at %ctor, and
+        // (2) mark the launch stable so the crash guard clears once the app has
+        //     actually reached foreground-active without crashing.
+        static dispatch_once_t activeOnce;
+        dispatch_once(&activeOnce, ^{
+            __block id token = [NSNotificationCenter.defaultCenter
+                addObserverForName:UIApplicationDidBecomeActiveNotification
+                            object:nil
+                             queue:NSOperationQueue.mainQueue
+                        usingBlock:^(__unused NSNotification *note) {
+                // idempotent: setOverrideForParam:andValue: just overwrites the
+                // same entries; harmless if already applied at %ctor.
+                [SCINativeMobileConfigOverride applyAllPersistedNativeOverrides];
+                [SCIMobileConfigRuntime markLaunchStable];
+                if (token) { [NSNotificationCenter.defaultCenter removeObserver:token]; token = nil; }
+            }];
+        });
+    }
 }

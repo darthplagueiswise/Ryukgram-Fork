@@ -448,7 +448,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_force_easy_gating_internal": @(NO),
 		@"sci_force_easy_gating_mcq": @(NO),
 		@"sci_force_easy_gating_platform": @(NO),
-		@"sci_force_meta_ext_experiment": @(NO),
+		@"sci_mc_native_override_apply_on_launch": @(NO),
 		@"sci_force_employee_defaults_persist": @(NO),
 		@"sci_force_ig_creation_internal_label": @(NO),
 		@"sci_force_ig_featured_internal_badge": @(NO),

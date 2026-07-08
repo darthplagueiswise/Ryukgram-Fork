@@ -1,5 +1,6 @@
 #import "SCIDogfoodBrowserViewController.h"
 #import "../Features/MobileConfig/SCIMobileConfigRuntime.h"
+#import "../Features/MobileConfig/SCINativeMobileConfigOverride.h"
 #import "../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import "../Features/Dogfooding/SCILauncherOverride.h"
 #import "../Features/Dogfooding/SCIInternalActions.h"
@@ -269,6 +270,8 @@ typedef NS_ENUM(NSInteger, SCIDogfoodBrowserMode) {
         @{ @"title": @"Open Notes Dogfooding", @"subtitle": @"Uses notesDogfoodingSettingsOpenOnViewController:userSession: with the live user session.", @"badge": @"NOTES", @"action": @"openNotes", @"emphasized": @(YES) },
         @{ @"title": @"Copy full runtime snapshot", @"subtitle": @"Exports state, stubs, live objects, captures, MobileConfig reads and launcher overrides as JSON.", @"badge": @"JSON", @"action": @"export", @"emphasized": @(NO) },
         @{ @"title": @"MobileConfig runtime capture", @"subtitle": capture ? @"ON for this session. Dogfood/Internal read tracer is active." : @"OFF. Tap to enable only while investigating a specific getter.", @"badge": SCIDFBrowserBoolBadge(capture), @"action": @"toggleCapture", @"emphasized": @(capture) },
+        @{ @"title": @"Native override: apply on launch", @"subtitle": [NSUserDefaults.standardUserDefaults boolForKey:@"sci_mc_native_override_apply_on_launch"] ? @"ON. Persisted MobileConfig overrides are written into the app's own overrides table at launch (native path, doc §12), then configs are force-updated. Crash-guarded." : @"OFF. Tap to write persisted overrides natively at launch instead of only intercepting readers.", @"badge": SCIDFBrowserBoolBadge([NSUserDefaults.standardUserDefaults boolForKey:@"sci_mc_native_override_apply_on_launch"]), @"action": @"toggleNativeApply", @"emphasized": @([NSUserDefaults.standardUserDefaults boolForKey:@"sci_mc_native_override_apply_on_launch"]) },
+        @{ @"title": @"Native override: apply now", @"subtitle": [SCINativeMobileConfigOverride available] ? @"Writes all persisted overrides into the app's overrides table now via setOverrideForParam:andValue: and force-updates configs." : @"FBMobileConfigStartupConfigs not ready yet; open after login.", @"badge": [SCINativeMobileConfigOverride available] ? @"APPLY" : @"WAIT", @"action": @"applyNativeNow", @"emphasized": @([SCINativeMobileConfigOverride available]) },
         @{ @"title": @"Deep caller symbols", @"subtitle": deep ? @"ON. Delayed stack/caller symbol enrichment is active." : @"OFF. Safer default; enable only when the callsite is needed.", @"badge": SCIDFBrowserBoolBadge(deep), @"action": @"toggleDeep", @"emphasized": @(deep) },
     ];
 }
@@ -496,6 +499,21 @@ typedef NS_ENUM(NSInteger, SCIDogfoodBrowserMode) {
     }
     if ([action isEqualToString:@"export"]) { [self exportSnapshot]; return YES; }
     if ([action isEqualToString:@"toggleCapture"]) { [self toggleCapturePreference]; return YES; }
+    if ([action isEqualToString:@"toggleNativeApply"]) {
+        NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+        BOOL next = ![ud boolForKey:@"sci_mc_native_override_apply_on_launch"];
+        [ud setBool:next forKey:@"sci_mc_native_override_apply_on_launch"];
+        [ud synchronize];
+        [SCIUtils showErrorHUDWithDescription:next ? @"Native apply on launch: ON (restart to apply)" : @"Native apply on launch: OFF"];
+        [self refreshRuntimeStateOnly];
+        return YES;
+    }
+    if ([action isEqualToString:@"applyNativeNow"]) {
+        NSUInteger n = [SCINativeMobileConfigOverride applyAllPersistedNativeOverrides];
+        [SCIUtils showErrorHUDWithDescription:[NSString stringWithFormat:@"Applied %lu native override(s)", (unsigned long)n]];
+        [self refreshRuntimeStateOnly];
+        return YES;
+    }
     if ([action isEqualToString:@"toggleDeep"]) { [self toggleDeepCallerSymbols]; return YES; }
     if ([action isEqualToString:@"bloksOn"]) { [self confirmAutofillAction:@"Force Bloks Experience ON" message:@"Call setForceBloksExperienceOn on the live IGAutofillInternalSettings object?" block:^{ return [SCIInternalActions setBloksForceExperienceState:1 error:NULL]; }]; return YES; }
     if ([action isEqualToString:@"bloksOff"]) { [self confirmAutofillAction:@"Force Bloks Experience OFF" message:@"Call setForceBloksExperienceOff on the live IGAutofillInternalSettings object?" block:^{ return [SCIInternalActions setBloksForceExperienceState:0 error:NULL]; }]; return YES; }
