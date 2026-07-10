@@ -42,7 +42,7 @@
 		_separatorH = [UIView new];
 		_separatorV1 = [UIView new];
 		for (UIView *sep in @[_separatorH, _separatorV1]) {
-			sep.backgroundColor = [SCIUIKit26BaseSurfaceColor() colorWithAlphaComponent:0.9];
+			sep.backgroundColor = [UIColor.systemBackgroundColor colorWithAlphaComponent:0.9];
 			[self addSubview:sep];
 		}
 	}

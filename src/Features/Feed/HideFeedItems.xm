@@ -21,16 +21,36 @@ static Class sciInFeedStoriesTrayCls(void) {
 	return cls;
 }
 
+// Cached pref snapshot — objectsForListAdapter runs per list-diff on the scroll path.
+static struct {
+	BOOL hideMetaAI, noSuggestedPost, noSuggestedReels, noSuggestedAccount;
+	BOOL noSuggestedThreads, hideStoriesTray, hideEntireFeed;
+} sciFeedPrefs;
+static BOOL sciFeedPrefsStale = YES;
+
+static void sciRefreshFeedPrefs(void) {
+	if (!sciFeedPrefsStale) return;
+	sciFeedPrefs.hideMetaAI = [SCIUtils getBoolPref:@"hide_meta_ai"];
+	sciFeedPrefs.noSuggestedPost = [SCIUtils getBoolPref:@"no_suggested_post"];
+	sciFeedPrefs.noSuggestedReels = [SCIUtils getBoolPref:@"no_suggested_reels"];
+	sciFeedPrefs.noSuggestedAccount = [SCIUtils getBoolPref:@"no_suggested_account"];
+	sciFeedPrefs.noSuggestedThreads = [SCIUtils getBoolPref:@"no_suggested_threads"];
+	sciFeedPrefs.hideStoriesTray = [SCIUtils getBoolPref:@"hide_stories_tray"];
+	sciFeedPrefs.hideEntireFeed = [SCIUtils getBoolPref:@"hide_entire_feed"];
+	sciFeedPrefsStale = NO;
+}
+
 static NSArray *removeItemsInList(NSArray *list, BOOL isFeed, BOOL hideAds) {
 	if (![list isKindOfClass:NSArray.class] || !list.count) return list;
 
-	BOOL hideMetaAI = isFeed && [SCIUtils getBoolPref:@"hide_meta_ai"];
-	BOOL noSuggestedPost = isFeed && [SCIUtils getBoolPref:@"no_suggested_post"];
-	BOOL noSuggestedReels = isFeed && [SCIUtils getBoolPref:@"no_suggested_reels"];
-	BOOL noSuggestedAccount = [SCIUtils getBoolPref:@"no_suggested_account"];
-	BOOL noSuggestedThreads = [SCIUtils getBoolPref:@"no_suggested_threads"];
-	BOOL hideStoriesTray = isFeed && [SCIUtils getBoolPref:@"hide_stories_tray"];
-	BOOL hideEntireFeed = isFeed && [SCIUtils getBoolPref:@"hide_entire_feed"];
+	sciRefreshFeedPrefs();
+	BOOL hideMetaAI = isFeed && sciFeedPrefs.hideMetaAI;
+	BOOL noSuggestedPost = isFeed && sciFeedPrefs.noSuggestedPost;
+	BOOL noSuggestedReels = isFeed && sciFeedPrefs.noSuggestedReels;
+	BOOL noSuggestedAccount = sciFeedPrefs.noSuggestedAccount;
+	BOOL noSuggestedThreads = sciFeedPrefs.noSuggestedThreads;
+	BOOL hideStoriesTray = isFeed && sciFeedPrefs.hideStoriesTray;
+	BOOL hideEntireFeed = isFeed && sciFeedPrefs.hideEntireFeed;
 
 	NSMutableArray *filtered = nil;
 
@@ -126,8 +146,8 @@ static NSArray *removeShortFeedSpinner(NSArray *list) {
 
 %hook IGMainFeedListAdapterDataSource
 - (NSArray *)objectsForListAdapter:(id)arg1 {
-	NSArray *sciOrig = %orig;
-	return removeShortFeedSpinner(removeItemsInList(sciOrig, YES, sciHideAds(@"feed")));
+	NSArray *sciOrigList = %orig;
+	return removeShortFeedSpinner(removeItemsInList(sciOrigList, YES, sciHideAds(@"feed")));
 }
 %end
 
@@ -201,6 +221,14 @@ static NSArray *sciSundialFilterAndLimit(id dataSource, NSArray *list) {
 }
 %end
 
+// IG 434 renamed the Swift module: IGSundialFeed -> IGSundialFeedDataSource.
+%hook _TtC23IGSundialFeedDataSource23IGSundialFeedDataSource
+- (NSArray *)objectsForListAdapter:(id)arg1 {
+	NSArray *sciOrig = %orig;
+	return sciSundialFilterAndLimit(self, sciOrig);
+}
+%end
+
 %hook IGContextualFeedViewController
 - (NSArray *)objectsForListAdapter:(id)arg1 {
 	NSArray *list = %orig;
@@ -228,8 +256,8 @@ static NSArray *sciSundialFilterAndLimit(id dataSource, NSArray *list) {
 }
 %end
 
-%hook IGStoryAdsManager
-- (id)initWithUserSession:(id)arg1 storyViewerLoggingContext:(id)arg2 storyFullscreenSectionLoggingContext:(id)arg3 viewController:(id)arg4 {
+%hook _TtC17IGStoryAdsManager17IGStoryAdsManager
+- (id)initWithUserSession:(id)arg1 storyAdsManagerDelegate:(id)arg2 storyViewerLoggingContext:(id)arg3 sectionLoggingContext:(id)arg4 viewController:(id)arg5 storyViewerNavigator:(id)arg6 {
 	return sciHideAds(@"stories") ? nil : %orig;
 }
 %end
@@ -315,6 +343,10 @@ static NSArray *sciSundialFilterAndLimit(id dataSource, NSArray *list) {
 %end
 
 %ctor {
+	[NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+	                                                object:nil queue:nil
+	                                             usingBlock:^(__unused NSNotification *n) { sciFeedPrefsStale = YES; }];
+
 	%init(IGContextualFeedViewController = NSClassFromString(@"_TtC30IGContextualFeedViewController30IGContextualFeedViewController") ?: NSClassFromString(@"IGContextualFeedViewController"),
 	      IGChainingFeedViewController = NSClassFromString(@"_TtC18IGPostChainingFeed28IGChainingFeedViewController") ?: NSClassFromString(@"IGChainingFeedViewController"),
 	      IGStoryAdsOptInTextView = NSClassFromString(@"_TtC12IGStoryAdsUI23IGStoryAdsOptInTextView") ?: NSClassFromString(@"IGStoryAdsOptInTextView"));

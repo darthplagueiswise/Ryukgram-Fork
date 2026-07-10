@@ -118,10 +118,8 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	self.availableMask = [self maskFromRows:self.rows];
 	self.selection = self.initialSelection & self.availableMask;
 
@@ -150,7 +148,7 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 	self.tableView.delegate = self;
 	self.tableView.estimatedRowHeight = 64;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
-	self.tableView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 	[self.tableView registerClass:SCIPickerCell.class forCellReuseIdentifier:@"scope"];
 	[self.view addSubview:self.tableView];
@@ -165,7 +163,7 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 - (void)buildCommitBar {
 	self.commitBar = UIView.new;
 	self.commitBar.translatesAutoresizingMaskIntoConstraints = NO;
-	self.commitBar.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.commitBar.backgroundColor = UIColor.systemGroupedBackgroundColor;
 	[self.view addSubview:self.commitBar];
 
 	self.continueButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -322,7 +320,6 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 
 - (UITableViewCell *)modeCellForTable:(UITableView *)tv row:(NSInteger)row {
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"mode"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"mode"];
 
 	BOOL isMerge = row == 1;
@@ -339,7 +336,6 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 
 - (UITableViewCell *)jsonCellForTable:(UITableView *)tv {
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"json"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"json"];
 
 	cell.textLabel.text = SCILocalized(@"Raw JSON");
@@ -356,7 +352,6 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 	if (kind == SCIPickerSectionRaw) return [self jsonCellForTable:tv];
 
 	SCIPickerCell *cell = [tv dequeueReusableCellWithIdentifier:@"scope" forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
 	NSDictionary *r = self.rows[ip.row];
 
 	NSInteger bit = [r[@"bit"] integerValue];
@@ -407,7 +402,7 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 - (void)pushRawJSON {
 	UIViewController *vc = UIViewController.new;
 	vc.title = SCILocalized(@"Raw JSON");
-	vc.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	vc.view.backgroundColor = UIColor.systemBackgroundColor;
 
 	UITextView *tv = UITextView.new;
 	tv.translatesAutoresizingMaskIntoConstraints = NO;
@@ -415,7 +410,7 @@ typedef NS_ENUM(NSInteger, SCIPickerSection) {
 	tv.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
 	tv.text = self.rawJSON ?: @"{}";
 	tv.textContainerInset = UIEdgeInsetsMake(12, 12, 12, 12);
-	tv.backgroundColor = SCIUIKit26PanelFillColor();
+	tv.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	[vc.view addSubview:tv];
 
 	[NSLayoutConstraint activateConstraints:@[

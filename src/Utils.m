@@ -188,16 +188,7 @@ static void sciDismissAlertWindow(void) {
 + (void)showSettingsVC:(UIWindow *)window {
 	[SCILockGate presentLockedVC:[SCISettingsViewController new]
 	                    forGroup:SCILockGroupSettings
-	                        from:window.rootViewController
-	                  sourceView:nil];
-}
-
-+ (void)showSettingsVCFromSourceView:(UIView *)sourceView {
-	UIViewController *presenter = [self nearestViewControllerForView:sourceView] ?: sourceView.window.rootViewController;
-	[SCILockGate presentLockedVC:[SCISettingsViewController new]
-	                    forGroup:SCILockGroupSettings
-	                        from:presenter
-	                  sourceView:sourceView];
+	                        from:window.rootViewController];
 }
 
 // Open settings at a named top-level entry. Entry becomes the nav root with
@@ -704,6 +695,7 @@ static void SCIPresentAlert(UIAlertController *alert, UIViewController *host) {
 	UIAlertController *alert = SCIAlert(title, message);
 
 	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Restart") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+		[NSUserDefaults.standardUserDefaults synchronize];
 		exit(0);
 	}]];
 

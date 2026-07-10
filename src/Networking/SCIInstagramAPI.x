@@ -172,6 +172,40 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
     }];
 }
 
++ (void)fetchFriendshipForPK:(NSString *)pk
+                  completion:(SCIAPIStatusesCompletion)completion {
+    if (!pk.length) { if (completion) completion(nil, nil); return; }
+    [self sendRequestWithMethod:@"GET"
+                           path:[NSString stringWithFormat:@"friendships/show/%@/", pk]
+                           body:nil
+                     completion:^(NSDictionary *response, NSError *error) {
+        // show/ returns the status fields at the top level (unlike show_many's nesting).
+        NSDictionary *status = [response isKindOfClass:[NSDictionary class]] ? response : nil;
+        if (completion) completion(status, error);
+    }];
+}
+
++ (void)fetchPendingFollowRequestsWithCompletion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion {
+    [self fetchPendingPage:nil accumulated:[NSMutableArray array] page:0 completion:completion];
+}
+
++ (void)fetchPendingPage:(NSString *)maxId
+             accumulated:(NSMutableArray *)acc
+                    page:(NSInteger)page
+              completion:(void (^)(NSArray<NSDictionary *> *, NSError *))completion {
+    NSString *path = maxId.length ? [NSString stringWithFormat:@"friendships/pending/?max_id=%@", maxId] : @"friendships/pending/";
+    [self sendRequestWithMethod:@"GET" path:path body:nil completion:^(NSDictionary *response, NSError *error) {
+        if (error) { if (completion) completion(acc.count ? acc : nil, error); return; }
+        id users = response[@"users"];
+        if ([users isKindOfClass:[NSArray class]]) for (id u in users) if ([u isKindOfClass:[NSDictionary class]]) [acc addObject:u];
+        id next = response[@"next_max_id"];
+        NSString *nextId = [next isKindOfClass:[NSString class]] ? next : ([next respondsToSelector:@selector(stringValue)] ? [next stringValue] : nil);
+        // Cap pages — incoming request lists are small; this just bounds a runaway.
+        if (nextId.length && page < 5) [self fetchPendingPage:nextId accumulated:acc page:page + 1 completion:completion];
+        else if (completion) completion(acc, nil);
+    }];
+}
+
 // ============ Media ============
 
 + (void)fetchMediaInfoForMediaId:(NSString *)mediaId completion:(SCIAPICompletion)completion {
@@ -193,4 +227,19 @@ static void sciPerformRequest(NSMutableURLRequest *req, SCIAPICompletion complet
                      completion:completion];
 }
 
++ (void)fetchStoryViewersForMediaId:(NSString *)mediaId
+                              maxId:(NSString *)maxId
+                              count:(NSInteger)count
+                         completion:(SCIAPICompletion)completion {
+    if (!mediaId.length) { if (completion) completion(nil, nil); return; }
+    NSMutableString *path = [NSMutableString stringWithFormat:@"media/%@/list_reel_media_viewer/?", mediaId];
+    if (count > 0) [path appendFormat:@"count=%ld&", (long)count];
+    if (maxId.length) {
+        NSString *enc = [maxId stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: maxId;
+        [path appendFormat:@"max_id=%@", enc];
+    }
+    [self sendRequestWithMethod:@"GET" path:path body:nil completion:completion];
+}
+
 @end
+

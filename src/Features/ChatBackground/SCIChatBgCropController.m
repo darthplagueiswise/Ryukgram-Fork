@@ -16,7 +16,6 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.view.backgroundColor = UIColor.blackColor;
 	self.modalPresentationStyle = UIModalPresentationFullScreen;

@@ -16,10 +16,8 @@ static NSArray *sciPresetDomains(void) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
     self.title = SCILocalized(@"Embed domain");
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [UIColor systemBackgroundColor];
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self;
@@ -86,7 +84,6 @@ static NSArray *sciPresetDomains(void) {
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell"];
-	SCIUIKit26ConfigureTableCell(cell);
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"cell"];
     NSString *domain = indexPath.section == 0
         ? sciPresetDomains()[indexPath.row]

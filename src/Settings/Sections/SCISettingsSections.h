@@ -16,6 +16,7 @@
 #import "../../Features/StoriesAndMessages/SCIExcludedStoryUsers.h"
 #import "../../Features/ChatBackground/SCIChatBgSettingsVC.h"
 #import "../../Features/DeletedMessages/SCIDeletedMessagesViewController.h"
+#import "../../Features/FollowRequests/SCIFollowRequestsViewController.h"
 #import "../../Features/General/SCICacheManager.h"
 #import "../../Features/General/SCIChangelog.h"
 #import "../../Features/Theme/SCITheme.h"
@@ -69,15 +70,17 @@ static inline UIViewController * _Nullable sciTopVC(void) {
 + (SCISetting *)reelsNavCell;
 + (SCISetting *)messagesNavCell;
 + (SCISetting *)profileNavCell;
++ (SCISetting *)followRequestsNavCell;
 + (SCISetting *)interfaceNavCell;
 + (SCISetting *)mediaSavingNavCell;
 + (SCISetting *)confirmActionsNavCell;
 + (SCISetting *)themeNavCell;
 + (SCISetting *)backupNavCell;
 + (SCISetting *)advancedNavCell;
-+ (SCISetting *)devNavCell;
 + (SCISetting *)debugNavCell;
++ (SCISetting *)devNavCell;
 + (SCISetting *)aboutNavCell;
++ (SCISetting *)instaPlusNavCell;
 @end
 
 NS_ASSUME_NONNULL_END

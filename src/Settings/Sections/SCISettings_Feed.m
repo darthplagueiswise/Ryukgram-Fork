@@ -35,7 +35,7 @@
 										@{
 											@"header": SCILocalized(@"Stories tray"),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Tray long-press actions") subtitle:SCILocalized(@"Adds 'View profile picture' and 'View cover' to story tray long-press menus") defaultsKey:@"story_tray_actions"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Tray long-press actions") subtitle:SCILocalized(@"Adds 'Profile picture' to story tray long-press menus") defaultsKey:@"story_tray_actions"],
 											]
 										},
 										@{

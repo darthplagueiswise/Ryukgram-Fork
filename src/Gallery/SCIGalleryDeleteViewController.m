@@ -54,13 +54,11 @@ typedef NS_ENUM(NSInteger, SCIGalleryDeleteSection) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.title = self.mode == SCIGalleryDeletePageModeRoot
 		? SCILocalized(@"Delete files")
 		: SCILocalized(@"Delete by user");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
-	self.tableView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
+	self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
 	[self reloadDataModel];
 }
 

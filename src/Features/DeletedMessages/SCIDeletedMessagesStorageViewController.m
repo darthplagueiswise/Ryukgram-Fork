@@ -16,11 +16,9 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
 	self.title = SCILocalized(@"Storage");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -116,7 +114,6 @@
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
 	static NSString *rid = @"sci_dm_storage";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:rid];
 
 	cell.detailTextLabel.text = nil;

@@ -13,6 +13,8 @@ NSString *const SCIAID_DownloadSave        = @"download_save";
 NSString *const SCIAID_DownloadGallery     = @"download_gallery";
 NSString *const SCIAID_DownloadWithMusic        = @"download_with_music";
 NSString *const SCIAID_DownloadWithMusicGallery = @"download_with_music_gallery";
+NSString *const SCIAID_DownloadImageOnly        = @"download_image_only";
+NSString *const SCIAID_DownloadImageOnlyGallery = @"download_image_only_gallery";
 NSString *const SCIAID_BulkCopyURLs        = @"bulk_copy_urls";
 NSString *const SCIAID_BulkDownloadShare   = @"bulk_download_share";
 NSString *const SCIAID_BulkDownloadSave    = @"bulk_download_save";
@@ -129,6 +131,7 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
         case SCIActionSourceDM: return @"dm";
         case SCIActionSourceProfile: return @"profile";
         case SCIActionSourceInstants: return @"instants";
+        case SCIActionSourceDMNativeSave: return @"dm_native_save";
         case SCIActionSourceCount: break;
     }
     return @"unknown";
@@ -142,6 +145,7 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
         case SCIActionSourceDM: return SCILocalized(@"DM disappearing media");
         case SCIActionSourceProfile: return SCILocalized(@"Profile");
         case SCIActionSourceInstants: return SCILocalized(@"Instants");
+        case SCIActionSourceDMNativeSave: return SCILocalized(@"DM Save button");
         case SCIActionSourceCount: break;
     }
     return @"";
@@ -159,6 +163,7 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
         case SCIActionSourceDM:      return @"dm_visual_action_default";
         case SCIActionSourceProfile: return @"action_button_profile_default_action";
         case SCIActionSourceInstants: return nil;  // new source, no legacy migration
+        case SCIActionSourceDMNativeSave: return nil;  // new source, no legacy migration
         case SCIActionSourceCount: break;
     }
     return nil;
@@ -244,6 +249,8 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
             d(SCIAID_CopyURL,             SCILocalized(@"Copy media URL"),         @"link",                               YES),
             d(SCIAID_DownloadShare,       SCILocalized(@"Download and share"),     @"square.and.arrow.up",                YES),
             d(SCIAID_DownloadSave,        SCILocalized(@"Download to Photos"),     @"square.and.arrow.down",              YES),
+            d(SCIAID_DownloadImageOnly,   SCILocalized(@"Save image (no music)"),  @"photo",                              YES),
+         dOff(SCIAID_DownloadImageOnlyGallery, SCILocalized(@"Gallery image (no music)"), @"photo.badge.arrow.down",      YES),
          dOff(SCIAID_DownloadGallery,     SCILocalized(@"Download to Gallery"),    @"photo.on.rectangle.angled",          YES),
             d(SCIAID_BulkCopyURLs,        SCILocalized(@"Copy all URLs"),          @"doc.on.doc",                         NO),
             d(SCIAID_BulkDownloadShare,   SCILocalized(@"Download and share all"), @"square.and.arrow.up.on.square",      NO),
@@ -291,6 +298,14 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
          dOff(SCIAID_BulkDownloadGallery, SCILocalized(@"Save all to Gallery"),  @"rectangle.stack",                    NO),
         ];
 
+        // DM native Save button reroute — Expand / Photos / Gallery / Share.
+        NSArray *dmNativeSave = @[
+            d(SCIAID_Expand,              SCILocalized(@"Expand"),               @"arrow.up.left.and.arrow.down.right", YES),
+            d(SCIAID_DownloadSave,        SCILocalized(@"Save to Photos"),       @"square.and.arrow.down",              YES),
+         dOff(SCIAID_DownloadGallery,     SCILocalized(@"Save to Gallery"),      @"photo.on.rectangle.angled",          YES),
+            d(SCIAID_DownloadShare,       SCILocalized(@"Share"),                @"square.and.arrow.up",                YES),
+        ];
+
         gSCIActionCatalogCache = @{
             @(SCIActionSourceFeed):     feed,
             @(SCIActionSourceReels):    reels,
@@ -298,6 +313,7 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
             @(SCIActionSourceDM):       dm,
             @(SCIActionSourceProfile):  profile,
             @(SCIActionSourceInstants): instants,
+            @(SCIActionSourceDMNativeSave): dmNativeSave,
         };
     }
     return gSCIActionCatalogCache[@(source)] ?: @[];
@@ -367,7 +383,7 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
                         @[SCIAID_CopyURL]),
                 section(@"download",
                         SCILocalized(@"Download"), @"arrow.down.circle", NO,
-                        @[SCIAID_DownloadShare, SCIAID_DownloadSave, SCIAID_DownloadGallery]),
+                        @[SCIAID_DownloadShare, SCIAID_DownloadSave, SCIAID_DownloadImageOnly, SCIAID_DownloadImageOnlyGallery, SCIAID_DownloadGallery]),
                 section(@"bulk",
                         SCILocalized(@"Bulk download"), @"square.stack.3d.down.right", YES,
                         @[SCIAID_BulkCopyURLs, SCIAID_BulkDownloadShare, SCIAID_BulkDownloadSave, SCIAID_BulkDownloadGallery]),
@@ -404,6 +420,13 @@ static NSDictionary<NSNumber *, NSArray *> *gSCIActionCatalogCache = nil;
                 section(@"all",
                         SCILocalized(@"All loaded instants"), @"square.stack.3d.down.right", YES,
                         @[SCIAID_BulkDownloadSave, SCIAID_BulkDownloadGallery]),
+            ];
+
+        case SCIActionSourceDMNativeSave:
+            return @[
+                section(@"actions",
+                        SCILocalized(@"Download"), @"arrow.down.circle", NO,
+                        @[SCIAID_Expand, SCIAID_DownloadSave, SCIAID_DownloadGallery, SCIAID_DownloadShare]),
             ];
 
         case SCIActionSourceCount: break;

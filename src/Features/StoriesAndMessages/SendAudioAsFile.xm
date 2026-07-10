@@ -1,6 +1,5 @@
-// Send audio/video files as voice messages in DMs.
-// Injects an Upload Audio item into the DM plus menu, runs the file through a
-// trim UI, transcodes to AAC m4a when needed, then hands the URL to IG's native voice pipeline.
+// Send audio/video files as voice messages in DMs. Adds an Upload Audio item to
+// the DM plus menu, trims + transcodes to AAC m4a, then feeds IG's voice pipeline.
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
@@ -375,6 +374,8 @@ static void sciExportAndSend(NSURL *url, UIViewController *threadVC, BOOL isVide
 
 #pragma mark - Trim preparation
 
+static void sciShowUploadAudioOptions(UIViewController *threadVC);
+
 static void sciShowTrimVC(NSURL *url, BOOL isVideo, UIViewController *threadVC) {
 	if (!url || !threadVC) return;
 
@@ -389,24 +390,30 @@ static void sciShowTrimVC(NSURL *url, BOOL isVideo, UIViewController *threadVC) 
 		UIViewController *vc = weakThread;
 		if (vc) sciExportAndSend(url, vc, isVideo, trimRange);
 	};
+	trimVC.onBack = ^{
+		UIViewController *vc = weakThread;
+		if (vc) sciShowUploadAudioOptions(vc);
+	};
 
 	[threadVC presentViewController:trimVC animated:YES completion:nil];
 }
 
-static void sciFFmpegPreConvertForTrim(NSURL *url, UIViewController *threadVC) {
+static void sciFFmpegPreConvertForTrim(NSURL *url, BOOL sourceHasAudio, UIViewController *threadVC) {
 	NSURL *outURL = [SCITempFiles claimWithExt:@"m4a" ttl:600 tag:@"pre"];
 
 	NSString *cmd = [NSString stringWithFormat:@"-y -i \"%@\" -vn -c:a aac -b:a 128k -ar 44100 \"%@\"", url.path, outURL.path];
 
 	[SCIFFmpeg executeCommand:cmd completion:^(BOOL success, NSString *output) {
-		(void)output;
-
+		BOOL noStream = [output containsString:@"does not contain any stream"];
 		dispatch_async(dispatch_get_main_queue(), ^{
 			if (success && [NSFileManager.defaultManager fileExistsAtPath:outURL.path]) {
 				sciShowTrimVC(outURL, NO, threadVC);
 			} else {
 				[SCITempFiles releaseURL:outURL];
-				sciShowUnsupportedAlert(url, SCILocalized(@"FFmpeg conversion failed"), threadVC);
+				NSString *msg = (noStream || !sourceHasAudio)
+					? SCILocalized(@"No audio track found")
+					: SCILocalized(@"FFmpeg conversion failed");
+				sciShowUnsupportedAlert(url, msg, threadVC);
 			}
 		});
 	}];
@@ -422,9 +429,10 @@ static void sciPrepareAndShowTrim(NSURL *url, UIViewController *threadVC) {
 		BOOL canRead = sciAssetHasAudio(asset) && sciAudioDurationFromAsset(asset) > 0.0;
 
 		if (!canRead) {
+			BOOL hasAudio = sciAssetHasAudio(asset);
 			dispatch_async(dispatch_get_main_queue(), ^{
 				if ([SCIFFmpeg isAvailable]) {
-					sciFFmpegPreConvertForTrim(url, threadVC);
+					sciFFmpegPreConvertForTrim(url, hasAudio, threadVC);
 				} else {
 					sciShowUnsupportedAlert(url, SCILocalized(@"Format not supported without FFmpegKit"), threadVC);
 				}
@@ -441,7 +449,7 @@ static void sciPrepareAndShowTrim(NSURL *url, UIViewController *threadVC) {
 
 			dispatch_async(dispatch_get_main_queue(), ^{
 				if ([SCIFFmpeg isAvailable]) {
-					sciFFmpegPreConvertForTrim(url, threadVC);
+					sciFFmpegPreConvertForTrim(url, YES, threadVC);
 				} else {
 					sciShowUnsupportedAlert(url, SCILocalized(@"Format not supported without FFmpegKit"), threadVC);
 				}
@@ -460,7 +468,7 @@ static void sciPrepareAndShowTrim(NSURL *url, UIViewController *threadVC) {
 					[SCITempFiles releaseURL:outURL];
 
 					if ([SCIFFmpeg isAvailable]) {
-						sciFFmpegPreConvertForTrim(url, threadVC);
+						sciFFmpegPreConvertForTrim(url, YES, threadVC);
 					} else {
 						sciShowUnsupportedAlert(url, exporter.error.localizedDescription ?: SCILocalized(@"no audio track could be read"), threadVC);
 					}

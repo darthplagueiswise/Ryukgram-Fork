@@ -49,9 +49,7 @@ static NSDictionary *sciTabEntryForKey(NSString *key) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-	UIColor *bg = SCIUIKit26BaseSurfaceColor();
+	UIColor *bg = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 	self.view.backgroundColor = bg;
 	self.tableView.backgroundColor = bg;
 }

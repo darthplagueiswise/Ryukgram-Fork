@@ -16,7 +16,7 @@
                                                                                           weight:UIImageSymbolWeightSemibold];
         [self setImage:[UIImage systemImageNamed:@"chevron.up" withConfiguration:cfg] forState:UIControlStateNormal];
         self.tintColor = [UIColor labelColor];
-        self.backgroundColor = SCIUIKit26PanelFillColor();
+        self.backgroundColor = [UIColor secondarySystemBackgroundColor];
         self.layer.cornerRadius = 22;
         self.layer.cornerCurve = kCACornerCurveContinuous;
         self.layer.shadowColor = [UIColor blackColor].CGColor;

@@ -58,10 +58,12 @@ static NSString *sciButtonText(UIControl *btn) {
     	return;
     }
 
-    [SCIUtils showConfirmation:^{
-    	%orig;
+    {
+    	void (^sciOrigBlock)(void) = ^ {
+    		%orig;
+    	};
+    	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm Instants emoji reaction")];
     }
-                         title:SCILocalized(@"Confirm Instants emoji reaction")];
 }
 
 %end

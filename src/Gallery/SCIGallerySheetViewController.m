@@ -66,7 +66,6 @@ static CGFloat const kSheetPanHeaderHeight = 62.0;
 	[super viewDidLoad];
 
 	self.view.backgroundColor = UIColor.clearColor;
-	SCIConfigureNavigationChromeForGlass(self);
 
 	[self setupBackdrop];
 	[self setupCard];
@@ -146,13 +145,13 @@ static CGFloat const kSheetPanHeaderHeight = 62.0;
 	self.compactHeight = [self preferredCardHeight];
 	self.maxHeight = [self maxCardHeight];
 
-	self.card = [[SCIUIKit26GlassPanelView alloc] initWithRadius:kSheetCardCornerRadius];
+	self.card = [UIView new];
 	self.card.translatesAutoresizingMaskIntoConstraints = NO;
-	self.card.backgroundColor = UIColor.clearColor;
-	self.card.opaque = NO;
+	self.card.backgroundColor = UIColor.secondarySystemBackgroundColor;
+	self.card.opaque = YES;
 	self.card.clipsToBounds = YES;
 	self.card.layer.cornerRadius = kSheetCardCornerRadius;
-	if ([self.card.layer respondsToSelector:@selector(setCornerCurve:)]) self.card.layer.cornerCurve = kCACornerCurveContinuous;
+	self.card.layer.cornerCurve = kCACornerCurveContinuous;
 	self.card.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
 
 	[self.view addSubview:self.card];
@@ -171,7 +170,7 @@ static CGFloat const kSheetPanHeaderHeight = 62.0;
 - (void)setupGrabber {
 	self.grabber = [UIView new];
 	self.grabber.translatesAutoresizingMaskIntoConstraints = NO;
-	self.grabber.backgroundColor = SCIUIKit26SeparatorColor();
+	self.grabber.backgroundColor = UIColor.systemFillColor;
 	self.grabber.layer.cornerRadius = kSheetGrabberHeight / 2.0;
 
 	[self.card addSubview:self.grabber];
@@ -206,7 +205,6 @@ static CGFloat const kSheetPanHeaderHeight = 62.0;
 	self.scrollView = [UIScrollView new];
 	self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.scrollView.backgroundColor = UIColor.clearColor;
-	SCIUIKit26ConfigureScrollView(self.scrollView);
 	self.scrollView.showsVerticalScrollIndicator = NO;
 	self.scrollView.alwaysBounceVertical = YES;
 	self.scrollView.delaysContentTouches = NO;

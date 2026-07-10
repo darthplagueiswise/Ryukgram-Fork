@@ -18,6 +18,8 @@
 @property (nonatomic, strong) UIView *headerView;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *countLabel;
+@property (nonatomic, strong) UIButton *statusButton;
+@property (nonatomic, strong) NSLayoutConstraint *statusHeight;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, strong) UIToolbar *batchToolbar;
 @property (nonatomic, strong) UIBarButtonItem *editBtn;
@@ -40,10 +42,8 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemBackgroundColor;
 	self.navigationItem.title = @"";
 
 	_headerView = [UIView new];
@@ -63,6 +63,17 @@
 	_countLabel.translatesAutoresizingMaskIntoConstraints = NO;
 	[_headerView addSubview:_countLabel];
 
+	_statusButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	_statusButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+	_statusButton.tintColor = UIColor.systemBlueColor;
+	_statusButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.12];
+	_statusButton.layer.cornerRadius = 16;
+	_statusButton.contentEdgeInsets = UIEdgeInsetsMake(0, 14, 0, 14);
+	_statusButton.hidden = YES;
+	_statusButton.translatesAutoresizingMaskIntoConstraints = NO;
+	[_statusButton addTarget:self action:@selector(tapStatus) forControlEvents:UIControlEventTouchUpInside];
+	[_headerView addSubview:_statusButton];
+
 	_searchBar = [UISearchBar new];
 	_searchBar.delegate = self;
 	_searchBar.searchBarStyle = UISearchBarStyleMinimal;
@@ -72,9 +83,8 @@
 
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
-	SCIUIKit26ConfigureTableView(_tableView);
 	_tableView.delegate = self;
-	_tableView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	_tableView.backgroundColor = UIColor.systemBackgroundColor;
 	_tableView.separatorInset = UIEdgeInsetsMake(0, 76, 0, 16);
 	_tableView.contentInset = UIEdgeInsetsMake(4, 0, 12, 0);
 	_tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
@@ -108,7 +118,10 @@
 		[_countLabel.topAnchor constraintEqualToAnchor:_titleLabel.bottomAnchor constant:4],
 		[_countLabel.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
 		[_countLabel.trailingAnchor constraintEqualToAnchor:_titleLabel.trailingAnchor],
-		[_searchBar.topAnchor constraintEqualToAnchor:_countLabel.bottomAnchor constant:8],
+		[_statusButton.topAnchor constraintEqualToAnchor:_countLabel.bottomAnchor constant:8],
+		[_statusButton.leadingAnchor constraintEqualToAnchor:_titleLabel.leadingAnchor],
+		(_statusHeight = [_statusButton.heightAnchor constraintEqualToConstant:0]),
+		[_searchBar.topAnchor constraintEqualToAnchor:_statusButton.bottomAnchor constant:4],
 		[_searchBar.leadingAnchor constraintEqualToAnchor:_headerView.leadingAnchor constant:8],
 		[_searchBar.trailingAnchor constraintEqualToAnchor:_headerView.trailingAnchor constant:-8],
 		[_searchBar.bottomAnchor constraintEqualToAnchor:_headerView.bottomAnchor constant:-8],
@@ -165,6 +178,12 @@
 	if (self.config.sortedItems) items = self.config.sortedItems(items, self.sortMode);
 	self.filtered = items ?: @[];
 
+	NSString *status = self.config.statusProvider ? self.config.statusProvider() : nil;
+	BOOL showStatus = status.length > 0;
+	[self.statusButton setTitle:status forState:UIControlStateNormal];
+	self.statusButton.hidden = !showStatus;
+	self.statusHeight.constant = showStatus ? 32 : 0;
+
 	NSUInteger count = self.filtered.count;
 	self.countLabel.text = [NSString stringWithFormat:@"%lu %@", (unsigned long)count, count == 1 ? SCILocalized(@"item") : SCILocalized(@"items")];
 	self.emptyLabel.text = count ? @"" : (q.length ? SCILocalized(@"No results found.") : SCILocalized(@"Nothing here yet."));
@@ -177,6 +196,10 @@
 - (void)dismissKeyboard {
 	[self.searchBar resignFirstResponder];
 	[self.view endEditing:YES];
+}
+
+- (void)tapStatus {
+	if (self.config.onStatusTap) self.config.onStatusTap();
 }
 
 - (void)scrollViewWillBeginDragging:(__unused UIScrollView *)scrollView {
@@ -312,11 +335,10 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
 	static NSString *reuse = @"sciIDListCell";
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuse];
-	SCIUIKit26ConfigureTableCell(cell);
 
 	if (!cell) {
 		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
-		cell.backgroundColor = SCIUIKit26PanelFillColor();
+		cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 		cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
 		cell.detailTextLabel.font = [UIFont systemFontOfSize:13];
 		cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;

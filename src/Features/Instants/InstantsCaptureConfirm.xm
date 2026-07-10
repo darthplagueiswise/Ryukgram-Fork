@@ -1,29 +1,111 @@
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 
-// Hold-to-record fires a different selector and passes through.
-%hook _TtC34IGQuickSnapCameraControlController28IGQuickSnapCameraControlView
+extern "C" BOOL SCIInstantsShouldSwallowCaptureRelease(void);
 
-- (void)captureButtonDidReleaseBeforeExpandingFinished {
-    if (![SCIUtils getBoolPref:@"instants_capture_confirm"]) {
-    	%orig;
-    	return;
+static BOOL sciQuickSnapVCTree(UIViewController *vc) {
+    if (!vc) return NO;
+    if ([NSStringFromClass(vc.class) rangeOfString:@"QuickSnap"].location != NSNotFound) return YES;
+    for (UIViewController *c in vc.childViewControllers) if (sciQuickSnapVCTree(c)) return YES;
+    return sciQuickSnapVCTree(vc.presentedViewController);
+}
+
+static BOOL sciQuickSnapActive(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows)
+            if (sciQuickSnapVCTree(w.rootViewController)) return YES;
     }
-    [SCIUtils showConfirmation:^{
-    	%orig;
+    return NO;
+}
+
+#pragma mark - Capture confirm (tap = photo, hold = video)
+
+// Release the hold before confirming, else IG rolls the held button into a recording.
+// Hold path: arm on press, confirm on first AVAssetWriter finishWriting, clear on a tap.
+static __weak id sInstantCaptureButton;
+static volatile BOOL sVideoGateArmed;
+
+static void sciClearCaptureHold(void) {
+    id btn = sInstantCaptureButton;
+    if (!btn) return;
+    UIGestureRecognizer *gr = ((id (*)(id, SEL))objc_msgSend)(btn, @selector(longPressGestureRecognizer));
+    if ([gr isKindOfClass:UIGestureRecognizer.class]) { gr.enabled = NO; gr.enabled = YES; }
+    ((void (*)(id, SEL, long long))objc_msgSend)(btn, @selector(setButtonState:), 1);
+}
+
+%group SCIInstantCaptureConfirm
+
+%hook IGCameraCaptureButton
+
+- (void)_longPress:(id)gr {
+    sInstantCaptureButton = self;
+    if ([gr respondsToSelector:@selector(state)]
+        && [(UIGestureRecognizer *)gr state] == UIGestureRecognizerStateBegan) {
+        sVideoGateArmed = YES;
     }
-                         title:SCILocalized(@"Confirm Instants capture")];
+    %orig;
 }
 
 %end
 
-// IG 433 moved tap-to-advance into a child tapController with no callable advance
-// method (Swift-internal). To advance ourselves we re-enter -didPressWithGestureRecognizer:
-// with a stand-in recognizer reading state Ended, seeding pressStartLocation so IG
-// treats it as a tap, not a swipe.
+%hook AVAssetWriter
+
+- (void)finishWritingWithCompletionHandler:(void (^)(void))handler {
+    if (!sVideoGateArmed) {
+        %orig(handler);
+        return;
+    }
+    if (!sciQuickSnapActive()) {
+        sVideoGateArmed = NO;
+        %orig(handler);
+        return;
+    }
+    sVideoGateArmed = NO;
+
+    void (^orig)(void) = [handler copy];
+    void (^gated)(void) = ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            {
+            	void (^sciOrigBlock)(void) = ^ {
+            		if (orig) orig();
+            	};
+            	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm Instants capture")];
+            }
+        });
+    };
+    %orig(gated);
+}
+
+%end
+
+%hook _TtC34IGQuickSnapCameraControlController28IGQuickSnapCameraControlView
+
+- (void)captureButtonDidReleaseBeforeExpandingFinished {
+    if (SCIInstantsShouldSwallowCaptureRelease()) return;
+    sVideoGateArmed = NO;
+    sciClearCaptureHold();
+    {
+    	void (^sciOrigBlock)(void) = ^ {
+    		%orig;
+    	};
+    	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm Instants capture")];
+    }
+}
+
+%end
+
+%end
+
+#pragma mark - Switch-Instant confirm
+
+// Tap-to-advance lives in a Swift-internal tapController with no callable advance, so we
+// re-enter didPressWithGestureRecognizer: with a stand-in recognizer (state Ended, seeded
+// pressStartLocation) that IG reads as a tap.
 @interface SCIInstantAdvanceGR : UILongPressGestureRecognizer
 @property (nonatomic, assign) CGPoint sciLoc;
 @property (nonatomic, weak) UIView *sciView;
@@ -53,16 +135,12 @@ extern "C" void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc) {
         ((void (*)(id, SEL, id))objc_msgSend)(tc, sel, gr);
 }
 
+%group SCIInstantAdvanceConfirm
+
 %hook _TtC39IGQuickSnapImmersiveViewerSnapStackView61IGQuickSnapImmersiveViewerAnimatingSnapStackViewTapController
 
 - (void)didPressWithGestureRecognizer:(UIGestureRecognizer *)gr {
-    // our synthetic re-entry (post-confirm / auto-advance) — run IG's advance as-is
     if ([gr isKindOfClass:[SCIInstantAdvanceGR class]]) {
-    	%orig;
-    	return;
-    }
-
-    if (![SCIUtils getBoolPref:@"instants_advance_confirm"]) {
     	%orig;
     	return;
     }
@@ -70,7 +148,6 @@ extern "C" void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc) {
     	%orig;
     	return;
     }
-    // Began records pressStartLocation
 
     UIView *stack = gr.view;
     Ivar psl = class_getInstanceVariable(object_getClass(self), "pressStartLocation");
@@ -80,13 +157,21 @@ extern "C" void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc) {
     if ((dx * dx + dy * dy) > (12.0 * 12.0)) {
     	%orig;
     	return;
-    }
-    // travelled => swipe, pass through
+    }  // travelled => swipe
 
-    [SCIUtils showConfirmation:^{
-        SCIDriveInstantAdvanceForStack(stack, loc);
-    } title:SCILocalized(@"Confirm switching Instant")];
-    // suppress %orig — advance only fires once confirmed
+    {
+    	void (^sciOrigBlock)(void) = ^ {
+    		SCIDriveInstantAdvanceForStack(stack, loc);
+    	};
+    	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm switching Instant")];
+    }
 }
 
 %end
+
+%end
+
+%ctor {
+    if ([SCIUtils getBoolPref:@"instants_capture_confirm"]) %init(SCIInstantCaptureConfirm);
+    if ([SCIUtils getBoolPref:@"instants_advance_confirm"]) %init(SCIInstantAdvanceConfirm);
+}

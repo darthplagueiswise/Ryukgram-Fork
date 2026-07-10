@@ -1,5 +1,7 @@
 #import "SCIChatBgPerImageSheet.h"
 #import "SCIChatBackgroundManager.h"
+#import "SCIChatBgVideoView.h"
+#import "SCIChatBgEditor.h"
 #import "../../UI/SCIPopupChrome.h"
 #import "../../UI/SCIColorPickerSheet.h"
 #import "../../Utils.h"
@@ -22,6 +24,7 @@ static NSString *const kCell = @"cell";
 @interface SCIChatBgPerImageSheet () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, copy) NSString *asset;
 @property (nonatomic, strong) UIImageView *preview;
+@property (nonatomic, strong) SCIChatBgVideoView *videoPreview;
 @property (nonatomic, strong) UIView *dimView;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) NSArray<NSNumber *> *rows;
@@ -39,10 +42,8 @@ static NSString *const kCell = @"cell";
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:SCILocalized(@"Done") style:UIBarButtonItemStyleDone target:self action:@selector(done)];
 
 	_preview = [UIImageView new];
@@ -53,6 +54,15 @@ static NSString *const kCell = @"cell";
 	_preview.translatesAutoresizingMaskIntoConstraints = NO;
 	[self.view addSubview:_preview];
 
+	if ([SCIChatBackgroundManager isVideoAsset:self.asset]) {
+		_videoPreview = [[SCIChatBgVideoView alloc] initWithFrame:CGRectZero];
+		_videoPreview.layer.cornerRadius = 16;
+		_videoPreview.layer.cornerCurve = kCACornerCurveContinuous;
+		_videoPreview.clipsToBounds = YES;
+		_videoPreview.translatesAutoresizingMaskIntoConstraints = NO;
+		[_preview addSubview:_videoPreview];
+	}
+
 	_dimView = [UIView new];
 	_dimView.backgroundColor = UIColor.blackColor;
 	_dimView.userInteractionEnabled = NO;
@@ -61,10 +71,9 @@ static NSString *const kCell = @"cell";
 
 	_tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
 	_tableView.dataSource = self;
-	SCIUIKit26ConfigureTableView(_tableView);
 	_tableView.delegate = self;
-	_tableView.contentInset = UIEdgeInsetsZero;
-	_tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
+	_tableView.backgroundColor = self.view.backgroundColor;
+	_tableView.contentInset = UIEdgeInsetsMake(-6, 0, 0, 0);
 	_tableView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_tableView registerClass:UITableViewCell.class forCellReuseIdentifier:kCell];
 	[self.view addSubview:_tableView];
@@ -86,8 +95,47 @@ static NSString *const kCell = @"cell";
 		[_tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
 	]];
 
+	if (_videoPreview) [NSLayoutConstraint activateConstraints:@[
+		[_videoPreview.topAnchor constraintEqualToAnchor:_preview.topAnchor],
+		[_videoPreview.leadingAnchor constraintEqualToAnchor:_preview.leadingAnchor],
+		[_videoPreview.trailingAnchor constraintEqualToAnchor:_preview.trailingAnchor],
+		[_videoPreview.bottomAnchor constraintEqualToAnchor:_preview.bottomAnchor],
+	]];
+
+	_preview.userInteractionEnabled = YES;
+	[_preview addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(editMedia)]];
+	[self installEditBadge];
+
 	[self rebuildRows];
 	[self renderPreview];
+}
+
+- (void)installEditBadge {
+	UIImageView *badge = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"crop.rotate"]];
+	badge.tintColor = UIColor.whiteColor;
+	badge.contentMode = UIViewContentModeScaleAspectFit;
+	badge.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45];
+	badge.layer.cornerRadius = 14;
+	badge.clipsToBounds = YES;
+	badge.translatesAutoresizingMaskIntoConstraints = NO;
+	[self.view addSubview:badge];
+	[NSLayoutConstraint activateConstraints:@[
+		[badge.trailingAnchor constraintEqualToAnchor:_preview.trailingAnchor constant:-8],
+		[badge.bottomAnchor constraintEqualToAnchor:_preview.bottomAnchor constant:-8],
+		[badge.widthAnchor constraintEqualToConstant:28],
+		[badge.heightAnchor constraintEqualToConstant:28],
+	]];
+}
+
+- (void)editMedia {
+	[SCIChatBgEditor reEditAsset:self.asset from:self completion:^(NSString *newRel) {
+		if (!newRel) return;
+		[[SCIChatBackgroundManager shared] replaceAsset:self.asset withAsset:newRel];
+		self.asset = newRel;
+		[self rebuildRows];
+		[self.tableView reloadData];
+		[self renderPreview];
+	}];
 }
 
 - (void)rebuildRows {
@@ -123,9 +171,20 @@ static NSString *const kCell = @"cell";
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(renderPreview) object:nil];
 
 	SCIChatBackgroundManager *m = [SCIChatBackgroundManager shared];
-	self.preview.image = [m processedImageForAsset:self.asset darkAppearance:self.isDark];
 	self.preview.alpha = [m effectiveOpacityForAsset:self.asset];
 	self.preview.backgroundColor = self.isDark ? UIColor.blackColor : UIColor.whiteColor;
+
+	if (self.videoPreview) {
+		self.preview.image = [m imageForAsset:self.asset];
+		self.dimView.alpha = 0;
+		self.videoPreview.videoURL = [m urlForRelativeAsset:self.asset];
+		[self.videoPreview setBlurRadius:(CGFloat)[m effectiveBlurForAsset:self.asset]
+									  dim:(self.isDark ? (CGFloat)[m effectiveDimForAsset:self.asset] : 0.0)];
+		[self.videoPreview play];
+		return;
+	}
+
+	self.preview.image = [m processedImageForAsset:self.asset darkAppearance:self.isDark];
 	self.dimView.alpha = self.isDark ? [m effectiveDimForAsset:self.asset] : 0;
 }
 
@@ -152,7 +211,6 @@ static NSString *const kCell = @"cell";
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:kCell forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.selectionStyle = UITableViewCellSelectionStyleNone;

@@ -3,6 +3,7 @@
 // Other profile -> LEFT of right-side cluster.
 // Icon follows SCIActionIcon profile/global override.
 
+#import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 
@@ -16,6 +17,17 @@
 #import "../../ActionButton/SCIActionIcon.h"
 #import "SCIProfileHelpers.h"
 
+// Route to the debug console if its module is built in, else the device console.
+// Resolved at runtime so there's no link dependency when it's disabled.
+static void sciPBLog(NSString *body) {
+	static void (*dbg)(NSString *, NSString *, ...) = NULL;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ dbg = (void (*)(NSString *, NSString *, ...))dlsym(RTLD_DEFAULT, "SCIDebugLog"); });
+
+	if (dbg) dbg(@"ProfileBtn", @"%@", body);
+}
+#define SCIPBLog(fmt, ...) sciPBLog([NSString stringWithFormat:fmt, ##__VA_ARGS__])
+
 static NSString * const kSCIProfileButtonID = @"sci-profile-action-button";
 
 static CGFloat const kSize = 32.0;
@@ -27,6 +39,13 @@ static const void *kHitKey = &kHitKey;
 static const void *kWireKey = &kWireKey;
 static const void *kIconKey = &kIconKey;
 static const void *kOwnKey = &kOwnKey;
+static const void *kSideKey = &kSideKey;       // cached SCISide
+static const void *kTargetKey = &kTargetKey;   // last applied frame
+static const void *kSideWarnKey = &kSideWarnKey; // dedup the side-fallback log
+static const void *kSkipKey = &kSkipKey;       // dedup repeated skip-reason logs
+static const void *kPKKey = &kPKKey;           // last user PK seen on a container (variant-B reuse)
+static const void *kChainKey = &kChainKey;     // dedup the variant-B superview-chain log
+static const void *kNavDiagKey = &kNavDiagKey; // dedup the nav-bar "no user" diagnostic
 
 static NSInteger sciVersion = 0;
 
@@ -34,6 +53,10 @@ typedef NS_ENUM(NSInteger, SCISide) {
 	SCISideLeft,
 	SCISideRight
 };
+
+static Class sciHeaderViewClass(void);
+static UIView *sciFindDescendantOfClass(UIView *root, Class cls);
+static BOOL sciHostHasNativeButton(UIView *host);
 
 #pragma mark - Runtime
 
@@ -112,6 +135,13 @@ static id sciUserForView(UIView *view) {
 	id ref = sciCall(config, @selector(userReference));
 
 	return ref ?: sciCall(sciCall(context, @selector(dataManager)), @selector(userReference));
+}
+
+static NSString *sciLogID(UIView *header) {
+	id user = sciUserForView(header);
+	NSString *uname = user ? [SCIProfileHelpers usernameForUser:user] : nil;
+	NSString *pk = user ? [SCIProfileHelpers pkForUser:user] : nil;
+	return [NSString stringWithFormat:@"user=%@ pk=%@ hdr=%p", uname.length ? uname : @"<nil>", pk.length ? pk : @"<nil>", header];
 }
 
 static BOOL sciIsOwnProfile(UIView *header) {
@@ -309,6 +339,24 @@ static void sciRunTap(id user, SCIActionMenuConfig *cfg) {
 	}
 }
 
+// Shared tap target — the host may be a nav bar with no tap selector, so resolve
+// the user from the sender rather than targeting the host.
+@interface SCIProfileTapTarget : NSObject
+@end
+
+@implementation SCIProfileTapTarget
++ (instancetype)shared {
+	static SCIProfileTapTarget *shared;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ shared = [SCIProfileTapTarget new]; });
+	return shared;
+}
+- (void)tapped:(id)sender {
+	UIView *view = [sender isKindOfClass:UIView.class] ? sender : nil;
+	sciRunTap(sciUserForView(view), [SCIActionMenuConfig configForSource:SCIActionSourceProfile]);
+}
+@end
+
 #pragma mark - Icon
 
 static NSString *sciSymbol(void) {
@@ -359,6 +407,7 @@ static UIButton *sciHit(UIView *header) {
 	hit.adjustsImageWhenHighlighted = NO;
 	hit.hidden = YES;
 	hit.accessibilityLabel = SCILocalized(@"RyukGram profile actions");
+	hit.accessibilityIdentifier = kSCIProfileButtonID;   // excluded from the anchor scan
 
 	objc_setAssociatedObject(header, kHitKey, hit, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	return hit;
@@ -372,14 +421,15 @@ static void sciWire(UIView *header, UIButton *hit) {
 	if ([objc_getAssociatedObject(hit, kWireKey) isEqualToString:key]) return;
 
 	[hit removeTarget:nil action:NULL forControlEvents:UIControlEventAllEvents];
-	hit.menu = nil;
-	hit.showsMenuAsPrimaryAction = NO;
+
+	// Always attach the menu (long-press); a direct tap just drops primary-action.
+	hit.menu = sciDeferredMenu(header);
 
 	if ([tap isEqualToString:@"menu"]) {
-		hit.menu = sciDeferredMenu(header);
 		hit.showsMenuAsPrimaryAction = YES;
 	} else {
-		[hit addTarget:header action:@selector(sciProfileActionTapped:) forControlEvents:UIControlEventTouchUpInside];
+		hit.showsMenuAsPrimaryAction = NO;
+		[hit addTarget:[SCIProfileTapTarget shared] action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
 	}
 
 	objc_setAssociatedObject(hit, kWireKey, key, OBJC_ASSOCIATION_COPY_NONATOMIC);
@@ -412,9 +462,17 @@ static void sciConsiderAnchor(UIView *header, UIView *view, SCISide side, UIView
 	}
 }
 
+// Right cluster can hold non-native controls (e.g. the "Follow" pill) we must
+// clear, so count any control there as an anchor — not just the native nav classes.
+static BOOL sciIsAnchorCandidate(UIView *view, SCISide side) {
+	if ([view.accessibilityIdentifier isEqualToString:kSCIProfileButtonID]) return NO;
+	if (sciIsNativeNavButton(view)) return YES;
+	return side == SCISideRight && [view isKindOfClass:UIControl.class];
+}
+
 static void sciScanAnchors(UIView *header, UIView *root, SCISide side, UIView **best, CGFloat *bestX) {
 	for (UIView *sub in root.subviews) {
-		if (sciIsNativeNavButton(sub)) sciConsiderAnchor(header, sub, side, best, bestX);
+		if (sciIsAnchorCandidate(sub, side)) sciConsiderAnchor(header, sub, side, best, bestX);
 		sciScanAnchors(header, sub, side, best, bestX);
 	}
 }
@@ -435,6 +493,36 @@ static UIView *sciAnchor(UIView *header, SCISide side) {
 	return best;
 }
 
+static SCISide sciSideFor(UIView *header) {
+	NSNumber *cached = objc_getAssociatedObject(header, kSideKey);
+	if (cached) return (SCISide)cached.integerValue;
+
+	id user = sciUserForView(header);
+	NSString *pk = user ? [SCIProfileHelpers pkForUser:user] : nil;
+	NSString *me = [SCIUtils currentUserPK];
+
+	// Cache only once the PK is known; the titleIsCentered fallback can be wrong early.
+	if (pk.length && me.length) {
+		SCISide side = [pk isEqualToString:me] ? SCISideLeft : SCISideRight;
+		objc_setAssociatedObject(header, kSideKey, @(side), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		return side;
+	}
+
+	BOOL centered = [objc_getAssociatedObject(header, kOwnKey) boolValue];
+	if (![objc_getAssociatedObject(header, kSideWarnKey) boolValue]) {
+		objc_setAssociatedObject(header, kSideWarnKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		SCIPBLog(@"side FALLBACK: pk/me unresolved (pk=%@ me=%@) using titleIsCentered=%d — hdr=%p", pk.length ? pk : @"<nil>", me.length ? me : @"<nil>", centered, header);
+	}
+	return centered ? SCISideLeft : SCISideRight;
+}
+
+static void sciInvalidate(UIView *header) {
+	objc_setAssociatedObject(header, kSideKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(header, kTargetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(header, kSideWarnKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	objc_setAssociatedObject(header, kSkipKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
 #pragma mark - Layout
 
 static void sciRemove(UIView *header) {
@@ -442,27 +530,48 @@ static void sciRemove(UIView *header) {
 	[(UIView *)objc_getAssociatedObject(header, kHitKey) removeFromSuperview];
 	objc_setAssociatedObject(header, kBtnKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	objc_setAssociatedObject(header, kHitKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	sciInvalidate(header);
+}
+
+// Re-scan each pass — the leftmost right-cluster element can change as pills appear.
+static UIView *sciResolveAnchor(UIView *header, SCISide side) {
+	return sciAnchor(header, side);
+}
+
+// Dedup skip reasons — layoutSubviews fires constantly.
+static void sciLogSkip(UIView *header, NSString *reason) {
+	if ([objc_getAssociatedObject(header, kSkipKey) isEqualToString:reason]) return;
+	objc_setAssociatedObject(header, kSkipKey, reason, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	SCIPBLog(@"layout SKIP: %@ — %@", reason, sciLogID(header));
 }
 
 static void sciLayout(UIView *header) {
 	if (![header isKindOfClass:UIView.class]) return;
 
-	if (![SCIUtils getBoolPref:@"action_button_profile_enabled"]) {
-		sciRemove(header);
+	BOOL enabled = [SCIUtils getBoolPref:@"action_button_profile_enabled"];
+	if (!enabled) {
+		sciLogSkip(header, @"pref action_button_profile_enabled=OFF");
+		if (objc_getAssociatedObject(header, kBtnKey)) sciRemove(header);
 		return;
 	}
 
+	Class headerCls = sciHeaderViewClass();
+
 	UIView *button = sciButton(header);
 	UIButton *hit = sciHit(header);
-	if (!button || !hit) return;
-
-	if (button.superview != header) {
-		[button removeFromSuperview];
-		[header addSubview:button];
+	if (!button || !hit) {
+		sciLogSkip(header, [NSString stringWithFormat:@"button=%p hit=%p nil", button, hit]);
+		return;
 	}
-	if (hit.superview != header) {
-		[hit removeFromSuperview];
-		[header addSubview:hit];
+
+	BOOL reparented = NO;
+	if (button.superview != header) { [button removeFromSuperview]; [header addSubview:button]; reparented = YES; }
+	if (hit.superview != header) { [hit removeFromSuperview]; [header addSubview:hit]; reparented = YES; }
+
+	// Fresh attach may be a recycled header on a different profile — re-resolve side.
+	if (reparented) {
+		objc_setAssociatedObject(header, kSideKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		objc_setAssociatedObject(header, kTargetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	}
 
 	sciApplyIcon(button);
@@ -471,22 +580,54 @@ static void sciLayout(UIView *header) {
 	CGFloat width = CGRectGetWidth(header.bounds);
 	CGFloat height = CGRectGetHeight(header.bounds);
 
-	if (width < 60.0 || height < 20.0) return;
+	if (width < 60.0 || height < 20.0) {
+		sciLogSkip(header, [NSString stringWithFormat:@"header too small w=%.1f h=%.1f", width, height]);
+		return;
+	}
 
-	SCISide side = sciIsOwnProfile(header) ? SCISideLeft : SCISideRight;
-	UIView *anchor = sciAnchor(header, side);
+	// Header view can place early off titleIsCentered; other hosts need a resolved
+	// user, else we'd paint a stray button on whatever nav bar is on screen.
+	BOOL isHeaderHost = headerCls && [header isKindOfClass:headerCls];
+	if (!isHeaderHost && !sciUserForView(header)) {
+		sciLogSkip(header, @"non-header host without a resolved user");
+		return;
+	}
 
-	if (!anchor) return;
+	SCISide side = sciSideFor(header);
+	UIView *anchor = sciResolveAnchor(header, side);
 
-	CGRect frame = [anchor.superview convertRect:anchor.frame toView:header];
+	CGFloat x, y;
 
-	CGFloat y = floor(CGRectGetMidY(frame) - kSize * 0.5);
-	CGFloat x = side == SCISideLeft ? CGRectGetMaxX(frame) + kGap : CGRectGetMinX(frame) - kGap - kSize;
+	if (anchor) {
+		CGRect frame = [anchor.superview convertRect:anchor.frame toView:header];
+		y = floor(CGRectGetMidY(frame) - kSize * 0.5);
+		x = side == SCISideLeft ? CGRectGetMaxX(frame) + kGap : CGRectGetMinX(frame) - kGap - kSize;
+	} else {
+		NSValue *placed = objc_getAssociatedObject(header, kTargetKey);
+		if (placed && !button.hidden && !reparented) return;   // hold position; don't bounce to the band on a transient anchor miss
+
+		// First placement with no anchor — pin to the nav-bar band.
+		CGFloat band = header.safeAreaInsets.top + (44.0 - kSize) * 0.5;
+		y = floor(band);
+		x = side == SCISideLeft ? kGap + 4.0 : width - kSize - 8.0;
+	}
 
 	x = MAX(4.0, MIN(x, width - kSize - 4.0));
 	y = MAX(0.0, MIN(y, height - kSize));
 
 	CGRect target = CGRectMake(x, y, kSize, kSize);
+
+	NSValue *last = objc_getAssociatedObject(header, kTargetKey);
+	if (!reparented && !button.hidden && last && CGRectEqualToRect(last.CGRectValue, target)) return;
+
+	SCIPBLog(@"layout SHOW: side=%@ anchor=%@ target=%@ clipped=%d icon=%@ hdr=%.0fx%.0f safeTop=%.1f reparented=%d — %@",
+		side == SCISideLeft ? @"L" : @"R",
+		anchor ? NSStringFromClass(anchor.class) : @"<none/band>",
+		NSStringFromCGRect(target),
+		(x <= 4.0 || x >= width - kSize - 4.0 || y <= 0.0 || y >= height - kSize),
+		sciSymbol(), width, height, header.safeAreaInsets.top, reparented, sciLogID(header));
+
+	objc_setAssociatedObject(header, kSkipKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
 
 	button.hidden = NO;
 	button.alpha = 1.0;
@@ -497,6 +638,8 @@ static void sciLayout(UIView *header) {
 
 	[header bringSubviewToFront:button];
 	[header bringSubviewToFront:hit];
+
+	objc_setAssociatedObject(header, kTargetKey, [NSValue valueWithCGRect:target], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static void sciRefresh(void) {
@@ -524,6 +667,7 @@ static void sciRefresh(void) {
 
 	objc_setAssociatedObject(header, kOwnKey, @(titleIsCentered), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	[sciHeaders() addObject:header];
+	sciInvalidate(header);
 
 	dispatch_async(dispatch_get_main_queue(), ^{
 		sciLayout(header);
@@ -532,13 +676,224 @@ static void sciRefresh(void) {
 
 - (void)layoutSubviews {
 	%orig;
-	sciLayout((UIView *)self);
+
+	UIView *header = (UIView *)self;
+	if (![header isKindOfClass:UIView.class]) return;
+
+	// configure: is bypassed by IG's Swift dispatch, so register for refresh here.
+	[sciHeaders() addObject:header];
+	sciLayout(header);
 }
 
-%new
-- (void)sciProfileActionTapped:(id)sender {
-	UIView *view = [sender isKindOfClass:UIView.class] ? sender : (UIView *)self;
-	sciRunTap(sciUserForView(view), [SCIActionMenuConfig configForSource:SCIActionSourceProfile]);
+%end
+
+#pragma mark - Variant B (classic nav surface)
+
+// A/B variant: some accounts show other-user profiles in a plain UINavigationBar
+// instead of the header view, so the hook above never fires. Anchor off the one
+// class common to both: the native badged nav button.
+
+static Class sciHeaderViewClass(void) {
+	return objc_getClass("_TtC24IGProfileNavigationSwift29IGProfileNavigationHeaderView");
+}
+
+// Walk up from a native nav button to the host to inject into. *variantA marks
+// the header-view case (handled above) so we don't double-inject.
+static UIView *sciHostForNavButton(UIView *button, BOOL *variantA) {
+	*variantA = NO;
+	Class headerCls = sciHeaderViewClass();
+
+	UIView *navBar = nil;
+	UIView *widest = nil;
+	CGFloat widestW = 0.0;
+
+	UIView *v = button.superview;
+	for (int depth = 0; v && depth < 14; v = v.superview, depth++) {
+		if (headerCls && [v isKindOfClass:headerCls]) { *variantA = YES; return v; }
+		if ([v isKindOfClass:UINavigationBar.class] && !navBar) navBar = v;
+
+		CGFloat w = CGRectGetWidth(v.bounds);
+		if (w > widestW && CGRectGetHeight(v.bounds) <= 120.0) { widestW = w; widest = v; }
+	}
+
+	// Prefer the nav bar; else the widest shallow ancestor (the nav band).
+	return navBar ?: widest ?: button.superview;
+}
+
+static void sciLogChainOnce(UIView *button, UIView *host) {
+	if (objc_getAssociatedObject(button, kChainKey)) return;
+	objc_setAssociatedObject(button, kChainKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	NSMutableString *chain = [NSMutableString string];
+	UIView *v = button;
+	for (int depth = 0; v && depth < 14; v = v.superview, depth++) {
+		[chain appendFormat:@"\n  [%d] %@ frame=%@%@", depth, NSStringFromClass(v.class), NSStringFromCGRect(v.frame), v == host ? @"  <== HOST" : @""];
+	}
+	UIViewController *vc = [SCIUtils nearestViewControllerForView:button];
+	SCIPBLog(@"variantB chain (vc=%@):%@", vc ? NSStringFromClass(vc.class) : @"<nil>", chain);
+}
+
+// Other-profile nav bars get recycled across users; re-resolve when the PK changes.
+static void sciSyncContainerUser(UIView *container) {
+	id user = sciUserForView(container);
+	NSString *pk = user ? [SCIProfileHelpers pkForUser:user] : nil;
+	NSString *last = objc_getAssociatedObject(container, kPKKey);
+
+	if (pk.length && ![pk isEqualToString:last ?: @""]) {
+		objc_setAssociatedObject(container, kPKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
+		if (last.length) sciInvalidate(container);   // genuine user switch on a reused bar
+	}
+}
+
+static void sciInjectIntoHost(UIView *host, UIView *button) {
+	if (!host) return;
+
+	// Gate on a resolvable user so we never inject on a non-profile nav bar.
+	if (!sciUserForView(host)) {
+		id marker = button ?: host;
+		if (!objc_getAssociatedObject(marker, kChainKey)) {
+			objc_setAssociatedObject(marker, kChainKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+			SCIPBLog(@"variantB SKIP: no user for host=%@ marker=%p", NSStringFromClass(host.class), marker);
+		}
+		return;
+	}
+
+	// Real profile bars hold the native buttons; variant A's separate decorative
+	// bar is empty. Requiring one keeps a stray button off it regardless of timing.
+	if (!sciHostHasNativeButton(host)) {
+		sciLogSkip(host, [NSString stringWithFormat:@"host %@ has no native nav button", NSStringFromClass(host.class)]);
+		return;
+	}
+
+	if (button) sciLogChainOnce(button, host);
+	[sciHeaders() addObject:host];
+	sciSyncContainerUser(host);
+	sciLayout(host);
+}
+
+static void sciHandleNavButton(UIView *button) {
+	if (![SCIUtils getBoolPref:@"action_button_profile_enabled"]) return;
+	if (!button.window) return;
+
+	BOOL variantA = NO;
+	UIView *host = sciHostForNavButton(button, &variantA);
+	if (variantA) return;   // header-view hook owns variant A
+	sciInjectIntoHost(host, button);
+}
+
+static UIView *sciFindDescendantOfClass(UIView *root, Class cls) {
+	if (!root || !cls) return nil;
+	for (UIView *sub in root.subviews) {
+		if ([sub isKindOfClass:cls]) return sub;
+		UIView *found = sciFindDescendantOfClass(sub, cls);
+		if (found) return found;
+	}
+	return nil;
+}
+
+static BOOL sciHostHasNativeButton(UIView *host) {
+	if (sciFindDescendantOfClass(host, sciNativeClass())) return YES;
+	Class navBtn = objc_getClass("_TtC14IGProfileUtils25IGNavigationBarButtonView");
+	return navBtn && sciFindDescendantOfClass(host, navBtn) != nil;
+}
+
+// Drive off the VC lifecycle, not the button's relayout — that timing was flaky
+// (button only appeared from some entry points).
+static void sciDriveProfileVC(UIViewController *vc) {
+	if (![SCIUtils getBoolPref:@"action_button_profile_enabled"]) return;
+
+	UINavigationBar *bar = vc.navigationController.navigationBar;
+	if (![bar isKindOfClass:UIView.class]) return;
+
+	// Prefer routing through a real native button (full host classification).
+	UIView *button = sciFindDescendantOfClass(bar, sciNativeClass());
+	if (button) { sciHandleNavButton(button); return; }
+
+	// No native button in the bar — variant A (header view) owns it.
+	Class headerCls = sciHeaderViewClass();
+	if (headerCls && sciFindDescendantOfClass(bar, headerCls)) return;
+
+	sciInjectIntoHost(bar, nil);
+}
+
+%hook _TtC19IGProfileNavigation24IGBadgedNavigationButton
+
+- (void)layoutSubviews {
+	%orig;
+	UIView *button = (UIView *)self;
+	if ([button isKindOfClass:UIView.class]) sciHandleNavButton(button);
+}
+
+- (void)didMoveToWindow {
+	%orig;
+	UIView *button = (UIView *)self;
+	if ([button isKindOfClass:UIView.class]) sciHandleNavButton(button);
+}
+
+%end
+
+%hook IGProfileViewController
+
+- (void)viewDidLayoutSubviews {
+	%orig;
+	sciDriveProfileVC((UIViewController *)self);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+	%orig;
+	sciDriveProfileVC((UIViewController *)self);
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+	%orig;
+	sciDriveProfileVC((UIViewController *)self);
+}
+
+%end
+
+// The nav bar is present for every variant regardless of VC/button class — drive
+// off it directly to catch accounts the other hooks miss.
+static BOOL sciNonProfileVCName(NSString *cls) {
+	return [cls containsString:@"Edit"] || [cls containsString:@"Creation"] ||
+		[cls containsString:@"Settings"] || [cls containsString:@"Business"];
+}
+
+static void sciDriveNavBar(UIView *bar) {
+	if (![SCIUtils getBoolPref:@"action_button_profile_enabled"]) return;
+
+	UINavigationController *nav = nil;
+	for (UIResponder *r = bar.nextResponder; r; r = r.nextResponder) {
+		if ([r isKindOfClass:UINavigationController.class]) { nav = (UINavigationController *)r; break; }
+	}
+
+	UIViewController *top = nav.topViewController ?: nav.visibleViewController;
+	if (!top) return;
+
+	NSString *cls = NSStringFromClass(top.class);
+	if (![cls containsString:@"Profile"] || sciNonProfileVCName(cls)) return;   // user-profile screens only
+
+	Class headerCls = sciHeaderViewClass();
+	if (headerCls && (sciFindDescendantOfClass(bar, headerCls) ||
+			sciFindDescendantOfClass(top.viewIfLoaded, headerCls))) return;     // header-view hook owns variant A
+
+	if (![SCIProfileHelpers userForViewController:top] && !sciUserForView(bar)) {
+		NSString *key = [@"nb:" stringByAppendingString:cls];
+		if (![objc_getAssociatedObject(bar, kNavDiagKey) isEqualToString:key]) {
+			objc_setAssociatedObject(bar, kNavDiagKey, key, OBJC_ASSOCIATION_COPY_NONATOMIC);
+			SCIPBLog(@"navbar profile but NO USER yet — vc=%@ bar=%p nav=%@ subviews=%lu", cls, bar, nav ? NSStringFromClass(nav.class) : @"<nil>", (unsigned long)bar.subviews.count);
+		}
+		return;
+	}
+
+	sciInjectIntoHost(bar, nil);   // native-button gate inside keeps the empty variant-A bar clean
+}
+
+%hook IGNavigationBar
+
+- (void)layoutSubviews {
+	%orig;
+	UIView *bar = (UIView *)self;
+	if ([bar isKindOfClass:UIView.class]) sciDriveNavBar(bar);
 }
 
 %end

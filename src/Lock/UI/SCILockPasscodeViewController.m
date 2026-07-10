@@ -41,9 +41,8 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	self.pad = SCILockPasscodeView.new;
 	self.pad.translatesAutoresizingMaskIntoConstraints = NO;

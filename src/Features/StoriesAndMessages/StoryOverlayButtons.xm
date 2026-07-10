@@ -4,6 +4,7 @@
 #import "OverlayHelpers.h"
 #import "StoryHelpers.h"
 #import "SCIExcludedStoryUsers.h"
+#import "SCIStoryButtonLayout.h"
 #import "../../SCIChrome.h"
 #import "../../UI/SCIIcon.h"
 #import "../../ActionButton/SCIActionButton.h"
@@ -24,17 +25,11 @@ extern "C" __weak UIViewController *sciActiveStoryViewerVC;
 extern "C" NSDictionary *sciOwnerInfoForView(UIView *view);
 
 static const NSInteger kStoryMentionsCountTag = 13450;
-static const CGFloat kStoryBottomBaseOffset = -100.0;
-static NSString *const kStoryBottomConstraintID = @"sci_story_bottom";
 
 static char kStoryActionDefaultKey;
 static char kStoryReelItemsProviderKey;
-static char kStoryMentionsAnchorKey;
 static char kStoryMentionsCountKey;
 static char kStoryMentionsRetryGenKey;
-static char kStoryEyeAnchorKey;
-static char kStoryLastPKKey;
-static char kStoryLastExcludedKey;
 static char kStoryLastAudioKey;
 static char kStoryLastMediaPKKey;
 static char kStoryInstallPendingKey;
@@ -97,37 +92,53 @@ static void SCIRemoveAllStoryButtons(UIView *root) {
 	SCIRemoveStoryButton(root, SCI_STORY_MENTIONS_TAG);
 }
 
-static void SCIActivateBottomTrailing(UIView *host, UIView *button, CGFloat size, CGFloat trailing) {
-	NSLayoutConstraint *bottom = [button.bottomAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.bottomAnchor constant:kStoryBottomBaseOffset];
-	bottom.identifier = kStoryBottomConstraintID;
-
-	[NSLayoutConstraint activateConstraints:@[
-		bottom,
-		[button.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:trailing],
-		[button.widthAnchor constraintEqualToConstant:size],
-		[button.heightAnchor constraintEqualToConstant:size]
-	]];
+static NSString *sciLayoutIDForTag(NSInteger tag) {
+	switch (tag) {
+		case SCI_STORY_ACTION_TAG: return SCIStoryBtnAction;
+		case SCI_STORY_AUDIO_TAG: return SCIStoryBtnAudio;
+		case SCI_STORY_EYE_TAG: return SCIStoryBtnEye;
+		case SCI_STORY_MENTIONS_TAG: return SCIStoryBtnMentions;
+	}
+	return nil;
 }
 
-static void SCIActivateBottomLeading(UIView *host, UIView *button, CGFloat size, CGFloat leading) {
-	NSLayoutConstraint *bottom = [button.bottomAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.bottomAnchor constant:kStoryBottomBaseOffset];
-	bottom.identifier = kStoryBottomConstraintID;
+// Hidden while a comment sheet / keyboard is up — IG shrinks the overlay safe area
+// then, which otherwise yanks the buttons to the middle and leaves them stuck.
+static BOOL sciStoryButtonsKbHidden = NO;
 
-	[NSLayoutConstraint activateConstraints:@[
-		bottom,
-		[button.leadingAnchor constraintEqualToAnchor:host.leadingAnchor constant:leading],
-		[button.widthAnchor constraintEqualToConstant:size],
-		[button.heightAnchor constraintEqualToConstant:size]
-	]];
-}
+// Frame-positions each present button at its saved normalized point in the safe area.
+static void sciLayoutStoryButtons(UIView *host) {
+	CGRect safe = host.safeAreaLayoutGuide.layoutFrame;
+	if (safe.size.width <= 0 || safe.size.height <= 0) return;
 
-static void SCIActivateLeftOfAnchor(UIView *button, UIView *anchor, CGFloat size) {
-	[NSLayoutConstraint activateConstraints:@[
-		[button.centerYAnchor constraintEqualToAnchor:anchor.centerYAnchor],
-		[button.trailingAnchor constraintEqualToAnchor:anchor.leadingAnchor constant:-10.0],
-		[button.widthAnchor constraintEqualToConstant:size],
-		[button.heightAnchor constraintEqualToConstant:size]
-	]];
+	UIEdgeInsets ins = [SCIStoryButtonLayout placeableInsetsNormalized];
+	CGRect area = CGRectMake(safe.origin.x + ins.left * safe.size.width,
+							 safe.origin.y + ins.top * safe.size.height,
+							 safe.size.width * (1.0 - ins.left - ins.right),
+							 safe.size.height * (1.0 - ins.top - ins.bottom));
+
+	NSInteger allTags[] = { SCI_STORY_ACTION_TAG, SCI_STORY_AUDIO_TAG, SCI_STORY_EYE_TAG, SCI_STORY_MENTIONS_TAG };
+
+	for (NSUInteger i = 0; i < 4; i++) {
+		UIView *button = [host viewWithTag:allTags[i]];
+		if (!button) continue;
+
+		if (sciStoryButtonsKbHidden) { button.hidden = YES; continue; }
+		button.hidden = NO;
+
+		NSString *bid = sciLayoutIDForTag(allTags[i]);
+		CGFloat d = [SCIStoryButtonLayout diameterForID:bid];
+		CGPoint norm = [SCIStoryButtonLayout positionForID:bid];
+
+		CGFloat half = d / 2.0;
+		CGFloat cx = safe.origin.x + norm.x * safe.size.width;
+		CGFloat cy = safe.origin.y + norm.y * safe.size.height;
+		cx = MIN(MAX(cx, CGRectGetMinX(area) + half), CGRectGetMaxX(area) - half);
+		cy = MIN(MAX(cy, CGRectGetMinY(area) + half), CGRectGetMaxY(area) - half);
+
+		button.bounds = CGRectMake(0, 0, d, d);
+		button.center = CGPointMake(cx, cy);
+	}
 }
 
 static NSHashTable<UIView *> *sciLiveStoryOverlays(void) {
@@ -145,6 +156,12 @@ static void sciRegisterLiveStoryOverlay(UIView *overlay) {
 	if (overlay.window && !sciOverlayIsInDMContext(overlay)) {
 		[sciLiveStoryOverlays() addObject:overlay];
 	}
+}
+
+static void sciSetStoryButtonsKbHidden(BOOL hidden) {
+	if (sciStoryButtonsKbHidden == hidden) return;
+	sciStoryButtonsKbHidden = hidden;
+	for (UIView *host in sciLiveStoryOverlays().allObjects) sciLayoutStoryButtons(host);
 }
 
 static id sciSafeCall0(id target, SEL sel) {
@@ -388,54 +405,6 @@ static void sciApplyMentionsCounter(SCIChromeButton *button, NSInteger count, BO
 	objc_setAssociatedObject(button, &kStoryMentionsCountKey, @(count), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-// Music attribution/highlight buttons can overlap our custom bottom-right column.
-// Prefer scanning known overlay/header/footer roots instead of the whole story VC tree.
-static CGFloat sciStoryMusicClearance(UIView *overlay) {
-	CGFloat OW = overlay.bounds.size.width;
-	CGFloat H = overlay.bounds.size.height;
-	if (OW <= 0 || H <= 0) return 0;
-
-	static Class tapCls;
-	static dispatch_once_t once;
-
-	dispatch_once(&once, ^{
-		tapCls = NSClassFromString(@"IGTapButton");
-	});
-
-	if (!tapCls) return 0;
-
-	UIViewController *storyVC = sciStoryVCForView(overlay);
-	UIView *root = storyVC.view ?: overlay.window ?: overlay;
-
-	CGFloat safeBottom = H - overlay.safeAreaInsets.bottom;
-	CGFloat ourBottomEdgeY = safeBottom + kStoryBottomBaseOffset;
-	CGRect zone = CGRectMake(OW - 220.0, ourBottomEdgeY - 44.0, 220.0, 60.0);
-	const CGFloat pad = 10.0;
-
-	CGFloat clearance = 0;
-	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
-
-	while (stack.count) {
-		UIView *v = stack.lastObject;
-		[stack removeLastObject];
-
-		for (UIView *s in v.subviews) {
-			[stack addObject:s];
-		}
-
-		if (![v isKindOfClass:tapCls] || v.hidden || v.alpha < 0.01 || !v.window) continue;
-		if (v.bounds.size.width > 120.0 || v.bounds.size.height > 120.0) continue;
-
-		CGRect f = [v convertRect:v.bounds toView:overlay];
-		if (!CGRectIntersectsRect(f, zone)) continue;
-
-		CGFloat need = ourBottomEdgeY - (CGRectGetMinY(f) - pad);
-		if (need > clearance) clearance = need;
-	}
-
-	return clearance;
-}
-
 %group StoryOverlayGroup
 
 %hook IGStoryFullscreenOverlayView
@@ -484,9 +453,6 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 
 	SCIRemoveAllStoryButtons(self);
 	objc_setAssociatedObject(self, &kStoryMentionsRetryGenKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryLastPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryLastExcludedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	objc_setAssociatedObject(self, &kStoryLastAudioKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	objc_setAssociatedObject(self, &kStoryLastMediaPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
@@ -515,27 +481,8 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryAudioButtonWithPrefs:), prefs);
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshSeenButtonWithPrefs:), prefs);
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+	sciLayoutStoryButtons(self);
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciKickMentionsRetryChainWithPrefs:), prefs);
-	((void (*)(id, SEL))objc_msgSend)(self, @selector(sciApplyMusicButtonClearance));
-}
-
-%new
-- (void)sciApplyMusicButtonClearance {
-	NSMutableArray<NSLayoutConstraint *> *bottoms = nil;
-
-	for (NSLayoutConstraint *c in self.constraints) {
-		if (![c.identifier isEqualToString:kStoryBottomConstraintID]) continue;
-		if (!bottoms) bottoms = NSMutableArray.array;
-		[bottoms addObject:c];
-	}
-
-	if (!bottoms.count) return;
-
-	CGFloat offset = kStoryBottomBaseOffset - sciStoryMusicClearance(self);
-
-	for (NSLayoutConstraint *c in bottoms) {
-		if (c.constant != offset) c.constant = offset;
-	}
 }
 
 %new
@@ -555,14 +502,13 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 	[button removeFromSuperview];
 
 	button = SCIStoryButton(@"", 18.0, 36.0, SCI_STORY_ACTION_TAG);
+	button.translatesAutoresizingMaskIntoConstraints = YES;
 	[self addSubview:button];
 
-	SCIActivateBottomTrailing(self, button, 36.0, -12.0);
 	[SCIActionIcon attachAutoUpdate:button source:SCIActionSourceStories pointSize:18.0 style:SCIActionIconStylePlain];
 	SCIConfigureStoryActionButton(button);
 
 	objc_setAssociatedObject(button, &kStoryActionDefaultKey, currentAction, OBJC_ASSOCIATION_COPY_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 %new
@@ -600,10 +546,10 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 	sciInitStoryAudioState();
 
 	button = SCIStoryButton(audioOn ? @"speaker.wave.2" : @"speaker.slash", 14.0, 28.0, SCI_STORY_AUDIO_TAG);
+	button.translatesAutoresizingMaskIntoConstraints = YES;
 	[button addTarget:self action:@selector(sciStoryAudioToggleTapped:) forControlEvents:UIControlEventTouchUpInside];
 	[self addSubview:button];
 
-	SCIActivateBottomLeading(self, button, 28.0, 12.0);
 	objc_setAssociatedObject(self, &kStoryLastAudioKey, @(audioOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
@@ -613,27 +559,12 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 
 	if (!prefs.seen) {
 		[button removeFromSuperview];
-		objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		return;
 	}
 
 	NSDictionary *ownerInfo = sciOwnerInfoForView(self);
 	NSString *ownerPK = ownerInfo[@"pk"] ?: @"";
 	BOOL excluded = ownerPK.length && [SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
-
-	NSString *oldPK = objc_getAssociatedObject(self, &kStoryLastPKKey);
-	NSNumber *oldExcluded = objc_getAssociatedObject(self, &kStoryLastExcludedKey);
-	BOOL hasAction = [self viewWithTag:SCI_STORY_ACTION_TAG] != nil;
-	NSNumber *oldAnchor = objc_getAssociatedObject(self, &kStoryEyeAnchorKey);
-
-	BOOL sameOwner = oldPK && [oldPK isEqualToString:ownerPK] && oldExcluded && oldExcluded.boolValue == excluded;
-	BOOL sameAnchor = oldAnchor && oldAnchor.boolValue == hasAction;
-
-	if (button && sameOwner && sameAnchor) return;
-
-	objc_setAssociatedObject(self, &kStoryLastPKKey, ownerPK, OBJC_ASSOCIATION_COPY_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryLastExcludedKey, @(excluded), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-	objc_setAssociatedObject(self, &kStoryEyeAnchorKey, @(hasAction), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
 	if (excluded) {
 		[button removeFromSuperview];
@@ -644,20 +575,12 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 	NSString *symbol = (toggleMode && sciStorySeenToggleEnabled) ? @"eye.fill" : @"eye";
 	UIColor *tint = (toggleMode && sciStorySeenToggleEnabled) ? SCIUtils.SCIColor_Primary : UIColor.whiteColor;
 
-	if (!button || !sameAnchor) {
-		[button removeFromSuperview];
-
+	if (!button) {
 		button = SCIStoryButton(@"", 18.0, 36.0, SCI_STORY_EYE_TAG);
+		button.translatesAutoresizingMaskIntoConstraints = YES;
 		[button addTarget:self action:@selector(sciStorySeenButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
 		[button addInteraction:[[UIContextMenuInteraction alloc] initWithDelegate:(id<UIContextMenuInteractionDelegate>)self]];
 		[self addSubview:button];
-
-		UIView *action = [self viewWithTag:SCI_STORY_ACTION_TAG];
-		if (action) SCIActivateLeftOfAnchor(button, action, 36.0);
-		else SCIActivateBottomTrailing(self, button, 36.0, -12.0);
-
-		SCIChromeButton *mentions = SCIStoryExistingButton(self, SCI_STORY_MENTIONS_TAG);
-		objc_setAssociatedObject(mentions, &kStoryMentionsAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	}
 
 	[button setIconResource:symbol pointSize:18.0];
@@ -673,33 +596,15 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 		return;
 	}
 
-	UIView *eye = [self viewWithTag:SCI_STORY_EYE_TAG];
-	UIView *action = [self viewWithTag:SCI_STORY_ACTION_TAG];
-	UIView *anchor = eye ?: action;
-
-	NSInteger anchorState = (eye ? 1 : 0) | (action ? 2 : 0);
 	NSInteger count = prefs.mentionsCounter ? sciStoryMentionsCount(self) : 0;
 
-	NSNumber *oldAnchor = objc_getAssociatedObject(button, &kStoryMentionsAnchorKey);
-	NSNumber *oldCount = objc_getAssociatedObject(button, &kStoryMentionsCountKey);
-
-	if (button && oldAnchor && oldAnchor.integerValue == anchorState) {
-		if (!oldCount || oldCount.integerValue != count) {
-			sciApplyMentionsCounter(button, count, prefs.mentionsCounter);
-		}
-		return;
+	if (!button) {
+		button = SCIStoryButton(@"at", 18.0, 36.0, SCI_STORY_MENTIONS_TAG);
+		button.translatesAutoresizingMaskIntoConstraints = YES;
+		[button addTarget:self action:@selector(sciStoryMentionsButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+		[self addSubview:button];
 	}
 
-	[button removeFromSuperview];
-
-	button = SCIStoryButton(@"at", 18.0, 36.0, SCI_STORY_MENTIONS_TAG);
-	[button addTarget:self action:@selector(sciStoryMentionsButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-	[self addSubview:button];
-
-	if (anchor) SCIActivateLeftOfAnchor(button, anchor, 36.0);
-	else SCIActivateBottomTrailing(self, button, 36.0, -12.0);
-
-	objc_setAssociatedObject(button, &kStoryMentionsAnchorKey, @(anchorState), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	sciApplyMentionsCounter(button, count, prefs.mentionsCounter);
 }
 
@@ -727,7 +632,9 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 		SCIStoryOverlayPrefs prefs = SCIStoryPrefs();
 		((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
 
-		if (![self viewWithTag:SCI_STORY_MENTIONS_TAG]) {
+		if ([self viewWithTag:SCI_STORY_MENTIONS_TAG]) {
+			sciLayoutStoryButtons(self);
+		} else {
 			((void (*)(id, SEL, NSInteger, NSInteger))objc_msgSend)(self, @selector(sciScheduleMentionsRetryGeneration:remaining:), gen, remaining - 1);
 		}
 	});
@@ -767,10 +674,6 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 
 	if (mediaChanged) {
 		objc_setAssociatedObject(self, &kStoryLastMediaPKKey, mediaPK, OBJC_ASSOCIATION_COPY_NONATOMIC);
-		objc_setAssociatedObject(self, &kStoryEyeAnchorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-		objc_setAssociatedObject(self, &kStoryLastPKKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
-		objc_setAssociatedObject(self, &kStoryLastExcludedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
 		((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciUpdateStoryOverlayButtonsWithPrefs:), prefs);
 		return;
 	}
@@ -779,7 +682,7 @@ static CGFloat sciStoryMusicClearance(UIView *overlay) {
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryAudioButtonWithPrefs:), prefs);
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshSeenButtonWithPrefs:), prefs);
 	((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(self, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
-	((void (*)(id, SEL))objc_msgSend)(self, @selector(sciApplyMusicButtonClearance));
+	sciLayoutStoryButtons(self);
 }
 
 %new
@@ -1010,14 +913,11 @@ static void sciRefreshMentionsInVisibleOverlays(id storyVC) {
 	for (UIView *overlay in sciLiveStoryOverlays().allObjects) {
 		if (!overlay.window || sciOverlayIsInDMContext(overlay)) continue;
 
-		if ([overlay respondsToSelector:@selector(sciApplyMusicButtonClearance)]) {
-			((void (*)(id, SEL))objc_msgSend)(overlay, @selector(sciApplyMusicButtonClearance));
-		}
-
 		if (!prefs.mentions) continue;
 
 		if ([overlay respondsToSelector:@selector(sciRefreshStoryMentionsButtonWithPrefs:)]) {
 			((void (*)(id, SEL, SCIStoryOverlayPrefs))objc_msgSend)(overlay, @selector(sciRefreshStoryMentionsButtonWithPrefs:), prefs);
+			sciLayoutStoryButtons(overlay);
 		}
 
 		if ([overlay respondsToSelector:@selector(sciKickMentionsRetryChainWithPrefs:)]) {
@@ -1050,5 +950,13 @@ static void sciRefreshMentionsInVisibleOverlays(id storyVC) {
 %ctor {
 	if (SCIStoryHasAnyFeature(SCIStoryPrefs())) {
 		%init(StoryOverlayGroup);
+		[[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillShowNotification
+			object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+				sciSetStoryButtonsKbHidden(YES);
+			}];
+		[[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillHideNotification
+			object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+				sciSetStoryButtonsKbHidden(NO);
+			}];
 	}
 }

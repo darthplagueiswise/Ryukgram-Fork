@@ -10,6 +10,7 @@ NSString *const SCILockGroupKeepDeleted     = @"keep_deleted";
 NSString *const SCILockGroupProfileAnalyzer = @"profile_analyzer";
 NSString *const SCILockGroupMessagesTab     = @"messages_tab";
 NSString *const SCILockGroupChats           = @"chats";
+NSString *const SCILockGroupHiddenReveal    = @"hidden_reveal";
 
 @interface SCILockGroupInfo ()
 @property (nonatomic, readwrite, copy) NSString *identifier;
@@ -67,6 +68,11 @@ NSArray<SCILockGroupInfo *> *SCILockAllGroups(void) {
                             name:SCILocalized(@"Per-chat locks")
                             desc:SCILocalized(@"Long-press a chat to lock it individually")
                             icon:@"ig_icon_direct_off_prism_outline_24"
+                           indep:YES],
+            [SCILockGroupInfo id:SCILockGroupHiddenReveal
+                            name:SCILocalized(@"Reveal hidden chats")
+                            desc:SCILocalized(@"Prompt before holding the inbox name reveals hidden chats")
+                            icon:@"eye.slash"
                            indep:YES],
         ];
     });

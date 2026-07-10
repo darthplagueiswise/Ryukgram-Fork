@@ -96,7 +96,6 @@ static CGFloat const kSCIGridSpacing = 8.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.sheetTitle = SCILocalized(@"Filter");
 

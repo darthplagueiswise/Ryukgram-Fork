@@ -74,7 +74,7 @@ static CGFloat const kSCIGalleryThumbLeadingSelection = 40.0;
 	self.thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
 	self.thumbnailView.clipsToBounds = YES;
 	self.thumbnailView.layer.cornerRadius = 6.0;
-	self.thumbnailView.backgroundColor = SCIUIKit26PanelFillColor();
+	self.thumbnailView.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	[self.contentView addSubview:self.thumbnailView];
 
 	self.rowTypeIcon = [self imageViewWithTint:UIColor.secondaryLabelColor];

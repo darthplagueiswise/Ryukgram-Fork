@@ -57,9 +57,16 @@
 	}];
 	hidden.dynamicSubtitle = ^{
 		NSUInteger count = [SCIHiddenChats allEntries].count;
-		return count ? [NSString stringWithFormat:SCILocalized(@"%lu hidden"), (unsigned long)count] : SCILocalized(@"Long-press a DM to add");
+		if (!count) return SCILocalized(@"Long-press a DM to add");
+		NSString *base = [NSString stringWithFormat:SCILocalized(@"%lu hidden"), (unsigned long)count];
+		return [SCIHiddenChats revealed] ? [base stringByAppendingString:SCILocalized(@" · shown in inbox")] : base;
 	};
 	hidden.iconImage = [SCIIcon imageNamed:@"ig_icon_direct_off_prism_outline_24" pointSize:24];
+
+	SCISetting *holdReveal = [self switchRowWithTitle:SCILocalized(@"Hold name to reveal")
+											 subtitle:SCILocalized(@"Long-press the account name atop the DM inbox to show or hide your hidden chats")
+												  key:@"hidden_chats_reveal_on_hold"
+											 restart:NO];
 
 	SCISetting *hideUI = [self switchRowWithTitle:SCILocalized(@"Hide UI on capture")
 										 subtitle:SCILocalized(@"Redact RyukGram buttons from screenshots, screen recordings, and mirroring")
@@ -82,7 +89,7 @@
 											   rows:@[lock]],
 		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Hidden chats")
 											 footer:SCILocalized(@"Long-press a DM thread → Hide chat to add it here. Hidden chats are filtered out of the inbox until you remove them from this list.")
-											   rows:@[hidden]],
+											   rows:@[hidden, holdReveal]],
 		[SCISettingsViewController sectionWithHeader:SCILocalized(@"Screenshots & capture")
 											 footer:SCILocalized(@"Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts.")
 											   rows:@[hideUI, removeAlert, instants]]

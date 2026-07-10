@@ -145,13 +145,27 @@ static BOOL SCIGalleryPathIsInside(NSString *path, NSString *folder) {
 
 #pragma mark - Bulk actions
 
+// Share under the file's display name, not its on-disk `<epochMs>_` name — via a hardlink, no copy.
+- (NSURL *)sciShareURLForGalleryFile:(SCIGalleryFile *)file {
+	NSURL *src = file.fileURL;
+	if (!src) return nil;
+	NSString *clean = file.exportFilename;
+	if (!clean.length || [src.lastPathComponent isEqualToString:clean]) return src;
+	NSURL *dst = [SCITempFiles claimNamedFile:clean ttl:600 tag:@"galshare"];
+	NSFileManager *fm = NSFileManager.defaultManager;
+	if ([fm linkItemAtURL:src toURL:dst error:nil] || [fm copyItemAtURL:src toURL:dst error:nil]) return dst;
+	[SCITempFiles releaseURL:dst];
+	return src;
+}
+
 - (void)shareSelectedFiles {
 	NSArray<SCIGalleryFile *> *files = [self selectedGalleryFiles];
 	if (!files.count) return;
 
 	NSMutableArray<NSURL *> *urls = [NSMutableArray arrayWithCapacity:files.count];
 	for (SCIGalleryFile *file in files) {
-		if (file.fileURL) [urls addObject:file.fileURL];
+		NSURL *shareURL = [self sciShareURLForGalleryFile:file];
+		if (shareURL) [urls addObject:shareURL];
 	}
 
 	if (!urls.count) return;
@@ -297,7 +311,7 @@ static BOOL SCIGalleryPathIsInside(NSString *path, NSString *folder) {
 					done(NO, nil);
 					return;
 				}
-				[SCIPhotoAlbum saveFileToAlbum:temp completion:done];
+				[SCIPhotoAlbum saveFileToAlbum:temp originalFilename:file.exportFilename completion:done];
 				return;
 			}
 
@@ -308,6 +322,7 @@ static BOOL SCIGalleryPathIsInside(NSString *path, NSString *folder) {
 				PHAssetCreationRequest *request = PHAssetCreationRequest.creationRequestForAsset;
 				PHAssetResourceCreationOptions *options = PHAssetResourceCreationOptions.new;
 				options.shouldMoveFile = NO;
+				options.originalFilename = file.exportFilename;
 
 				[request addResourceWithType:(isVideo ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto)
 									  fileURL:url
@@ -380,8 +395,9 @@ static BOOL SCIGalleryPathIsInside(NSString *path, NSString *folder) {
 		__strong typeof(weakSelf) self = weakSelf;
 		if (!self || !file.fileURL) return;
 
+		NSURL *shareURL = [self sciShareURLForGalleryFile:file] ?: file.fileURL;
 		[SCIPhotoAlbum armWatcherIfEnabled];
-		UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[file.fileURL] applicationActivities:nil];
+		UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[shareURL] applicationActivities:nil];
 		[self presentViewController:vc animated:YES completion:nil];
 	});
 

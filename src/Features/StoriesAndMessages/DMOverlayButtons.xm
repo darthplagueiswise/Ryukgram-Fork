@@ -2,6 +2,7 @@
 // Hooks IGDirectVisualMessageViewerController directly; reads only dm_visual_* prefs.
 
 #import "OverlayHelpers.h"
+#import "SCIDMButtonLayout.h"
 #import "../../SCIChrome.h"
 #import "../../UI/SCIIcon.h"
 #import "../../ActionButton/SCIActionIcon.h"
@@ -30,6 +31,53 @@ static inline SCIChromeButton *SCIDMButton(NSString *symbol, CGFloat pointSize, 
 
 static inline void SCIDMRemoveButton(UIView *overlay, NSInteger tag) {
 	[[overlay viewWithTag:tag] removeFromSuperview];
+}
+
+static NSString *sciDMIDForTag(NSInteger tag) {
+	if (tag == SCI_DM_ACTION_TAG) return SCIDMBtnAction;
+	if (tag == SCI_DM_EYE_TAG) return SCIDMBtnEye;
+	if (tag == SCI_DM_AUDIO_TAG) return SCIDMBtnAudio;
+	return nil;
+}
+
+// Hidden while a comment sheet / keyboard is up (IG shrinks the overlay safe area).
+static BOOL sciDMButtonsKbHidden = NO;
+static __weak UIView *sciCurrentDMOverlay = nil;
+
+// Frame-positions each present button at its saved normalized point in the safe area.
+static void sciDMLayoutButtons(UIView *overlay) {
+	CGRect safe = overlay.safeAreaLayoutGuide.layoutFrame;
+	if (safe.size.width <= 0 || safe.size.height <= 0) return;
+	sciCurrentDMOverlay = overlay;
+
+	UIEdgeInsets ins = [SCIDMButtonLayout placeableInsetsNormalized];
+	CGRect area = CGRectMake(safe.origin.x + ins.left * safe.size.width,
+							 safe.origin.y + ins.top * safe.size.height,
+							 safe.size.width * (1.0 - ins.left - ins.right),
+							 safe.size.height * (1.0 - ins.top - ins.bottom));
+
+	NSInteger tags[] = { SCI_DM_ACTION_TAG, SCI_DM_EYE_TAG, SCI_DM_AUDIO_TAG };
+
+	for (NSUInteger i = 0; i < 3; i++) {
+		UIView *button = [overlay viewWithTag:tags[i]];
+		if (!button) continue;
+
+		if (sciDMButtonsKbHidden) { button.hidden = YES; continue; }
+		button.hidden = NO;
+
+		NSString *bid = sciDMIDForTag(tags[i]);
+		CGFloat d = [SCIDMButtonLayout diameterForID:bid];
+		CGPoint norm = [SCIDMButtonLayout positionForID:bid];
+
+		CGFloat half = d / 2.0;
+		CGFloat cx = safe.origin.x + norm.x * safe.size.width;
+		CGFloat cy = safe.origin.y + norm.y * safe.size.height;
+		cx = MIN(MAX(cx, CGRectGetMinX(area) + half), CGRectGetMaxX(area) - half);
+		cy = MIN(MAX(cy, CGRectGetMinY(area) + half), CGRectGetMaxY(area) - half);
+
+		button.bounds = CGRectMake(0, 0, d, d);
+		button.center = CGPointMake(cx, cy);
+	}
 }
 
 // MARK: - Menu item builders
@@ -293,17 +341,10 @@ static void sciDMInstallButtons(UIViewController *dmVC) {
 
 	if (SCIDMActionEnabled()) {
 		SCIChromeButton *button = SCIDMButton(@"", 18.0, 36.0, SCI_DM_ACTION_TAG);
+		button.translatesAutoresizingMaskIntoConstraints = YES;
 		objc_setAssociatedObject(button, kSCIDMOwnerVCKey, dmVC, OBJC_ASSOCIATION_ASSIGN);
 
 		[overlay addSubview:button];
-
-		[NSLayoutConstraint activateConstraints:@[
-			[button.bottomAnchor constraintEqualToAnchor:overlay.safeAreaLayoutGuide.bottomAnchor constant:-100.0],
-			[button.trailingAnchor constraintEqualToAnchor:overlay.trailingAnchor constant:-12.0],
-			[button.widthAnchor constraintEqualToConstant:36.0],
-			[button.heightAnchor constraintEqualToConstant:36.0]
-		]];
-
 		[SCIActionIcon attachAutoUpdate:button source:SCIActionSourceDM pointSize:18.0 style:SCIActionIconStylePlain];
 		sciDMConfigureActionButton(button, dmVC);
 	}
@@ -313,6 +354,7 @@ static void sciDMInstallButtons(UIViewController *dmVC) {
 
 	if (SCIDMEyeEnabled()) {
 		SCIChromeButton *button = SCIDMButton(@"", 18.0, 36.0, SCI_DM_EYE_TAG);
+		button.translatesAutoresizingMaskIntoConstraints = YES;
 		[button setIconResource:@"eye" pointSize:18.0]; // IG-styled eye glyph
 		objc_setAssociatedObject(button, kSCIDMOwnerVCKey, dmVC, OBJC_ASSOCIATION_ASSIGN);
 
@@ -320,24 +362,6 @@ static void sciDMInstallButtons(UIViewController *dmVC) {
 		sciDMAttachLongPressMenu(button, SCI_DM_EYE_TAG);
 
 		[overlay addSubview:button];
-
-		UIView *anchor = [overlay viewWithTag:SCI_DM_ACTION_TAG];
-
-		if (anchor) {
-			[NSLayoutConstraint activateConstraints:@[
-				[button.centerYAnchor constraintEqualToAnchor:anchor.centerYAnchor],
-				[button.trailingAnchor constraintEqualToAnchor:anchor.leadingAnchor constant:-10.0],
-				[button.widthAnchor constraintEqualToConstant:36.0],
-				[button.heightAnchor constraintEqualToConstant:36.0]
-			]];
-		} else {
-			[NSLayoutConstraint activateConstraints:@[
-				[button.bottomAnchor constraintEqualToAnchor:overlay.safeAreaLayoutGuide.bottomAnchor constant:-100.0],
-				[button.trailingAnchor constraintEqualToAnchor:overlay.trailingAnchor constant:-12.0],
-				[button.widthAnchor constraintEqualToConstant:36.0],
-				[button.heightAnchor constraintEqualToConstant:36.0]
-			]];
-		}
 	}
 
 	// --- Audio toggle (tag 1344) ---
@@ -348,18 +372,13 @@ static void sciDMInstallButtons(UIViewController *dmVC) {
 	if ([SCIUtils getBoolPref:@"dm_visual_audio_toggle"]) {
 		NSString *symbol = sciIsStoryAudioEnabled() ? @"speaker.wave.2" : @"speaker.slash";
 		SCIChromeButton *button = SCIDMButton(symbol, 14.0, 28.0, SCI_DM_AUDIO_TAG);
+		button.translatesAutoresizingMaskIntoConstraints = YES;
 
 		[button addTarget:delegate action:@selector(audioTapped:) forControlEvents:UIControlEventTouchUpInside];
-
 		[overlay addSubview:button];
-
-		[NSLayoutConstraint activateConstraints:@[
-			[button.bottomAnchor constraintEqualToAnchor:overlay.safeAreaLayoutGuide.bottomAnchor constant:-100.0],
-			[button.leadingAnchor constraintEqualToAnchor:overlay.leadingAnchor constant:12.0],
-			[button.widthAnchor constraintEqualToConstant:28.0],
-			[button.heightAnchor constraintEqualToConstant:28.0]
-		]];
 	}
+
+	sciDMLayoutButtons(overlay);
 }
 
 // Rebuild only when an enabled button is missing.
@@ -384,6 +403,7 @@ static void sciDMEnsureButtons(UIViewController *dmVC) {
 	}
 
 	sciDMRefreshActionIcon(dmVC);
+	sciDMLayoutButtons(overlay);
 }
 
 // MARK: - VC hook
@@ -419,10 +439,31 @@ static void sciDMEnsureButtons(UIViewController *dmVC) {
 
 %end // DMOverlayGroup
 
+static void sciSetDMButtonsKbHidden(BOOL hidden) {
+	if (sciDMButtonsKbHidden == hidden) return;
+	sciDMButtonsKbHidden = hidden;
+	__weak UIView *ov = sciCurrentDMOverlay;
+	if (ov) sciDMLayoutButtons(ov);
+	// On unhide the safe area is still keyboard-shrunk for a beat — relayout again
+	// once it settles so the buttons return to their saved spots, not the middle.
+	if (!hidden) {
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+			dispatch_get_main_queue(), ^{ if (ov && !sciDMButtonsKbHidden) sciDMLayoutButtons(ov); });
+	}
+}
+
 %ctor {
 	if (SCIDMActionEnabled() ||
 		SCIDMEyeEnabled() ||
 		[SCIUtils getBoolPref:@"dm_visual_audio_toggle"]) {
 		%init(DMOverlayGroup);
+		[[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardWillShowNotification
+			object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+				sciSetDMButtonsKbHidden(YES);
+			}];
+		[[NSNotificationCenter defaultCenter] addObserverForName:UIKeyboardDidHideNotification
+			object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *n) {
+				sciSetDMButtonsKbHidden(NO);
+			}];
 	}
 }

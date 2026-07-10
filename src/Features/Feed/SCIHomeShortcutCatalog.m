@@ -6,6 +6,7 @@
 #import "../ProfileAnalyzer/SCIProfileAnalyzerViewController.h"
 #import "../DeletedMessages/SCIDeletedMessagesViewController.h"
 #import "../ReadReceipts/SCIReadReceiptLogViewController.h"
+#import "../FollowRequests/SCIFollowRequestsViewController.h"
 #import "../HiddenChats/SCIHiddenChatsViewController.h"
 #import "../../UI/SCIPopupChrome.h"
 #import "../../Lock/SCILockGate.h"
@@ -56,6 +57,7 @@ NSNotificationName const SCIHomeShortcutConfigDidChangeNotification = @"SCIHomeS
 			make(@"profile_analyzer", SCILocalized(@"Profile Analyzer"), @"green_screen"),
 			make(@"deleted_messages", SCILocalized(@"Deleted messages"), @"tray.full"),
 			make(@"read_receipts",	SCILocalized(@"Read receipts"),	@"eye.fill"),
+			make(@"follow_requests",  SCILocalized(@"Follow Requests"),  @"bcn_users-add_outline_24"),
 			make(@"fake_location",	SCILocalized(@"Fake location"),	@"location_arrow"),
 			make(@"clear_cache",	  SCILocalized(@"Clear cache"),	  @"trash"),
 			make(@"changelog",		SCILocalized(@"Changelog"),		@"doc.text"),
@@ -161,6 +163,10 @@ NSNotificationName const SCIHomeShortcutConfigDidChangeNotification = @"SCIHomeS
 	if ([actionID isEqualToString:@"read_receipts"]) {
 		UIViewController *top = [SCIUtils nearestViewControllerForView:contextView];
 		[SCIReadReceiptLogViewController presentFromViewController:top];
+		return;
+	}
+	if ([actionID isEqualToString:@"follow_requests"]) {
+		[SCIPopupChrome presentVC:[SCIFollowRequestsViewController new] from:[SCIUtils nearestViewControllerForView:contextView]];
 		return;
 	}
 	if ([actionID isEqualToString:@"changelog"]) {

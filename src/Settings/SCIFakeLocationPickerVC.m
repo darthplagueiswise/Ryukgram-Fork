@@ -1,7 +1,6 @@
 #import "SCIFakeLocationPickerVC.h"
 #import <MapKit/MapKit.h>
 #import "../Localization/SCILocalization.h"
-#import "../UI/SCIUIKit26LiquidGlass.h"
 
 @interface SCIFakeLocationSearchResultsVC : UITableViewController <MKLocalSearchCompleterDelegate>
 @property (nonatomic,strong) MKLocalSearchCompleter *completer;
@@ -19,12 +18,6 @@
 		_results = @[];
 	}
 	return self;
-}
-
-- (void)viewDidLoad {
-	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 }
 
 - (void)dealloc {
@@ -62,7 +55,6 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"result"];
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"result"];
-	SCIUIKit26ConfigureTableCell(cell);
 
 	MKLocalSearchCompletion *result = self.results[indexPath.row];
 	cell.textLabel.text = result.title;
@@ -100,9 +92,8 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemBackgroundColor;
 	self.title = self.titleText.length ? self.titleText : SCILocalized(@"Pick location");
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
 
@@ -157,15 +148,15 @@
 	self.searchController.searchBar.placeholder = SCILocalized(@"Search address or place");
 
 	self.navigationItem.searchController = self.searchController;
-	SCIUIKit26ConfigureSearchNavigationItem(self.navigationItem);
+	self.navigationItem.hidesSearchBarWhenScrolling = NO;
 	self.definesPresentationContext = YES;
 }
 
 - (void)setupLocateButton {
 	self.locateButton = [UIButton buttonWithType:UIButtonTypeSystem];
+	self.locateButton.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	self.locateButton.tintColor = UIColor.systemBlueColor;
-	SCIUIKit26ConfigureButton(self.locateButton);
-	self.locateButton.layer.cornerRadius = 20.0;
+	self.locateButton.layer.cornerRadius = 8.0;
 	self.locateButton.translatesAutoresizingMaskIntoConstraints = NO;
 	[self.locateButton setImage:[UIImage systemImageNamed:@"location"] forState:UIControlStateNormal];
 	[self.locateButton addTarget:self action:@selector(onLocateTap) forControlEvents:UIControlEventTouchUpInside];
@@ -180,7 +171,7 @@
 }
 
 - (void)setupCard {
-	self.cardView = [[UIVisualEffectView alloc] initWithEffect:(SCIUIKit26GlassEffect(NO, YES, nil) ?: [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial])];
+	self.cardView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
 	self.cardView.layer.cornerRadius = 16.0;
 	self.cardView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.cardView.clipsToBounds = YES;
@@ -192,7 +183,7 @@
 	self.subtitleLabel = [self labelWithFont:[UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightRegular] color:UIColor.secondaryLabelColor];
 
 	self.useButton = [UIButton buttonWithType:UIButtonTypeSystem];
-	SCIUIKit26ConfigureButton(self.useButton);
+	self.useButton.backgroundColor = UIColor.systemBlueColor;
 	self.useButton.layer.cornerRadius = 12.0;
 	self.useButton.translatesAutoresizingMaskIntoConstraints = NO;
 	self.useButton.titleLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];

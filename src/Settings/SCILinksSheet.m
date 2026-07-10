@@ -19,8 +19,11 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        return tc.userInterfaceStyle == UIUserInterfaceStyleDark
+            ? [UIColor colorWithWhite:0.11 alpha:1.0]
+            : [UIColor systemBackgroundColor];
+    }];
 
     UIImageView *logo = [[UIImageView alloc] initWithImage:
         [UIImage imageNamed:@"ryukgram"

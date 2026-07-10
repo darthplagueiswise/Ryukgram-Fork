@@ -4,24 +4,21 @@
 @implementation SCIPopupChrome
 
 + (UIColor *)backgroundColor {
-    return SCIUIKit26BaseSurfaceColor();
+    return [UIColor systemGroupedBackgroundColor];
 }
 
 + (void)applyBackdropTo:(UIViewController *)vc {
     if (!vc.isViewLoaded) [vc loadViewIfNeeded];
-    SCIUIKit26ConfigureViewController(vc);
-    vc.view.backgroundColor = [self backgroundColor];
+    UIColor *bg = [self backgroundColor];
+    vc.view.backgroundColor = bg;
     NSMutableArray *stack = [NSMutableArray arrayWithObject:vc.view];
     while (stack.count) {
         UIView *v = stack.lastObject;
         [stack removeLastObject];
-        if ([v isKindOfClass:[UITableView class]]) {
-            SCIUIKit26ConfigureTableView((UITableView *)v);
-            continue;
-        }
-        if ([v isKindOfClass:[UICollectionView class]]) {
-            SCIUIKit26ConfigureCollectionView((UICollectionView *)v);
-            continue;
+        if ([v isKindOfClass:[UITableView class]]
+            || [v isKindOfClass:[UICollectionView class]]) {
+            v.backgroundColor = bg;
+            return;
         }
         for (UIView *sub in v.subviews) [stack addObject:sub];
     }
@@ -35,8 +32,6 @@
         nav.overrideUserInterfaceStyle = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
     }
     [self applyBackdropTo:content];
-    SCIConfigureNavigationChromeForGlass(content);
-    SCIUIKit26InstallNavigationTitleBubble(content);
     if (!content.navigationItem.leftBarButtonItem
         && !content.navigationItem.leftBarButtonItems.count) {
         UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark"]

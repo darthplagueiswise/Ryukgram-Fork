@@ -9,6 +9,7 @@
 #import "../Features/ProfileAnalyzer/SCIProfileAnalyzerStorage.h"
 #import "../Features/DeletedMessages/SCIDeletedMessagesStorage.h"
 #import "../Features/ReadReceipts/SCIReadReceiptStorage.h"
+#import "../Features/FollowRequests/SCIFollowRequestStorage.h"
 #import "../Features/ChatBackground/SCIChatBackgroundManager.h"
 #import "../Gallery/SCIGalleryPaths.h"
 #import "../Gallery/SCIGalleryCoreDataStack.h"
@@ -180,7 +181,7 @@ static id sciMergedValue(id local, id imported) {
 }
 
 + (NSArray<NSString *> *)hiddenLockedAccountKeys {
-	return @[ @"hidden_chats", @"lock_chats_locked_entries", @"share_sheet_pinned_thread_ids" ];
+	return @[ @"hidden_chats", @"lock_chats_locked_entries", @"share_sheet_pinned_thread_ids", @"story_pinned_viewers" ];
 }
 
 + (NSString *)hiddenLockedGlobalKey { return @"lock_chats_appearance_overrides"; }
@@ -208,6 +209,14 @@ static id sciMergedValue(id local, id imported) {
 			@"dir": [SCIReadReceiptStorage storageDirectory],
 			@"reset": [^{ [SCIReadReceiptStorage resetAll]; } copy],
 			@"merge": [^(NSString *extracted) { [SCIReadReceiptStorage mergeImportedStoreAtPath:extracted]; } copy],
+		},
+		@{
+			@"id": @"follow_requests",
+			@"title": SCILocalized(@"Follow requests log"),
+			@"prefs": @[ @"follow_requests_enabled", @"follow_requests_track_outgoing", @"follow_requests_track_incoming", @"follow_requests_check_interval", @"follow_requests_notify_accepted", @"follow_requests_notify_rejected", @"follow_requests_notify_received", @"follow_requests_notify_withdrawn" ],
+			@"dir": [SCIFollowRequestStorage storageDirectory],
+			@"reset": [^{ [SCIFollowRequestStorage resetAll]; } copy],
+			@"merge": [^(NSString *extracted) { [SCIFollowRequestStorage mergeImportedStoreAtPath:extracted]; } copy],
 		},
 		@{
 			@"id": @"instants_auto_save",
@@ -836,7 +845,7 @@ static id sciMergedValue(id local, id imported) {
 
 	// No media: small, write inline.
 	if (roots.count == 0) {
-		NSURL *out = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"RyukGram-backup-%@.json", stamp] ttl:900 tag:@"backup"];
+		NSURL *out = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"RyukGram-%@-backup-%@.json", SCIVersionString, stamp] ttl:900 tag:@"backup"];
 		if (!payload || ![payload writeToURL:out options:NSDataWritingAtomic error:nil]) {
 			[SCITempFiles releaseURL:out];
 			[self showError:SCILocalized(@"Could not write backup file.")];
@@ -847,7 +856,7 @@ static id sciMergedValue(id local, id imported) {
 	}
 
 	// Media bundle: compress off-main (slow on a big gallery), pill carries to success.
-	NSURL *out = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"RyukGram-backup-%@.ryukbak", stamp] ttl:900 tag:@"backup"];
+	NSURL *out = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"RyukGram-%@-backup-%@.ryukbak", SCIVersionString, stamp] ttl:900 tag:@"backup"];
 	SCINotificationHandle *h = SCINotifyLoading(SCI_NOTIF_BACKUP, SCILocalized(@"Preparing backup…"), nil);
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
 		NSError *err = nil;

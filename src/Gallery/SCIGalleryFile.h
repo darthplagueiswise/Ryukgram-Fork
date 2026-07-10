@@ -86,6 +86,9 @@ typedef NS_ENUM(int16_t, SCIGallerySource) {
 /// User-facing display name — customName if set, else the portion of relativePath after the timestamp prefix.
 - (NSString *)displayName;
 
+/// `displayName` with the file's real extension — the name for Photos / share.
+- (NSString *)exportFilename;
+
 /// Human-readable label for the source type.
 - (NSString *)sourceLabel;
 

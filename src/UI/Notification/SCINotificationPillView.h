@@ -55,6 +55,9 @@ typedef NS_ENUM(NSUInteger, SCINotificationPosition) {
 - (void)setProgress:(float)progress animated:(BOOL)animated;
 - (void)refreshSizeAnimated:(BOOL)animated;
 - (void)pulseIcon;
+// Target height from the height constraint — valid right after refreshSize, before
+// bounds resolve (bounds read 0 until layout, which breaks stack spacing math).
+- (CGFloat)pillTargetHeight;
 
 @end
 

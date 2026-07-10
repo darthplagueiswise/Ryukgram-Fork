@@ -13,10 +13,12 @@ NS_ASSUME_NONNULL_BEGIN
 // Pref gating only — does not check app state.
 + (BOOL)shouldMirrorAction:(nullable NSString *)actionID;
 
-// Safe to call from any thread.
+// Safe to call from any thread. onTap runs when the user taps the mirrored
+// notification (kept in memory — a tap after IG was killed just opens the app).
 + (void)mirrorActionID:(nullable NSString *)actionID
                  title:(NSString *)title
-              subtitle:(nullable NSString *)subtitle;
+              subtitle:(nullable NSString *)subtitle
+                 onTap:(nullable void (^)(void))onTap;
 
 // Per-action mirror pref defaults (notif_mirror_<id> = "on"/"off").
 + (NSDictionary<NSString *, NSString *> *)defaultPerActionPrefs;

@@ -31,6 +31,13 @@ What it does
    breaks that predate the old version. A file that reaches the same class via a
    working spelling too (mangled-then-bare fallback, dual %hook) is not flagged.
    Run with just --new (no --old) to lint the current version standalone.
+   CAVEAT — this lint is ADVISORY, not actionable: ipsw names a Swift class by its
+   mangled `_TtC…` symbol, but an @objc-named Swift class registers under its BARE
+   name at runtime, so a bare %hook resolves fine despite the mangled header. The
+   static index can't distinguish the two, so this false-positives on every such
+   class. ALWAYS verify with a boot-time NSClassFromString probe on device before
+   changing a hook; NEVER switch a working bare %hook to the mangled name on the
+   strength of this lint alone (doing so silently kills the hook).
 
 Swift names: source reaches IG Swift classes via dotted "Module.Class" or bare
 "Class"; ipsw emits mangled "_TtC<len>Module<len>Class". All three spellings are
@@ -368,7 +375,7 @@ RE_SRC_SELECTOR = re.compile(r'@selector\(([^)]+)\)')
 RE_SRC_SELSTR = re.compile(r'NSSelectorFromString\(@"([^"]+)"\)')
 RE_SRC_MSHOOKIVAR = re.compile(r'MSHookIvar<[^>]*>\([^,]+,\s*"([^"]+)"')
 # ivar names passed through helper wrappers, e.g. sciObjIvar(obj, "_x")
-RE_SRC_IVARHELPER = re.compile(r'\b\w*Ivar\w*\(\s*[^,()]+,\s*"(_[A-Za-z0-9_]+)"\s*\)')
+RE_SRC_IVARHELPER = re.compile(r'\b\w*Ivar\w*\(\s*[^,()]+,\s*"(_[A-Za-z0-9_]+)"\s*[,)]')
 RE_SRC_KVC = re.compile(r'alueForKey:@"([^"]+)"')
 RE_SRC_SWIFT = re.compile(r'(_TtC\d+[A-Za-z0-9_]+)')
 RE_SRC_IFACE = re.compile(r'@interface\s+([A-Za-z_]\w*)')
@@ -512,6 +519,24 @@ def method_in_chain(idx, cls, sel):
     return False
 
 
+def ivar_in_chain(idx, cls, name):
+    """True if ivar `name` is declared on `cls` or any superclass in this version."""
+    seen = set()
+    cur = resolve_class_key(idx, cls)
+    while cur and cur not in seen:
+        seen.add(cur)
+        c = idx["classes"][cur]
+        if name in c["ivars"]:
+            return True
+        cur = resolve_class_key(idx, c["super"]) if c["super"] else None
+    return False
+
+
+def classes_with_ivar(idx, name):
+    """Classes in this version that declare ivar `name` (where it may have moved)."""
+    return sorted(k for k, c in idx["classes"].items() if name in c["ivars"])
+
+
 def kvc_resolvable(idx, key):
     """valueForKey: hits a getter or a `key`/`_key` ivar."""
     return (key in idx["all_selectors"] or key in idx["all_ivars"]
@@ -607,6 +632,53 @@ def diff(refs, old, new):
                 broken_kvc.append((r, suggest(r.name, new["all_selectors"])))
 
     return broken_class, broken_method, broken_ivar, broken_selector, broken_kvc
+
+
+def perclass_ivar_loss(refs, old, new):
+    """Ivars we read that vanished from THEIR class even though the name survives
+    elsewhere in the binary — the blind spot of the global `all_ivars` check.
+
+    An ivar read (`sciIvar(obj, "_x")`, MSHookIvar, class_getInstanceVariable) has
+    no class literal at the call site, so it's tied to a class by co-location:
+    a file that names class C (via %hook/%c/NSClassFromString/@interface) and reads
+    ivar `_x` is treated as reading `_x` off C. We flag only when `_x` was on C's
+    chain in old and is gone from C's chain in new — so unrelated ivars in the same
+    file self-filter, and a name still present on C (just moved up a super) doesn't
+    false-fire. Suggestion points at the 434 class that now owns the ivar.
+    """
+    class_files = {}                       # class name -> {files that name it}
+    for r in refs:
+        if r.kind == "class":
+            class_files.setdefault(r.name, set()).add(r.file)
+
+    file_ivars = {}                        # file -> {ivar name -> representative ref}
+    for r in refs:
+        if r.kind == "ivar":
+            file_ivars.setdefault(r.file, {}).setdefault(r.name, r)
+
+    out, seen = [], set()
+    for cname, files in class_files.items():
+        ok = resolve_class_key(old, cname)
+        if not ok:
+            continue                       # not an IG class in old — our own / Apple
+        nk = resolve_class_key(new, cname)
+        if not nk:
+            continue                       # class fully gone — runtime-dead/broken-class own it
+        for f in files:
+            for ivname, ref in file_ivars.get(f, {}).items():
+                if (ok, ivname) in seen:   # canonical key collapses bare + mangled spellings
+                    continue
+                if not ivar_in_chain(old, ok, ivname):
+                    continue               # ivar wasn't on this class in old — not ours to claim
+                if ivar_in_chain(new, nk, ivname):
+                    continue               # still there in new — fine
+                seen.add((ok, ivname))
+                sug = suggest(ivname, new["classes"][nk]["ivars"])
+                holders = classes_with_ivar(new, ivname)
+                if holders:
+                    sug = sug + ["now on %s" % dotted_name(holders[0])]
+                out.append((Ref("ivar", ivname, cname, ref.file, ref.line), sug))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -999,30 +1071,51 @@ def main():
     refs = scrape_source(args.src)
 
     rc = runtime_check(refs, new)
-    rc_title = ("RUNTIME-DEAD class lookups (class exists in %s under another name "
-                "— literal returns nil)" % new_label)
+    # ADVISORY, not actionable: ipsw names a Swift class by its mangled `_TtC…` symbol,
+    # but an @objc-named Swift class registers under its BARE name at runtime — so a
+    # bare %hook resolves fine even though the header is mangled. The static index
+    # can't tell the two apart, so this lint false-positives on every @objc Swift
+    # class. VERIFY each at runtime before touching it (boot ClassProbe below);
+    # NEVER switch a bare %hook to the mangled name on this lint alone.
+    rc_title = ("ADVISORY — possible runtime-dead class lookups (VERIFY at runtime; "
+                "often false-positive for @objc-named Swift classes that resolve bare)")
+
+    def print_classprobe_hint():
+        if not rc:
+            return
+        names = ", ".join('@"%s"' % g.name for g, _ in rc[:8])
+        print(yel("\n  ⚠ VERIFY before changing any of these — add a boot probe and read the device log:"))
+        print("    __attribute__((constructor)) static void _p(void){")
+        print("      for (NSString *n in @[%s])" % names)
+        print('        NSLog(@"[ClassProbe] %@ = %@", n, NSClassFromString(n));')
+        print("    }")
+        print("    bare lookup non-null → keep the bare %hook; only mangle when bare is null AND mangled resolves.")
 
     if not old:
         print(hl(f"\n══ runtime-lookup lint against {new_label} ══"))
         print(hl(f"\n══ references scraped: {len(refs)} ══"))
         print_bucket(rc_title, rc, None, new)
-        total = len(rc)
-        print(hl(f"\n══ total actionable: {total} ══"))
-        bc = bm = bi = bs = bk = []
+        print_classprobe_hint()
+        total = 0
+        print(hl(f"\n══ total actionable: {total}  (advisory above is not counted) ══"))
+        bc = bm = bi = bs = bk = pci = []
     else:
         bc, bm, bi, bs, bk = diff(refs, old, new)
+        pci = perclass_ivar_loss(refs, old, new)
 
         print_overview(old, new, old_label, new_label)
         print(hl(f"\n══ references scraped: {len(refs)} ══"))
         print_bucket("BROKEN classes (in %s, gone in %s)" % (old_label, new_label), bc, old, new)
         print_bucket("BROKEN methods on surviving class (silent hook failure)", bm, old, new)
-        print_bucket("BROKEN ivars", bi, old, new)
+        print_bucket("BROKEN ivars (gone from entire binary)", bi, old, new)
+        print_bucket("BROKEN ivars on surviving class (moved/renamed, name survives elsewhere)", pci, old, new)
         print_bucket("BROKEN selectors (gone from entire binary)", bs, old, new)
         print_bucket("BROKEN KVC keys (no getter/ivar left)", bk, old, new)
         print_bucket(rc_title, rc, old, new)
+        print_classprobe_hint()
 
-        total = len(bc) + len(bm) + len(bi) + len(bs) + len(bk) + len(rc)
-        print(hl(f"\n══ total actionable: {total} ══"))
+        total = len(bc) + len(bm) + len(bi) + len(pci) + len(bs) + len(bk)
+        print(hl(f"\n══ total actionable: {total}  (advisory class lookups not counted) ══"))
 
         added_class_report(refs, old, new, args.added_limit, args.added_all)
 
@@ -1034,7 +1127,8 @@ def main():
         with open(args.json, "w") as fh:
             json.dump({"old": old_label, "new": new_label,
                        "classes": dump(bc), "methods": dump(bm),
-                       "ivars": dump(bi), "selectors": dump(bs),
+                       "ivars": dump(bi), "ivars_perclass": dump(pci),
+                       "selectors": dump(bs),
                        "kvc": dump(bk), "runtime_dead": dump(rc)}, fh, indent=2)
         print(f"[*] wrote {args.json}", file=sys.stderr)
 

@@ -8,13 +8,13 @@ TWEAK_NAME = RyukGram
 
 $(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
 
-# SideStore-only: legacy sideload compat patch (keychain, app groups, CloudKit).
-ifdef SIDESTORE
-	$(TWEAK_NAME)_FILES += modules/SideloadPatch/SideloadPatch.xm
-endif
+# The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
+# longer baked in here — it ships as a standalone NoPluginsPatch.dylib
+# (modules/SideloadPatch) injected by cyan for no-plugins builds.
 
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics UserNotifications Photos PhotosUI CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit LocalAuthentication Accelerate CoreData CoreMedia CoreVideo CoreImage ImageIO QuickLook
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics UserNotifications Photos PhotosUI CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit LocalAuthentication Vision Accelerate CoreData CoreMedia CoreVideo CoreImage ImageIO QuickLook
 $(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
+
 $(TWEAK_NAME)_USE_MODULES = 0
 
 # TARGET_OS_* defines so the iPhoneOS26.2 SDK headers resolve correctly under Theos.
@@ -40,4 +40,24 @@ endif
 CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-RyukGram_FILES += src/Features/Dogfooding/SCIIGInternalSettingsMenuGate.x
+
+ifeq ($(FINALPACKAGE),1)
+after-all::
+	@python3 tools/obfuscate-classes.py "$(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib"
+	@ldid -S "$(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib"
+endif
+
+# # Build FLEXing once for sideload builds, then reuse the compiled dylib.
+# ifdef SIDELOAD
+
+# FLEXING_DYLIB := modules/flexing/.theos/obj/arm64/FLEXing.dylib
+
+# $(FLEXING_DYLIB):
+# 	$(MAKE) -C modules/flexing FINALPACKAGE=1
+
+# before-package:: $(FLEXING_DYLIB)
+
+# clean-flexing::
+# 	$(MAKE) -C modules/flexing clean
+
+# endif

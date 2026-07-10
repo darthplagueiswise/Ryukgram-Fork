@@ -1,9 +1,6 @@
-// Send-from-gallery for Instants/QuickSnap.
-//
-// Adds a gallery button on the Instants surface. Picked image goes through a
-// square cropper, then drives IG's pipeline: we wrap AVCaptureVideoDataOutput's
-// delegate and substitute every frame with one rendered from the image. IG's
-// native upload + optimistic UI + store insert run unchanged on top.
+// Send an image or video from the gallery as an Instant. We wrap the camera's
+// AVCaptureVideoDataOutput delegate and substitute frames; IG's native record +
+// upload run unchanged on top.
 
 #import <UIKit/UIKit.h>
 #import <PhotosUI/PhotosUI.h>
@@ -13,11 +10,13 @@
 #import <ImageIO/ImageIO.h>
 #import <Accelerate/Accelerate.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "../../Utils.h"
 #import "../../SCIChrome.h"
 #import "SCIInstantsPath.h"
 #import "../../Gallery/SCIGalleryViewController.h"
 #import "../../Gallery/SCIGalleryFile.h"
+#import "../../UI/SCIVideoEditor.h"
 
 static const void *kSCIVideoInjectorKey = &kSCIVideoInjectorKey;
 static const void *kSCIInstantsGalleryButtonKey = &kSCIInstantsGalleryButtonKey;
@@ -27,6 +26,8 @@ static const void *kSCIInstantsGalleryButtonKey = &kSCIInstantsGalleryButtonKey;
 @interface SCIInstantsGalleryState : NSObject
 @property (nonatomic, strong) UIImage *image;
 @property (nonatomic) BOOL active;
+@property (nonatomic, strong) AVURLAsset *videoAsset;
+@property (nonatomic) BOOL videoActive;
 @end
 
 @implementation SCIInstantsGalleryState
@@ -52,16 +53,59 @@ static void sciClearFrameCache(void) {
 	sCachedPix = 0;
 }
 
+// Reader ops run only on the camera sample-buffer queue; record start flips
+// sVideoArmReset, consumed on the next frame there — no locking needed.
+static AVAssetReader *sVideoReader;
+static AVAssetReaderTrackOutput *sVideoOut;
+static CVPixelBufferRef sVideoCurPB;
+static CMTime sVideoCurPTS;
+static CVPixelBufferRef sVideoPosterPB;
+static CMTime sVideoStartPTS;
+static BOOL sVideoRecording;
+static BOOL sVideoStartCaptured;
+static volatile BOOL sVideoArmReset;
+static __weak id sQuickSnapControlView;
+static volatile BOOL sVideoForcedStop;
+static volatile BOOL sVideoAwaitingRelease;
+static BOOL sVideoSyntheticRelease;
+
+// Hot-path gate the per-frame wrapper checks first; YES only while armed.
+static volatile BOOL sInstantsInjectActive;
+
+static void sciTeardownReader(void) {
+	if (sVideoReader) { [sVideoReader cancelReading]; sVideoReader = nil; }
+	sVideoOut = nil;
+	if (sVideoCurPB) { CVPixelBufferRelease(sVideoCurPB); sVideoCurPB = NULL; }
+	sVideoCurPTS = kCMTimeInvalid;
+	sVideoStartCaptured = NO;
+}
+
+static void sciClearPendingVideo(void) {
+	SCIInstantsGalleryState *state = sciGalleryState();
+	state.videoAsset = nil;
+	state.videoActive = NO;
+	sVideoRecording = NO;
+	sVideoArmReset = NO;
+	sciTeardownReader();
+	if (sVideoPosterPB) { CVPixelBufferRelease(sVideoPosterPB); sVideoPosterPB = NULL; }
+}
+
 static void sciClearPendingImage(void) {
 	SCIInstantsGalleryState *state = sciGalleryState();
 	state.image = nil;
 	state.active = NO;
 	sciClearFrameCache();
+	sciClearPendingVideo();
+	sInstantsInjectActive = NO;
 }
 
 static BOOL sciHasPendingImage(void) {
 	SCIInstantsGalleryState *state = sciGalleryState();
 	return state.active && state.image.CGImage != nil;
+}
+
+static BOOL sciHasPendingVideo(void) {
+	return sciGalleryState().videoActive;
 }
 
 #pragma mark - Small helpers
@@ -87,8 +131,7 @@ static UIViewController *sciTopPresenter(void) {
 
 #pragma mark - Image → sample buffer
 
-// Draws image centred into a malloc'd BGRA buffer at the camera dims with HQ
-// interpolation. Caller frees.
+// Draw image centred into a malloc'd BGRA buffer at camera dims. Caller frees.
 static void *sciDrawImageToBGRA(CGImageRef cg, int32_t width, int32_t height, size_t *outBPR) {
 	if (!cg || width <= 0 || height <= 0) return NULL;
 
@@ -119,10 +162,15 @@ static void *sciDrawImageToBGRA(CGImageRef cg, int32_t width, int32_t height, si
 	return bgra;
 }
 
+static CVPixelBufferRef sciRenderCGImageToPixelBuffer(CGImageRef cg, int32_t width, int32_t height, OSType pix) CF_RETURNS_RETAINED;
+
 static CVPixelBufferRef sciRenderImageToPixelBuffer(UIImage *image, int32_t width, int32_t height, OSType pix) CF_RETURNS_RETAINED;
 
 static CVPixelBufferRef sciRenderImageToPixelBuffer(UIImage *image, int32_t width, int32_t height, OSType pix) {
-	CGImageRef cg = image.CGImage;
+	return sciRenderCGImageToPixelBuffer(image.CGImage, width, height, pix);
+}
+
+static CVPixelBufferRef sciRenderCGImageToPixelBuffer(CGImageRef cg, int32_t width, int32_t height, OSType pix) {
 	if (!cg || width <= 0 || height <= 0) return NULL;
 
 	NSDictionary *attrs = @{
@@ -277,6 +325,220 @@ static CMSampleBufferRef sciSampleBufferFromImage(UIImage *image, CMSampleBuffer
 	return out;
 }
 
+#pragma mark - Video frame injection
+
+static CGImageRef sciCGImageFromPixelBuffer(CVPixelBufferRef pb) CF_RETURNS_RETAINED;
+
+static CGImageRef sciCGImageFromPixelBuffer(CVPixelBufferRef pb) {
+	if (!pb) return NULL;
+	if (CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) return NULL;
+
+	CGImageRef cg = NULL;
+	void *base = CVPixelBufferGetBaseAddress(pb);
+	size_t w = CVPixelBufferGetWidth(pb);
+	size_t h = CVPixelBufferGetHeight(pb);
+	size_t bpr = CVPixelBufferGetBytesPerRow(pb);
+
+	if (base && w && h) {
+		CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB) ?: CGColorSpaceCreateDeviceRGB();
+		CGContextRef ctx = CGBitmapContextCreate(base, w, h, 8, bpr, cs, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
+		if (ctx) {
+			cg = CGBitmapContextCreateImage(ctx);
+			CGContextRelease(ctx);
+		}
+		CGColorSpaceRelease(cs);
+	}
+
+	CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+	return cg;
+}
+
+static CMSampleBufferRef sciSampleBufferFromPixelBufferSource(CVPixelBufferRef src, CMSampleBufferRef tmpl) CF_RETURNS_RETAINED;
+
+static CMSampleBufferRef sciSampleBufferFromPixelBufferSource(CVPixelBufferRef src, CMSampleBufferRef tmpl) {
+	if (!src || !tmpl) return NULL;
+
+	CMFormatDescriptionRef fmt = CMSampleBufferGetFormatDescription(tmpl);
+	if (!fmt) return NULL;
+
+	CMVideoDimensions dims = CMVideoFormatDescriptionGetDimensions(fmt);
+	OSType pix = CMFormatDescriptionGetMediaSubType(fmt);
+
+	CGImageRef cg = sciCGImageFromPixelBuffer(src);
+	if (!cg) return NULL;
+
+	CVPixelBufferRef pb = sciRenderCGImageToPixelBuffer(cg, dims.width, dims.height, pix);
+	CGImageRelease(cg);
+	if (!pb) return NULL;
+
+	CMVideoFormatDescriptionRef newFmt = NULL;
+	if (CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pb, &newFmt) != noErr || !newFmt) {
+		CVPixelBufferRelease(pb);
+		return NULL;
+	}
+
+	CMSampleTimingInfo timing = { kCMTimeInvalid, kCMTimeZero, kCMTimeInvalid };
+	CMSampleBufferGetSampleTimingInfo(tmpl, 0, &timing);
+
+	CMSampleBufferRef out = NULL;
+	CMSampleBufferCreateForImageBuffer(kCFAllocatorDefault, pb, true, NULL, NULL, newFmt, &timing, &out);
+	CFRelease(newFmt);
+	CVPixelBufferRelease(pb);
+
+	return out;
+}
+
+// Build a fresh reader for the picked video (readers can't seek/restart).
+static BOOL sciBuildVideoReader(void) {
+	sciTeardownReader();
+
+	AVURLAsset *asset = sciGalleryState().videoAsset;
+	AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
+	if (!track) return NO;
+
+	NSError *err = nil;
+	AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&err];
+	if (!reader || err) return NO;
+
+	NSDictionary *settings = @{ (__bridge NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA) };
+	AVAssetReaderTrackOutput *out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:settings];
+	out.alwaysCopiesSampleData = NO;
+	if (![reader canAddOutput:out]) return NO;
+	[reader addOutput:out];
+
+	if (![reader startReading]) return NO;
+
+	sVideoReader = reader;
+	sVideoOut = out;
+	return YES;
+}
+
+// Decode the first frame once, for the frozen pre-record preview.
+static void sciPrepareVideoPoster(void) {
+	if (sVideoPosterPB) { CVPixelBufferRelease(sVideoPosterPB); sVideoPosterPB = NULL; }
+	if (!sciBuildVideoReader()) return;
+
+	CMSampleBufferRef sb = [sVideoOut copyNextSampleBuffer];
+	if (sb) {
+		CVImageBufferRef pb = CMSampleBufferGetImageBuffer(sb);
+		if (pb) sVideoPosterPB = (CVPixelBufferRef)CVPixelBufferRetain(pb);
+		CFRelease(sb);
+	}
+	sciTeardownReader();
+}
+
+// At clip end, fire IG's own release handler so recording stops natively
+// instead of padding frozen frames until the user lifts their finger.
+static void sciForceStopRecording(void) {
+	if (sVideoForcedStop || !sciHasPendingVideo()) return;
+	id view = sQuickSnapControlView;
+	if (!view) return;
+	sVideoForcedStop = YES;
+
+	dispatch_async(dispatch_get_main_queue(), ^{
+		SEL sel = @selector(captureButtonDidReleaseAfterExpandingFinished);
+		if (![view respondsToSelector:sel]) return;
+		sVideoAwaitingRelease = YES;
+		sVideoSyntheticRelease = YES;
+		((void (*)(id, SEL))objc_msgSend)(view, sel);
+		sVideoSyntheticRelease = NO;
+	});
+}
+
+extern "C" BOOL SCIInstantsShouldSwallowCaptureRelease(void) {
+	return sVideoAwaitingRelease;
+}
+
+// Advance sVideoCurPB to the frame at `elapsed`; freezes the last frame at EOF.
+static void sciAdvanceVideoTo(CMTime elapsed) {
+	if (!sVideoOut) return;
+
+	while (1) {
+		if (sVideoCurPB && CMTIME_IS_VALID(sVideoCurPTS) && CMTimeCompare(sVideoCurPTS, elapsed) > 0) return;
+
+		CMSampleBufferRef sb = [sVideoOut copyNextSampleBuffer];
+		if (!sb) {
+			[sVideoReader cancelReading];
+			sVideoReader = nil;
+			sVideoOut = nil;
+			if (sVideoRecording) sciForceStopRecording();
+			return;
+		}
+
+		CVImageBufferRef pb = CMSampleBufferGetImageBuffer(sb);
+		CMTime pts = CMSampleBufferGetPresentationTimeStamp(sb);
+		if (pb) {
+			if (sVideoCurPB) CVPixelBufferRelease(sVideoCurPB);
+			sVideoCurPB = (CVPixelBufferRef)CVPixelBufferRetain(pb);
+			sVideoCurPTS = pts;
+		}
+		CFRelease(sb);
+
+		if (!sVideoCurPB) return;
+		if (CMTIME_IS_VALID(pts) && CMTimeCompare(pts, elapsed) >= 0) return;
+	}
+}
+
+// Returns the source frame to draw this camera tick (caller does not own it).
+static CVPixelBufferRef sciCurrentVideoFrame(CMSampleBufferRef tmpl) {
+	if (sVideoArmReset) {
+		sVideoArmReset = NO;
+		sVideoRecording = YES;
+		sVideoStartCaptured = NO;
+		sVideoForcedStop = NO;
+		sciBuildVideoReader();
+	}
+
+	if (sVideoRecording) {
+		if (sVideoOut) {
+			CMTime camPTS = CMSampleBufferGetPresentationTimeStamp(tmpl);
+			if (!sVideoStartCaptured) {
+				sVideoStartPTS = camPTS;
+				sVideoStartCaptured = YES;
+			}
+			CMTime elapsed = CMTimeSubtract(camPTS, sVideoStartPTS);
+			sciAdvanceVideoTo(elapsed);
+		}
+		if (sVideoCurPB) return sVideoCurPB;
+	}
+
+	return sVideoPosterPB;
+}
+
+static void sciBeginVideoFromURL(NSURL *srcURL) {
+	if (!srcURL) return;
+
+	sciClearPendingImage();
+
+	NSString *ext = srcURL.pathExtension.length ? srcURL.pathExtension.lowercaseString : @"mp4";
+	NSURL *tmp = [SCITempFiles claimWithExt:ext ttl:900 tag:@"instants-upload"];
+	[NSFileManager.defaultManager removeItemAtURL:tmp error:nil];
+
+	NSURL *assetURL = tmp;
+	NSError *err = nil;
+	if (![NSFileManager.defaultManager copyItemAtURL:srcURL toURL:tmp error:&err]) {
+		[SCITempFiles releaseURL:tmp];
+		assetURL = srcURL;
+	}
+
+	SCIInstantsGalleryState *state = sciGalleryState();
+	state.videoAsset = [AVURLAsset URLAssetWithURL:assetURL options:nil];
+	sciPrepareVideoPoster();
+	state.videoActive = YES;
+	sInstantsInjectActive = YES;
+}
+
+static void sciArmVideoRecord(void) {
+	if (!sciHasPendingVideo()) return;
+	sVideoArmReset = YES;
+}
+
+static void sciEndVideoRecord(void) {
+	sVideoRecording = NO;
+	sVideoArmReset = NO;
+	sVideoForcedStop = NO;
+}
+
 #pragma mark - AVCapture wrapper
 
 @interface SCIVideoBufferInjector : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
@@ -297,13 +559,28 @@ static CMSampleBufferRef sciSampleBufferFromImage(UIImage *image, CMSampleBuffer
 	id real = self.realDelegate;
 	if (!real) return;
 
-	UIImage *image = sciGalleryState().image;
-	if (sciHasPendingImage()) {
-		CMSampleBufferRef fake = sciSampleBufferFromImage(image, sampleBuffer);
+	if (!sInstantsInjectActive) {
+		[(id<AVCaptureVideoDataOutputSampleBufferDelegate>)real captureOutput:output didOutputSampleBuffer:sampleBuffer fromConnection:connection];
+		return;
+	}
+
+	if (sciHasPendingVideo()) {
+		CVPixelBufferRef src = sciCurrentVideoFrame(sampleBuffer);
+		CMSampleBufferRef fake = src ? sciSampleBufferFromPixelBufferSource(src, sampleBuffer) : NULL;
 		if (fake) {
 			[(id<AVCaptureVideoDataOutputSampleBufferDelegate>)real captureOutput:output didOutputSampleBuffer:fake fromConnection:connection];
 			CFRelease(fake);
 			return;
+		}
+	} else {
+		UIImage *image = sciGalleryState().image;
+		if (sciHasPendingImage()) {
+			CMSampleBufferRef fake = sciSampleBufferFromImage(image, sampleBuffer);
+			if (fake) {
+				[(id<AVCaptureVideoDataOutputSampleBufferDelegate>)real captureOutput:output didOutputSampleBuffer:fake fromConnection:connection];
+				CFRelease(fake);
+				return;
+			}
 		}
 	}
 
@@ -475,6 +752,7 @@ static CMSampleBufferRef sciSampleBufferFromImage(UIImage *image, CMSampleBuffer
 
 @interface SCIInstantsGalleryPickerProxy : NSObject <PHPickerViewControllerDelegate>
 - (void)presentCropForImage:(UIImage *)image;
+- (void)presentTrimmerForURL:(NSURL *)url;
 @end
 
 @implementation SCIInstantsGalleryPickerProxy
@@ -486,10 +764,8 @@ static CMSampleBufferRef sciSampleBufferFromImage(UIImage *image, CMSampleBuffer
 	return proxy;
 }
 
-// Decode raw bytes via ImageIO so we always get a CGImage-backed UIImage. The
-// stock PHPicker `loadObjectOfClass:UIImage` path can return a CIImage-backed
-// UIImage for some HEIC/HDR sources whose .CGImage is nil — our renderer would
-// then bail every frame and the preview locks on the last camera frame.
+// Decode via ImageIO for a guaranteed CGImage-backed UIImage — PHPicker's
+// loadObjectOfClass: can return a CIImage-backed one (nil .CGImage) for HEIC/HDR.
 static UIImage *sciDecodeImageURL(NSURL *url) {
 	if (!url) return nil;
 	CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
@@ -529,10 +805,36 @@ static UIImage *sciDecodeImageURL(NSURL *url) {
 	return img;
 }
 
+- (void)loadVideoFromProvider:(NSItemProvider *)prov {
+	NSString *videoType = nil;
+	for (NSString *t in prov.registeredTypeIdentifiers) {
+		if ([t isEqualToString:@"public.mpeg-4"] || [t isEqualToString:@"com.apple.quicktime-movie"] || [t isEqualToString:@"public.movie"] || [t isEqualToString:@"public.video"]) {
+			videoType = t;
+			break;
+		}
+	}
+	if (!videoType) videoType = prov.registeredTypeIdentifiers.firstObject;
+
+	[prov loadFileRepresentationForTypeIdentifier:videoType completionHandler:^(NSURL *fileURL, __unused NSError *err) {
+		if (!fileURL) return;
+		NSString *ext = fileURL.pathExtension.length ? fileURL.pathExtension.lowercaseString : @"mp4";
+		NSURL *tmp = [SCITempFiles claimWithExt:ext ttl:900 tag:@"instants-upload-src"];
+		[NSFileManager.defaultManager removeItemAtURL:tmp error:nil];
+		NSURL *use = fileURL;
+		if ([NSFileManager.defaultManager copyItemAtURL:fileURL toURL:tmp error:nil]) use = tmp;
+		dispatch_async(dispatch_get_main_queue(), ^{ [SCIInstantsGalleryPickerProxy.shared presentTrimmerForURL:use]; });
+	}];
+}
+
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
 	[picker dismissViewControllerAnimated:YES completion:^{
 		NSItemProvider *prov = results.firstObject.itemProvider;
 		if (!prov) return;
+
+		if ([prov hasItemConformingToTypeIdentifier:@"public.movie"] && ![prov hasItemConformingToTypeIdentifier:@"public.image"]) {
+			[self loadVideoFromProvider:prov];
+			return;
+		}
 
 		NSString *type = nil;
 		for (NSString *t in prov.registeredTypeIdentifiers) {
@@ -562,8 +864,7 @@ static UIImage *sciDecodeImageURL(NSURL *url) {
 
 		if (!type) { fallback(); return; }
 
-		// loadFileRepresentation gives a temp URL valid only inside this completion;
-		// decode synchronously here before it gets reaped.
+		// Temp URL is valid only inside this completion; decode before it's reaped.
 		[prov loadFileRepresentationForTypeIdentifier:type completionHandler:^(NSURL *fileURL, NSError *err) {
 			if (err || !fileURL) {
 				dispatch_async(dispatch_get_main_queue(), fallback);
@@ -579,6 +880,12 @@ static UIImage *sciDecodeImageURL(NSURL *url) {
 	}];
 }
 
+- (void)presentTrimmerForURL:(NSURL *)url {
+	[SCIVideoEditor presentForVideoURL:url from:sciTopPresenter() maxDuration:7.0 onDone:^(NSURL *edited) {
+		sciBeginVideoFromURL(edited);
+	}];
+}
+
 - (void)presentCropForImage:(UIImage *)image {
 	if (!image.CGImage) return;
 
@@ -588,6 +895,7 @@ static UIImage *sciDecodeImageURL(NSURL *url) {
 		SCIInstantsGalleryState *state = sciGalleryState();
 		state.image = cropped;
 		state.active = YES;
+		sInstantsInjectActive = YES;
 		sciClearFrameCache();
 
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -602,7 +910,7 @@ static UIImage *sciDecodeImageURL(NSURL *url) {
 
 static void sciPresentSystemPicker(void) {
 	PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
-	config.filter = PHPickerFilter.imagesFilter;
+	config.filter = [PHPickerFilter anyFilterMatchingSubfilters:@[PHPickerFilter.imagesFilter, PHPickerFilter.videosFilter]];
 	config.selectionLimit = 1;
 	config.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
 
@@ -622,8 +930,13 @@ static void sciPresentGallerySourceSheet(UIView *sender) {
 	UIAlertController *sheet = [UIAlertController alertControllerWithTitle:SCILocalized(@"Pick from") message:nil preferredStyle:UIAlertControllerStyleActionSheet];
 
 	[sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"In-app Gallery") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-		[SCIGalleryViewController presentPickerWithMediaTypes:@[@(SCIGalleryMediaTypeImage)] title:SCILocalized(@"Send from gallery") fromVC:sciTopPresenter() completion:^(NSURL *pickedURL, __unused SCIGalleryFile *pickedFile) {
-			UIImage *image = pickedURL.path.length ? [UIImage imageWithContentsOfFile:pickedURL.path] : nil;
+		[SCIGalleryViewController presentPickerWithMediaTypes:@[@(SCIGalleryMediaTypeImage), @(SCIGalleryMediaTypeVideo)] title:SCILocalized(@"Send from gallery") fromVC:sciTopPresenter() completion:^(NSURL *pickedURL, SCIGalleryFile *pickedFile) {
+			if (!pickedURL.path.length) return;
+			if (pickedFile.mediaType == SCIGalleryMediaTypeVideo) {
+				[SCIInstantsGalleryPickerProxy.shared presentTrimmerForURL:pickedURL];
+				return;
+			}
+			UIImage *image = [UIImage imageWithContentsOfFile:pickedURL.path];
 			if (image) [SCIInstantsGalleryPickerProxy.shared presentCropForImage:image];
 		}];
 	}]];
@@ -642,8 +955,7 @@ static void sciPresentGallerySourceSheet(UIView *sender) {
 
 #pragma mark - Hooks
 
-// Clones a native bar button and pins it under the left one. The bar stays put
-// during capture, so Auto Layout holds our button there with no per-frame work.
+// Clone a native bar button and pin it under the leftmost one via Auto Layout.
 static void sciInjectInstantsGalleryButton(UIView *view, NSInteger attempt) {
 	if (!view.window || objc_getAssociatedObject(view, kSCIInstantsGalleryButtonKey)) return;
 
@@ -727,6 +1039,61 @@ static void sciInjectInstantsGalleryButton(UIView *view, NSInteger attempt) {
 		return;
 	}
 
+	%orig;
+}
+
+%end
+
+// Hold onto the active capture-control view so we can fire its release handler
+// at clip end (see sciForceStopRecording).
+%hook _TtC34IGQuickSnapCameraControlController28IGQuickSnapCameraControlView
+
+- (void)captureButtonDidTouchDown {
+	sVideoAwaitingRelease = NO;
+	if (sciHasPendingVideo()) sQuickSnapControlView = self;
+	%orig;
+}
+
+- (void)captureButtonDidBeginExpanding {
+	if (sciHasPendingVideo()) sQuickSnapControlView = self;
+	%orig;
+}
+
+- (void)captureButtonDidReleaseAfterExpandingFinished {
+	if (!sVideoSyntheticRelease && sVideoAwaitingRelease) return;
+	%orig;
+}
+
+- (void)captureButtonDidConfirm {
+	if (sVideoAwaitingRelease) return;
+	%orig;
+}
+
+%end
+
+%hook AVAssetWriter
+
+- (void)startSessionAtSourceTime:(CMTime)time {
+	sciArmVideoRecord();
+	%orig;
+}
+
+- (void)finishWritingWithCompletionHandler:(void (^)(void))handler {
+	sciEndVideoRecord();
+	%orig;
+}
+
+%end
+
+%hook AVCaptureMovieFileOutput
+
+- (void)startRecordingToOutputFileURL:(NSURL *)url recordingDelegate:(id)delegate {
+	sciArmVideoRecord();
+	%orig;
+}
+
+- (void)stopRecording {
+	sciEndVideoRecord();
 	%orig;
 }
 

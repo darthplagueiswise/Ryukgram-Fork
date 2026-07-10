@@ -1,6 +1,5 @@
 #import "SCISettingsViewController.h"
 #import "SCIWhatsNew.h"
-#import "../Features/Gating/SCIBulkGatingPresets.h"
 #import "../UI/SCIPopupChrome.h"
 #import "SCISearchBarStyler.h"
 #import "../Features/General/SCICacheManager.h"
@@ -9,150 +8,6 @@
 #import "../UI/SCIColorPicker.h"
 
 static char kSCIRowKey;
-
-static const CGFloat kSCISettingsStandardIconBox = 23.0;
-
-
-static BOOL SCIMenuContainsDefaultsKey(UIMenu *menu, NSString *defaultsKey) {
-	if (!menu || !defaultsKey.length) return NO;
-	for (UIMenuElement *el in menu.children) {
-		if ([el isKindOfClass:UIMenu.class]) {
-			if (SCIMenuContainsDefaultsKey((UIMenu *)el, defaultsKey)) return YES;
-			continue;
-		}
-		if (![el isKindOfClass:UICommand.class]) continue;
-		NSDictionary *props = [((UICommand *)el).propertyList isKindOfClass:NSDictionary.class] ? ((UICommand *)el).propertyList : nil;
-		if ([props[@"defaultsKey"] isEqualToString:defaultsKey]) return YES;
-	}
-	return NO;
-}
-
-
-static NSString *SCISettingsWordmarkDisplayTitleForValue(NSString *value, NSString *fallback) {
-	if ([value isEqualToString:@"off"]) return SCILocalized(@"Default");
-	if ([value isEqualToString:@"1a"]) return SCILocalized(@"Wordmark 1");
-	if ([value isEqualToString:@"1a_alt"]) return SCILocalized(@"Wordmark 1A");
-	if ([value isEqualToString:@"1b"]) return SCILocalized(@"Wordmark 2");
-	if ([value isEqualToString:@"1b_alt"]) return SCILocalized(@"Wordmark 2A");
-	return fallback ?: @"";
-}
-
-static NSString *SCISettingsWordmarkImageNameForValue(NSString *value) {
-	NSString *v = value.length ? value : @"off";
-	if ([v isEqualToString:@"1a"]) return @"instagram-wordmark-1a";
-	if ([v isEqualToString:@"1a_alt"]) return @"instagram-wordmark-1a-alt";
-	if ([v isEqualToString:@"1b"]) return @"instagram-wordmark-1b";
-	if ([v isEqualToString:@"1b_alt"]) return @"instagram-wordmark-1b-alt";
-	return @"instagram-wordmark-default";
-}
-
-static UIImage *SCISettingsBundleImageNamed(NSString *name) {
-	NSBundle *bundle = SCILocalizationBundle();
-	UIImage *img = bundle ? [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil] : nil;
-	if (!img) img = [UIImage imageNamed:name];
-	return img;
-}
-
-static UIImage *SCISettingsTrimTransparentTemplateImage(UIImage *image) {
-	if (!image) return nil;
-	CGImageRef cg = image.CGImage;
-	if (!cg) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	size_t width = CGImageGetWidth(cg);
-	size_t height = CGImageGetHeight(cg);
-	if (width == 0 || height == 0 || width > 4096 || height > 4096) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	size_t bytesPerRow = width * 4;
-	NSMutableData *data = [NSMutableData dataWithLength:bytesPerRow * height];
-	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-	CGContextRef ctx = CGBitmapContextCreate(data.mutableBytes, width, height, 8, bytesPerRow, colorSpace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-	if (colorSpace) CGColorSpaceRelease(colorSpace);
-	if (!ctx) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	CGContextDrawImage(ctx, CGRectMake(0, 0, width, height), cg);
-	CGContextRelease(ctx);
-	const UInt8 *bytes = (const UInt8 *)data.bytes;
-	size_t minX = width, minY = height, maxX = 0, maxY = 0;
-	BOOL found = NO;
-	for (size_t y = 0; y < height; y++) {
-		const UInt8 *row = bytes + y * bytesPerRow;
-		for (size_t x = 0; x < width; x++) {
-			UInt8 alpha = row[x * 4 + 3];
-			if (alpha <= 8) continue;
-			found = YES;
-			if (x < minX) minX = x;
-			if (y < minY) minY = y;
-			if (x > maxX) maxX = x;
-			if (y > maxY) maxY = y;
-		}
-	}
-	if (!found) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	CGFloat pad = 2.0 * MAX(image.scale, 1.0);
-	CGFloat originX = MAX(0.0, (CGFloat)minX - pad);
-	CGFloat originY = MAX(0.0, (CGFloat)minY - pad);
-	CGFloat endX = MIN((CGFloat)width, (CGFloat)maxX + 1.0 + pad);
-	CGFloat endY = MIN((CGFloat)height, (CGFloat)maxY + 1.0 + pad);
-	CGRect cropRect = CGRectMake(originX, originY, MAX(1.0, endX - originX), MAX(1.0, endY - originY));
-	if (CGRectEqualToRect(cropRect, CGRectMake(0, 0, width, height))) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	CGImageRef cropped = CGImageCreateWithImageInRect(cg, cropRect);
-	if (!cropped) return [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	UIImage *trimmed = [UIImage imageWithCGImage:cropped scale:image.scale orientation:image.imageOrientation];
-	CGImageRelease(cropped);
-	return [trimmed imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-}
-
-static BOOL SCISettingsScanSelectedMenuTitle(UIMenu *menu, NSString **firstTitle, NSString **matchedTitle) {
-	if (!menu || (matchedTitle && (*matchedTitle).length)) return YES;
-	for (UIMenuElement *el in menu.children) {
-		if ([el isKindOfClass:UIMenu.class]) {
-			SCISettingsScanSelectedMenuTitle((UIMenu *)el, firstTitle, matchedTitle);
-			if (matchedTitle && (*matchedTitle).length) return YES;
-			continue;
-		}
-		if (![el isKindOfClass:UICommand.class]) continue;
-		UICommand *cmd = (UICommand *)el;
-		if (firstTitle && !(*firstTitle).length && cmd.title.length) *firstTitle = cmd.title;
-		NSDictionary *props = [cmd.propertyList isKindOfClass:NSDictionary.class] ? cmd.propertyList : nil;
-		NSString *key = [props[@"defaultsKey"] isKindOfClass:NSString.class] ? props[@"defaultsKey"] : nil;
-		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
-		if (!key.length || !value.length) continue;
-		id raw = [NSUserDefaults.standardUserDefaults objectForKey:key];
-		NSString *saved = [raw isKindOfClass:NSString.class] ? raw : nil;
-		if (!saved.length) saved = @"default";
-		if ([value isEqualToString:saved]) {
-			if (matchedTitle) *matchedTitle = cmd.title ?: @"";
-			return YES;
-		}
-	}
-	return NO;
-}
-
-static NSString *SCISettingsSelectedMenuTitle(UIMenu *menu) {
-	NSString *firstTitle = nil;
-	NSString *matchedTitle = nil;
-	SCISettingsScanSelectedMenuTitle(menu, &firstTitle, &matchedTitle);
-	if (matchedTitle.length) return matchedTitle;
-	if (firstTitle.length) return firstTitle;
-	return SCILocalized(@"Default");
-}
-
-static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxSize) {
-	UIImage *img = SCISettingsBundleImageNamed(name);
-	if (!img) return nil;
-	img = SCISettingsTrimTransparentTemplateImage(img);
-	CGSize size = img.size;
-	if (size.width <= 0.0 || size.height <= 0.0) return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-	CGFloat ratio = MIN(maxSize.width / size.width, maxSize.height / size.height);
-	if (ratio <= 0.0) ratio = 1.0;
-	// Downscale and upscale intentionally here. The closed accessory is a preview,
-	// not the source asset; it must visually fill the same right-side slot every time.
-	CGSize target = CGSizeMake(ceil(size.width * ratio), ceil(size.height * ratio));
-	UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
-	fmt.opaque = NO;
-	fmt.scale = UIScreen.mainScreen.scale;
-	UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:fmt];
-	UIImage *scaled = [renderer imageWithActions:^(UIGraphicsImageRendererContext * _Nonnull ctx) {
-		[img drawInRect:CGRectMake(0.0, 0.0, target.width, target.height)];
-	}];
-	return [scaled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-}
 
 #pragma mark - Language Picker
 
@@ -390,11 +245,9 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
-	SCIUIKit26ConfigureViewController(self);
 	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
-	SCIUIKit26InstallNavigationTitleBubble(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(sciCacheSizeDidUpdate) name:SCICacheSizeDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(sciReloadFromNotification) name:@"SCISettingsShouldReload" object:nil];
@@ -410,12 +263,8 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 - (void)setupTableView {
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.tableView.rowHeight = UITableViewAutomaticDimension;
-	self.tableView.estimatedRowHeight = 52.0;
-	self.tableView.contentInset = UIEdgeInsetsZero;
-	self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
-	if (@available(iOS 11.0, *)) self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
+	self.tableView.backgroundColor = self.view.backgroundColor;
+	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	[self.view addSubview:self.tableView];
@@ -430,15 +279,13 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	self.searchController = sc;
 	self.navigationItem.searchController = sc;
 	self.navigationItem.hidesSearchBarWhenScrolling = NO;
-	self.definesPresentationContext = ![SCIUtils getBoolPref:@"liquid_glass_buttons"];
+	self.definesPresentationContext = ![SCISearchBarStyler shouldUseNativeGlass];
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(sciDismissSettings)];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"globe"] style:UIBarButtonItemStylePlain target:self action:@selector(sciPresentLanguagePicker)];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-	SCIConfigureNavigationChromeForGlass(self);
-	SCIUIKit26RefreshNavigationTitleBubble(self);
 	if (self.isRoot) self.sections = [self filteredSections:[SCITweakSettings sections]];
 	[self.tableView reloadData];
 	[self sciStyleSearchBar];
@@ -451,7 +298,7 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)viewWillDisappear:(BOOL)animated {
 	[super viewWillDisappear:animated];
-	if (![SCIUtils getBoolPref:@"liquid_glass_buttons"] && self.searchController.isActive) self.searchController.active = NO;
+	if (![SCISearchBarStyler shouldUseNativeGlass] && self.searchController.isActive) self.searchController.active = NO;
 	if (self.isRoot) [self sciShowFirstRunAlertIfNeeded];
 }
 
@@ -484,7 +331,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)sciApplyLanguageChange {
 	self.title = SCILocalized(@"settings.title");
-	SCIUIKit26RefreshNavigationTitleBubble(self);
 	self.searchController.searchBar.placeholder = SCILocalized(@"settings.search.placeholder");
 	self.sections = [self filteredSections:[SCITweakSettings sections]];
 	self.searchIndex = [self buildSearchIndexFromSections:self.sections breadcrumb:@""];
@@ -576,7 +422,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		return row.customCellProvider(tv, ip);
 
 	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-	SCIUIKit26ConfigureTableCell(cell);
 	UIListContentConfiguration *config = cell.defaultContentConfiguration;
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
@@ -585,9 +430,6 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
-	config.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-	config.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
-	config.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(10.0, 16.0, 10.0, 16.0);
 
 	NSString *rowSubtitle = row.dynamicSubtitle ? row.dynamicSubtitle() : row.subtitle;
 	NSString *subtitle = ([self isSearching] && breadcrumb.length) ? breadcrumb : rowSubtitle;
@@ -600,7 +442,28 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	config = [self configuredContent:config forCell:cell row:row indexPath:ip];
 	cell.contentConfiguration = config;
 	if (![self isSearching] && [self rowHasWhatsNew:row]) [self addWhatsNewDotToCell:cell];
+	if (row.badgeCount) [self addBadgeCount:row.badgeCount() toCell:cell];
 	return cell;
+}
+
+- (void)addBadgeCount:(NSInteger)count toCell:(UITableViewCell *)cell {
+	if (count <= 0) return;
+	UILabel *badge = [UILabel new];
+	badge.translatesAutoresizingMaskIntoConstraints = NO;
+	badge.text = count > 99 ? @"  99+  " : [NSString stringWithFormat:@"  %ld  ", (long)count];
+	badge.font = [UIFont boldSystemFontOfSize:13];
+	badge.textColor = UIColor.whiteColor;
+	badge.textAlignment = NSTextAlignmentCenter;
+	badge.backgroundColor = UIColor.systemRedColor;
+	badge.layer.cornerRadius = 10;
+	badge.clipsToBounds = YES;
+	[cell.contentView addSubview:badge];
+	[NSLayoutConstraint activateConstraints:@[
+		[badge.heightAnchor constraintEqualToConstant:20],
+		[badge.widthAnchor constraintGreaterThanOrEqualToConstant:20],
+		[badge.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+		[badge.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
+	]];
 }
 
 - (BOOL)rowHasWhatsNew:(SCISetting *)row {
@@ -624,19 +487,12 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 
 - (void)configureIconForRow:(SCISetting *)row config:(UIListContentConfiguration *)config indexPath:(NSIndexPath *)ip tableView:(UITableView *)tv {
 	if (row.iconImage) {
-		config.image = [row.iconImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
-		config.imageProperties.tintColor = UIColor.labelColor;
-
-		// Match the rest of the tweak: settings icons sit on the standard
-		// UIListContentConfiguration image rail. Asset-backed icons are capped
-		// to the same visual box as SCISymbol/Apply/Reset rows; no negative
-		// margins and no per-row left offsets.
-		config.imageProperties.maximumSize = CGSizeMake(kSCISettingsStandardIconBox, kSCISettingsStandardIconBox);
+		config.image = row.iconImage;
+		config.imageToTextPadding = 14.0;
 	}
 	if (row.icon) {
 		config.image = [row.icon image];
 		config.imageProperties.tintColor = row.icon.color;
-		config.imageProperties.maximumSize = CGSizeMake(kSCISettingsStandardIconBox, kSCISettingsStandardIconBox);
 	}
 	if (row.imageUrl) {
 		config.imageToTextPadding = 14.0;
@@ -710,57 +566,19 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 		}
 		case SCITableCellMenu: {
 			UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+			[b setTitle:@"•••" forState:UIControlStateNormal];
+			b.menu = [row menuForButton:b];
+			b.showsMenuAsPrimaryAction = YES;
 			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			b.titleLabel.numberOfLines = 1;
-			b.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-			b.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
-			UIMenu *resolvedMenu = [row menuForButton:b];
-			BOOL isWordmarkMenu = SCIMenuContainsDefaultsKey(resolvedMenu, @"sci_ig_wordmark_variant");
-			// SCIUIKit26ConfigureMenuButton usa glassButtonConfiguration NATIVO puro,
-			// sem UIGlassEffect custom por cima (era o custom que virava "blob redondo"
-			// fora do lugar). Botao glass nativo = morphing com glass de verdade quando
-			// o menu abre (WWDC25 "Build a UIKit app with the new design").
-			SCIUIKit26ConfigureMenuButton(b);
 			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(6.0, 10.0, 6.0, 10.0);
-			bc.titleLineBreakMode = NSLineBreakByTruncatingTail;
-			if (isWordmarkMenu) {
-				NSString *variant = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_ig_wordmark_variant"] ?: @"off";
-				// Glass nativo mantido (nao zera mais visualEffect/backgroundColor --
-				// isso apagava o proprio glass que o glassButtonConfiguration da).
-				bc.title = nil;
-				bc.contentInsets = NSDirectionalEdgeInsetsMake(2.0, 8.0, 2.0, 8.0);
-				bc.image = SCISettingsScaledTemplateBundleImage(SCISettingsWordmarkImageNameForValue(variant), CGSizeMake(96.0, 22.0));
-				bc.imagePadding = 0.0;
-				bc.baseForegroundColor = UIColor.labelColor;
-			} else {
-				NSString *selectedTitle = SCISettingsSelectedMenuTitle(resolvedMenu);
-				bc.title = selectedTitle.length ? selectedTitle : SCILocalized(@"Default");
-				bc.image = nil;
-				bc.indicator = UIButtonConfigurationIndicatorPopup;
-			}
+			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 8.0, 8.0, 8.0);
 			b.configuration = bc;
-			// Menu NATIVO: UIButton.menu + showsMenuAsPrimaryAction da o morphing
-			// automatico do iOS 26, selecao via UIMenuOptionsSingleSelection +
-			// UIAction.state (ja montados em menuForButton), e separadores nativos
-			// via inline sections. Nao usar popover/painel custom para menu simples.
-			b.menu = resolvedMenu;
-			b.showsMenuAsPrimaryAction = YES;
-			if (@available(iOS 15.0, *)) b.changesSelectionAsPrimaryAction = NO;
 			[b sizeToFit];
-			if (isWordmarkMenu) {
-				// trava a altura no padrão de accessory pra a célula não estourar
-				CGRect fr = b.frame;
-				fr.size.height = MIN(fr.size.height, 34.0);
-				fr.size.width  = MIN(fr.size.width, 132.0);
-				b.frame = fr;
-			}
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
 			break;
 		}
-
 		case SCITableCellColor:
 			cell.accessoryView = [SCIColorPicker swatchViewForKey:row.defaultsKey defaultColor:row.defaultColor];
 			break;
@@ -841,14 +659,11 @@ static UIImage *SCISettingsScaledTemplateBundleImage(NSString *name, CGSize maxS
 	[self reloadCellForView:sender animated:NO];
 }
 
-
 - (void)menuChanged:(UICommand *)command {
 	NSDictionary *props = [command.propertyList isKindOfClass:NSDictionary.class] ? command.propertyList : nil;
 	NSString *key = props[@"defaultsKey"];
 	id value = props[@"value"];
 	if (key.length && value) [NSUserDefaults.standardUserDefaults setValue:value forKey:key];
-	if ([key isEqualToString:@"sci_ig_wordmark_variant"] || [key isEqualToString:@"sci_ig_wordmark_mode"])
-		[SCIBulkGatingPresets applyIGWordmarkMode:[value isKindOfClass:NSString.class] ? value : @"off"];
 	[self sciReloadFromNotification];
 
 	NSString *pickerKey = props[@"presentColorPickerForKey"];

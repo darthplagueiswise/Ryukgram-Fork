@@ -564,6 +564,32 @@ static NSDictionary *sciMusicTrackInfo(id media, id parentMedia) {
 	return sciMusicTrackInfo(media, parentMedia) != nil;
 }
 
++ (BOOL)mediaIsStillImageWithAudio:(id)media parentMedia:(id)parentMedia {
+	if (!media) return NO;
+
+	// IG muxes an image + its soundtrack into an MP4, so a photo-with-music is
+	// media_type=2 with video_versions — no fieldCache flag separates it from a
+	// real video. Gate on a music sticker + a still frame, excluding reshared clips.
+	if (sciFieldCache(media, @"clips_metadata")) return NO;
+
+	BOOL hasStillURL = [self hdPhotoURLForMedia:media]
+		|| [SCIUtils getPhotoUrlForMedia:(IGMedia *)media]
+		|| [self fieldCachePhotoURLForMedia:media];
+	if (!hasStillURL) return NO;
+
+	if ([self mediaHasMusic:media parentMedia:parentMedia]) return YES;
+
+	id flag = sciFieldCache(media, @"is_story_image_with_music");
+	if ([flag respondsToSelector:@selector(boolValue)] && [flag boolValue]) return YES;
+
+	for (NSString *k in @[@"story_music_stickers", @"story_music_lyric_stickers", @"spotify_stickers", @"music_metadata"]) {
+		id v = sciFieldCache(media, k);
+		if ([v isKindOfClass:NSArray.class] && [(NSArray *)v count]) return YES;
+		if ([v isKindOfClass:NSDictionary.class] && [(NSDictionary *)v count]) return YES;
+	}
+	return NO;
+}
+
 + (NSURL *)fieldCachePhotoURLForMedia:(id)media {
 	id candidates = nil;
 	id iv2 = sciFieldCache(media, @"image_versions2");
@@ -835,6 +861,30 @@ static NSDictionary *sciMusicTrackInfo(id media, id parentMedia) {
 	};
 }
 
++ (BOOL)downloadVisualDMVideo:(id)igVideo action:(DownloadAction)action metadata:(id)metadata {
+	if (!igVideo || ![SCIUtils getBoolPref:@"enhance_download_quality"] || ![SCIFFmpeg isAvailable]) return NO;
+
+	Ivar iv = class_getInstanceVariable([igVideo class], "_dashManifestData");
+	id manifestData = iv ? object_getIvar(igVideo, iv) : nil;
+	if (![manifestData isKindOfClass:NSData.class] || ![(NSData *)manifestData length]) return NO;
+
+	NSString *xml = [[NSString alloc] initWithData:manifestData encoding:NSUTF8StringEncoding];
+	if (!xml.length) return NO;
+
+	NSURL *standardURL = [SCIUtils getVideoUrl:igVideo];  // progressive low-bitrate "Standard" option
+	SCIGallerySaveMetadata *meta = [metadata isKindOfClass:[SCIGallerySaveMetadata class]] ? metadata : nil;
+
+	return [SCIQualityPicker pickQualityWithManifestXML:xml standardURL:standardURL fromView:nil action:action
+		picked:^(SCIDashRepresentation *video, SCIDashRepresentation *audio) {
+			if (meta) sciSetPendingMetadata(meta);
+			[self downloadDASHVideo:video audio:audio action:action];
+		} fallback:^{
+			if (!standardURL) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not extract video URL")]; return; }
+			if (meta) sciSetPendingMetadata(meta);
+			[sciMakeDownloader(action, YES) downloadFileWithURL:standardURL fileExtension:sciExt(standardURL, @"mp4") hudLabel:nil];
+		}];
+}
+
 + (void)downloadPhotoWithMusicForMedia:(id)media parentMedia:(id)parentMedia action:(DownloadAction)action {
 	NSDictionary *info = sciMusicTrackInfo(media, parentMedia);
 	NSURL *photoURL = [self hdPhotoURLForMedia:media] ?: [SCIUtils getPhotoUrlForMedia:(IGMedia *)media] ?: [self fieldCachePhotoURLForMedia:media];
@@ -1016,7 +1066,7 @@ static NSDictionary *sciMusicTrackInfo(id media, id parentMedia) {
 
 				NSString *ext = sciExt(url, @"jpg");
 				NSString *name = stem.length ? [NSString stringWithFormat:@"%@_%lu", stem, (unsigned long)(idx + 1)] : NSUUID.UUID.UUIDString;
-				NSURL *dst = [SCITempFiles claimWithExt:ext ttl:900 tag:name];
+				NSURL *dst = [SCITempFiles claimNamedFile:[name stringByAppendingPathExtension:ext] ttl:900 tag:@"bulk"];
 
 				NSURLSessionDownloadTask *task = [NSURLSession.sharedSession downloadTaskWithURL:url completionHandler:^(NSURL *loc, __unused NSURLResponse *resp, NSError *err) {
 					[lock lock]; BOOL wasCancelled = cancelled || err.code == NSURLErrorCancelled; [lock unlock];
@@ -1395,18 +1445,18 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 
 		while (cell && cellClass && ![cell isKindOfClass:cellClass]) cell = cell.superview;
 
-		UIView *ufi = cell ? sciFindSubviewOfClass(cell, @"IGSundialViewerVerticalUFI", 200) : nil;
+		UIView *ufi = cell ? sciFindSubviewOfClass(cell, @"_TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI", 200) : nil;
 		if (ufi) {
-			SEL noArg = NSSelectorFromString(@"_didTapRepostButton");
-			SEL oneArg = @selector(_didTapRepostButton:);
+			SEL noArg = NSSelectorFromString(@"didTapRepostButton");
+			SEL oldNoArg = NSSelectorFromString(@"_didTapRepostButton");
 
 			if ([ufi respondsToSelector:noArg]) {
 				((void(*)(id, SEL))objc_msgSend)(ufi, noArg);
 				return;
 			}
 
-			if ([ufi respondsToSelector:oneArg]) {
-				((void(*)(id, SEL, id))objc_msgSend)(ufi, oneArg, nil);
+			if ([ufi respondsToSelector:oldNoArg]) {
+				((void(*)(id, SEL))objc_msgSend)(ufi, oldNoArg);
 				return;
 			}
 		}
@@ -1623,6 +1673,25 @@ static id sciCarouselParentMedia(id media, UIView *sourceView) {
 				sciConfirmThen(SCILocalized(@"Gallery with music"), ^{
 					[SCIMediaActions downloadPhotoWithMusicForMedia:media parentMedia:parentMedia action:saveToGallery];
 				});
+			}];
+		}
+
+		if ([aid isEqualToString:SCIAID_DownloadImageOnly]) {
+			if (![SCIMediaActions mediaIsStillImageWithAudio:media parentMedia:parentMedia]) return nil;
+
+			return [SCIAction actionWithTitle:SCILocalized(@"Save image (no music)") icon:@"photo" handler:^{
+				stamp(media);
+				[SCIMediaActions downloadPhotoOnlyForMedia:media action:saveToPhotos];
+			}];
+		}
+
+		if ([aid isEqualToString:SCIAID_DownloadImageOnlyGallery]) {
+			if (![SCIUtils getBoolPref:@"sci_gallery_enabled"]) return nil;
+			if (![SCIMediaActions mediaIsStillImageWithAudio:media parentMedia:parentMedia]) return nil;
+
+			return [SCIAction actionWithTitle:SCILocalized(@"Gallery image (no music)") icon:@"photo.badge.arrow.down" handler:^{
+				stamp(media);
+				[SCIMediaActions downloadPhotoOnlyForMedia:media action:saveToGallery];
 			}];
 		}
 

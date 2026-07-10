@@ -39,7 +39,8 @@ static void sciSetIvarViewHidden(id host, const char *name, BOOL hidden) {
 static void sciApplyExploreHide(id vc) {
     // Chips stay visible while search is focused (they act as filters then).
     BOOL hideChips = sciHideSearch() && !gSearchFocused;
-    sciSetIvarViewHidden(vc, "_nidoChipBar", hideChips);
+    sciSetIvarViewHidden(vc, "_chipBar", hideChips);      // IG 433+
+    sciSetIvarViewHidden(vc, "_nidoChipBar", hideChips);  // pre-433
 
     // Force re-layout so pref flips reflect on re-entry.
     Ivar stvIvar = class_getInstanceVariable([vc class], "_searchTitleView");

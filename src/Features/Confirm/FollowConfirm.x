@@ -1,24 +1,21 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 
-#define SCI_CONFIRM_FOLLOW(origCall) \
+#define SCI_CONFIRM_FOLLOW_BLOCK(blk) \
 	if ([SCIUtils getBoolPref:@"follow_confirm"]) { \
-		[SCIUtils showConfirmation:^{ origCall; } title:SCILocalized(@"Confirm follow")]; \
+		[SCIUtils showConfirmation:blk title:SCILocalized(@"Confirm follow")]; \
 		return; \
 	} \
-	origCall;
+	blk();
 
 %hook IGFollowController
 
 - (void)_didPressFollowButton {
 	if (self.user.followStatus == 2) {
-		if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+		void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 		return;
 	}
 	%orig;
@@ -26,9 +23,12 @@
 
 - (void)_performUnfollow {
 	if ([SCIUtils getBoolPref:@"unfollow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm unfollow")];
+		{
+			void (^sciOrigBlock)(void) = ^ {
+				%orig;
+			};
+			[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm unfollow")];
+		}
 		return;
 	}
 	%orig;
@@ -39,23 +39,17 @@
 %hook IGDiscoverPeopleButtonGroupView
 
 - (void)_onFollowButtonTapped:(id)arg1 {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 - (void)_onFollowingButtonTapped:(id)arg1 {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end
@@ -63,13 +57,10 @@
 %hook IGHScrollAYMFCell
 
 - (void)_didTapAYMFActionButton {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end
@@ -77,13 +68,10 @@
 %hook IGHScrollAYMFActionButton
 
 - (void)_didTapTextActionButton {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end
@@ -91,13 +79,10 @@
 %hook IGUnifiedVideoFollowButton
 
 - (void)_hackilyHandleOurOwnButtonTaps:(id)arg1 event:(id)arg2 {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end
@@ -105,13 +90,10 @@
 %hook IGProfileViewController
 
 - (void)navigationItemsControllerDidTapHeaderFollowButton:(id)arg1 {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end
@@ -119,13 +101,10 @@
 %hook IGStorySectionController
 
 - (void)followButtonTapped:(id)arg1 cell:(id)arg2 {
-	if ([SCIUtils getBoolPref:@"follow_confirm"]) {
-		[SCIUtils showConfirmation:^{
-			%orig;
-		} title:SCILocalized(@"Confirm follow")];
-		return;
-	}
-	%orig;
+	void (^sciOrigBlk)(void) = ^{
+		%orig;
+	};
+	SCI_CONFIRM_FOLLOW_BLOCK(sciOrigBlk);
 }
 
 %end

@@ -5,8 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 // Library / default / per-thread changes. Settings UI listens here.
 extern NSString *const SCIChatBackgroundDidChangeNotification;
 
-// Slider tweaks. Render hook listens here. Kept separate from the asset-change
-// signal so the settings sheet doesn't reload mid-drag.
+// Slider tweaks; separate from the asset signal so the settings sheet doesn't reload mid-drag.
 extern NSString *const SCIChatBackgroundRenderDirtyNotification;
 
 extern NSString *const SCIPrefChatBackgroundEnabled;
@@ -33,6 +32,9 @@ typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
 
 + (instancetype)shared;
 
++ (BOOL)isVideoExtension:(NSString *)ext;
++ (BOOL)isVideoAsset:(NSString *_Nullable)relPath;
+
 - (BOOL)isEnabled;
 
 // Asset paths are stored relative to Documents/RyukGram/ChatBackgrounds/.
@@ -42,6 +44,7 @@ typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
 // Library — ordered list of imported assets (newest last).
 - (NSArray<NSString *> *)libraryAssets;
 - (void)deleteLibraryAsset:(NSString *)relPath;
+- (void)replaceAsset:(NSString *)oldRel withAsset:(NSString *)newRel;
 
 // Per-thread assignments (account-scoped via SCIAccountScopedDefaults).
 - (NSString *_Nullable)assetForThreadID:(NSString *)threadID;
@@ -49,8 +52,7 @@ typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
 - (void)clearAssetForThreadID:(NSString *)threadID;
 - (NSDictionary<NSString *, NSString *> *)allThreadAssets;
 
-// Thread metadata captured at apply time. Lets the chats list show usernames
-// without re-fetching from IG.
+// Captured at apply time so the chats list needn't refetch from IG.
 - (NSDictionary *_Nullable)metadataForThreadID:(NSString *)threadID;
 - (void)setMetadata:(NSDictionary *_Nullable)meta forThreadID:(NSString *)threadID;
 
@@ -58,8 +60,10 @@ typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
 - (NSString *_Nullable)resolvedAssetForThreadID:(NSString *_Nullable)threadID;
 - (UIImage *_Nullable)resolvedImageForThreadID:(NSString *_Nullable)threadID;
 
-// Resolved image with effective blur + dark-mode dim applied. Cached by
-// (asset, blur, dim).
+// Raw asset image — a decoded still, or the first-frame poster for a video asset.
+- (UIImage *_Nullable)imageForAsset:(NSString *_Nullable)asset;
+
+// Resolved image with effective blur + dark-mode dim applied.
 - (UIImage *_Nullable)processedImageForThreadID:(NSString *_Nullable)threadID darkAppearance:(BOOL)isDark;
 - (UIImage *_Nullable)processedImageForAsset:(NSString *)asset darkAppearance:(BOOL)isDark;
 
@@ -73,9 +77,7 @@ typedef NS_ENUM(NSInteger, SCIBubbleGradientDirection) {
 - (void)setDim:(double)value forAsset:(NSString *)asset;
 - (void)resetSettingsForAsset:(NSString *)asset;
 
-// Auto bubble color: tint message bubbles for chats using this background, with
-// contrast text. Colors are 1 (solid) or 2 (gradient, top→bottom); override falls back
-// to a color auto-derived from the image.
+// Tint bubbles for this background's chats; 1 solid or 2 gradient colors, else auto-derived from the image.
 - (BOOL)autoBubbleEnabledForAsset:(NSString *_Nullable)asset;
 - (void)setAutoBubble:(BOOL)on forAsset:(NSString *)asset;
 - (UIColor *_Nullable)autoBubbleColorForAsset:(NSString *_Nullable)asset;

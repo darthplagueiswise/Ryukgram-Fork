@@ -7,7 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SCILockSetupViewController : UIViewController
 
-@property (nonatomic) NSInteger codeLength;        // default 4
+@property (nonatomic) NSInteger codeLength;
 @property (nonatomic, copy, nullable) void (^completion)(BOOL success);
 
 - (instancetype)initWithCodeLength:(NSInteger)length;

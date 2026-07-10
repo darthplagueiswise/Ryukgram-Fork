@@ -21,6 +21,7 @@ PACKAGES_DIR="packages"
 TWEAK_DYLIB=".theos/obj/${APP_NAME}.dylib"
 BUNDLE_NAME="${APP_NAME}.bundle"
 BUNDLE_PATH="${PACKAGES_DIR}/${BUNDLE_NAME}"
+NOPLUGINS_PATCH_DYLIB="NoPluginsPatch.dylib"
 
 # Cached FLEXing outputs. Kept inside the FLEXing subproject so normal
 # RyukGram clean builds do not wipe them.
@@ -118,7 +119,7 @@ copy_bundle_assets() {
 		-iname '*.jpg' -o \
 		-iname '*.jpeg' -o \
 		-iname '*.pdf' -o \
-		-iname '*.md' \
+		-iname '*.bin' \
 	\) -exec cp {} "$dest/" \;
 }
 
@@ -254,12 +255,15 @@ postprocess_ipa_bundle() {
 	rm -rf "$tmpdir"
 }
 
-# Copy FFmpegKit frameworks into RyukGram.bundle. Names preserved — the
-# frameworks resolve siblings via @loader_path/.. so they all need to land
-# in one directory together. No install_name patching required.
-# Arg 1: bundle path.
+# Copy FFmpegKit frameworks into a dir; siblings resolve via @loader_path/..
+# Arg 2 non-empty: also rename libav*/libsw* to _sci + repoint deps. Only
+# TrollFools needs it — those frameworks share the host app's Frameworks/ where
+# plain ffmpeg names collide; cyan/deb keep them isolated in RyukGram.bundle.
 patch_ffmpegkit_frameworks() {
 	local bundle="$1"
+	local rename_sci="${2:-}"
+	local libs="libavutil libavcodec libavformat libavfilter libavdevice libswresample libswscale"
+	local fw lib target
 
 	[ -d "modules/ffmpegkit/ffmpegkit.framework" ] || return 0
 
@@ -268,6 +272,31 @@ patch_ffmpegkit_frameworks() {
 	for fw in modules/ffmpegkit/*.framework; do
 		[ -d "$fw" ] || continue
 		cp -R "$fw" "$bundle/"
+	done
+
+	[ -n "$rename_sci" ] || return 0
+
+	log "Renaming FFmpegKit libs to _sci (TrollFools collision-safety)"
+
+	for lib in $libs; do
+		[ -d "$bundle/${lib}.framework" ] || continue
+		mv "$bundle/${lib}.framework" "$bundle/${lib}_sci.framework"
+		install_name_tool -id "@rpath/${lib}_sci.framework/${lib}" \
+			"$bundle/${lib}_sci.framework/${lib}" 2>/dev/null || true
+	done
+
+	# Repoint deps to @rpath/<lib>_sci — TrollFools adds an rpath to Frameworks/
+	# when it injects each top-level framework, so @rpath resolves there.
+	for target in "$bundle/ffmpegkit.framework/ffmpegkit" \
+	              "$bundle"/libav*_sci.framework/libav* \
+	              "$bundle"/libsw*_sci.framework/libsw*; do
+		[ -f "$target" ] || continue
+		for lib in $libs; do
+			install_name_tool -change "@loader_path/../${lib}.framework/${lib}" \
+				"@rpath/${lib}_sci.framework/${lib}" "$target" 2>/dev/null || true
+			install_name_tool -change "@rpath/${lib}.framework/${lib}" \
+				"@rpath/${lib}_sci.framework/${lib}" "$target" 2>/dev/null || true
+		done
 	done
 }
 
@@ -344,6 +373,29 @@ build_zxpi_dylib() {
 	# Match the @rpath LC that ipapatch writes into target binaries.
 	install_name_tool -id "@rpath/zxPluginsInject.dylib" \
 		"${PACKAGES_DIR}/zxPluginsInject.dylib" 2>/dev/null || true
+}
+
+# Build the no-plugins sideload-compat patch -> packages/NoPluginsPatch.dylib
+# (keychain / app groups / CloudKit). cyan-injected into no-plugins IPAs, and
+# shipped as a release asset so buildapp-from-release can inject it too.
+build_noplugins_patch_dylib() {
+	local mod_dir="modules/SideloadPatch"
+	local dylib_out="${mod_dir}/.theos/obj/${NOPLUGINS_PATCH_DYLIB}"
+
+	ensure_theos
+
+	log "Building ${NOPLUGINS_PATCH_DYLIB}"
+
+	(
+		cd "$mod_dir"
+		make FINALPACKAGE=1 >/dev/null
+	)
+
+	[ -f "$dylib_out" ] || die "${NOPLUGINS_PATCH_DYLIB} build failed"
+
+	ensure_packages_dir
+
+	cp "$dylib_out" "${PACKAGES_DIR}/${NOPLUGINS_PATCH_DYLIB}"
 }
 
 # LC-inject zxPluginsInject.dylib into main exec + every .appex in the IPA.
@@ -521,7 +573,7 @@ EOF
 
 	local rg_sidestore=0
 	local build_label="sideloading"
-	local out_ipa="${PACKAGES_DIR}/${APP_NAME}-sideloaded.ipa"
+	local out_ipa="${PACKAGES_DIR}/${APP_NAME}-sideload.ipa"
 	local compression=9
 	local makeargs=""
 	local flexpath=""
@@ -581,11 +633,6 @@ EOF
 		compression=9
 	fi
 
-	if [ "$rg_sidestore" = "1" ]; then
-		makeargs="${makeargs} SIDESTORE=1"
-		makeargs="$(printf "%s" "$makeargs" | xargs)"
-	fi
-
 	# Clean build artifacts.
 	clean_build
 	ensure_packages_dir
@@ -613,9 +660,13 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 
 	make_final "$makeargs"
 
-	# Skip zxPluginsInject for the no-plugins build — its LC injection trips ldid on resign.
 	if [ "$rg_sidestore" != "1" ]; then
+		# Normal sideload: zxPluginsInject is LC-injected later via ipapatch.
 		build_zxpi_dylib
+	else
+		# No-plugins: ship the sideload-compat patch as its own dylib, cyan-
+		# injected below (no ipapatch). Replaces the old SIDESTORE bake.
+		build_noplugins_patch_dylib
 	fi
 
 	# Copy dylib to packages.
@@ -647,6 +698,10 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 
 	if [ -d "$BUNDLE_PATH" ]; then
 		cyan_files="$cyan_files $BUNDLE_PATH"
+	fi
+
+	if [ "$rg_sidestore" = "1" ] && [ -f "${PACKAGES_DIR}/${NOPLUGINS_PATCH_DYLIB}" ]; then
+		cyan_files="$cyan_files ${PACKAGES_DIR}/${NOPLUGINS_PATCH_DYLIB}"
 	fi
 
 	cyan_files="$(printf "%s" "$cyan_files" | xargs)"
@@ -681,22 +736,16 @@ Or use ./build.sh dylib to build the dylib for Feather injection."
 	echo "IPA at: $(pwd)/$out_ipa"
 }
 
-# Build rootless/rootful .deb with FFmpegKit.
+# Build rootless .deb with FFmpegKit.
 build_deb() {
-	local scheme="$1"
 	local base_deb
 	local new_name
 
 	clean_build
 	ensure_packages_dir
 
-	if [ "$scheme" = "rootless" ]; then
-		log "Building ${APP_NAME} tweak for rootless"
-		export THEOS_PACKAGE_SCHEME=rootless
-	else
-		log "Building ${APP_NAME} tweak for rootful"
-		unset THEOS_PACKAGE_SCHEME
-	fi
+	log "Building ${APP_NAME} tweak for rootless"
+	export THEOS_PACKAGE_SCHEME=rootless
 
 	make_final "package"
 
@@ -711,7 +760,7 @@ build_deb() {
 
 		inject_bundle_into_deb "$base_deb"
 
-		new_name="${base_deb%.deb}-${scheme}.deb"
+		new_name="${base_deb%.deb}-${THEOS_PACKAGE_SCHEME}.deb"
 		mv "$base_deb" "$new_name"
 	)
 
@@ -844,36 +893,16 @@ build_trollfools() {
 
 	if [ -d "modules/ffmpegkit/ffmpegkit.framework" ]; then
 		log "Staging FFmpegKit at zip root"
-		patch_ffmpegkit_frameworks "$stage"
+		patch_ffmpegkit_frameworks "$stage" sci
 	else
 		warn "FFmpegKit not found — zip built without FFmpegKit."
 	fi
 
-	if command -v ldid >/dev/null 2>&1; then
-		log "Adhoc-signing staged binaries (ldid -S)"
+	# Ship unsigned — TrollFools signs each Mach-O on inject. Pre-signing makes
+	# it skip them as "already signed" → AMFI rejects on some devices → crash.
 
-		local signed=0
-		local f
-		local bin
-
-		for f in "$stage"/*.dylib; do
-			[ -f "$f" ] || continue
-			ldid -S "$f" && signed=$((signed + 1))
-		done
-
-		for f in "$stage"/*.framework; do
-			[ -d "$f" ] || continue
-
-			bin="$f/$(basename "${f%.framework}")"
-			[ -f "$bin" ] || continue
-
-			ldid -S "$bin" && signed=$((signed + 1))
-		done
-
-		warn "  signed ${signed} binar(ies)"
-	else
-		warn "ldid not found — leaving binaries unsigned."
-	fi
+	# Bundle resources must be world-readable on device.
+	chmod -R a+rX "$stage"
 
 	rm -f "$out_zip"
 
@@ -894,23 +923,23 @@ usage() {
 	echo '| RyukGram Build Script |'
 	echo '+-----------------------+'
 	echo
-	echo "Usage: $0 <dylib/sideload/noplugins/trollstore/trollfools/rootless/rootful/flexclean> [option]"
+	echo "Usage: $0 <dylib/sideloadpatch/sideload/noplugins/trollstore/trollfools/rootless/flexclean> [option]"
 	echo
 	echo 'Commands:'
 	echo '  dylib                 Build the dylib only for Feather/manual injection'
 	echo '  dylib --fast          Build dylib without cleaning'
+	echo '  sideloadpatch         Build NoPluginsPatch.dylib only (no-plugins sideload compat)'
 	echo '  sideload              Build a patched IPA, requires cyan + decrypted IPA'
 	echo '  sideload --buildonly  Compile only, do not create IPA'
 	echo '  sideload --dev        Build dev IPA with cached FLEX libs'
 	echo '  sideload --devquick   Create IPA without RyukGram.dylib injection'
 	echo '  sideload --dup [id]   Spoof bundle id so it installs next to stock Instagram'
-	echo '  noplugins             Like sideload but appex stripped + SideloadPatch baked in;'
+	echo '  noplugins             Like sideload but appex stripped + NoPluginsPatch.dylib injected;'
 	echo '                        works with any sideloader (SideStore / AltStore / Feather)'
 	echo '  noplugins --dup [id]  No-plugins dup build for coexist install next to stock IG'
 	echo '  trollstore            Build a .tipa for TrollStore, requires cyan + decrypted IPA'
 	echo '  trollfools            Build a TrollFools zip (dylib + bundle + frameworks, no IPA)'
 	echo '  rootless              Build a rootless .deb package with FFmpegKit'
-	echo '  rootful               Build a rootful .deb package with FFmpegKit'
 	echo '  flexclean             Delete cached FLEXing build outputs'
 	echo
 	echo 'Duplicate (--dup) notes:'
@@ -931,6 +960,9 @@ main() {
 		dylib)
 			build_dylib "$option"
 			;;
+		sideloadpatch)
+			build_noplugins_patch_dylib
+			;;
 		sideload)
 			build_sideload "sideload" "${@:2}"
 			;;
@@ -944,10 +976,7 @@ main() {
 			build_trollfools
 			;;
 		rootless)
-			build_deb "rootless"
-			;;
-		rootful)
-			build_deb "rootful"
+			build_deb
 			;;
 		flexclean)
 			rm -rf "$FLEX_DIR/.theos"

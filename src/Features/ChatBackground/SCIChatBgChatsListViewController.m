@@ -106,8 +106,7 @@ static UIImage *SCIThumb(NSString *asset) {
 	UIImage *cached = [SCIChatBgThumbCache() objectForKey:asset];
 	if (cached) return cached;
 
-	NSURL *url = [[SCIChatBackgroundManager shared] urlForRelativeAsset:asset];
-	UIImage *src = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+	UIImage *src = [[SCIChatBackgroundManager shared] imageForAsset:asset];
 	if (!src || !src.CGImage) return [UIImage systemImageNamed:@"photo"];
 
 	CGFloat side = MIN(src.size.width, src.size.height);
@@ -116,6 +115,7 @@ static UIImage *SCIThumb(NSString *asset) {
 	UIImage *square = cg ? [UIImage imageWithCGImage:cg scale:src.scale orientation:src.imageOrientation] : src;
 	if (cg) CGImageRelease(cg);
 
+	BOOL video = [SCIChatBackgroundManager isVideoAsset:asset];
 	CGSize size = CGSizeMake(48, 48);
 	UIGraphicsImageRendererFormat *fmt = UIGraphicsImageRendererFormat.preferredFormat;
 	fmt.opaque = NO;
@@ -123,6 +123,11 @@ static UIImage *SCIThumb(NSString *asset) {
 	UIImage *thumb = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:fmt] imageWithActions:^(__unused UIGraphicsImageRendererContext *ctx) {
 		[[UIBezierPath bezierPathWithRoundedRect:(CGRect){CGPointZero, size} cornerRadius:13] addClip];
 		[square drawInRect:(CGRect){CGPointZero, size}];
+		if (video) {
+			UIImage *play = [[UIImage systemImageNamed:@"play.circle.fill"] imageWithTintColor:UIColor.whiteColor renderingMode:UIImageRenderingModeAlwaysOriginal];
+			CGFloat b = 18;
+			[play drawInRect:CGRectMake(size.width - b - 3, size.height - b - 3, b, b)];
+		}
 	}];
 
 	if (thumb) [SCIChatBgThumbCache() setObject:thumb forKey:asset];
@@ -283,7 +288,6 @@ static NSString *SCIThreadIDForInput(NSString *input) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:SCIChatBackgroundDidChangeNotification object:nil];
 }
 

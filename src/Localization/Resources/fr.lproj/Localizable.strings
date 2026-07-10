@@ -43,6 +43,7 @@
 "App Icon" = "Icône de l’app";
 "Audio page" = "Page audio";
 "Auto-reveals sensitive media" = "Affiche automatiquement les médias sensibles";
+"Block surveys" = "Bloquer les sondages";
 "Blocks the viewer-count heartbeat so the broadcaster doesn't see you — you also won't see the viewer count" = "Bloque le signal du compteur de spectateurs pour que le diffuseur ne vous voie pas — vous ne verrez pas non plus le compteur";
 "Browser" = "Navigateur";
 "Change the app icon from the bundled icons" = "Changez l’icône de l’app parmi les icônes intégrées";
@@ -95,6 +96,8 @@
 "Hides the meta ai buttons/functionality within the app" = "Masque les boutons et fonctionnalités Meta AI dans l’app";
 "Hides the notes tray in the DM inbox" = "Masque le bandeau des notes dans la boîte de réception des DM";
 "Hides the suggested broadcast channels in direct messages" = "Masque les canaux de diffusion suggérés dans les messages directs";
+"Hide DM search suggestions" = "Masquer les suggestions de recherche des messages";
+"Removes suggested accounts and channels from direct message search" = "Supprime les comptes et canaux suggérés de la recherche de messages directs";
 "Hides the trending searches under the explore search bar" = "Masque les recherches tendance sous la barre de recherche Explorer";
 "Hold down on the Instagram logo to change the app icon" = "Maintenez le logo Instagram appuyé pour changer l’icône de l’app";
 "Lets the photo sticker picker show videos too, not just photos" = "Permet au sélecteur de sticker photo d’afficher aussi des vidéos, pas seulement des photos";
@@ -130,6 +133,7 @@
 "Solid color" = "Couleur unie";
 "Sponsored posts in main, contextual, video, and chaining feeds" = "Publications sponsorisées dans les fils principal, contextuel, vidéo et de chaînage";
 "Sponsored posts on the explore grid" = "Publications sponsorisées sur la grille d'exploration";
+"Stops Instagram's in-app surveys and feedback prompts" = "Bloque les sondages et demandes d'avis intégrés à Instagram";
 "Sponsored reels in the sundial feed" = "Reels sponsorisés dans le fil sundial";
 "Start" = "Début";
 "Story ads and sponsored entries in the story tray" = "Pubs de stories et entrées sponsorisées dans le bandeau des stories";
@@ -171,6 +175,8 @@
 "Download to Photos" = "Télécharger dans Photos";
 "Save with music" = "Enregistrer avec la musique";
 "Gallery with music" = "Galerie avec la musique";
+"Save image (no music)" = "Enregistrer l'image (sans musique)";
+"Gallery image (no music)" = "Image dans la galerie (sans musique)";
 "Photo with music" = "Photo avec musique";
 "Enabled" = "Activé";
 "Expand" = "Agrandir";
@@ -204,7 +210,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 "Action button" = "Bouton d’action";
-"Adds 'View profile picture' and 'View cover' to story tray long-press menus" = "Ajoute « Voir la photo de profil » et « Voir la couverture » aux menus d’appui long du bandeau des stories";
+"Adds 'Profile picture' to story tray long-press menus" = "Ajoute « Photo de profil » aux menus d’appui long du bandeau des stories";
 "Adds a RyukGram action button under each feed post with download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "Ajoute un bouton d’action RyukGram sous chaque publication du fil avec des options télécharger/partager/copier/agrandir/repost. Par défaut, un toucher ouvre le menu ; changez ce comportement ci-dessous.";
 "Choose Instagram's default feed or force the Following feed" = "Choisir le fil par défaut d’Instagram ou forcer le fil Abonnements";
 "Main feed" = "Fil principal";
@@ -259,6 +265,8 @@
 "Long-press a GIF in the picker to pin it — favorites show first" = "Maintenez un GIF dans le sélecteur pour l'épingler — les favoris s'affichent en premier";
 "Added to favorites" = "Ajouté aux favoris";
 "Removed from favorites" = "Retiré des favoris";
+"Favorite GIF unavailable" = "GIF favori indisponible";
+"This GIF may have been removed. Long-press it to unfavorite." = "Ce GIF a peut-être été supprimé. Appuyez longuement pour le retirer des favoris.";
 "Failed to build GIF model" = "Échec de la création du modèle GIF";
 "GIF link copied" = "Lien du GIF copié";
 "Image" = "Image";
@@ -276,6 +284,14 @@
 
 "Adds a RyukGram action button above the reel sidebar with view-cover/download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "Ajoute un bouton d’action RyukGram au-dessus de la barre latérale des reels avec voir-couverture/télécharger/partager/copier/agrandir/repost. Par défaut, un toucher ouvre le menu ; changez ce comportement ci-dessous.";
 "Always show progress scrubber" = "Toujours afficher la barre de progression";
+"Auto-scroll reels" = "Défilement automatique des reels";
+"Speed, seek and auto-scroll controls" = "Contrôles de vitesse, navigation et défilement automatique";
+"Enabled controls appear when you hold the ⋯ or audio button on a reel." = "Les contrôles activés apparaissent en maintenant le bouton ⋯ ou audio d'un reel.";
+"Seek controls" = "Contrôles de navigation";
+"Auto-scroll control" = "Contrôle du défilement automatique";
+"Seek" = "Navigation";
+"Custom seek step" = "Saut personnalisé";
+"Enter the number of seconds to skip" = "Saisissez le nombre de secondes à sauter";
 "Change what happens when you tap on a reel" = "Changer ce qui se passe quand vous touchez un reel";
 "Confirm reel refresh" = "Confirmer le rafraîchissement des reels";
 "Custom speed" = "Vitesse personnalisée";
@@ -296,7 +312,6 @@
 "Hides the repost button on the reels sidebar" = "Masque le bouton de repost dans la barre latérale des reels";
 "Hides the top navigation bar when watching reels" = "Masque la barre de navigation supérieure pendant le visionnage des reels";
 "Hiding" = "Masquage";
-"Hold the 3-dot on any reel to open speed picker" = "Maintenez les 3 points sur un reel pour ouvrir le sélecteur de vitesse";
 "IG default" = "Par défaut IG";
 "Limits" = "Limites";
 "Limits the amount of reels available to scroll at any given time, and prevents refreshing" = "Limite le nombre de reels disponibles à faire défiler à tout moment et empêche le rafraîchissement";
@@ -431,6 +446,12 @@
 // Settings → Stories tab                                                   //
 //////////////////////////////////////////////////////////////////////////////
 
+"Arrange overlay buttons" = "Disposer les boutons superposés";
+"Overlay layout" = "Disposition superposée";
+"Drag to position the buttons" = "Faites glisser pour positionner les boutons";
+"Drag the buttons onto the story. The dimmed strip is the reply bar." = "Faites glisser les boutons sur la story. La bande grisée est la barre de réponse.";
+"Send message" = "Envoyer un message";
+
 "Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below." = "Ajoute un bouton d’action RyukGram à côté du bouton œil sur les stories avec télécharger/partager/copier/agrandir/repost/voir les mentions. Par défaut, un toucher ouvre le menu ; changez ce comportement ci-dessous.";
 "Adds a speaker button to the story overlay to unmute/mute audio. Also available in the 3-dot menu" = "Ajoute un bouton haut-parleur sur les stories pour activer/couper le son. Aussi disponible dans le menu à trois points";
 "Adds the eye button to story overlays. Off keeps seen blocking on without the button" = "Ajoute le bouton œil sur les stories. Désactivé, le blocage des vues reste actif sans le bouton";
@@ -558,6 +579,8 @@
 "Makes view-once messages behave like normal visual messages (loopable/pauseable)" = "Fait se comporter les messages à vue unique comme des messages visuels normaux (bouclables/pausables)";
 "Note actions" = "Actions des notes";
 "Preserves messages that others unsend" = "Conserve les messages annulés par les autres";
+"Keep my deleted messages" = "Conserver mes messages supprimés";
+"Also preserves messages you unsend yourself" = "Conserve aussi les messages que vous annulez vous-même";
 "Prevents accidental swipe-up activation of vanish mode" = "Empêche l’activation accidentelle du mode éphémère par balayage vers le haut";
 "Quick list button in chats" = "Bouton de liste rapide dans les discussions";
 "Removes the audio call button from DM thread header" = "Retire le bouton d’appel audio de l’en-tête des fils de DM";
@@ -685,7 +708,18 @@
 // Settings → Messages tab                                                  //
 //////////////////////////////////////////////////////////////////////////////
 
+"In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor" = "Dans l’outil Dessin, envoyez une image comme dessin, depuis la galerie, Photos, des stickers ou le presse-papiers, avec un éditeur intégré pour recadrer et supprimer l’arrière-plan";
+"Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect." = "Dessinez une ligne ou une forme, puis touchez Envoyer et choisissez la source de l’image : galerie, Photos, stickers ou presse-papiers.\n\nL’image prend la place de votre dessin et adopte sa position et sa taille, alors dessinez plus grand pour une image plus grande.\n\nRedémarrez Instagram pour appliquer le changement.";
+
+"Send image as drawing" = "Envoyer une image comme dessin";
+
+"Bypass \"You can't send messages\"" = "Contourner « Vous ne pouvez pas envoyer de messages »";
+"Removes the blocked composer banner and restores the text input in restricted threads" = "Supprime la bannière de saisie bloquée et restaure le champ de texte dans les conversations restreintes";
 "Custom chat background" = "Fond de discussion personnalisé";
+"DM Save button" = "Bouton Enregistrer des DM";
+"Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share" = "Fait télécharger le bouton Enregistrer intégré d'Instagram sur les photos et vidéos des DM vers Photos, la Galerie ou Partager";
+"Reroute native Save" = "Rediriger l'enregistrement natif";
+"Save media" = "Enregistrer le média";
 "Incoming calls stay silent — no ring, no screen, no notification" = "Les appels entrants restent silencieux — pas de sonnerie, pas d'écran, pas de notification";
 "Messages" = "Messages";
 "Silence incoming calls" = "Mettre en silence les appels entrants";
@@ -740,6 +774,18 @@
 "Lets you swipe to switch between navigation bar tabs" = "Permet de balayer pour passer d’un onglet de navigation à l’autre";
 "Messages only" = "Messages seulement";
 "Messages-only mode" = "Mode messages seulement";
+"Automatic schedule" = "Programmation automatique";
+"DM-only client, hide tabs, auto schedule" = "Client messages seulement, masquer les onglets, programmation auto";
+"Start time" = "Heure de début";
+"End time" = "Heure de fin";
+"Switch into Messages-only on its own during a time window" = "Passer en mode messages seulement automatiquement pendant une plage horaire";
+"Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends." = "Active le mode messages seulement automatiquement pendant une plage quotidienne (ex. 22:00 – 06:00) à l’aide des options ci-dessus. Un redémarrage vous sera demandé au début et à la fin de la plage.";
+"Active now · ends %@" = "Actif maintenant · se termine à %@";
+"Next window starts %@" = "Prochaine plage à %@";
+"Messages-only starting" = "Mode messages seulement : début";
+"Messages-only ending" = "Mode messages seulement : fin";
+"Your Messages-only window has started. Restart Instagram to switch to DM-only." = "Votre plage en mode messages seulement a commencé. Redémarrez Instagram pour basculer en messages seulement.";
+"Your Messages-only window has ended. Restart Instagram to bring back the other tabs." = "Votre plage en mode messages seulement est terminée. Redémarrez Instagram pour retrouver les autres onglets.";
 "Navigation" = "Navigation";
 "Swipe between tabs" = "Balayer entre les onglets";
 "Tab the app opens to. Ignored when Messages-only is on" = "Onglet ouvert au lancement de l’app. Ignoré quand Messages seulement est activé";
@@ -795,7 +841,7 @@
 "Shows an alert before sending an emoji reaction on a note" = "Affiche une alerte avant d’envoyer une réaction emoji à une note";
 "Shows an alert before sending an emoji reaction on a story" = "Affiche une alerte avant d’envoyer une réaction emoji à une story";
 "Shows an alert before sending an emoji reaction on an Instant" = "Affiche une alerte avant d’envoyer une réaction emoji à un Instant";
-"Shows an alert before taking a photo with the Instants camera" = "Affiche une alerte avant de prendre une photo avec la caméra Instants";
+"Shows an alert before sending a photo or video from the Instants camera" = "Affiche une alerte avant d'envoyer une photo ou une vidéo depuis la caméra Instants";
 "Shows an alert before tapping to switch to the next/previous Instant" = "Affiche une alerte avant de toucher pour passer à l’Instant suivant/précédent";
 "Shows an alert to confirm before sending a voice message" = "Affiche une alerte de confirmation avant d’envoyer un message vocal";
 "Shows an alert to confirm before toggling vanish mode" = "Affiche une alerte de confirmation avant de basculer le mode éphémère";
@@ -841,6 +887,7 @@
 "Biometric" = "Biométrie";
 "Change passcode" = "Changer le code";
 "Chat hidden" = "Discussion masquée";
+"Chat unhidden" = "Discussion affichée";
 "Chat locked" = "Discussion verrouillée";
 "Chat unlocked" = "Discussion déverrouillée";
 "Choose a code you'll remember." = "Choisissez un code dont vous vous souviendrez.";
@@ -863,6 +910,7 @@
 "Every use" = "À chaque utilisation";
 "Hidden chats" = "Discussions masquées";
 "Hide chat" = "Masquer la discussion";
+"Unhide chat" = "Afficher la discussion";
 "Hide message preview" = "Masquer l’aperçu du message";
 "Hide this chat?" = "Masquer cette discussion ?";
 "Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts." = "Masque l’interface de RyukGram dans les captures et enregistrements et contourne les alertes de capture d’écran d’Instagram par fonctionnalité.";
@@ -1204,6 +1252,15 @@
 // inside DM threads.                                                       //
 //////////////////////////////////////////////////////////////////////////////
 
+"Free" = "Libre";
+"Remove background" = "Supprimer l’arrière-plan";
+"No subject found" = "Aucun sujet trouvé";
+"No stickers yet" = "Aucun sticker pour l’instant";
+"Send drawing" = "Envoyer un dessin";
+"Send my drawing" = "Envoyer mon dessin";
+"Paste image / sticker" = "Coller image / sticker";
+"Tap any sticker on your keyboard\nto add it to your drawing" = "Touchez un sticker de votre clavier\npour l’ajouter à votre dessin";
+
 "  %lu votes · avg %.0f%%  " = "  %lu votes · moy. %.0f%%  ";
 "%@ can't be converted" = "%@ ne peut pas être converti";
 "%@ unsent a message" = "%@ a annulé un message";
@@ -1323,14 +1380,18 @@
 "Change default" = "Changer la valeur par défaut";
 "Chat Backgrounds" = "Fonds de discussion";
 "Choose an image used when no chat override exists" = "Choisir une image utilisée quand aucun fond personnalisé n'existe";
-"Choose Image" = "Choisir une image";
 "Clear default" = "Effacer la valeur par défaut";
 "Couldn't import image" = "Impossible d'importer l'image";
+"Adjust settings" = "Réglages";
+"Choose Media" = "Choisir un média";
+"Converting GIF" = "Conversion du GIF";
+"Couldn't import video" = "Impossible d'importer la vidéo";
+"Crop & resize" = "Rogner et redimensionner";
+"Crop & trim" = "Rogner et couper";
 "Custom Chat Background" = "Fond de discussion personnalisé";
 "Default background" = "Fond par défaut";
 "Delete library images, default background, and chat overrides" = "Supprimer les images de la bibliothèque, le fond par défaut et les fonds personnalisés des discussions";
 "Dim in dark mode" = "Assombrir en mode sombre";
-"Edit image settings" = "Modifier les réglages d'image";
 "Enable custom backgrounds" = "Activer les fonds personnalisés";
 "Enter a username, chat name, or thread ID." = "Saisissez un nom d'utilisateur, un nom de discussion ou un ID de fil.";
 "Group" = "Groupe";
@@ -1430,7 +1491,7 @@
 "Turn every theme option off and restart" = "Désactiver chaque option de thème et redémarrer";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Activez les services de localisation dans Réglages → Confidentialité pour utiliser votre position actuelle.";
 "Type an emoji to use as the note bubble icon." = "Saisissez un emoji à utiliser comme icône de la bulle de note.";
-"View profile picture" = "Voir la photo de profil";
+"Profile picture" = "Photo de profil";
 
 //////////////////////////////////////////////////////////////////////////////
 //                            PROFILE ANALYZER                              //
@@ -1438,6 +1499,11 @@
 //////////////////////////////////////////////////////////////////////////////
 
 " BETA " = " BETA ";
+"%lu of %lu checks on" = "%lu vérifications sur %lu activées";
+"Checks" = "Vérifications";
+"Pick which categories each scan computes. A disabled check is greyed out and skipped — it won't be calculated or shown." = "Choisissez les catégories que calcule chaque analyse. Une vérification désactivée apparaît grisée et est ignorée : elle n'est ni calculée ni affichée.";
+"Snapshot saved" = "Instantané enregistré";
+"Your current scan was archived" = "Votre analyse actuelle a été archivée";
 "%@ %lu accounts? The first %ld will be processed to avoid rate limits." = "%@ %lu comptes ? Les %ld premiers seront traités pour éviter les limites de débit.";
 "%@ %lu accounts? This runs sequentially with a short pause between each." = "%@ %lu comptes ? L’opération se fait séquentiellement avec une courte pause entre chaque.";
 "%@ followers · %@ following" = "%@ abonnés · %@ abonnements";
@@ -1500,6 +1566,9 @@
 "Mutual followers" = "Abonnements mutuels";
 "Name: %@ → %@" = "Nom : %@ → %@";
 "New followers" = "Nouveaux abonnés";
+"NEW" = "NOUVEAU";
+"New first" = "Nouveaux d'abord";
+"New only" = "Nouveaux seulement";
 "No active Instagram session found" = "Aucune session Instagram active trouvée";
 "No results" = "Aucun résultat";
 "No scan yet" = "Aucune analyse pour le moment";
@@ -2113,6 +2182,7 @@
 // Settings → Interface (renamed Navigation tab)                            //
 //////////////////////////////////////////////////////////////////////////////
 
+"Instagram language" = "Langue d'Instagram";
 "Adds an extra shortcut button beside the create-post + button on the home top bar." = "Ajoute un bouton de raccourci supplémentaire à côté du bouton + de création dans la barre supérieure de l'accueil.";
 "All buttons" = "Tous les boutons";
 "Choose icon, reorder actions, and enable menu items" = "Choisir l'icône, réorganiser les actions et activer les éléments de menu";
@@ -2130,6 +2200,9 @@
 //                              NOTIFICATIONS                               //
 // Settings → Interface → Notifications + the universal pill / toast system //
 //////////////////////////////////////////////////////////////////////////////
+
+"Drag the pill to position it" = "Faites glisser la notification pour la positionner";
+"Drag the pill where you want it. Higher than center slides down, lower slides up." = "Faites glisser la notification où vous voulez. Au-dessus du centre, elle descend ; en dessous, elle monte.";
 
 "Notifications" = "Notifications";
 "Appearance" = "Apparence";
@@ -2203,6 +2276,12 @@
 "Share-sheet recipient pinned" = "Destinataire de la feuille de partage épinglé";
 "Unsent message detected" = "Message annulé détecté";
 "Reaction removed detected" = "Suppression de réaction détectée";
+"%lu messages unsent" = "%lu messages annulés";
+"%lu reactions removed" = "%lu réactions retirées";
+"%lu chats marked seen" = "%lu discussions marquées comme vues";
+"%lu stories marked seen" = "%lu stories marquées comme vues";
+"%lu of your messages read" = "%lu de vos messages lus";
+"%lu notifications" = "%lu notifications";
 "Live comments toggled" = "Commentaires de live basculés";
 "Custom GIF sent" = "GIF personnalisé envoyé";
 "GIF favorited / unfavorited" = "GIF ajouté / retiré des favoris";
@@ -2317,3 +2396,189 @@
 "read your message" = "a lu votre message";
 "Also track reads in group chats. Off by default — groups can be noisy" = "Suivre aussi les lectures dans les groupes. Désactivé par défaut — les groupes peuvent être bruyants";
 "Refreshing…" = "Actualisation…";
+"Pinned" = "Épinglés";
+"Liked the story" = "Ont aimé la story";
+"Default (recent first)" = "Par défaut (récents d'abord)";
+"Liked first" = "Ceux qui ont aimé d'abord";
+"Load all viewers" = "Charger tous les spectateurs";
+"%lu viewers" = "%lu spectateurs";
+"Viewer pinned" = "Spectateur épinglé";
+"Viewer unpinned" = "Spectateur désépinglé";
+"Pin a viewer" = "Épingler un spectateur";
+"Pin order" = "Ordre d'épinglage";
+"Pin this viewer?" = "Épingler ce spectateur ?";
+"Filter, sort & pin viewers" = "Filtrer, trier et épingler les spectateurs";
+"Adds controls to your story viewers list" = "Ajoute des commandes à la liste des spectateurs de votre story";
+"Add by username, remove, reorder" = "Ajouter par nom d'utilisateur, supprimer, réordonner";
+"Pinned viewers (%lu)" = "Spectateurs épinglés (%lu)";
+"Viewers list" = "Liste des spectateurs";
+"Settings are saved and reused next time." = "Les réglages sont enregistrés et réutilisés la prochaine fois.";
+"Tick several to combine them. Pinned viewers always stay on top and ignore these filters." = "Cochez-en plusieurs pour les combiner. Les spectateurs épinglés restent toujours en haut et ignorent ces filtres.";
+"Pinned viewers" = "Spectateurs épinglés";
+"Pin" = "Épingler";
+"On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list." = "Dans la liste « qui a vu ma story », ajoute un bouton filtre/tri (en bas à droite) avec des réglages enregistrés. Appui long sur un spectateur pour l'épingler. Les spectateurs épinglés restent toujours en haut de la liste.";
+"Username or raw user PK. Pinned viewers always stay at the top of your story viewers list." = "Nom d'utilisateur ou PK brut. Les spectateurs épinglés restent toujours en haut de la liste des spectateurs de votre story.";
+
+//////////////////////////////////////////////////////////////////////////////
+//                               DEVICE ID                                  //
+// Settings -> Advanced -> Device ID, and the login-screen Device ID button //
+//////////////////////////////////////////////////////////////////////////////
+"Roll a new fingerprint" = "Générer une nouvelle empreinte";
+"Roll new ID" = "Générer un nouvel ID";
+"Roll + clear IG data" = "Générer + effacer les données IG";
+"Generate fresh device identifiers" = "Génère de nouveaux identifiants d'appareil";
+"New fingerprint ready" = "Nouvelle empreinte prête";
+"Relaunch Instagram now so the new device identity applies from a clean start?" = "Redémarrer Instagram maintenant pour que la nouvelle identité d'appareil s'applique dès un démarrage propre ?";
+"Full reset to a brand-new device" = "Réinitialisation complète vers un appareil neuf";
+"Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen." = "Masque les identifiants qu'Instagram utilise pour identifier cet appareil : ID d'appareil, ID d'appareil familial, ID de fournisseur et ID machine. Les changements s'appliquent après un redémarrage. Les mêmes commandes apparaissent sur l'écran de connexion.";
+"Rolls a fresh device ID, family device ID, vendor ID and clears the machine ID so Instagram re-registers as a new device. Or also wipe saved logins for a full reset." = "Génère un nouvel ID d'appareil, ID d'appareil familial et ID de fournisseur, et efface l'ID machine pour qu'Instagram s'enregistre de nouveau comme un appareil neuf. Ou effacez aussi les connexions enregistrées pour une réinitialisation complète.";
+"Apple attestation" = "Attestation Apple";
+"Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on." = "Bloque l'attestation d'appareil Apple d'Instagram (DeviceCheck et App Attest). Celles-ci sont liées au matériel et ne peuvent pas être modifiées, elles continuent donc d'associer l'appareil malgré les réinitialisations. Le blocage fait voir à Instagram un appareil qui ne les prend pas en charge. Ne fonctionne que lorsque le masquage est activé.";
+"Block Apple device attestation" = "Bloquer l'attestation d'appareil Apple";
+"Stop the hardware attestation that links the device" = "Arrête l'attestation matérielle qui associe l'appareil";
+"Block Apple attestation: %@" = "Bloquer l'attestation Apple : %@";
+"Attestation blocked" = "Attestation bloquée";
+"Attestation allowed" = "Attestation autorisée";
+"Roll + clear, then sign in fresh" = "Générer + effacer, puis se reconnecter à neuf";
+"New device fingerprint" = "Nouvelle empreinte d'appareil";
+"Enter ID manually…" = "Saisir l'ID manuellement…";
+"Manual device ID" = "ID d'appareil manuel";
+"Paste or type the UUID this device should report." = "Collez ou saisissez l'UUID que cet appareil doit signaler.";
+"Device ID set" = "ID d'appareil défini";
+"Copy current ID" = "Copier l'ID actuel";
+"Revert to my real device ID" = "Revenir à mon vrai ID d'appareil";
+"Restore the original, stop masking" = "Restaure l'original et arrête le masquage";
+"Spoofing off" = "Usurpation désactivée";
+"Relaunch now" = "Redémarrer maintenant";
+"Relaunch to apply" = "Redémarrez pour appliquer";
+"Clear device & relaunch" = "Effacer l'appareil et redémarrer";
+"Clear device & relaunch?" = "Effacer l'appareil et redémarrer ?";
+"Clear & relaunch" = "Effacer et redémarrer";
+"Device ID" = "ID d'appareil";
+"Device identity" = "Identité de l'appareil";
+"Masked" = "Masqué";
+"Real" = "Réel";
+"Show button on login screen" = "Afficher le bouton sur l'écran de connexion";
+"Floating Device ID button while signed out" = "Bouton ID d'appareil flottant lorsque déconnecté";
+"Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards." = "Oublie chaque connexion enregistrée, cookie et l'identité d'appareil stockée, puis redémarre pour qu'Instagram démarre comme un appareil neuf. Vous devrez vous reconnecter ensuite.";
+
+//////////////////////////////////////////////////////////////////////////
+//                         FOLLOW REQUESTS TRACKER                        //
+// Settings → Follow Requests Tracker                                     //
+//////////////////////////////////////////////////////////////////////////
+"Follow Requests Tracker" = "Suivi des demandes d'abonnement";
+"Follow Requests" = "Demandes d'abonnement";
+"Show follow requests" = "Afficher les demandes d'abonnement";
+"Check now" = "Vérifier maintenant";
+"Reset tracked data" = "Réinitialiser les données suivies";
+"Enable tracker" = "Activer le suivi";
+"Log requests and check outcomes" = "Enregistrer les demandes et vérifier les résultats";
+"Logs follow requests you send and receive, and catches who cancels a request before you answer. All on-device." = "Enregistre les demandes d'abonnement que tu envoies et reçois, et repère qui annule une demande avant que tu répondes. Tout sur l'appareil.";
+"What to track" = "Quoi suivre";
+"Requests I send" = "Demandes que j'envoie";
+"To private accounts" = "Vers des comptes privés";
+"Requests I receive" = "Demandes que je reçois";
+"From people who want to follow you" = "Des personnes qui veulent s'abonner à toi";
+"Background check" = "Vérification en arrière-plan";
+"Check interval" = "Intervalle de vérification";
+"How often to check for outcomes while the app is open. Also checks on launch and when you open the list." = "Fréquence de vérification des résultats lorsque l'app est ouverte. Vérifie aussi au lancement et à l'ouverture de la liste.";
+"Off (manual only)" = "Désactivé (manuel uniquement)";
+"Every 15 minutes" = "Toutes les 15 minutes";
+"Every 30 minutes" = "Toutes les 30 minutes";
+"Every hour" = "Toutes les heures";
+"Every 6 hours" = "Toutes les 6 heures";
+"My request accepted" = "Ma demande acceptée";
+"A private account accepted you" = "Un compte privé t'a accepté";
+"My request declined" = "Ma demande refusée";
+"No longer pending" = "N'est plus en attente";
+"New request received" = "Nouvelle demande reçue";
+"Someone asked to follow you" = "Quelqu'un a demandé à te suivre";
+"Request withdrawn" = "Demande retirée";
+"Someone cancelled their request" = "Quelqu'un a annulé sa demande";
+"Sent by me" = "Envoyées par moi";
+"Received" = "Reçue";
+"Sent" = "Envoyée";
+"Accepted" = "Acceptée";
+"Rejected" = "Refusée";
+"Requested" = "Demandée";
+"Approved" = "Approuvée";
+"Withdrawn" = "Retirée";
+"No follow requests tracked yet" = "Aucune demande d'abonnement suivie pour l'instant";
+"Cancel requests" = "Annuler les demandes";
+"Delete %lu record(s) from history?" = "Supprimer %lu enregistrement(s) de l'historique ?";
+"Cancel %lu pending request(s)?" = "Annuler %lu demande(s) en attente ?";
+"Follow back %lu account(s)?" = "S'abonner en retour à %lu compte(s) ?";
+"Clear all tracked follow requests?" = "Effacer toutes les demandes d'abonnement suivies ?";
+"Reset tracked follow requests for this account?" = "Réinitialiser les demandes d'abonnement suivies pour ce compte ?";
+"Enable the tracker first" = "Active d'abord le suivi";
+"Checking…" = "Vérification…";
+"%ld request(s) updated" = "%ld demande(s) mise(s) à jour";
+"No changes" = "Aucun changement";
+"Working…" = "Traitement…";
+"Follow request accepted" = "Demande d'abonnement acceptée";
+"%@ accepted your request" = "%@ a accepté ta demande";
+"Follow request declined" = "Demande d'abonnement refusée";
+"%@ is no longer pending" = "%@ n'est plus en attente";
+"New follow request" = "Nouvelle demande d'abonnement";
+"%@ asked to follow you" = "%@ a demandé à te suivre";
+"Follow request withdrawn" = "Demande d'abonnement retirée";
+"%@ withdrew their request" = "%@ a retiré sa demande";
+"Follow requests log" = "Journal des demandes d'abonnement";
+"Hidden chats hidden" = "Conversations masquées cachées";
+"Hidden chats revealed" = "Conversations masquées affichées";
+"Hold name to reveal" = "Maintenir le nom pour afficher";
+"Long-press the account name atop the DM inbox to show or hide your hidden chats" = "Appuyez longuement sur le nom du compte en haut de la boîte de réception pour afficher ou masquer vos conversations masquées";
+"Reveal hidden chats" = "Afficher les conversations masquées";
+"Prompt before holding the inbox name reveals hidden chats" = "Demander avant que le maintien du nom n'affiche les conversations masquées";
+"👁 Shown in the inbox · Tap to hide" = "👁 Affichées dans la boîte · Touchez pour masquer";
+" · shown in inbox" = " · affichées dans la boîte";
+
+//////////////////////////////////////////////////////////////////////////////
+//                              INSTAGRAM PLUS                               //
+// Settings → General → Instagram Plus                                        //
+//////////////////////////////////////////////////////////////////////////////
+
+"Instagram Plus" = "Instagram Plus";
+"Unlock Instagram's paid features" = "Débloquez les fonctionnalités payantes d'Instagram";
+"Turn on Instagram's paid subscriber features inside the app." = "Activez les fonctionnalités réservées aux abonnés payants d'Instagram directement dans l'application.";
+"Instagram Plus is Instagram's paid subscription. These switches turn its features on inside the app. Some work completely. Others only reveal the option, because the content is loaded from Instagram's servers and still needs a real subscription, so they may show up empty or do nothing. Turn on what you want and tap Apply. If Instagram fails to launch three times in a row, these switches reset themselves." = "Instagram Plus est l'abonnement payant d'Instagram. Ces interrupteurs en activent les fonctionnalités dans l'application. Certaines fonctionnent totalement. D'autres ne font qu'afficher l'option, car le contenu provient des serveurs d'Instagram et nécessite toujours un véritable abonnement : elles peuvent donc rester vides ou ne rien faire. Activez ce que vous voulez, puis touchez Appliquer. Si Instagram ne parvient pas à démarrer trois fois de suite, ces interrupteurs se réinitialisent d'eux-mêmes.";
+"Turn everything on" = "Tout activer";
+"Turn everything off" = "Tout désactiver";
+"Reset Instagram Plus" = "Réinitialiser Instagram Plus";
+"Reset Instagram Plus?" = "Réinitialiser Instagram Plus ?";
+"Turn every Instagram Plus feature off" = "Désactiver toutes les fonctionnalités Instagram Plus";
+"Every Instagram Plus feature turns off and Instagram restarts." = "Toutes les fonctionnalités Instagram Plus sont désactivées et Instagram redémarre.";
+"Story peek" = "Aperçu de story";
+"Hold a story in the tray to preview it without opening it." = "Maintenez une story dans la barre pour l'aperçu sans l'ouvrir.";
+"Story fonts" = "Polices de story";
+"Adds the subscriber fonts when you add text to a story." = "Ajoute les polices réservées aux abonnés lorsque vous ajoutez du texte à une story.";
+"Search story viewers" = "Rechercher parmi les vues";
+"Search the list of people who viewed your story." = "Recherchez dans la liste des personnes qui ont vu votre story.";
+"Viewer timestamps" = "Heure des vues";
+"Shows when each person viewed your story." = "Indique à quel moment chaque personne a vu votre story.";
+"Silent post to profile" = "Publication silencieuse au profil";
+"Share to your profile without notifying your followers." = "Publiez sur votre profil sans prévenir vos abonnés.";
+"Silent post to highlights" = "Ajout silencieux aux à la une";
+"Add to a highlight without notifying your followers." = "Ajoutez à une story à la une sans prévenir vos abonnés.";
+"Story rewatch" = "Revoir la story";
+"Rewatch a story right after it finishes." = "Revoyez une story juste après la fin.";
+"Story extend" = "Prolonger la story";
+"Keep your story up longer than 24 hours." = "Gardez votre story en ligne plus de 24 heures.";
+"Story spotlight" = "Mise en avant de story";
+"Boost your story to more viewers. Loads from Instagram, so it may not work." = "Diffusez votre story à plus de spectateurs. Chargée depuis Instagram, elle peut ne pas fonctionner.";
+"Story super likes" = "Super j'aime de story";
+"Send super likes on stories. Loads from Instagram, so it may not work." = "Envoyez des super j'aime sur les stories. Chargés depuis Instagram, ils peuvent ne pas fonctionner.";
+"Message peek" = "Aperçu de message";
+"Hold a chat in the inbox to preview it." = "Maintenez une conversation dans la boîte de réception pour l'aperçu.";
+"Chat fonts" = "Polices de conversation";
+"Adds the subscriber fonts in direct messages." = "Ajoute les polices réservées aux abonnés dans les messages privés.";
+"Chat themes" = "Thèmes de conversation";
+"Unlocks the premium chat themes. Loads from Instagram, so it may not work." = "Débloque les thèmes de conversation premium. Chargés depuis Instagram, ils peuvent ne pas fonctionner.";
+"App icons" = "Icônes d'application";
+"Opens the alternate app icon picker." = "Ouvre le sélecteur d'icônes alternatives de l'application.";
+"Bio font" = "Police de bio";
+"Use a subscriber font for your bio." = "Utilisez une police réservée aux abonnés pour votre bio.";
+"Custom story lists" = "Listes de story personnalisées";
+"Make lists to pick exactly who sees a story." = "Créez des listes pour choisir précisément qui voit une story.";
+"More pinned posts" = "Plus de publications épinglées";
+"Pin more posts to the top of your profile." = "Épinglez davantage de publications en haut de votre profil.";

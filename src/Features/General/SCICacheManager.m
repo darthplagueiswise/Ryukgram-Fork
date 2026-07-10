@@ -1,4 +1,5 @@
 #import "SCICacheManager.h"
+#import "../../Background/SCIBackgroundActivity.h"
 #import <stdatomic.h>
 #import <fts.h>
 #import <sys/stat.h>
@@ -8,6 +9,10 @@
 static NSString *const kAutoClearModeKey = @"cache_auto_clear_mode";
 static NSString *const kLastAutoClearKey = @"cache_last_auto_clear_ts";
 static NSString *const kLastKnownSizeKey = @"cache_last_known_size";
+static NSString *const kInProgressKey = @"cache_auto_clear_in_progress";
+static NSString *const kBgSource = @"cache_autoclear";
+
+static _Atomic bool gClearing;
 
 NSString *const SCICacheSizeDidUpdateNotification = @"SCICacheSizeDidUpdateNotification";
 
@@ -179,20 +184,40 @@ static void sciDeleteContents(NSString *path, BOOL preserveMessages) {
 	}
 }
 
-+ (void)clearCacheWithCompletion:(void(^)(uint64_t))completion {
++ (void)_clearAuto:(BOOL)isAuto completion:(void(^)(uint64_t))completion {
+	if (atomic_exchange(&gClearing, true)) {
+		if (completion) sciPost(0, completion, NO);
+		return;
+	}
+	if (isAuto) [SCIBackgroundActivity setSource:kBgSource active:YES];
+
 	dispatch_async(sciQueue(), ^{
 		uint64_t reclaimed = atomic_load(&gCachedSize) ?: sciTotalSize();
 		BOOL preserve = [[NSUserDefaults standardUserDefaults] boolForKey:@"cache_preserve_messages_db"];
+
+		NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+		[ud setBool:YES forKey:kInProgressKey];
+		[ud synchronize];
 
 		for (NSString *dir in sciCacheDirs()) sciDeleteContents(dir, preserve);
 		[NSURLCache.sharedURLCache removeAllCachedResponses];
 
 		sciSaveSize(0);
-		[[NSUserDefaults standardUserDefaults] setDouble:NSDate.date.timeIntervalSince1970 forKey:kLastAutoClearKey];
+		[ud setDouble:NSDate.date.timeIntervalSince1970 forKey:kLastAutoClearKey];
+		[ud setBool:NO forKey:kInProgressKey];
+		[ud synchronize];
+
+		atomic_store(&gClearing, false);
+		if (isAuto) [SCIBackgroundActivity setSource:kBgSource active:NO];
+
 		sciPost(0, ^(uint64_t size) {
 			if (completion) completion(reclaimed);
 		}, YES);
 	});
+}
+
++ (void)clearCacheWithCompletion:(void(^)(uint64_t))completion {
+	[self _clearAuto:NO completion:completion];
 }
 
 + (void)runAutoClearIfDue {
@@ -205,10 +230,12 @@ static void sciDeleteContents(NSString *path, BOOL preserveMessages) {
 	else if ([mode isEqualToString:@"monthly"]) interval = 2592000;
 	else return [self refreshSizeInBackgroundIfEnabled];
 
+	BOOL interrupted = [[NSUserDefaults standardUserDefaults] boolForKey:kInProgressKey];
 	NSTimeInterval last = [[NSUserDefaults standardUserDefaults] doubleForKey:kLastAutoClearKey];
-	if (last > 0 && NSDate.date.timeIntervalSince1970 - last < interval) return [self refreshSizeInBackgroundIfEnabled];
+	BOOL due = interrupted || last <= 0 || NSDate.date.timeIntervalSince1970 - last >= interval;
+	if (!due) return [self refreshSizeInBackgroundIfEnabled];
 
-	[self clearCacheWithCompletion:nil];
+	[self _clearAuto:YES completion:nil];
 }
 
 + (NSString *)formattedSize:(uint64_t)bytes {

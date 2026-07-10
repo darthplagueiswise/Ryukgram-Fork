@@ -250,6 +250,24 @@
 @property IGUser *user;
 @end
 
+// friendship_status value object on IGUser._fieldCache; getters return boxed NSNumber-likes.
+@interface IGAPIRelationshipInfoDict : NSObject
+- (id)following;
+- (id)outgoingRequest;
+- (id)followedBy;
+@end
+
+// Story viewers list (who viewed my story). Per-viewer model is the Swift
+// IGStoryViewerSource (ivars `user`/`showLikedBadge`/`likeType`, read via scan).
+@interface IGStoryViewersListViewController : UIViewController
+- (NSArray *)objectsForListAdapter:(id)adapter;
+@end
+
+@interface IGStoryViewerCell : UICollectionViewCell
+@property (nonatomic, readonly) UIView *avatarView;
+@property (nonatomic, readonly) id viewerSource;
+@end
+
 @class IGStyledString;
 @interface IGCoreTextView : UIView
 @property(nonatomic, strong) NSString *text;
@@ -421,6 +439,9 @@
 - (NSObject *)patchConfig:(NSObject *)config; // new
 @end
 
+// IG 437 registers this class under its Swift-mangled name only.
+@compatibility_alias _TtC16IGDirectComposer16IGDirectComposer IGDirectComposer;
+
 @interface IGDirectComposerConfig : NSObject
 @end
 
@@ -456,6 +477,11 @@ extern "C"
 void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc);
 
 @interface IGStoryColorPaletteView : UIView
+@end
+
+@class AVAsset;
+@interface IGAssetPlayerView : UIView
+@property (retain, nonatomic) AVAsset *asset;
 @end
 
 // Color wheel button on sticker editors; tap fires ValueChanged, hosts read currentColor.
@@ -516,11 +542,11 @@ void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc);
 @end
 
 @interface IGSundialViewerVerticalUFI : UIView
-- (void)_didTapLikeButton:(id)arg1;
-- (void)_didTapRepostButton:(id)arg1;
 @property (readonly, nonatomic) IGUFIButton *ufiLikeButton;
-
 @end
+
+// IG 436+ registers this class under its Swift-mangled name only.
+@compatibility_alias _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI IGSundialViewerVerticalUFI;
 
 @interface IGMainAppSurfaceIntent : NSObject
 - (id)tabStringFromSurfaceIntent;
@@ -538,6 +564,8 @@ void SCIDriveInstantAdvanceForStack(UIView *stack, CGPoint loc);
 
 @interface IGDirectThreadViewDrawingViewController : UIViewController
 - (void)drawingControls:controls didSelectColor:color;
+- (UIImage *)drawingImage;
+- (void)_send;
 @end
 
 // DM thread title view — hosts username + "Active …" subtitle.
@@ -924,4 +952,16 @@ typedef FLEXAlertAction * _Nonnull (^FLEXAlertActionHandler)(void(^handler)(NSAr
 // Followers/Following list (IGListKit). objectsForListAdapter: feeds the rows.
 @interface IGFollowListViewController : UIViewController
 - (NSArray *)objectsForListAdapter:(id)adapter;
+@end
+
+// DM send-block state. unavailableComposerType: 0 = available.
+@interface IGDirectThreadViewUnavailableComposerHelper : NSObject
+- (long long)unavailableComposerType;
+@end
+
+// Cached composer state the thread VC reads for the banner, the composer swap
+// and the message-list inset. Force the setters so every reader stays consistent.
+@interface IGDirectThreadViewSessionState : NSObject
+- (void)setCurrentUnavailableComposerType:(long long)type;
+- (void)setIsThreadInputDisabled:(BOOL)disabled;
 @end

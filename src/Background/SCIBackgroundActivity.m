@@ -74,6 +74,10 @@ static NSData *SCISilentWAVData(void) {
 
 + (BOOL)prefAllowsSource:(NSString *)source {
 	if ([source isEqualToString:@"dm_keepalive"]) return [SCIUtils getBoolPref:@"deleted_messages_keepalive"];
+	if ([source isEqualToString:@"cache_autoclear"]) {
+		NSString *mode = [[NSUserDefaults standardUserDefaults] stringForKey:@"cache_auto_clear_mode"];
+		return mode.length && ![mode isEqualToString:@"off"];
+	}
 	return [SCIUtils getBoolPref:@"bg_keepalive"];
 }
 

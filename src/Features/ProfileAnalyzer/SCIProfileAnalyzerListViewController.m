@@ -70,6 +70,7 @@ typedef NS_ENUM(NSInteger, SCIPASortMode) {
 	SCIPASortModeRecent,
 	SCIPASortModeOldest,
 	SCIPASortModeMostVisited,
+	SCIPASortModeNewFirst,
 };
 
 typedef NS_ENUM(NSInteger, SCIPADateFilter) {
@@ -87,10 +88,26 @@ typedef NS_ENUM(NSInteger, SCIPABatchOp) {
 
 #pragma mark - Cell
 
+// Pill label with horizontal insets so the text stays centered.
+@interface SCIPAPaddedLabel : UILabel
+@end
+@implementation SCIPAPaddedLabel
+- (void)drawTextInRect:(CGRect)rect {
+	[super drawTextInRect:UIEdgeInsetsInsetRect(rect, UIEdgeInsetsMake(0, 6, 0, 6))];
+}
+- (CGSize)intrinsicContentSize {
+	CGSize s = [super intrinsicContentSize];
+	s.width += 12;
+	return s;
+}
+@end
+
 @interface SCIPAUserCell : UITableViewCell
 @property (nonatomic, strong) UIImageView *avatar;
+@property (nonatomic, strong) UIStackView *titleStack;
 @property (nonatomic, strong) UILabel *usernameLabel;
 @property (nonatomic, strong) UIImageView *verifiedBadge;
+@property (nonatomic, strong) SCIPAPaddedLabel *freshBadge;
 @property (nonatomic, strong) UILabel *subtitleLabel;
 @property (nonatomic, strong) UIButton *actionButton;
 @property (nonatomic, strong) UIActivityIndicatorView *actionSpinner;
@@ -108,27 +125,43 @@ typedef NS_ENUM(NSInteger, SCIPABatchOp) {
 
 	_avatar = [UIImageView new];
 	_avatar.translatesAutoresizingMaskIntoConstraints = NO;
-	_avatar.backgroundColor = SCIUIKit26PanelFillColor();
+	_avatar.backgroundColor = [UIColor secondarySystemBackgroundColor];
 	_avatar.layer.cornerRadius = 24;
 	_avatar.layer.masksToBounds = YES;
 	_avatar.contentMode = UIViewContentModeScaleAspectFill;
 	[self.contentView addSubview:_avatar];
 
 	_usernameLabel = [UILabel new];
-	_usernameLabel.translatesAutoresizingMaskIntoConstraints = NO;
 	_usernameLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
 	_usernameLabel.textColor = [UIColor labelColor];
 	[_usernameLabel setContentHuggingPriority:UILayoutPriorityDefaultHigh forAxis:UILayoutConstraintAxisHorizontal];
 	[_usernameLabel setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
-	[self.contentView addSubview:_usernameLabel];
 
 	_verifiedBadge = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.seal.fill"]];
-	_verifiedBadge.translatesAutoresizingMaskIntoConstraints = NO;
 	_verifiedBadge.tintColor = [UIColor systemBlueColor];
 	_verifiedBadge.contentMode = UIViewContentModeScaleAspectFit;
 	_verifiedBadge.hidden = YES;
 	[_verifiedBadge setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-	[self.contentView addSubview:_verifiedBadge];
+	[_verifiedBadge.widthAnchor constraintEqualToConstant:14].active = YES;
+	[_verifiedBadge.heightAnchor constraintEqualToConstant:14].active = YES;
+
+	_freshBadge = [SCIPAPaddedLabel new];
+	_freshBadge.font = [UIFont systemFontOfSize:10 weight:UIFontWeightHeavy];
+	_freshBadge.textColor = [UIColor whiteColor];
+	_freshBadge.backgroundColor = [SCIUtils SCIColor_Primary] ?: [UIColor systemBlueColor];
+	_freshBadge.textAlignment = NSTextAlignmentCenter;
+	_freshBadge.layer.cornerRadius = 8;
+	_freshBadge.layer.masksToBounds = YES;
+	_freshBadge.hidden = YES;
+	[_freshBadge setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+	[_freshBadge.heightAnchor constraintEqualToConstant:16].active = YES;
+
+	_titleStack = [[UIStackView alloc] initWithArrangedSubviews:@[_usernameLabel, _verifiedBadge, _freshBadge]];
+	_titleStack.translatesAutoresizingMaskIntoConstraints = NO;
+	_titleStack.axis = UILayoutConstraintAxisHorizontal;
+	_titleStack.alignment = UIStackViewAlignmentCenter;
+	_titleStack.spacing = 4;
+	[self.contentView addSubview:_titleStack];
 
 	_subtitleLabel = [UILabel new];
 	_subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -153,8 +186,8 @@ typedef NS_ENUM(NSInteger, SCIPABatchOp) {
 	_actionSpinner.hidesWhenStopped = YES;
 	[self.contentView addSubview:_actionSpinner];
 
-	_usernameTrailingToButton = [_verifiedBadge.trailingAnchor constraintLessThanOrEqualToAnchor:_actionButton.leadingAnchor constant:-10];
-	_usernameTrailingToEdge = [_verifiedBadge.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.layoutMarginsGuide.trailingAnchor];
+	_usernameTrailingToButton = [_titleStack.trailingAnchor constraintLessThanOrEqualToAnchor:_actionButton.leadingAnchor constant:-10];
+	_usernameTrailingToEdge = [_titleStack.trailingAnchor constraintLessThanOrEqualToAnchor:self.contentView.layoutMarginsGuide.trailingAnchor];
 
 	[NSLayoutConstraint activateConstraints:@[
 		[_avatar.leadingAnchor constraintEqualToAnchor:self.contentView.layoutMarginsGuide.leadingAnchor],
@@ -162,16 +195,11 @@ typedef NS_ENUM(NSInteger, SCIPABatchOp) {
 		[_avatar.widthAnchor constraintEqualToConstant:48],
 		[_avatar.heightAnchor constraintEqualToConstant:48],
 
-		[_usernameLabel.leadingAnchor constraintEqualToAnchor:_avatar.trailingAnchor constant:12],
-		[_usernameLabel.topAnchor constraintEqualToAnchor:_avatar.topAnchor constant:2],
+		[_titleStack.leadingAnchor constraintEqualToAnchor:_avatar.trailingAnchor constant:12],
+		[_titleStack.topAnchor constraintEqualToAnchor:_avatar.topAnchor constant:2],
 
-		[_verifiedBadge.leadingAnchor constraintEqualToAnchor:_usernameLabel.trailingAnchor constant:4],
-		[_verifiedBadge.centerYAnchor constraintEqualToAnchor:_usernameLabel.centerYAnchor],
-		[_verifiedBadge.widthAnchor constraintEqualToConstant:14],
-		[_verifiedBadge.heightAnchor constraintEqualToConstant:14],
-
-		[_subtitleLabel.leadingAnchor constraintEqualToAnchor:_usernameLabel.leadingAnchor],
-		[_subtitleLabel.topAnchor constraintEqualToAnchor:_usernameLabel.bottomAnchor constant:2],
+		[_subtitleLabel.leadingAnchor constraintEqualToAnchor:_titleStack.leadingAnchor],
+		[_subtitleLabel.topAnchor constraintEqualToAnchor:_titleStack.bottomAnchor constant:2],
 		[_subtitleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_actionButton.leadingAnchor constant:-10],
 		[_subtitleLabel.bottomAnchor constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor constant:-8],
 
@@ -266,12 +294,18 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	self.usernameTrailingToEdge.active = YES;
 }
 
+- (void)setShowsNew:(BOOL)shows {
+	if (shows && !self.freshBadge.text.length) self.freshBadge.text = SCILocalized(@"NEW");
+	self.freshBadge.hidden = !shows;
+}
+
 - (void)onAction { if (self.onActionTap) self.onActionTap(self); }
 - (void)prepareForReuse {
 	[super prepareForReuse];
 	self.avatar.image = nil;
 	self.onActionTap = nil;
 	self.verifiedBadge.hidden = YES;
+	self.freshBadge.hidden = YES;
 	self.boundPK = nil;
 	[self.actionSpinner stopAnimating];
 	self.actionButton.hidden = YES;
@@ -301,6 +335,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 @property (nonatomic, assign) BOOL filterVerifiedOnly;
 @property (nonatomic, assign) BOOL filterNotVerifiedOnly;
 @property (nonatomic, assign) BOOL filterPrivateOnly;
+@property (nonatomic, assign) BOOL filterNewOnly;
 @property (nonatomic, assign) SCIPADateFilter dateFilter;
 @property (nonatomic, copy) NSString *currentQuery;
 
@@ -373,16 +408,13 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [UIColor systemBackgroundColor];
 	[self setupTable];
 	[self setupSearch];
 	[self setupEmptyState];
 	[self setupBatchBar];
 	[self seedFriendshipStatusFromKind];
-	[self updateNavBar];
-	[self refreshCounts];
+	[self applyFiltersAndSort];
 }
 
 // Snapshot-derived kinds imply a friendship direction; seed them so we skip
@@ -536,6 +568,17 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	__weak typeof(self) weakSelf = self;
 
 	NSMutableArray *sortChildren = [NSMutableArray array];
+	if (self.unseenEntryIDs.count) {
+		UIAction *newFirst = [UIAction actionWithTitle:SCILocalized(@"New first")
+												 image:[UIImage systemImageNamed:@"sparkles"]
+											identifier:nil
+											   handler:^(__kindof UIAction *_) {
+			weakSelf.sortMode = (weakSelf.sortMode == SCIPASortModeNewFirst) ? SCIPASortModeDefault : SCIPASortModeNewFirst;
+			[weakSelf applyFiltersAndSort];
+		}];
+		newFirst.state = (self.sortMode == SCIPASortModeNewFirst) ? UIMenuElementStateOn : UIMenuElementStateOff;
+		[sortChildren addObject:newFirst];
+	}
 	if (self.kind == SCIPAListKindVisited) {
 		UIAction *recent = [UIAction actionWithTitle:SCILocalized(@"Most recent")
 											   image:[UIImage systemImageNamed:@"clock.arrow.circlepath"]
@@ -616,10 +659,22 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	}];
 	priv.state = self.filterPrivateOnly ? UIMenuElementStateOn : UIMenuElementStateOff;
 
+	NSMutableArray *filterChildren = [NSMutableArray arrayWithObjects:verified, notVerified, priv, nil];
+	if (self.unseenEntryIDs.count) {
+		UIAction *newOnly = [UIAction actionWithTitle:SCILocalized(@"New only")
+												image:[UIImage systemImageNamed:@"sparkles"]
+										   identifier:nil
+											  handler:^(__kindof UIAction *_) {
+			weakSelf.filterNewOnly = !weakSelf.filterNewOnly;
+			[weakSelf applyFiltersAndSort];
+		}];
+		newOnly.state = self.filterNewOnly ? UIMenuElementStateOn : UIMenuElementStateOff;
+		[filterChildren addObject:newOnly];
+	}
 	UIMenu *filterGroup = [UIMenu menuWithTitle:SCILocalized(@"Filter")
 										  image:nil identifier:nil
 										options:UIMenuOptionsDisplayInline
-									   children:@[verified, notVerified, priv]];
+									   children:filterChildren];
 
 	NSMutableArray *children = [NSMutableArray arrayWithObjects:sortGroup, filterGroup, nil];
 
@@ -652,10 +707,11 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 											  image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
 										 identifier:nil
 											handler:^(__kindof UIAction *_) {
-			weakSelf.sortMode = (weakSelf.kind == SCIPAListKindVisited) ? SCIPASortModeRecent : SCIPASortModeDefault;
+			weakSelf.sortMode = [weakSelf neutralSortMode];
 			weakSelf.filterVerifiedOnly = NO;
 			weakSelf.filterNotVerifiedOnly = NO;
 			weakSelf.filterPrivateOnly = NO;
+			weakSelf.filterNewOnly = NO;
 			weakSelf.dateFilter = SCIPADateFilterAny;
 			[weakSelf applyFiltersAndSort];
 		}];
@@ -687,12 +743,40 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 	[self applyFiltersAndSort];
 }
 
+- (void)setUnseenEntryIDs:(NSSet<NSString *> *)unseenEntryIDs {
+	_unseenEntryIDs = [unseenEntryIDs copy];
+	// Land on New-first so unseen entries open at the top.
+	if (_unseenEntryIDs.count) self.sortMode = [self neutralSortMode];
+}
+
+- (SCIPASortMode)neutralSortMode {
+	if (self.kind == SCIPAListKindVisited) return SCIPASortModeRecent;
+	if (self.unseenEntryIDs.count) return SCIPASortModeNewFirst;
+	return SCIPASortModeDefault;
+}
+
+// Mirrors -identityIDsForCategory: in the analyzer VC so newness lines up 1:1.
+- (NSString *)identityForUser:(SCIProfileAnalyzerUser *)u change:(SCIProfileAnalyzerProfileChange *)c {
+	if (self.kind == SCIPAListKindProfileUpdate) {
+		SCIProfileAnalyzerUser *cur = c.current;
+		return [NSString stringWithFormat:@"%@|%@|%@|%@",
+				cur.pk ?: @"", cur.username ?: @"", cur.fullName ?: @"", cur.profilePicID ?: @""];
+	}
+	return u.pk ?: @"";
+}
+
+- (BOOL)isNewUser:(SCIProfileAnalyzerUser *)u change:(SCIProfileAnalyzerProfileChange *)c {
+	if (!self.unseenEntryIDs.count) return NO;
+	return [self.unseenEntryIDs containsObject:[self identityForUser:u change:c]];
+}
+
 - (void)applyFiltersAndSort {
 	NSString *q = self.currentQuery;
 	BOOL hasQuery = q.length > 0;
 	BOOL verified = self.filterVerifiedOnly;
 	BOOL notVerified = self.filterNotVerifiedOnly;
 	BOOL priv = self.filterPrivateOnly;
+	BOOL newOnly = self.filterNewOnly;
 
 	NSArray *(^applyToUsers)(NSArray *) = ^NSArray *(NSArray *src) {
 		NSMutableArray *out = [NSMutableArray arrayWithCapacity:src.count];
@@ -702,6 +786,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 			if (verified && !u.isVerified) continue;
 			if (notVerified && u.isVerified) continue;
 			if (priv && !u.isPrivate) continue;
+			if (newOnly && ![self isNewUser:u change:nil]) continue;
 			[out addObject:u];
 		}
 		return [self sortUsers:out];
@@ -716,6 +801,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 			if (verified && !u.isVerified) continue;
 			if (notVerified && u.isVerified) continue;
 			if (priv && !u.isPrivate) continue;
+			if (newOnly && ![self isNewUser:u change:c]) continue;
 			[out addObject:c];
 		}
 		self.filteredChanges = [self sortChanges:out];
@@ -729,6 +815,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 			if (verified && !u.isVerified) continue;
 			if (notVerified && u.isVerified) continue;
 			if (priv && !u.isPrivate) continue;
+			if (newOnly && ![self isNewUser:u change:nil]) continue;
 			if (cutoff && [vst.lastSeen compare:cutoff] == NSOrderedAscending) continue;
 			[out addObject:vst];
 		}
@@ -743,6 +830,12 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 - (NSArray *)sortUsers:(NSArray<SCIProfileAnalyzerUser *> *)src {
 	if (self.sortMode == SCIPASortModeDefault) return src;
+	if (self.sortMode == SCIPASortModeNewFirst) {
+		NSMutableArray *fresh = [NSMutableArray array], *rest = [NSMutableArray array];
+		for (SCIProfileAnalyzerUser *u in src) [([self isNewUser:u change:nil] ? fresh : rest) addObject:u];
+		[fresh addObjectsFromArray:rest];
+		return fresh;
+	}
 	BOOL asc = (self.sortMode == SCIPASortModeAZ);
 	return [src sortedArrayUsingComparator:^NSComparisonResult(SCIProfileAnalyzerUser *a, SCIProfileAnalyzerUser *b) {
 		NSComparisonResult r = [a.username caseInsensitiveCompare:b.username ?: @""];
@@ -763,6 +856,12 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 - (NSArray *)sortVisits:(NSArray<SCIProfileAnalyzerVisit *> *)src {
 	SCIPASortMode m = self.sortMode;
+	if (m == SCIPASortModeNewFirst) {
+		NSMutableArray *fresh = [NSMutableArray array], *rest = [NSMutableArray array];
+		for (SCIProfileAnalyzerVisit *v in src) [([self isNewUser:v.user change:nil] ? fresh : rest) addObject:v];
+		[fresh addObjectsFromArray:rest];
+		return fresh;
+	}
 	if (m == SCIPASortModeRecent || m == SCIPASortModeDefault) {
 		return [src sortedArrayUsingComparator:^NSComparisonResult(SCIProfileAnalyzerVisit *a, SCIProfileAnalyzerVisit *b) {
 			return [b.lastSeen compare:a.lastSeen];
@@ -788,6 +887,12 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 - (NSArray *)sortChanges:(NSArray<SCIProfileAnalyzerProfileChange *> *)src {
 	if (self.sortMode == SCIPASortModeDefault) return src;
+	if (self.sortMode == SCIPASortModeNewFirst) {
+		NSMutableArray *fresh = [NSMutableArray array], *rest = [NSMutableArray array];
+		for (SCIProfileAnalyzerProfileChange *c in src) [([self isNewUser:c.current change:c] ? fresh : rest) addObject:c];
+		[fresh addObjectsFromArray:rest];
+		return fresh;
+	}
 	BOOL asc = (self.sortMode == SCIPASortModeAZ);
 	return [src sortedArrayUsingComparator:^NSComparisonResult(SCIProfileAnalyzerProfileChange *a, SCIProfileAnalyzerProfileChange *b) {
 		NSComparisonResult r = [a.current.username caseInsensitiveCompare:b.current.username ?: @""];
@@ -796,10 +901,10 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 }
 
 - (BOOL)hasActiveFilterOrSort {
-	SCIPASortMode neutral = (self.kind == SCIPAListKindVisited) ? SCIPASortModeRecent : SCIPASortModeDefault;
 	return self.filterVerifiedOnly || self.filterNotVerifiedOnly || self.filterPrivateOnly
+		|| self.filterNewOnly
 		|| self.dateFilter != SCIPADateFilterAny
-		|| self.sortMode != neutral;
+		|| self.sortMode != [self neutralSortMode];
 }
 
 #pragma mark - Table
@@ -812,7 +917,6 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	SCIPAUserCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:indexPath];
-	SCIUIKit26ConfigureTableCell(cell);
 	SCIProfileAnalyzerUser *user;
 	SCIProfileAnalyzerProfileChange *change = nil;
 	SCIProfileAnalyzerVisit *visit = nil;
@@ -828,6 +932,7 @@ typedef NS_ENUM(NSInteger, SCIPACellAction) {
 
 	cell.usernameLabel.text = user.username.length ? [NSString stringWithFormat:@"@%@", user.username] : SCILocalized(@"(unknown)");
 	cell.verifiedBadge.hidden = !user.isVerified;
+	[cell setShowsNew:[self isNewUser:user change:change]];
 
 	if (self.kind == SCIPAListKindProfileUpdate) {
 		NSMutableArray *lines = [NSMutableArray array];

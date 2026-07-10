@@ -31,10 +31,9 @@ static NSString *const SCIPrimaryAppIconKey = @"__primary__";
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.title = SCILocalized(@"App Icon");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	NSString *saved = [SCIUtils getStringPref:SCISelectedAppIconNameKey];
 	NSString *current = UIApplication.sharedApplication.alternateIconName;
@@ -53,12 +52,11 @@ static NSString *const SCIPrimaryAppIconKey = @"__primary__";
 - (void)setupTableView {
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	SCIUIKit26ConfigureTableView(self.tableView);
+	self.tableView.backgroundColor = self.view.backgroundColor;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.rowHeight = 76.0;
-	self.tableView.contentInset = UIEdgeInsetsZero;
-	self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
+	self.tableView.contentInset = UIEdgeInsetsMake(-10.0, 0.0, 0.0, 0.0);
 
 	[self.view addSubview:self.tableView];
 }
@@ -195,12 +193,11 @@ static NSString *const SCIPrimaryAppIconKey = @"__primary__";
 	static NSString *identifier = @"SCIAppIconPickerCell";
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-	SCIUIKit26ConfigureTableCell(cell);
 
 	if (!cell) {
 		cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
 		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-		cell.backgroundColor = SCIUIKit26PanelFillColor();
+		cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 	}
 
 	NSDictionary *icon = self.icons[indexPath.row];

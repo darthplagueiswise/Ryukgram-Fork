@@ -34,6 +34,7 @@ extern NSString *const SCI_NOTIF_BLOCK_TOGGLE;
 extern NSString *const SCI_NOTIF_EXCLUDE_CHAT;
 extern NSString *const SCI_NOTIF_EXCLUDE_STORY;
 extern NSString *const SCI_NOTIF_PIN_THREAD;
+extern NSString *const SCI_NOTIF_PIN_STORY_VIEWER;
 
 // ───── Stories & messages ─────
 extern NSString *const SCI_NOTIF_UNSENT_MESSAGE;
@@ -49,6 +50,10 @@ extern NSString *const SCI_NOTIF_AUDIO_EXTRACT;
 // ───── Profile ─────
 extern NSString *const SCI_NOTIF_ANALYZER_DONE;
 extern NSString *const SCI_NOTIF_ANALYZER_RUN;       // progress: profile-analyzer scan
+extern NSString *const SCI_NOTIF_FOLLOW_REQ_ACCEPTED; // a sent follow request was accepted
+extern NSString *const SCI_NOTIF_FOLLOW_REQ_REJECTED; // a sent follow request is no longer pending
+extern NSString *const SCI_NOTIF_FOLLOW_REQ_RECEIVED;  // someone requested to follow you
+extern NSString *const SCI_NOTIF_FOLLOW_REQ_WITHDRAWN; // someone cancelled their request to follow you
 
 // ───── Errors ─────
 extern NSString *const SCI_NOTIF_MEDIA_ERROR;
@@ -78,6 +83,7 @@ typedef NS_OPTIONS(NSUInteger, SCINotificationActionCaps) {
     SCINotificationActionCapsAllowIG            = 1 << 1,  // can route to IG-native toast
     SCINotificationActionCapsProgress           = 1 << 2,  // emits progress (forces pill)
     SCINotificationActionCapsMirrorOffByDefault = 1 << 3,  // background mirror ships off
+    SCINotificationActionCapsCoalesce           = 1 << 4,  // foreground bursts merge into one summary pill
 };
 
 @interface SCINotificationActionInfo : NSObject

@@ -21,7 +21,7 @@ static NSString *const kCellID = @"SCIIconCell";
     self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
     self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
     self.contentView.layer.borderColor = [UIColor separatorColor].CGColor;
-    self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+    self.contentView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
 
     _iconView = [UIImageView new];
     _iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -62,7 +62,7 @@ static NSString *const kCellID = @"SCIIconCell";
         self.contentView.layer.borderWidth = 2.0;
         self.iconView.tintColor = [UIColor systemBlueColor];
     } else {
-        self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+        self.contentView.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
         self.contentView.layer.borderColor = [UIColor separatorColor].CGColor;
         self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
         self.iconView.tintColor = [UIColor labelColor];
@@ -112,10 +112,9 @@ static NSString *const kCellID = @"SCIIconCell";
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
     self.title = self.hasSource ? [SCIActionCatalog displayNameForSource:self.source]
                                 : SCILocalized(@"Action button icon");
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
     if (self.hasSource) {
         self.navigationItem.rightBarButtonItem =
@@ -183,7 +182,6 @@ static NSString *const kCellID = @"SCIIconCell";
 - (UICollectionViewCell *)collectionView:(UICollectionView *)cv
                   cellForItemAtIndexPath:(NSIndexPath *)indexPath {
     SCIIconCell *cell = [cv dequeueReusableCellWithReuseIdentifier:kCellID forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
     NSString *name = self.icons[indexPath.item];
     [cell configureWithSymbolName:name selected:[name isEqualToString:[self activeSymbol]]];
     return cell;

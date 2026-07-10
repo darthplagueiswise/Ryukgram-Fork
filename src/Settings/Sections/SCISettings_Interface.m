@@ -1,9 +1,150 @@
 #import "SCISettingsSections.h"
 #import "../SCIAppIconPickerViewController.h"
 #import "../SCITabBarOrderViewController.h"
+#import "../SCITimePickerViewController.h"
+#import "../../Features/General/SCIMessagesOnlySchedule.h"
 #import "../../InstagramHeaders.h"
 
 @implementation SCITweakSettings (Section_Interface)
+
+static NSArray<NSArray<NSString *> *> *sciIGLanguages(void) {
+	return @[
+		@[@"system",     SCILocalized(@"settings.language.system")],
+		@[@"ar",         @"العربية"],
+		@[@"hr",         @"Hrvatski"],
+		@[@"cs",         @"Čeština"],
+		@[@"da",         @"Dansk"],
+		@[@"nl",         @"Nederlands"],
+		@[@"en",         @"English"],
+		@[@"en-GB",      @"English (UK)"],
+		@[@"tl",         @"Filipino"],
+		@[@"fi",         @"Suomi"],
+		@[@"fr",         @"Français"],
+		@[@"de",         @"Deutsch"],
+		@[@"el",         @"Ελληνικά"],
+		@[@"hi",         @"हिन्दी"],
+		@[@"hu",         @"Magyar"],
+		@[@"id",         @"Bahasa Indonesia"],
+		@[@"it",         @"Italiano"],
+		@[@"ja",         @"日本語"],
+		@[@"ko",         @"한국어"],
+		@[@"ms",         @"Bahasa Melayu"],
+		@[@"nb",         @"Norsk"],
+		@[@"pl",         @"Polski"],
+		@[@"pt",         @"Português (Brasil)"],
+		@[@"pt-PT",      @"Português (Portugal)"],
+		@[@"ro",         @"Română"],
+		@[@"ru",         @"Русский"],
+		@[@"sk",         @"Slovenčina"],
+		@[@"es",         @"Español"],
+		@[@"es-ES",      @"Español (España)"],
+		@[@"sv",         @"Svenska"],
+		@[@"th",         @"ไทย"],
+		@[@"tr",         @"Türkçe"],
+		@[@"uk",         @"Українська"],
+		@[@"vi",         @"Tiếng Việt"],
+		@[@"zh-Hans",    @"简体中文"],
+		@[@"zh-Hant",    @"繁體中文"],
+		@[@"zh-Hant-HK", @"繁體中文（香港）"],
+	];
+}
+
+static NSString *sciCurrentIGLanguageCode(void) {
+	NSString *cur = [SCIUtils getStringPref:@"ig_force_language"];
+	return cur.length ? cur : @"system";
+}
+
+static NSString *sciIGLanguageDisplayName(NSString *code) {
+	for (NSArray *l in sciIGLanguages()) if ([l[0] isEqualToString:code]) return l[1];
+	return SCILocalized(@"settings.language.system");
+}
+
++ (SCISetting *)igLanguageNavCell {
+	NSMutableArray *rows = [NSMutableArray array];
+	for (NSArray *l in sciIGLanguages()) {
+		NSString *code = l[0];
+		SCISetting *row = [SCISetting buttonCellWithTitle:l[1] subtitle:@"" icon:nil action:^{
+			[SCIUtils setPref:code forKey:@"ig_force_language"];
+			[NSNotificationCenter.defaultCenter postNotificationName:@"SCISettingsShouldReload" object:nil];
+			[SCIUtils showRestartConfirmation];
+		}];
+		row.hidesDisclosureIndicator = YES;
+		row.dynamicValueText = ^NSString *{ return [sciCurrentIGLanguageCode() isEqualToString:code] ? @"✓" : nil; };
+		[rows addObject:row];
+	}
+
+	SCISetting *nav = [SCISetting navigationCellWithTitle:SCILocalized(@"Instagram language")
+												 subtitle:@""
+													 icon:nil
+											  navSections:@[ @{ @"rows": rows } ]];
+	nav.dynamicValueText = ^NSString *{ return sciIGLanguageDisplayName(sciCurrentIGLanguageCode()); };
+	return nav;
+}
+
++ (NSString *)scheduleTimeText:(NSString *)key {
+	NSString *raw = [SCIUtils getStringPref:key] ?: @"";
+	NSArray<NSString *> *p = [raw componentsSeparatedByString:@":"];
+	if (p.count != 2) return raw;
+	NSDate *date = [NSCalendar.currentCalendar dateBySettingHour:p[0].integerValue minute:p[1].integerValue second:0 ofDate:[NSDate date] options:0];
+	if (!date) return raw;
+	static NSDateFormatter *fmt;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ fmt = [NSDateFormatter new]; fmt.timeStyle = NSDateFormatterShortStyle; fmt.dateStyle = NSDateFormatterNoStyle; });
+	return [fmt stringFromDate:date];
+}
+
++ (SCISetting *)scheduleTimeCellTitle:(NSString *)title key:(NSString *)key {
+	SCISetting *cell = [SCISetting buttonCellWithTitle:title subtitle:@"" icon:nil action:^{
+		[SCITimePickerViewController presentForKey:key title:title from:sciTopVC() onSave:^{
+			[[SCIMessagesOnlySchedule shared] refreshFromPrefs];
+			[[NSNotificationCenter defaultCenter] postNotificationName:@"SCISettingsShouldReload" object:nil];
+		}];
+	}];
+	cell.dynamicValueText = ^NSString *{ return [self scheduleTimeText:key]; };
+	return cell;
+}
+
++ (SCISetting *)messagesOnlyNavCell {
+	SCISetting *enable = [SCISetting switchCellWithTitle:SCILocalized(@"Automatic schedule")
+												subtitle:SCILocalized(@"Switch into Messages-only on its own during a time window")
+												   value:^BOOL{ return [SCIUtils getBoolPref:@"messages_only_schedule_enabled"]; }
+												  action:^(BOOL on) {
+		[[NSUserDefaults standardUserDefaults] setBool:on forKey:@"messages_only_schedule_enabled"];
+		[[SCIMessagesOnlySchedule shared] refreshFromPrefs];
+	}];
+	enable.dynamicSubtitle = ^NSString *{
+		if (![SCIUtils getBoolPref:@"messages_only_schedule_enabled"]) return SCILocalized(@"Switch into Messages-only on its own during a time window");
+		NSString *startTxt = [self scheduleTimeText:@"messages_only_schedule_start"];
+		NSString *endTxt = [self scheduleTimeText:@"messages_only_schedule_end"];
+		if ([[SCIMessagesOnlySchedule shared] isWithinWindowNow])
+			return [NSString stringWithFormat:SCILocalized(@"Active now · ends %@"), endTxt];
+		return [NSString stringWithFormat:SCILocalized(@"Next window starts %@"), startTxt];
+	};
+
+	return [SCISetting navigationCellWithTitle:SCILocalized(@"Messages-only mode")
+									  subtitle:SCILocalized(@"DM-only client, hide tabs, auto schedule")
+										  icon:[SCISymbol symbolWithIGName:@"messages" fallback:@"bubble.left.and.bubble.right"]
+								   navSections:@[
+		@{
+			@"header": SCILocalized(@"Messages-only mode"),
+			@"footer": SCILocalized(@"Hides every tab except DM inbox + profile and forces launch into the inbox. Settings shortcut moves to long-press on the inbox tab."),
+			@"rows": @[
+				[SCISetting switchCellWithTitle:SCILocalized(@"Messages only") subtitle:SCILocalized(@"Turn IG into a DM-only client") defaultsKey:@"messages_only" requiresRestart:YES],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Hide search tab") subtitle:SCILocalized(@"Remove the search/explore button from the tab bar") defaultsKey:@"messages_only_hide_search" requiresRestart:YES],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Hide tab bar") subtitle:SCILocalized(@"Also hide the bottom tab bar — only the inbox is visible") defaultsKey:@"messages_only_hide_tabbar" requiresRestart:YES],
+			]
+		},
+		@{
+			@"header": SCILocalized(@"Automatic schedule"),
+			@"footer": SCILocalized(@"Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends."),
+			@"rows": @[
+				enable,
+				[self scheduleTimeCellTitle:SCILocalized(@"Start time") key:@"messages_only_schedule_start"],
+				[self scheduleTimeCellTitle:SCILocalized(@"End time") key:@"messages_only_schedule_end"],
+			]
+		},
+	]];
+}
 
 + (SCISetting *)interfaceNavCell {
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Interface")
@@ -11,6 +152,12 @@
 										   subtitle:@""
 											   icon:[SCISymbol symbolWithIGName:@"layout" fallback:@"hand.draw.fill"]
 										navSections:@[
+										@{
+											@"header": SCILocalized(@"settings.language.title"),
+											@"rows": @[
+												[self igLanguageNavCell],
+											]
+										},
 										@{
 											@"header": SCILocalized(@"Home shortcut button"),
 											@"footer": SCILocalized(@"Adds an extra shortcut button beside the create-post + button on the home top bar."),
@@ -42,20 +189,18 @@
 										@{
 											@"header": SCILocalized(@"Tab bar"),
 											@"rows": @[
-												[SCISetting navigationCellWithTitle:SCILocalized(@"Icon order") subtitle:SCILocalized(@"The order of the icons on the bottom navigation bar")
+												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"Icon order") subtitle:SCILocalized(@"The order of the icons on the bottom navigation bar")
 																			   icon:nil
-																	 viewController:[SCITabBarOrderViewController new]],
+																	 viewController:[SCITabBarOrderViewController new]];
+																   s.whatsNewID = @"ui_taborder"; s; }),
 												[SCISetting menuCellWithTitle:SCILocalized(@"Swipe between tabs") subtitle:SCILocalized(@"Lets you swipe to switch between navigation bar tabs") menu:[self menus][@"swipe_nav_tabs"]],
 												[SCISetting menuCellWithTitle:SCILocalized(@"Launch tab") subtitle:SCILocalized(@"Tab the app opens to. Ignored when Messages-only is on") menu:[self menus][@"launch_tab"]],
 											]
 										},
 										@{
 											@"header": SCILocalized(@"Messages-only mode"),
-											@"footer": SCILocalized(@"Hides every tab except DM inbox + profile and forces launch into the inbox. Settings shortcut moves to long-press on the inbox tab."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Messages only") subtitle:SCILocalized(@"Turn IG into a DM-only client") defaultsKey:@"messages_only" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Hide search tab") subtitle:SCILocalized(@"Remove the search/explore button from the tab bar") defaultsKey:@"messages_only_hide_search" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Hide tab bar") subtitle:SCILocalized(@"Also hide the bottom tab bar — only the inbox is visible") defaultsKey:@"messages_only_hide_tabbar" requiresRestart:YES],
+												[self messagesOnlyNavCell],
 											]
 										},
 										@{

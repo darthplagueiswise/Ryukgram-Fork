@@ -12,5 +12,6 @@
 
 @property (nonatomic, copy) void (^onSend)(CMTimeRange trimRange);
 @property (nonatomic, copy) void (^onCancel)(void);
+@property (nonatomic, copy) void (^onBack)(void);
 
 @end

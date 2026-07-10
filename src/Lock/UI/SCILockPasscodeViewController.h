@@ -12,7 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *promptSubtitle;
 
 @property (nonatomic) BOOL allowsBiometric; // default YES, gated by manager prefs
-@property (nonatomic) BOOL allowsCancel;    // default YES, shows cancel button
+@property (nonatomic) BOOL allowsCancel;
 @property (nonatomic) BOOL instantDismissOnSuccess; // skip the modal slide-off after auth
 
 @property (nonatomic, copy, nullable) void (^completion)(BOOL success);

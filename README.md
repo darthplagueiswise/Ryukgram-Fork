@@ -1,6 +1,6 @@
 # RyukGram
 A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com/SoCuul/SCInsta) with additional features and fixes.\
-`Version v1.3.1` | `Tested on Instagram 433.0.0`
+`Version v1.3.3` | `Tested on Instagram 437.0.0`
 
 <a href="https://buymeacoffee.com/axryuk" target="_blank" rel="noopener noreferrer"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-violet.png" alt="Buy me a coffee" height="50"></a>
 
@@ -36,7 +36,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Copy comment text from long-press menu **\***
 - Download / copy / expand GIF and image comments **\***
 - Custom GIF in comments — long-press the GIF button to paste any Giphy link **\***
-- Favorite GIFs — long-press a GIF in the picker to pin it to the top or download it **\***
+- Favorite GIFs — long-press a GIF in the picker to pin it to the top, copy its link, or download it **\***
 - Download audio from the reels audio page **\***
 - Profile copy button **\***
 - Replace domain in shared links for embeds (Discord, Telegram, etc.) **\***
@@ -52,6 +52,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Liquid glass tab bar — Fixed (never shrink) / Hide on scroll
 - Force progressive blur (iOS 26) — keep the scroll-edge blur from fading out
 - Enable teen app icons
+- Instagram Plus — turn on Instagram's paid subscriber features (story & message peek, story/chat/bio fonts, the app icon picker, custom story lists, and more), with turn everything on/off and reset **\***
 - IG Notes:
   - Hide notes tray
   - Hide friends map
@@ -63,6 +64,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
   - Hide trending searches
   - Hide explore posts grid
   - Skip sensitive content covers **\***
+  - Block surveys **\***
 - Live
   - Anonymous live viewing **\***
   - Toggle live comments **\***
@@ -90,6 +92,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 ### Reels
 - Modify tap controls
 - Auto-scroll reels mode **\***
+- Playback menu — hold the ⋯ or audio button on a reel for speed, seek (skip back/forward) and auto-scroll controls **\***
 - Always show progress scrubber
 - Disable auto-unmuting reels **\***
 - Confirm reel refresh
@@ -117,9 +120,11 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Optional date header at the top of the action menu **\***
 - Carousel and multi-story reel support with bulk download **\***
 - Save photo posts with their music as a video — uses the exact track snippet the post plays (Photos or Gallery) **\***
+- Save a photo story as just the image — strips the Instagram music from photo stories that carry a soundtrack (Photos or Gallery) **\***
 - Repost via IG's native creation flow **\***
 - Full-screen media viewer with zoom and swipe **\***
 - Story playback pauses when menus are open **\***
+- Drag-to-arrange the story and disappearing-media overlay buttons on a preview **\***
 
 ### Profile **\***
 - Zoom profile photo — long press to view full-screen **\***
@@ -132,7 +137,8 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Show full follower / post count on profile headers **\***
 - No suggested users — hides the suggested-accounts strip on profiles **\***
 - Profile card details — view count, like count and upload date overlay on each post / reel card, with optional short-number format and on-demand fetch for missing counts **\***
-- Filter & sort follower/following lists — reorder by mutuals, who follows you, verified or A–Z, filter to just those, plus load-more and jump to top/bottom **\***
+- Filter, sort & search follower/following lists — reorder by mutuals, who follows you, verified or A–Z, filter to just those, search by name or username, plus load-more and jump to top/bottom **\***
+- Follow Requests Tracker — logs follow requests you send (accepted / declined / cancelled) and receive (approved / ignored / withdrawn), catching who cancels a request before you answer; notifications, an unread badge for new updates, a searchable history split by direction with filters, sort and bulk actions, all on-device **\***
 
 ### Profile Analyzer (beta) **\***
 - Follower and following scans with progress and cancel **\***
@@ -142,6 +148,9 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Searchable lists with inline and batch follow/unfollow, plus remove-follower on the non-followbacks list **\***
 - Visited profiles tracker — log every profile you open with date / verified / private filters **\***
 - Pull-to-refresh on the visited list re-syncs identity and pictures from IG **\***
+- Enable or disable individual checks from a Checks screen — disabled ones are greyed out and skipped **\***
+- Turning on snapshot recording archives your current scan right away instead of waiting for the next one **\***
+- Opening a list flags what's new since you last viewed it — a NEW tag, new entries sorted to the top, and a New-only filter **\***
 
 ### Saving
 - Enhanced HD downloads up to 1080p **\***
@@ -170,8 +179,8 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - "Download to Gallery" submenu on every download surface when the gallery is enabled, with Photos / Gallery / Share options for audio **\***
 
 ### Stories and messages
-- Keep deleted messages **\***
-- Deleted messages log — dedicated UI for every unsent message type, including disappearing (view-once) media, grouped by chat (group chats show who unsent each), optional removed-reaction logging, unread count per chat, search, filter (incl. disappearing-only), per-chat exclude list, bulk Save / Share / Delete, edit history per message **\***
+- Keep deleted messages — optionally also the ones you unsend yourself, shown faded with an "Unsent" label **\***
+- Deleted messages log — dedicated UI for every unsent message type at full quality, including disappearing (view-once) media, grouped by chat (group chats show who unsent each); your own unsends appear on the right like sent messages, optional removed-reaction logging, unread count per chat, search, filter (incl. disappearing-only), per-chat exclude list, bulk Save / Share / Delete, edit history per message **\***
 - Read receipts — notifies and optionally logs when someone reads a message you sent (tap the notification to open the log), grouped by chat (group chats show each reader) with profile photos, an unread count per chat, username/date search & sort, a per-person/chat ignore list, group-chat support, and a notifications-only mode **\***
 - Keep app active in the background to catch unsends while you're away — optional, off by default (may use more battery)
 - Hide trailing action buttons on preserved messages
@@ -193,11 +202,13 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Hide voice/video call buttons (independent toggles) **\***
 - Hide send to group chat in the share sheet **\***
 - Bypass DM character limit **\***
+- Bypass "You can't send messages" — removes the blocked-composer banner and restores the text input in restricted threads **\***
 - Pin recipients on long-press in the share sheet — pinned chats render at the top **\***
-- Custom chat backgrounds — per-chat images injected into IG's native theme picker, library upload with built-in cropper, per-image opacity / blur / dim, auto bubble color across text, replies and voice notes (tint the other person's bubbles, yours, or both — solid or gradient (vertical, horizontal, or diagonal) with readable or custom text color, works with animated themes, editable from the in-chat picker), optional global default, per-account list of chats with backgrounds **\***
+- Custom chat backgrounds — per-chat image, video or GIF injected into IG's native theme picker, imported from Photos, Files or the in-app gallery through a built-in editor (pan-zoom crop / resize for photos, framing + trim for video, GIFs converted to looping video), per-image opacity / blur / dim, auto bubble color across text, replies and voice notes (tint the other person's bubbles, yours, or both — solid or gradient (vertical, horizontal, or diagonal) with readable or custom text color, works with animated themes, editable from the in-chat picker), re-crop / re-trim / re-adjust any background later, optional global default, per-account list of chats with backgrounds **\***
 - Unlimited replay of direct stories **\***
 - Full last active date **\***
 - Send files in DMs (experimental) **\***
+- Draw an image doodle: in the DM Draw tool, send an image as your doodle from the in-app gallery, Photos, your Instagram or iOS keyboard stickers, or a pasted image, with a built-in crop, free-resize and background removal editor
 - Hold the DM tab button to open the on-device gallery **\***
 - Notes actions — copy text, download GIF / audio (Photos or Gallery) **\***
 - Copy note text on long press **\***
@@ -208,6 +219,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Manual mark story as seen (button or toggle mode) **\***
 - Long-press the story seen button for quick actions **\***
 - Per-user story seen-receipt exclusion list with Block all / Block selected mode **\***
+- Filter, sort, search & pin your story viewers list — reorder by mutuals, who follows you, verified, who liked, or A–Z; search by name or username; sticky settings; long-press to pin (pinned viewers stay on top, addable by username even before they view) **\***
 - Story audio mute/unmute toggle **\***
 - View story mentions, with optional quick-access overlay button and count badge **\***
 - Hide stories midcards (Trending / Music) **\***
@@ -218,11 +230,12 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Allow video in photo sticker — story photo sticker picker accepts videos too **\***
 - Custom sticker colors — pick any solid or gradient color from the color wheel in sticker editors (music, lyrics, slider, question, prompt and more) **\***
 - Disappearing DM media overlay — action button, mark-as-viewed eye (optionally advancing to the next stacked message), and audio toggle **\***
-- Download disappearing DM media **\***
+- Download disappearing DM media in full quality — videos go through the HD quality picker **\***
+- Reroute the native DM Save button — turn Instagram's built-in Save on DM photos & videos into Photos / Gallery / Share / Expand, configurable through the standard action-menu config, and force the Save button + long-press Save entry to show even where Instagram hides them (some accounts / vanish mode) **\***
 - Upload audio as voice message with built-in trim editor **\***
-- Send Instants from your photo album — gallery button on the Instants camera with a built-in square cropper, posts through IG's native capture flow; pick from the in-app gallery or Photos library when the gallery is enabled
+- Send Instants from your photo album — gallery button on the Instants camera; photos go through a square cropper, videos through a trim + framing editor (pick any 7s on a scrollable timeline, live preview) and auto-stop at clip end; posts through IG's native capture flow; pick from the in-app gallery or Photos library when the gallery is enabled
 - Allow screenshots on Instants — bypasses the screenshot/screen-record block, scoped to the Instants viewer only
-- Instants action button — Expand / Save (Photos / Gallery) / Share / Save all, fully configurable through the standard action-menu config
+- Instants action button — Expand / Save (Photos / Gallery) / Share / Save all for photo and video instants, fully configurable through the standard action-menu config
 - Auto-save Instants — every Instant you view (including while swiping) saves to Photos or the Gallery automatically, each one only once
 - Auto advance after reaction — moves to the next Instant after you like or react **\***
 - Confirm Instants emoji reaction — optional confirmation before a quick-reaction sends
@@ -231,15 +244,19 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 
 ### Interface **\***
 - Tab bar shortcuts — Home shortcut button + Action button icon picker, grouped at the top of the page
-- Notifications — universal in-app pill (Minimal / Colorful / Glow / Island), per-action routing (custom pill / IG-native / off), top or bottom position, master kill switch, swipe-to-dismiss, multi-pill stacking
-- Background mirroring — toasts that fire while Instagram is in the background are delivered to the iOS notification centre instead, with per-action overrides and auto-clear when the app opens
+- Notifications — universal in-app pill (Minimal / Colorful / Glow / Island), per-action routing (custom pill / IG-native / off), drag-to-place position anywhere on screen, master kill switch, swipe-to-dismiss, multi-pill stacking
+- Background mirroring — toasts that fire while Instagram is in the background are delivered to the iOS notification centre instead; tapping one opens the same thing as tapping the toast, with per-action overrides and auto-clear when the app opens
+- Burst summaries — a flood of the same toast (unsent messages, removed reactions, seen marks) collapses into one summary pill instead of stacking, while a single action still toasts instantly
 - Custom tab bar icon order — drag to reorder any tab, toggle tabs off to hide them (feed / explore / create / reels / messages / profile) **\***
 - Modify swiping between tabs
 - Messages-only mode — inbox, search & profile only, launch straight into inbox **\***
+  - Notifications shortcut in the inbox header — opens the activity feed the hidden tab would show **\***
   - Hide search tab sub-toggle — drop search too, leaving just inbox & profile **\***
-  - Hide tab bar sub-toggle — floating settings gear replaces it **\***
+  - Hide tab bar sub-toggle — a settings shortcut moves into the inbox header instead **\***
+  - Automatic schedule — turn Messages-only on by itself during a daily window (e.g. 10 PM – 6 AM) **\***
 - Launch tab — pick which tab the app opens to **\***
-- Home shortcut button — extra button on the home top bar with a configurable multi-action menu (Gallery / Settings / Security & Privacy / Hidden chats / Locked chats / Profile Analyzer / Deleted messages / Read receipts / Fake location / Clear cache / Changelog) **\***
+- Instagram language — force Instagram's own interface into any supported language, including Arabic even if your device isn't set to it; restart to apply **\***
+- Home shortcut button — extra button on the home top bar with a configurable multi-action menu (Gallery / Settings / Security & Privacy / Hidden chats / Locked chats / Profile Analyzer / Deleted messages / Read receipts / Follow Requests / Fake location / Clear cache / Changelog) **\***
 - Experimental flags
 
 ### Confirm actions
@@ -274,9 +291,10 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Apply & restart, plus Reset theme to revert every theme option
 
 ### Security & Privacy **\***
-- Passcode + biometric lock — gates tweak settings, gallery, deleted-messages log, Profile Analyzer, DM inbox, individual chats, and Instagram itself
+- Device ID — change the device identity Instagram reports: masks the device ID, family device ID, vendor ID and machine ID, can block Apple device attestation (DeviceCheck and App Attest), with a login-screen button and a Device ID menu in Settings → Advanced to roll a new fingerprint, set a custom ID, revert to your real one, or fully clear the device and relaunch fresh **\***
+- Passcode + biometric lock — gates tweak settings, gallery, deleted-messages log, Profile Analyzer, DM inbox, individual chats, hidden-chats reveal, and Instagram itself
 - Per-target idle timeout, re-lock on background, lock every time, independent session
-- Hidden chats — long-press a DM to hide it; managed under S&P
+- Hidden chats — long-press a DM to hide it; managed under S&P. Hold the account name at the top of Direct to show or hide them on demand, optionally behind the passcode lock
 - Per-account lists (excluded chats, hidden chats, locked chats, share-sheet pins) — switching IG accounts shows that account's own data
 - Locked, hidden, and excluded chat lists show real profile pictures, including group chat photos
 - App-switcher snapshot shroud — covers IG content when a locked surface is visible
@@ -308,6 +326,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 
 ### Optimization
 - Clear Instagram cache on demand with optional auto-clear interval, with a toggle to preserve DMs, drafts, and Notes **\***
+- Smoother feed scrolling, especially with the OLED theme enabled
 
 # Translating RyukGram
 Want to see RyukGram in your language? Two ways:
@@ -361,7 +380,7 @@ If you find a string that still renders in English on a translated build, open a
 ### Run build script
 ```sh
 $ chmod +x build.sh
-$ ./build.sh <sideload/sidestore/rootless/rootful>
+$ ./build.sh <sideload/sidestore/rootless>
 ```
 
 # Credits
@@ -388,15 +407,3 @@ RyukGram is free and open source. If you'd like to support development:
 
 - [☕ Donate to Ryuk (RyukGram)](https://buymeacoffee.com/axryuk)
 - [☕ Donate to SoCuul (original SCInsta)](https://ko-fi.com/SoCuul) — RyukGram wouldn't exist without SoCuul's original SCInsta, so showing them some love is always welcome
-
-### v32 ABI-aware runtime browser
-
-The C symbol browser is no longer diagnostic-only. Validated return classes now map to ABI-aware runtime replacements:
-
-- bool -> w0 hardstub/force
-- int32/int64 -> x0/w0 typed numeric force
-- double -> d0 typed force
-- string/pointer -> x0 typed string/pointer force
-- action/registration -> observe-only wrapper that calls original
-
-DATA symbols are intentionally not function-hooked; use the DATA/param descriptor browser to identify the consumer/reader.

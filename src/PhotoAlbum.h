@@ -11,6 +11,11 @@
 /// Saves fileURL into the album. Treats as photo or video by extension.
 + (void)saveFileToAlbum:(NSURL *)fileURL completion:(void (^)(BOOL success, NSError *error))completion;
 
+/// As above; `originalFilename` sets the Photos asset name (nil keeps the fileURL's).
++ (void)saveFileToAlbum:(NSURL *)fileURL
+       originalFilename:(nullable NSString *)originalFilename
+             completion:(void (^)(BOOL success, NSError *error))completion;
+
 /// One-shot photo-library observer that re-files the next inserted asset into
 /// the album. Use to capture saves done via UIActivityViewController's
 /// "Save to Photos" activity. Auto-unregisters after first capture or 60s.

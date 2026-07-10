@@ -129,7 +129,7 @@ static NSString *sciToManifestString(id val) {
 		@try {
 			Ivar iv = NULL;
 			for (Class c = [video class]; c && !iv; c = class_getSuperclass(c))
-				iv = class_getInstanceVariable(c, "_dashManifestData");
+				iv = class_getInstanceVariable(c, "_dashManifestData") ?: class_getInstanceVariable(c, "_videoDashManifest");
 			if (iv) {
 				id val = object_getIvar(video, iv);
 				NSString *str = sciToManifestString(val);

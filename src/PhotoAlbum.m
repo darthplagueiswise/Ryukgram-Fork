@@ -45,6 +45,10 @@ static SCIPhotoAlbumWatcher *sciActiveWatcher = nil;
 }
 
 + (void)saveFileToAlbum:(NSURL *)fileURL completion:(void (^)(BOOL, NSError *))completion {
+	[self saveFileToAlbum:fileURL originalFilename:nil completion:completion];
+}
+
++ (void)saveFileToAlbum:(NSURL *)fileURL originalFilename:(NSString *)originalFilename completion:(void (^)(BOOL, NSError *))completion {
 	[self fetchOrCreateAlbumWithCompletion:^(PHAssetCollection *album, NSError *err) {
 		if (!album) {
 			dispatch_async(dispatch_get_main_queue(), ^{
@@ -61,6 +65,7 @@ static SCIPhotoAlbumWatcher *sciActiveWatcher = nil;
 			PHAssetCreationRequest *req = [PHAssetCreationRequest creationRequestForAsset];
 			PHAssetResourceCreationOptions *opts = [[PHAssetResourceCreationOptions alloc] init];
 			opts.shouldMoveFile = YES;
+			if (originalFilename.length) opts.originalFilename = originalFilename;
 			[req addResourceWithType:(isVideo ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto)
 							 fileURL:fileURL options:opts];
 			req.creationDate = [NSDate date];

@@ -115,6 +115,7 @@
 					s.whatsNewID = @"ui_profileanalyzer";
 					s;
 				}),
+				({ SCISetting *s = [self followRequestsNavCell]; s.whatsNewID = @"ui_followrequests"; s; }),
 				({
 					SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Gallery")
 									   subtitle:@""
@@ -141,8 +142,8 @@
 			@"rows": @[
 				({ SCISetting *s = [self backupNavCell]; s.whatsNewID = @"ui_backup"; s; }),
 				[self advancedNavCell],
-				[self devNavCell],
-				[self debugNavCell]
+				[self debugNavCell],
+				[self devNavCell]
 			]
 		},
 		@{

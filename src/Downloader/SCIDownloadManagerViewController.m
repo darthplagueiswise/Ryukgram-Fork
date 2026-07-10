@@ -74,7 +74,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 	if (!self) return nil;
 
 	_card = [UIView new];
-	_card.backgroundColor = SCIUIKit26PanelFillColor();
+	_card.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
 	_card.layer.cornerRadius = 14;
 	_card.layer.cornerCurve = kCACornerCurveContinuous;
 	_card.clipsToBounds = YES;
@@ -225,10 +225,8 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.title = SCILocalized(@"Download settings");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 3; }
@@ -343,7 +341,7 @@ static UIColor *sciAccentForState(SCIDownloadJobState s) {
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.title = SCILocalized(@"Downloads");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.selected = [NSMutableSet set];
 
 	[self setupCollectionView];

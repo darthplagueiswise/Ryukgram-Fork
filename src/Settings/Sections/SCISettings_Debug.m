@@ -33,10 +33,11 @@
 											@"header": SCILocalized(@"Logging"),
 											@"footer": SCILocalized(@"Logs RyukGram's own activity to one shareable file across the app and its extensions. Off by default — turn it on, reproduce the issue, then share."),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Enable file logging")
+												({ SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Enable file logging")
 																	   subtitle:@""
 																		  value:^BOOL{ return SCIFileLogIsEnabled(); }
-																		 action:^(BOOL on){ SCIFileLogSetEnabled(on); }],
+																		 action:^(BOOL on){ SCIFileLogSetEnabled(on); }];
+																   s.whatsNewID = @"ui_filelogging"; s; }),
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Share log file")
 																	   subtitle:@""
 																		   icon:[SCISymbol symbolWithName:@"square.and.arrow.up"]

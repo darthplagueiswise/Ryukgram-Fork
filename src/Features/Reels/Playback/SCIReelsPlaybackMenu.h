@@ -2,10 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Shared long-press menu surfaced from the reel 3-dot button.
-// Each playback module (speed picker, …) registers itself at startup.
-// Coordinator installs the long-press recognizer only when at least one
-// registered module's `isOn` returns YES.
+// Long-press menu on a reel, built from modules that register at startup.
+// The recognizer installs only while at least one module's `isOn` returns YES.
 
 typedef BOOL (^SCIReelsModuleIsOn)(void);
 typedef UIView * _Nullable (^SCIReelsModuleBuildSection)(void);
@@ -18,10 +16,13 @@ typedef UIView * _Nullable (^SCIReelsModuleBuildSection)(void);
 
 + (BOOL)anyModuleEnabled;
 
+// Reel cell captured at long-press so seek targets the right reel.
++ (void)captureReelContextFromAnchor:(UIView *)anchor;
++ (nullable UIView *)capturedReelCell;
+
 @end
 
-// Module-side helper to build a section card matching the menu's style.
-// Header label + content view stacked vertically with a divider between rows.
+// Section card: header label above a content view.
 @interface SCIReelsPlaybackSection : UIView
 - (instancetype)initWithTitle:(NSString *)title content:(UIView *)content;
 @end

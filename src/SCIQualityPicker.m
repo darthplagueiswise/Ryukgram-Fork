@@ -60,7 +60,7 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 	if (!self) return nil;
 
 	self.selectionStyle = UITableViewCellSelectionStyleDefault;
-	self.backgroundColor = SCIUIKit26PanelFillColor();
+	self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
 	_iconButton = [UIButton buttonWithType:UIButtonTypeSystem];
 	_iconButton.tintColor = UIColor.labelColor;
@@ -168,14 +168,12 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
 	self.sizeCache = [NSMutableDictionary dictionary];
 	self.sizeLoading = [NSMutableSet set];
 	self.loadingVideoRows = [NSMutableIndexSet indexSet];
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	self.titleLabel = [UILabel new];
 	self.titleLabel.text = SCILocalized(@"Download Quality");
@@ -266,7 +264,6 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)ip {
 	_SCIQualityCell *cell = [tableView dequeueReusableCellWithIdentifier:kSCIQualityCellId forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
 	[cell.iconButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
 
 	if (ip.section == 0) {
@@ -564,6 +561,14 @@ static inline void SCIRemoveFiles(NSArray<NSString *> *paths) {
 	}
 
 	return [self continueWithManifest:manifest standardURL:standardURL media:media fromView:sourceView action:action picked:picked fallback:fallback];
+}
+
++ (BOOL)pickQualityWithManifestXML:(NSString *)manifestXML standardURL:(NSURL *)standardURL fromView:(UIView *)sourceView action:(DownloadAction)action picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked fallback:(void(^)(void))fallback {
+	if (!manifestXML.length || ![SCIUtils getBoolPref:@"enhance_download_quality"] || ![SCIFFmpeg isAvailable]) {
+		if (fallback) fallback();
+		return NO;
+	}
+	return [self continueWithManifest:manifestXML standardURL:standardURL media:nil fromView:sourceView action:action picked:picked fallback:fallback];
 }
 
 + (BOOL)continueWithManifest:(NSString *)manifest standardURL:(NSURL *)standardURL media:(id)media fromView:(UIView *)sourceView action:(DownloadAction)action picked:(void(^)(SCIDashRepresentation *video, SCIDashRepresentation *audio))picked fallback:(void(^)(void))fallback {

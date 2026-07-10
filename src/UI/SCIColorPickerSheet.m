@@ -125,7 +125,6 @@ static UISheetPresentationControllerDetentIdentifier const kSCIPickerFitDetentID
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.view.backgroundColor = UIColor.clearColor;
 	if (_mode != SCIColorPickerSheetModeGradient) return;

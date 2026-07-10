@@ -71,7 +71,6 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIConfigureNavigationChromeForGlass(self);
 	self.sheetTitle = SCILocalized(@"Sort");
 	[self buildContent];
 }

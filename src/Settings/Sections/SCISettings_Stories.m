@@ -1,4 +1,8 @@
 #import "SCISettingsSections.h"
+#import "../SCIStoryViewerPinsViewController.h"
+#import "../SCIOverlayLayoutEditorViewController.h"
+#import "../../Features/StoriesAndMessages/SCIStoryButtonLayout.h"
+#import "../../Features/StoriesAndMessages/SCIStoryViewerPins.h"
 
 @implementation SCITweakSettings (Section_Stories)
 
@@ -16,6 +20,15 @@
 																				icon:nil
 																	  viewController:[[SCIActionMenuConfigViewController alloc] initForSource:SCIActionSourceStories]];
 												   s.whatsNewID = @"ui_cfg_actionmenu"; s; }),
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Overlay layout"),
+											@"rows": @[
+												[SCISetting navigationCellWithTitle:SCILocalized(@"Arrange overlay buttons")
+																		   subtitle:SCILocalized(@"Drag to position the buttons")
+																			   icon:[SCISymbol symbolWithIGName:@"ig_icon_edit_list_outline_24" fallback:@"hand.draw"]
+																	 viewController:[[SCIOverlayLayoutEditorViewController alloc] initWithLayoutClass:SCIStoryButtonLayout.class]],
 											]
 										},
 										@{
@@ -62,6 +75,33 @@
 														}
 													}];
 													s.dynamicTitle = ^{ return [NSString stringWithFormat:SCILocalized(@"Manage list (%lu)"), (unsigned long)[SCIExcludedStoryUsers count]]; };
+													s;
+												}),
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Viewers list"),
+											@"footer": SCILocalized(@"On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list."),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Filter, sort & pin viewers") subtitle:SCILocalized(@"Adds controls to your story viewers list") defaultsKey:@"sci_story_viewer_sort_enabled" requiresRestart:YES],
+												({
+													SCISetting *s = [SCISetting buttonCellWithTitle:SCILocalized(@"Pinned viewers")
+																		subtitle:SCILocalized(@"Add by username, remove, reorder")
+																			icon:[SCISymbol symbolWithIGName:@"ig_icon_edit_list_outline_24" fallback:@"pin.fill"]
+																		  action:^(void) {
+														UIWindow *win = nil;
+														for (UIWindow *w in [UIApplication sharedApplication].windows) {
+															if (w.isKeyWindow) { win = w; break; }
+														}
+														UIViewController *top = win.rootViewController;
+														while (top.presentedViewController) top = top.presentedViewController;
+														if ([top isKindOfClass:[UINavigationController class]]) {
+															[(UINavigationController *)top pushViewController:[SCIStoryViewerPinsViewController new] animated:YES];
+														} else if (top.navigationController) {
+															[top.navigationController pushViewController:[SCIStoryViewerPinsViewController new] animated:YES];
+														}
+													}];
+													s.dynamicTitle = ^{ return [NSString stringWithFormat:SCILocalized(@"Pinned viewers (%lu)"), (unsigned long)[SCIStoryViewerPins count]]; };
 													s;
 												}),
 											]

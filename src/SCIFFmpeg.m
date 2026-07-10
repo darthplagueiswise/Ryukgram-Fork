@@ -261,6 +261,14 @@ static BOOL sciOutputLooksLikeVTDeath(NSString *output) {
 		|| [output containsString:@"Error submitting video frame"];
 }
 
+// xHE-AAC (USAC, object type 42) has no decoder before ffmpeg 7.1 — re-encode can't
+// open it, so detect the failure and remux the original audio stream instead.
+static BOOL sciOutputLooksLikeAudioDecodeFail(NSString *output) {
+	if (!output.length) return NO;
+	return [output containsString:@"Audio object type"]
+		|| ([output containsString:@"opening decoder for input stream"] && [output containsString:@"Function not implemented"]);
+}
+
 // One synchronous ffmpeg run. cancelOnBackground cancels a VT encode the moment the app
 // deactivates, while the VT session is still valid, so ffmpeg exits cleanly. The log
 // scanner abandons after a short grace when VT-death lines appear anyway, and the
@@ -495,7 +503,7 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 		NSString *videoPath = [SCITempFiles claimWithExt:@"mp4" ttl:300 tag:@"video"].path;
 		NSString *audioPath = [SCITempFiles claimWithExt:@"m4a" ttl:300 tag:@"audio"].path;
 		NSString *stem = sciSafeFileStem([SCIMediaActions currentFilenameStem]);
-		__block NSString *outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+		__block NSString *outputPath = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"%@.mp4", stem] ttl:900 tag:@"mux"].path;
 		NSError *(^cancelledError)(void) = ^NSError *{ return sciError(NSUserCancelledError, SCILocalized(@"Cancelled")); };
 		void (^cleanup)(BOOL removeOutput) = ^(BOOL removeOutput) {
 			NSFileManager *fm = NSFileManager.defaultManager;
@@ -537,7 +545,7 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 		report(0.5f, SCILocalized(@"Encoding…"));
 		NSDictionary *args = [self encodingArgsForFallbackPreset:preset];
 		NSString *vArgs = args[@"video"];
-		NSString *aArgs = args[@"audio"];
+		__block NSString *aArgs = args[@"audio"];
 		NSString *cArgs = args[@"container"];
 		NSString *fArgs = args[@"filter"];
 		BOOL vtPreferred = [vArgs containsString:@"h264_videotoolbox"];
@@ -573,12 +581,17 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 			BOOL vt = !wantSW && vtPreferred;
 			if (wantSW && !notifiedSW) { notifiedSW = YES; sciNotifySoftwareFallback(); }
 			if (attempt > 0) {
-				outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+				outputPath = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"%@.mp4", stem] ttl:900 tag:@"mux"].path;
 				report(0.5f, SCILocalized(@"Encoding…"));
 			}
 			BOOL bgKilled = NO;
 			run = sciRunMuxCommand(buildCmd(v, outputPath), vt, stall, statsCallback, onSID, &ffOutput, &bgKilled);
 			if (run == SCIMuxRunOK || cancelled()) break;
+			if (hasAudio && ![aArgs isEqualToString:@"-c:a copy"] && sciOutputLooksLikeAudioDecodeFail(ffOutput)) {
+				NSLog(@"[SCInsta][FFmpeg] source audio can't be decoded by this ffmpeg (likely xHE-AAC) — retrying with stream copy");
+				aArgs = @"-c:a copy";
+				continue;
+			}
 			BOOL vtDeath = vt && (bgKilled || run == SCIMuxRunStalled || sciOutputLooksLikeVTDeath(ffOutput));
 			if (!vtDeath || !swArgs) break;
 			stall = (run == SCIMuxRunStalled) ? kSCIRetryStartupStallSeconds : kSCIMuxStallSeconds;
@@ -626,7 +639,7 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 		NSString *photoPath = [SCITempFiles claimWithExt:@"jpg" ttl:300 tag:@"photo"].path;
 		NSString *audioPath = [SCITempFiles claimWithExt:@"mp4" ttl:300 tag:@"audio"].path;
 		NSString *stem = sciSafeFileStem([SCIMediaActions currentFilenameStem]);
-		__block NSString *outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+		__block NSString *outputPath = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"%@.mp4", stem] ttl:900 tag:@"mux"].path;
 		NSError *(^cancelledError)(void) = ^NSError *{ return sciError(NSUserCancelledError, SCILocalized(@"Cancelled")); };
 		void (^cleanup)(BOOL removeOutput) = ^(BOOL removeOutput) {
 			NSFileManager *fm = NSFileManager.defaultManager;
@@ -658,12 +671,13 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 		NSString *swVenc = @"-c:v libx264 -preset veryfast -crf 20 -tune stillimage";
 		NSString *venc = [self hasEncoder:@"h264_videotoolbox"] ? @"-c:v h264_videotoolbox -b:v 6M -allow_sw 1" : swVenc;
 		BOOL vtPreferred = [venc containsString:@"h264_videotoolbox"];
+		__block NSString *aenc = @"-c:a aac -b:a 192k";
 		// 3fps: every frame is identical, more only slows the encode.
 		NSString *(^buildCmd)(NSString *, NSString *) = ^NSString *(NSString *v, NSString *outPath) {
 			return [NSString stringWithFormat:
 				@"-y -hide_banner -loop 1 -framerate 3 -i %@ -ss %.3f -i %@ -t %.3f -map 0:v:0 -map 1:a:0 "
-				@"-vf scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p %@ -c:a aac -b:a 192k -movflags +faststart %@",
-				sciQuote(photoPath), startSec, sciQuote(audioPath), durSec, v, sciQuote(outPath)];
+				@"-vf scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p %@ %@ -movflags +faststart %@",
+				sciQuote(photoPath), startSec, sciQuote(audioPath), durSec, v, aenc, sciQuote(outPath)];
 		};
 		void (^statsCallback)(id) = ^(id stats) {
 			double timeMs = sciCallDoubleGetter(stats, @"getTime");
@@ -682,12 +696,17 @@ static SCIMuxRun sciRunMuxCommand(NSString *cmd, BOOL cancelOnBackground, NSTime
 			NSString *v = wantSW ? swVenc : venc;
 			BOOL vt = !wantSW && vtPreferred;
 			if (attempt > 0) {
-				outputPath = [SCITempFiles claimWithExt:@"mp4" ttl:900 tag:stem].path;
+				outputPath = [SCITempFiles claimNamedFile:[NSString stringWithFormat:@"%@.mp4", stem] ttl:900 tag:@"mux"].path;
 				report(0.5f, SCILocalized(@"Encoding…"));
 			}
 			BOOL bgKilled = NO;
 			run = sciRunMuxCommand(buildCmd(v, outputPath), vt, stall, statsCallback, onSID, &ffOutput, &bgKilled);
 			if (run == SCIMuxRunOK || cancelled()) break;
+			if (![aenc isEqualToString:@"-c:a copy"] && sciOutputLooksLikeAudioDecodeFail(ffOutput)) {
+				NSLog(@"[SCInsta][FFmpeg] photo-mux audio can't be decoded (likely xHE-AAC) — retrying with stream copy");
+				aenc = @"-c:a copy";
+				continue;
+			}
 			BOOL vtDeath = vt && (bgKilled || run == SCIMuxRunStalled || sciOutputLooksLikeVTDeath(ffOutput));
 			if (!vtDeath || !swVenc) break;
 			stall = (run == SCIMuxRunStalled) ? kSCIRetryStartupStallSeconds : kSCIMuxStallSeconds;

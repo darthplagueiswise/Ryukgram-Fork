@@ -32,8 +32,8 @@
 										@{
 											@"header": SCILocalized(@"Instants"),
 											@"rows": @[
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants capture") subtitle:SCILocalized(@"Shows an alert before taking a photo with the Instants camera") defaultsKey:@"instants_capture_confirm"],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm switching Instant") subtitle:SCILocalized(@"Shows an alert before tapping to switch to the next/previous Instant") defaultsKey:@"instants_advance_confirm"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants capture") subtitle:SCILocalized(@"Shows an alert before sending a photo or video from the Instants camera") defaultsKey:@"instants_capture_confirm" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm switching Instant") subtitle:SCILocalized(@"Shows an alert before tapping to switch to the next/previous Instant") defaultsKey:@"instants_advance_confirm" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Confirm Instants emoji reaction") subtitle:SCILocalized(@"Shows an alert before sending an emoji reaction on an Instant") defaultsKey:@"instants_emoji_reaction_confirm"],
 											]
 										},

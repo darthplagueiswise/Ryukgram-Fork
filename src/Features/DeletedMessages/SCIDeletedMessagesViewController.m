@@ -41,7 +41,7 @@
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
 	if ((self = [super initWithStyle:style reuseIdentifier:rid])) {
 		self.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-		self.backgroundColor = SCIUIKit26PanelFillColor();
+		self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
 		_avatarView = [self.class imageView];
 		[self.contentView addSubview:_avatarView];
@@ -129,7 +129,7 @@
 	UIImageView *iv = [UIImageView new];
 	iv.translatesAutoresizingMaskIntoConstraints = NO;
 	iv.contentMode = UIViewContentModeScaleAspectFill;
-	iv.backgroundColor = SCIUIKit26PanelFillColor();
+	iv.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	iv.layer.cornerRadius = 23;
 	iv.layer.masksToBounds = YES;
 	iv.tintColor = UIColor.systemGray3Color;
@@ -315,10 +315,8 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 @implementation SCIDMIgnoredViewController
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.title = SCILocalized(@"Ignored");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.backgroundColor = UIColor.clearColor;
@@ -362,7 +360,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
 	UITableViewCell *c = [t dequeueReusableCellWithIdentifier:@"i"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"i"];
-	c.backgroundColor = SCIUIKit26PanelFillColor();
+	c.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 	c.selectionStyle = UITableViewCellSelectionStyleNone;
 	NSString *id_ = self.ids[ip.row];
 	NSDictionary *info = self.meta[id_];
@@ -432,7 +430,7 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Deleted messages");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	[self installNavigationItems];
 	[self installSearchController];
@@ -488,7 +486,8 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 	self.searchCtl = sc;
 	self.navigationItem.searchController = sc;
-	self.navigationItem.hidesSearchBarWhenScrolling = YES;
+	// Collapsing search bar + UIRefreshControl recurse into a stack overflow on pull-to-refresh.
+	self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
 	// iOS 26 defaults search to the bottom edge — force stacked under the title.
 	if (@available(iOS 26.0, *)) {
@@ -845,7 +844,6 @@ static NSUInteger sciUnseenCountForGroup(SCIDeletedMessageGroup *g, NSString *ow
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
 	SCIDMSenderCell *cell = [tv dequeueReusableCellWithIdentifier:@"sender" forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
 	SCIDeletedMessageGroup *g = [self groupAtIndexPath:ip];
 	SCIDeletedMessage *latest = g.latest;
 

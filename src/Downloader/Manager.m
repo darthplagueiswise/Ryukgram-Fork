@@ -5,7 +5,7 @@
 
 - (instancetype)initWithDelegate:(id<SCIDownloadDelegateProtocol>)downloadDelegate {
     self = [super init];
-
+    
     if (self) {
         self.delegate = downloadDelegate;
     }
@@ -17,7 +17,7 @@
     // Properties
     self.session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration] delegate:self delegateQueue:nil];
     self.task = [self.session downloadTaskWithURL:url];
-
+    
     // Default to jpg if no other reasonable length extension is provided
     self.fileExtension = [fileExtension length] >= 3 ? fileExtension : @"jpg";
 

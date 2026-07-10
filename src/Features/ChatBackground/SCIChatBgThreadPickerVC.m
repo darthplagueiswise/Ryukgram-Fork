@@ -34,8 +34,7 @@ static NSString *sActiveThreadID = nil;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationItem.prompt = SCILocalized(@"Tap to apply · hold to edit");
 
 	UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
@@ -45,9 +44,8 @@ static NSString *sActiveThreadID = nil;
 
 	_collectionView = [[UICollectionView alloc] initWithFrame:self.view.bounds collectionViewLayout:layout];
 	_collectionView.dataSource = self;
-	SCIUIKit26ConfigureCollectionView(_collectionView);
 	_collectionView.delegate = self;
-	_collectionView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	_collectionView.backgroundColor = [SCIPopupChrome backgroundColor];
 	_collectionView.alwaysBounceVertical = YES;
 	_collectionView.translatesAutoresizingMaskIntoConstraints = NO;
 	[_collectionView registerClass:[UICollectionViewCell class] forCellWithReuseIdentifier:kCellID];
@@ -90,18 +88,15 @@ static NSString *sActiveThreadID = nil;
 
 	if (i == 0) {
 		UICollectionViewCell *cell = [cv dequeueReusableCellWithReuseIdentifier:kDefaultCellID forIndexPath:ip];
-	SCIStyleCollectionCellForGlass(cell);
 		[self configureDefaultCell:cell];
 		return cell;
 	} else if (i == addIndex) {
 		UICollectionViewCell *cell = [cv dequeueReusableCellWithReuseIdentifier:kAddCellID forIndexPath:ip];
-	SCIStyleCollectionCellForGlass(cell);
 		[self configureAddCell:cell];
 		return cell;
 	} else {
 		NSString *asset = self.assets[i - 1];
 		UICollectionViewCell *cell = [cv dequeueReusableCellWithReuseIdentifier:kCellID forIndexPath:ip];
-	SCIStyleCollectionCellForGlass(cell);
 		[self configureLibraryCell:cell withAsset:asset];
 		return cell;
 	}
@@ -219,8 +214,7 @@ static NSString *sActiveThreadID = nil;
 	iv.contentMode = UIViewContentModeScaleAspectFill;
 	iv.clipsToBounds = YES;
 	iv.translatesAutoresizingMaskIntoConstraints = NO;
-	NSURL *url = [[SCIChatBackgroundManager shared] urlForRelativeAsset:asset];
-	if (url) iv.image = [UIImage imageWithContentsOfFile:url.path];
+	iv.image = [[SCIChatBackgroundManager shared] imageForAsset:asset];
 	[tile addSubview:iv];
 	[NSLayoutConstraint activateConstraints:@[
 		[iv.topAnchor constraintEqualToAnchor:tile.topAnchor],
@@ -228,6 +222,20 @@ static NSString *sActiveThreadID = nil;
 		[iv.trailingAnchor constraintEqualToAnchor:tile.trailingAnchor],
 		[iv.bottomAnchor constraintEqualToAnchor:tile.bottomAnchor],
 	]];
+
+	if ([SCIChatBackgroundManager isVideoAsset:asset]) {
+		UIImageView *badge = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"play.circle.fill"]];
+		badge.tintColor = UIColor.whiteColor;
+		badge.contentMode = UIViewContentModeScaleAspectFit;
+		badge.translatesAutoresizingMaskIntoConstraints = NO;
+		[tile addSubview:badge];
+		[NSLayoutConstraint activateConstraints:@[
+			[badge.trailingAnchor constraintEqualToAnchor:tile.trailingAnchor constant:-6],
+			[badge.bottomAnchor constraintEqualToAnchor:tile.bottomAnchor constant:-6],
+			[badge.widthAnchor constraintEqualToConstant:22],
+			[badge.heightAnchor constraintEqualToConstant:22],
+		]];
+	}
 
 	BOOL selected = NO;
 	if (self.threadID.length) {

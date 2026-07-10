@@ -17,6 +17,7 @@ extern NSString *const SCILockGroupKeepDeleted;
 extern NSString *const SCILockGroupProfileAnalyzer;
 extern NSString *const SCILockGroupMessagesTab;
 extern NSString *const SCILockGroupChats;
+extern NSString *const SCILockGroupHiddenReveal;
 
 @interface SCILockGroupInfo : NSObject
 @property (nonatomic, readonly) NSString *identifier;

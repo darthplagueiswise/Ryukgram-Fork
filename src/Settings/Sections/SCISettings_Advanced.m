@@ -1,6 +1,57 @@
 #import "SCISettingsSections.h"
+#import "../../Features/DeviceSpoof/SCIDeviceMenu.h"
 
 @implementation SCITweakSettings (Section_Advanced)
+
++ (SCISetting *)deviceIDNavCell {
+	SCISetting *(^btn)(NSString *, NSString *, NSString *, NSString *, void(^)(void)) =
+		^(NSString *title, NSString *subtitle, NSString *ig, NSString *sf, void(^action)(void)) {
+			return [SCISetting buttonCellWithTitle:title subtitle:subtitle
+											  icon:[SCISymbol symbolWithIGName:ig fallback:sf]
+											action:action];
+		};
+	SCISetting *deviceIDCell = [SCISetting navigationCellWithTitle:SCILocalized(@"Device ID")
+									  subtitle:@""
+										  icon:[SCISymbol symbolWithIGName:@"phone" fallback:@"iphone.gen3"]
+								   navSections:@[@{
+		@"footer": SCILocalized(@"Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen."),
+		@"rows": @[
+			btn(SCILocalized(@"Roll a new fingerprint"), SCILocalized(@"Generate fresh device identifiers"),
+				@"bcn_refresh_outline_24", @"arrow.triangle.2.circlepath",
+				^{ [SCIDeviceMenu presentRollOptionsFrom:sciTopVC() onChange:nil]; }),
+			btn(SCILocalized(@"Enter ID manually…"), @"",
+				@"bcn_edit_outline_24", @"pencil",
+				^{ [SCIDeviceMenu presentCustomIDFrom:sciTopVC() onChange:nil]; }),
+			btn(SCILocalized(@"Copy current ID"), @"",
+				@"bcn_copy_outline_24", @"doc.on.doc",
+				^{ [SCIDeviceMenu copyCurrentID]; }),
+			btn(SCILocalized(@"Revert to my real device ID"), SCILocalized(@"Restore the original, stop masking"),
+				@"bcn_arrow-ccw_outline_24", @"arrow.uturn.backward",
+				^{ [SCIDeviceMenu revertOnChange:nil]; }),
+		]
+	}, @{
+		@"header": SCILocalized(@"Reset"),
+		@"footer": SCILocalized(@"Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards."),
+		@"rows": @[
+			btn(SCILocalized(@"Clear device & relaunch"), SCILocalized(@"Full reset to a brand-new device"),
+				@"bcn_trash_outline_24", @"trash",
+				^{ [SCIDeviceMenu presentWipeConfirmFrom:sciTopVC()]; }),
+		]
+	}, @{
+		@"header": SCILocalized(@"Apple attestation"),
+		@"footer": SCILocalized(@"Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on."),
+		@"rows": @[
+			[SCISetting switchCellWithTitle:SCILocalized(@"Block Apple device attestation") subtitle:SCILocalized(@"Stop the hardware attestation that links the device") defaultsKey:@"sci_devicespoof_block_devicecheck" requiresRestart:YES],
+		]
+	}, @{
+		@"rows": @[
+			[SCISetting switchCellWithTitle:SCILocalized(@"Show button on login screen") subtitle:SCILocalized(@"Floating Device ID button while signed out") defaultsKey:@"sci_devicespoof_login_button" requiresRestart:YES],
+		]
+	}]
+	];
+	deviceIDCell.whatsNewID = @"ui_deviceid";
+	return deviceIDCell;
+}
 
 + (SCISetting *)advancedNavCell {
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Advanced")
@@ -47,11 +98,15 @@
 											]
 										},
 										@{
+											@"rows": @[
+												[self deviceIDNavCell],
+											]
+										},
+										@{
 											@"header": SCILocalized(@"Advanced experimental features"),
 											@"footer": SCILocalized(@"Toggle hidden Instagram experiments. Some may not work on every account or IG version."),
 											@"rows": @[
 												[self experimentalEntryCell],
-
 											]
 										}]
 				];

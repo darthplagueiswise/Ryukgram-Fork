@@ -1,8 +1,9 @@
-// Messages-only mode — no-op the tab creators we don't want, force inbox at launch.
+// Messages-only mode — trim unwanted tabs, force inbox at launch, add inbox-header shortcuts.
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 #import "../../SCIChrome.h"
+#import "../../SCIURLOpener.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -140,9 +141,10 @@ static BOOL sciMsgOnlyHideSearch(void) {
 
 %end
 
-// Floating settings gear is parented to IG's nav header so it inherits the header's
-// blur, z-order, and scroll-collapse animation.
-static const void *kSCIMsgOnlyBtnKey = &kSCIMsgOnlyBtnKey;
+// Inbox-header shortcuts, parented to IG's nav header so they collapse with it:
+// Activity (the news tab is gone in messages-only) + a gear when the tab bar is hidden.
+static const void *kSCIMsgOnlyNewsKey = &kSCIMsgOnlyNewsKey;
+static const void *kSCIMsgOnlyGearKey = &kSCIMsgOnlyGearKey;
 
 static UIView *sciFindInboxHeaderView(UIView *root) {
     if (!root) return nil;
@@ -154,71 +156,109 @@ static UIView *sciFindInboxHeaderView(UIView *root) {
     return nil;
 }
 
+// IG buries its trailing buttons inside zero-frame wrappers; recurse for the
+// UIButtons in the header's right third, sorted left→right in header space.
+static NSArray<UIView *> *sciHeaderTrailingButtons(UIView *header, NSArray<UIView *> *skip) {
+    NSMutableArray<UIView *> *out = [NSMutableArray array];
+    NSMutableArray *stack = [NSMutableArray arrayWithObject:header];
+    while (stack.count) {
+        UIView *v = stack.lastObject;
+        [stack removeLastObject];
+        if (v != header && ![skip containsObject:v]
+            && [v isKindOfClass:[UIButton class]] && !CGRectIsEmpty(v.bounds)
+            && CGRectGetMinX([v convertRect:v.bounds toView:header]) > header.bounds.size.width * 0.6) {
+            [out addObject:v];
+        }
+        for (UIView *s in v.subviews) [stack addObject:s];
+    }
+    [out sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        CGFloat xa = CGRectGetMinX([a convertRect:a.bounds toView:header]);
+        CGFloat xb = CGRectGetMinX([b convertRect:b.bounds toView:header]);
+        return xa < xb ? NSOrderedAscending : (xa > xb ? NSOrderedDescending : NSOrderedSame);
+    }];
+    return out;
+}
+
+// Mirror IG's scroll-collapse by matching a reference button's effective alpha + hidden.
+static void sciMirrorHeaderChrome(UIView *btn, UIView *ref, UIView *header) {
+    if (!ref) { btn.alpha = 1.0; btn.hidden = NO; return; }
+    CGFloat eff = 1.0;
+    BOOL hidden = NO;
+    for (UIView *v = ref; v && v != header; v = v.superview) {
+        if (v.hidden) hidden = YES;
+        eff *= v.alpha;
+    }
+    btn.alpha = eff;
+    btn.hidden = hidden;
+}
+
+static SCIChromeButton *sciEnsureHeaderButton(UIView *header, const void *key, NSString *resource,
+                                              CGFloat pt, CGFloat diameter, id target, SEL action) {
+    SCIChromeButton *btn = objc_getAssociatedObject(header, key);
+    if (btn && btn.superview == header) return btn;
+    btn = [[SCIChromeButton alloc] initWithSymbol:@"circle" pointSize:pt diameter:diameter];
+    [btn setIconResource:resource pointSize:pt];
+    btn.iconTint = [UIColor labelColor];
+    btn.bubbleColor = [UIColor clearColor];
+    btn.translatesAutoresizingMaskIntoConstraints = YES;
+    [btn addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:btn];
+    objc_setAssociatedObject(header, key, btn, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return btn;
+}
+
 %hook IGDirectInboxViewController
 
 - (void)viewDidLayoutSubviews {
     %orig;
     UIViewController *vc = (UIViewController *)self;
-    if (!sciMsgOnlyHideTabBar() || !vc.isViewLoaded) return;
+    if (!sciMsgOnly() || !vc.isViewLoaded) return;
 
     UIView *header = sciFindInboxHeaderView(vc.view);
     if (!header) return;
 
-    SCIChromeButton *btn = objc_getAssociatedObject(header, kSCIMsgOnlyBtnKey);
-    if (!btn || btn.superview != header) {
-        btn = [[SCIChromeButton alloc] initWithSymbol:@"gearshape"
-                                            pointSize:18
-                                             diameter:32];
-        btn.iconTint = [UIColor labelColor];
-        btn.bubbleColor = [UIColor clearColor];
-        btn.translatesAutoresizingMaskIntoConstraints = YES;
-        [btn addTarget:self action:@selector(sciMsgOnlyOpenSettings)
-              forControlEvents:UIControlEventTouchUpInside];
-        [header addSubview:btn];
-        objc_setAssociatedObject(header, kSCIMsgOnlyBtnKey, btn, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    SCIChromeButton *news = sciEnsureHeaderButton(header, kSCIMsgOnlyNewsKey, @"bcn_heart_outline_24", 24, 40,
+                                                  self, @selector(sciMsgOnlyOpenActivity));
+    SCIChromeButton *gear = sciMsgOnlyHideTabBar()
+        ? sciEnsureHeaderButton(header, kSCIMsgOnlyGearKey, @"ig_icon_settings_outline_24", 24, 40,
+                                self, @selector(sciMsgOnlyOpenSettings))
+        : nil;
 
-    // IG buries its trailing buttons inside a zero-frame wrapper UIView; recurse
-    // to find the rightmost UIButton, then mirror its Y + effective alpha so we
-    // collapse with the rest of IG's chrome on scroll.
-    UIView *anchor = nil;
-    CGRect anchorInHeader = CGRectZero;
-    NSMutableArray *stack = [NSMutableArray arrayWithObject:header];
-    while (stack.count) {
-        UIView *v = stack.lastObject;
-        [stack removeLastObject];
-        if (v != header && v != btn
-            && [v isKindOfClass:[UIButton class]]
-            && !CGRectIsEmpty(v.bounds)) {
-            CGRect r = [v convertRect:v.bounds toView:header];
-            if (CGRectGetMinX(r) > header.bounds.size.width * 0.6
-                && (!anchor || CGRectGetMidX(r) > CGRectGetMidX(anchorInHeader))) {
-                anchor = v;
-                anchorInHeader = r;
-            }
-        }
-        for (UIView *s in v.subviews) [stack addObject:s];
-    }
+    UIView *ref = sciHeaderTrailingButtons(header, gear ? @[news, gear] : @[news]).lastObject;
+    CGRect refFrame = ref ? [ref convertRect:ref.bounds toView:header] : CGRectZero;
 
-    CGFloat side = 32;
-    CGFloat y = anchor ? CGRectGetMidY(anchorInHeader) - side * 0.5
-                       : (header.bounds.size.height - side) * 0.5;
-    btn.frame = CGRectMake(12, y, side, side);
-
-    if (anchor) {
-        CGFloat eff = 1.0;
-        BOOL hidden = NO;
-        for (UIView *v = anchor; v && v != header; v = v.superview) {
-            if (v.hidden) hidden = YES;
-            eff *= v.alpha;
-        }
-        btn.alpha = eff;
-        btn.hidden = hidden;
-    } else {
-        btn.alpha = 1.0;
-        btn.hidden = NO;
+    CGFloat side = 40, x = 12;
+    CGFloat y = ref ? CGRectGetMidY(refFrame) - side * 0.5 : (header.bounds.size.height - side) * 0.5;
+    for (SCIChromeButton *btn in @[ gear ?: NSNull.null, news ]) {
+        if (![btn isKindOfClass:[SCIChromeButton class]]) continue;
+        btn.frame = CGRectMake(x, y, side, side);
+        sciMirrorHeaderChrome(btn, ref, header);
+        [header bringSubviewToFront:btn];
+        x += side + 4;
     }
-    [header bringSubviewToFront:btn];
+}
+
+%new - (void)sciMsgOnlyOpenActivity {
+    UIViewController *inbox = (UIViewController *)self;
+    UIViewController *p = inbox;
+    while (p && ![p isKindOfClass:%c(IGTabBarController)]) p = p.parentViewController;
+    if (!p) return;
+
+    Ivar mgrIv = class_getInstanceVariable([p class], "_viewControllerManager");
+    id mgr = mgrIv ? object_getIvar(p, mgrIv) : nil;
+    SEL sel = @selector(activityFeedViewController);
+    UIViewController *feed = [mgr respondsToSelector:sel] ? ((id(*)(id, SEL))objc_msgSend)(mgr, sel) : nil;
+    if (!feed) return;
+
+    UINavigationController *nav = inbox.navigationController;
+    if (!nav) return;
+    if ([nav.viewControllers containsObject:feed]) { [nav popToViewController:feed animated:YES]; return; }
+    if (feed.navigationController && feed.navigationController != nav) {
+        [feed willMoveToParentViewController:nil];
+        [feed.view removeFromSuperview];
+        [feed removeFromParentViewController];
+    }
+    [nav pushViewController:feed animated:YES];
 }
 
 %new - (void)sciMsgOnlyOpenSettings {

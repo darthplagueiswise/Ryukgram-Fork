@@ -24,17 +24,15 @@ static const unsigned long long kSCISnapWarnBytes = 50ULL * 1024 * 1024;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.title = SCILocalized(@"Snapshots");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.allowsMultipleSelectionDuringEditing = YES;
-	self.tableView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
 	[self.view addSubview:self.tableView];
 
 	[self reloadFromStore];
@@ -151,7 +149,6 @@ static const unsigned long long kSCISnapWarnBytes = 50ULL * 1024 * 1024;
 - (UITableViewCell *)recordingCellForRow:(NSInteger)row tableView:(UITableView *)tv {
 	NSString *rid = row == 0 ? @"rec" : @"cap";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:rid];
 	cell.detailTextLabel.numberOfLines = 0;
 	cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
@@ -189,7 +186,6 @@ static const unsigned long long kSCISnapWarnBytes = 50ULL * 1024 * 1024;
 - (UITableViewCell *)compareCellForRow:(NSInteger)row tableView:(UITableView *)tv {
 	static NSString *rid = @"cmp";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:rid];
 	cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 	cell.imageView.image = nil;
@@ -278,6 +274,23 @@ static const unsigned long long kSCISnapWarnBytes = 50ULL * 1024 * 1024;
 
 - (void)recordToggled:(UISwitch *)sw {
 	[[NSUserDefaults standardUserDefaults] setBool:sw.isOn forKey:@"profile_analyzer_record_snapshots"];
+	// Archive the existing scan now rather than waiting for the next run.
+	if (sw.isOn) [self archiveCurrentScanIfNew];
+}
+
+- (void)archiveCurrentScanIfNew {
+	SCIProfileAnalyzerSnapshot *cur = [SCIProfileAnalyzerStorage currentSnapshotForUserPK:self.userPK];
+	if (!cur.scanDate) return;
+
+	SCIProfileAnalyzerSnapshotMeta *newest = [SCIProfileAnalyzerStorage snapshotHistoryForUserPK:self.userPK].firstObject;
+	if (newest && fabs([newest.scanDate timeIntervalSinceDate:cur.scanDate]) < 1.0) return;   // already saved
+
+	NSInteger cap = (NSInteger)[SCIUtils getDoublePref:@"profile_analyzer_snapshot_cap"];
+	[SCIProfileAnalyzerStorage appendSnapshotToHistory:cur forUserPK:self.userPK capacity:cap];
+	[self reloadFromStore];
+	[self refreshBarButtons];
+	SCINotifySuccess(SCI_NOTIF_ANALYZER_DONE, SCILocalized(@"Snapshot saved"),
+	                 SCILocalized(@"Your current scan was archived"));
 }
 
 - (void)promptCapacity {

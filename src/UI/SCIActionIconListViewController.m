@@ -15,8 +15,6 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
     self.title = SCILocalized(@"Action button icon");
     self.sources = [SCIActionIcon overridableSources];
 }
@@ -56,7 +54,6 @@
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *kID = @"SCIActionIconRow";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kID];
-	SCIUIKit26ConfigureTableCell(cell);
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:kID];
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;

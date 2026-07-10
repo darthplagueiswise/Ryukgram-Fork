@@ -9,19 +9,6 @@
 
 @end
 
-static BOOL SCIIsWordmarkMenuCommand(NSDictionary *props) {
-	return [props[@"defaultsKey"] isEqualToString:@"sci_ig_wordmark_variant"];
-}
-
-static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fallback) {
-	if ([value isEqualToString:@"off"]) return SCILocalized(@"Default");
-	if ([value isEqualToString:@"1a"]) return SCILocalized(@"Wordmark 1");
-	if ([value isEqualToString:@"1a_alt"]) return SCILocalized(@"Wordmark 1A");
-	if ([value isEqualToString:@"1b"]) return SCILocalized(@"Wordmark 2");
-	if ([value isEqualToString:@"1b_alt"]) return SCILocalized(@"Wordmark 2A");
-	return fallback ?: @"";
-}
-
 ///
 
 @implementation SCISetting
@@ -30,11 +17,11 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 
 - (instancetype)initWithType:(SCITableCell)type {
 	self = [super init];
-
+	
 	if (self) {
 		self.type = type;
 	}
-
+	
 	return self;
 }
 
@@ -46,7 +33,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 							   icon:(nullable SCISymbol *)icon
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellStatic];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
 	setting.icon = icon;
@@ -62,7 +49,7 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 							  url:(NSString *)url
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellLink];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
 	setting.icon = icon;
@@ -77,13 +64,13 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 							  url:(NSString *)url
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellLink];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
-
+	
 	setting.imageUrl = [NSURL URLWithString:imageUrl];
 	setting.url = [NSURL URLWithString:url];
-
+	
 	return setting;
 }
 
@@ -94,11 +81,11 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 						defaultsKey:(NSString *)defaultsKey
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellSwitch];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
 	setting.defaultsKey = defaultsKey;
-
+	
 	return setting;
 }
 
@@ -108,12 +95,12 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 					requiresRestart:(BOOL)requiresRestart
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellSwitch];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
 	setting.defaultsKey = defaultsKey;
 	setting.requiresRestart = requiresRestart;
-
+	
 	return setting;
 }
 
@@ -155,17 +142,17 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 					   singularLabel:(NSString *)singularLabel
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellStepper];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
 	setting.defaultsKey = defaultsKey;
-
+	
 	setting.min = min;
 	setting.max = max;
 	setting.step = step;
 	setting.label = label;
 	setting.singularLabel = singularLabel;
-
+	
 	return setting;
 }
 
@@ -177,13 +164,13 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 							 action:(void (^)(void))action
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellButton];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
-
+	
 	setting.icon = icon;
 	setting.action = action;
-
+	
 	return setting;
 }
 
@@ -211,46 +198,46 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 							 menu:(UIMenu *)menu
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellMenu];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
-
+	
 	setting.baseMenu = menu;
-
+	
 	return setting;
 }
 
 // MARK: - + navigationCellWithTitle
 
 + (instancetype)navigationCellWithTitle:(NSString *)title
-						   subtitle:(NSString *)subtitle
-							   icon:(nullable SCISymbol *)icon
+							   subtitle:(NSString *)subtitle
+								   icon:(nullable SCISymbol *)icon
 							navSections:(NSArray *)navSections
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellNavigation];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
-
+	
 	setting.icon = icon;
 	setting.navSections = navSections;
-
+	
 	return setting;
 }
 
 + (instancetype)navigationCellWithTitle:(NSString *)title
-						   subtitle:(NSString *)subtitle
-							   icon:(nullable SCISymbol *)icon
-					 viewController:(UIViewController *)viewController
+							   subtitle:(NSString *)subtitle
+								   icon:(nullable SCISymbol *)icon
+						 viewController:(UIViewController *)viewController
 {
 	SCISetting *setting = [[self alloc] initWithType:SCITableCellNavigation];
-
+	
 	setting.title = title;
 	setting.subtitle = subtitle;
-
+	
 	setting.icon = icon;
 	setting.navViewController = viewController;
-
+	
 	return setting;
 }
 
@@ -275,65 +262,30 @@ static NSString *SCIWordmarkDisplayTitleForValue(NSString *value, NSString *fall
 		}
 
 		UICommand *child = obj;
-		NSDictionary *props = [child.propertyList isKindOfClass:NSDictionary.class] ? child.propertyList : nil;
-		NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:props[@"defaultsKey"]];
-		NSString *value = [props[@"value"] isKindOfClass:NSString.class] ? props[@"value"] : nil;
-		BOOL isWordmark = SCIIsWordmarkMenuCommand(props);
-		NSString *displayTitle = isWordmark ? SCIWordmarkDisplayTitleForValue(value, child.title) : child.title;
-		// Icon-only wordmark rows: a single space (not @"") keeps a stable text
-		// baseline so the selected row still lays out its image next to the
-		// checkmark instead of collapsing it away.
-		NSString *menuTitle = isWordmark ? @" " : (child.title ?: @"");
 
-		UICommand *command = [UICommand commandWithTitle:menuTitle
-										   image:child.image
-									  action:child.action
-								propertyList:child.propertyList];
+		NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:child.propertyList[@"defaultsKey"]];
 
-		if (value.length && [value isEqualToString:saved]) {
-			command.state = UIMenuElementStateOn;
+		UICommand *command = [UICommand commandWithTitle:child.title
+												   image:child.image
+												  action:child.action
+											propertyList:child.propertyList];
+		
+		if ([child.propertyList[@"value"] isEqualToString:saved]) {
+			command.state = YES;
 
-			if (![props[@"noTitle"] boolValue]) {
-				[button setImage:nil forState:UIControlStateNormal];
-				[button setTitle:displayTitle forState:UIControlStateNormal];
-				button.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-				button.titleLabel.numberOfLines = 1;
-				if (button.configuration) {
-					UIButtonConfiguration *cfg = button.configuration;
-					cfg.title = displayTitle;
-					cfg.image = nil;
-					cfg.titleLineBreakMode = NSLineBreakByTruncatingTail;
-					button.configuration = cfg;
-				}
-			}
+			// noTitle: submenu entries keyed to another pref must not clobber
+			// the button's value title.
+			if (![child.propertyList[@"noTitle"] boolValue])
+				[button setTitle:command.title forState:UIControlStateNormal];
 		}
 		else {
-			command.state = UIMenuElementStateOff;
+			command.state = NO;
 		}
-
+		
 		[children addObject:command];
 	}
 
-	// iOS 26 morphing menus draw native separators between *inline sections*, not
-	// between flat actions. Wrap each leaf command in its own single-item inline
-	// group so the system renders a divider between every option (no manual
-	// drawing). Nested submenus are already grouped, so we keep them as-is.
-	NSMutableArray<UIMenuElement *> *sectioned = [NSMutableArray arrayWithCapacity:children.count];
-	for (UIMenuElement *element in children) {
-		if ([element isKindOfClass:UICommand.class]) {
-			[sectioned addObject:[UIMenu menuWithTitle:@""
-												 image:nil
-											identifier:nil
-											   options:UIMenuOptionsDisplayInline
-											  children:@[element]]];
-		} else {
-			[sectioned addObject:element];
-		}
-	}
-
-	UIMenuOptions options = submenu.options;
-	if (@available(iOS 15.0, *)) options |= UIMenuOptionsSingleSelection;
-	return [UIMenu menuWithTitle:submenu.title image:nil identifier:nil options:options children:sectioned];
+	return [UIMenu menuWithTitle:submenu.title image:nil identifier:nil options:submenu.options children:children];
 }
 
 @end

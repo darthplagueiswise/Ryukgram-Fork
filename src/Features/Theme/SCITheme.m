@@ -105,9 +105,27 @@ static CGFloat SCIClamp01(CGFloat value) {
 }
 
 + (BOOL)isTweakSurface:(UIResponder *)responder {
+	// Class names are obfuscated at build (SCI* -> _xxx); match ownership by defining
+	// image instead — every RyukGram class lives in our dylib.
+	static const char *ownImage;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ ownImage = class_getImageName([self class]); });
+	if (!ownImage) return NO;
+
+	// Verdict memoized on the Class — stable, so the responder walk drops to assoc lookups.
+	static const void *cacheKey = &cacheKey;
 	for (UIResponder *r = responder; r; r = r.nextResponder) {
-		const char *name = class_getName(r.class);
-		if (name && name[0] == 'S' && name[1] == 'C' && name[2] == 'I') return YES;
+		Class cls = [r class];
+		NSNumber *cached = objc_getAssociatedObject(cls, cacheKey);
+		BOOL owned;
+		if (cached) {
+			owned = cached.boolValue;
+		} else {
+			const char *img = class_getImageName(cls);
+			owned = img == ownImage || (img && strcmp(img, ownImage) == 0);
+			objc_setAssociatedObject(cls, cacheKey, @(owned), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		}
+		if (owned) return YES;
 	}
 
 	return NO;

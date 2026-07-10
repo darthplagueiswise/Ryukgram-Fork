@@ -658,6 +658,7 @@ static void sciVoiceMeta(id media, double *dur, NSArray **wave) {
 		if (!*wave) {
 			id w = sciIvar(cur, "_averageVolume") ?: sciIvar(cur, "_waveformData") ?:
 				   sciIvar(cur, "_waveform") ?: sciIvar(cur, "_amplitudes") ?:
+				   sciIvar(cur, "_voiceReply_waveform") ?: sciIvar(cur, "_audio_waveform") ?:
 				   sciKVC(cur, @"waveform") ?: sciKVC(cur, @"waveformData") ?: sciKVC(cur, @"averageVolume");
 			if ([w isKindOfClass:NSArray.class]) *wave = w;
 		}
@@ -683,6 +684,26 @@ static void sciVoiceMeta(id media, double *dur, NSArray **wave) {
 }
 
 #pragma mark - Snapshot
+
+// Never prompt in the log; "always_ask" resolves to highest.
+static SCIVideoQuality sciPreferredVideoQuality(void) {
+	NSString *q = [SCIUtils getStringPref:@"default_video_quality"];
+	if ([q isEqualToString:@"medium"]) return SCIVideoQualityMedium;
+	if ([q isEqualToString:@"low"]) return SCIVideoQualityLowest;
+	return SCIVideoQualityHighest;
+}
+
+// Widest-res photo candidates; the IGPhoto sits in one of a few slots.
+static NSArray<NSDictionary *> *sciPhotoCandidatesFromMedia(id media, NSString **outDisplay) {
+	if (outDisplay) *outDisplay = nil;
+	if (!media) return @[];
+	id photo = sciIvar(media, "_photo_photo")
+		?: sciIvar(sciIvar(media, "_permanentMedia_permanentMedia"), "_photo_photo")
+		?: sciIvar(sciIvar(media, "_visualMedia"), "_photo_photo")
+		?: sciIvar(media, "_photo") ?: sciIvar(media, "_image");
+	if (!photo) return @[];
+	return sciVisualPhotoCandidates(photo, outDisplay);
+}
 
 static NSDictionary *sciBuildSnapshot(id message, NSString *ownerHint) {
 	NSString *sid = sciSidFromMessage(message);
@@ -799,6 +820,7 @@ static NSDictionary *sciBuildSnapshot(id message, NSString *ownerHint) {
 			}
 		}
 
+		BOOL haveVideoSource = NO;
 		if (kind == SCIDeletedMessageKindVideo) {
 			id permanent = sciIvar(media, "_permanentMedia_permanentMedia");
 			id visual = sciIvar(media, "_visualMedia");
@@ -813,31 +835,15 @@ static NSDictionary *sciBuildSnapshot(id message, NSString *ownerHint) {
 				video = sciIvar(visual, "_video_video") ?: sciIvar(visual, "_video");
 				overlay = overlay ?: sciIvar(visual, "_video_overlayPhoto") ?: sciIvar(visual, "_overlayPhoto");
 			}
+			if (!video) video = sciIvar(media, "_video_video");
 
-			NSData *manifest = video ? sciIvar(video, "_dashManifestData") : nil;
-			if ([manifest isKindOfClass:NSData.class] && manifest.length) {
-				NSString *xml = [[NSString alloc] initWithData:manifest encoding:NSUTF8StringEncoding];
-				NSArray<SCIDashRepresentation *> *reps = [SCIDashParser parseManifest:xml];
-				SCIDashRepresentation *bestV = [SCIDashParser bestVideoFromRepresentations:reps];
-				SCIDashRepresentation *bestA = [SCIDashParser bestAudioFromRepresentations:reps];
-
-				if (bestV.url.absoluteString.length) {
-					mediaURL = bestV.url.absoluteString;
-					mediaScore = 100;
-				}
-				if (bestA.url.absoluteString.length) snap[@"audio_url"] = bestA.url.absoluteString;
-			}
-
-			if (!mediaURL.length && video) {
-				for (NSString *iv in @[@"_broadcastURL", @"_subtitleURL", @"_playableURL"]) {
-					id v = sciIvar(video, iv.UTF8String);
-					if ([v isKindOfClass:NSURL.class]) {
-						mediaURL = [(NSURL *)v absoluteString];
-						mediaScore = 90;
-						break;
-					}
-				}
-			}
+			// DASH highest + _allVideoURLs + broadcast/playable; never the thumbnail.
+			NSString *audioDash = nil, *primary = nil;
+			NSArray<NSDictionary *> *vcands = video ? sciVisualVideoCandidates(video, &audioDash, &primary) : @[];
+			if (primary.length) { mediaURL = primary; mediaScore = 100; }
+			if (audioDash.length) snap[@"audio_url"] = audioDash;
+			if (vcands.count) snap[@"media_candidates"] = vcands;
+			haveVideoSource = vcands.count > 0;
 
 			if (overlay) {
 				NSString *m = nil, *t = nil;
@@ -850,7 +856,20 @@ static NSDictionary *sciBuildSnapshot(id message, NSString *ownerHint) {
 			}
 		}
 
-		sciScanURLs(media, 5, &mediaURL, &mediaScore, &thumbURL, &thumbScore, kind == SCIDeletedMessageKindVoice ? @"playableAudioURL" : @"media");
+		if (kind == SCIDeletedMessageKindPhoto) {
+			NSString *disp = nil;
+			NSArray<NSDictionary *> *pc = sciPhotoCandidatesFromMedia(media, &disp);
+			if (disp.length) { mediaURL = disp; mediaScore = 130; }
+			if (pc.count) snap[@"media_candidates"] = pc;
+		}
+
+		// A video with no stream must not adopt its own thumbnail as the blob — route stray URLs to thumb.
+		if (kind == SCIDeletedMessageKindVideo && !haveVideoSource) {
+			NSString *dump = nil; int ds = 0;
+			sciScanURLs(media, 5, &dump, &ds, &thumbURL, &thumbScore, @"thumbnail");
+		} else {
+			sciScanURLs(media, 5, &mediaURL, &mediaScore, &thumbURL, &thumbScore, kind == SCIDeletedMessageKindVoice ? @"playableAudioURL" : @"media");
+		}
 		}  // !visualHandled
 	}
 
@@ -1301,7 +1320,7 @@ static NSArray<NSDictionary *> *sciVisualVideoCandidates(id video, NSString **ou
 	if ([manifest isKindOfClass:NSData.class] && manifest.length) {
 		NSString *xml = [[NSString alloc] initWithData:manifest encoding:NSUTF8StringEncoding];
 		NSArray<SCIDashRepresentation *> *reps = [SCIDashParser parseManifest:xml];
-		SCIDashRepresentation *bestV = [SCIDashParser bestVideoFromRepresentations:reps];
+		SCIDashRepresentation *bestV = [SCIDashParser representationForQuality:sciPreferredVideoQuality() fromRepresentations:reps];
 		SCIDashRepresentation *bestA = [SCIDashParser bestAudioFromRepresentations:reps];
 		if (bestV.url.absoluteString.length) { primary = bestV.url.absoluteString; [out addObject:@{@"url": primary, @"auth": @NO}]; }
 		if (bestA.url.absoluteString.length && outAudio) *outAudio = bestA.url.absoluteString;
@@ -1863,7 +1882,8 @@ static void sciSaveSnapshotForMessage(id msgObj, NSString *sid, NSString *owner,
 	if (!snap) return;
 
 	NSString *senderPk = snap[@"sender_pk"];
-	if (senderPk.length && [senderPk isEqualToString:owner]) return;
+	BOOL outgoing = senderPk.length && [senderPk isEqualToString:owner];
+	if (outgoing && ![SCIUtils getBoolPref:@"keep_my_deleted_messages"]) return;
 
 	SCIDeletedMessageKind kind = (SCIDeletedMessageKind)[snap[@"kind"] integerValue];
 	NSString *txt = snap[@"text"];

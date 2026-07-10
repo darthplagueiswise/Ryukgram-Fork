@@ -35,7 +35,7 @@
 	self.thumbnailView.contentMode = UIViewContentModeScaleAspectFill;
 	self.thumbnailView.clipsToBounds = YES;
 	self.thumbnailView.layer.cornerRadius = 6;
-	self.thumbnailView.backgroundColor = SCIUIKit26PanelFillColor();
+	self.thumbnailView.backgroundColor = [UIColor secondarySystemBackgroundColor];
 	[self.contentView addSubview:self.thumbnailView];
 
 	self.typeIcon = [[UIImageView alloc] init];

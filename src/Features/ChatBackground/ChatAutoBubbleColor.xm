@@ -36,6 +36,13 @@ static NSHashTable<UIView *> *sciLiveBubbles(void) {
 	return t;
 }
 
+static NSHashTable<UIView *> *sciLiveTextViews(void) {
+	static NSHashTable *t;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ t = [NSHashTable weakObjectsHashTable]; });
+	return t;
+}
+
 // Per-view thread resolution (cached on the thread VC) so recycled cells never carry a
 // previous chat's background into a new one.
 static const void *kSCIVCThreadIDKey = &kSCIVCThreadIDKey;
@@ -662,6 +669,8 @@ static BOOL sciBubbleEligibleForRecolor(UIView *bubble, NSString *asset) {
 static void sciHandleTextView(UIView *tv) {
 	if (objc_getAssociatedObject(tv, kSCITextApplyingKey)) return;
 
+	[sciLiveTextViews() addObject:tv];
+
 	UIView *bubble = sciEnclosingBubble(tv) ?: sciParentTextBubble(tv);
 	NSString *asset = bubble ? sciBubbleAssetForView(bubble) : nil;
 
@@ -932,5 +941,7 @@ static void sciHookEventBubble(NSString *mangled, NSString *bare) {
 			[bubble setNeedsLayout];
 			sciApplyBubbleFallback(bubble, NO);
 		}
+		// A theme toggle doesn't re-set the text, so re-drive touched text views directly.
+		for (UIView *tv in [sciLiveTextViews() allObjects]) sciHandleTextView(tv);
 	}];
 }

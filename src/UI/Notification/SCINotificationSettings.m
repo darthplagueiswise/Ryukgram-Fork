@@ -1,5 +1,6 @@
 #import "SCINotificationSettings.h"
 #import "SCINotification.h"
+#import "SCINotificationPositionViewController.h"
 #import "../../Settings/SCISymbol.h"
 
 @implementation SCINotificationSettings
@@ -23,13 +24,6 @@
         @[SCILocalized(@"Colorful"), @"colorful"],
         @[SCILocalized(@"Glow"),     @"glow"],
         @[SCILocalized(@"Island"),   @"island"],
-    ]];
-}
-
-+ (UIMenu *)positionMenu {
-    return [self sciMenuWithKey:@"notif_position" entries:@[
-        @[SCILocalized(@"Top"),    @"top"],
-        @[SCILocalized(@"Bottom"), @"bottom"],
     ]];
 }
 
@@ -164,9 +158,10 @@
                 [SCISetting menuCellWithTitle:SCILocalized(@"Style")
                                       subtitle:SCILocalized(@"Minimal: flat blur. Colorful: tinted by tone. Glow: colored halo. Island: dynamic-island capsule.")
                                           menu:[self styleMenu]],
-                [SCISetting menuCellWithTitle:SCILocalized(@"Position")
-                                      subtitle:SCILocalized(@"Top slides down, bottom slides up.")
-                                          menu:[self positionMenu]],
+                [SCISetting navigationCellWithTitle:SCILocalized(@"Position")
+                                           subtitle:SCILocalized(@"Drag the pill to position it")
+                                               icon:nil
+                                     viewController:[SCINotificationPositionViewController new]],
                 [SCISetting menuCellWithTitle:SCILocalized(@"Stack size")
                                       subtitle:SCILocalized(@"How many pills can show at once before queueing.")
                                           menu:[self maxVisibleMenu]],

@@ -37,8 +37,7 @@
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Set passcode");
-	SCIUIKit26ConfigureViewController(self);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
 
 	self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
@@ -71,8 +70,9 @@
 - (void)buildSegmentControl {
 	self.segmentContainer = UIView.new;
 	self.segmentContainer.translatesAutoresizingMaskIntoConstraints = NO;
-	self.segmentContainer.backgroundColor = UIColor.clearColor;
-	SCIUIKit26ConfigureGlassView(self.segmentContainer, 14.0, YES);
+	self.segmentContainer.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+	self.segmentContainer.layer.cornerRadius = 14.0;
+	self.segmentContainer.layer.cornerCurve = kCACornerCurveContinuous;
 
 	self.lengthSegment = [[UISegmentedControl alloc] initWithItems:@[
 		SCILocalized(@"4 digits"),
@@ -81,7 +81,6 @@
 
 	self.lengthSegment.translatesAutoresizingMaskIntoConstraints = NO;
 	self.lengthSegment.selectedSegmentIndex = self.codeLength == 6 ? 1 : 0;
-	SCIUIKit26ConfigureSegmentedControl(self.lengthSegment);
 
 	if (@available(iOS 13.0, *)) {
 		self.lengthSegment.selectedSegmentTintColor = [self primaryColor];

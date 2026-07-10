@@ -1,7 +1,6 @@
 #import "SCISettingsSections.h"
 #import "../../Features/Experimental/SCIExperimentalGuard.h"
 
-
 @implementation SCITweakSettings (Section_Experimental)
 
 // MARK: - Advanced experimental features
@@ -89,46 +88,30 @@
 			@"rows": @[]
 		},
 		@{
-			@"header": SCILocalized(@"Instagram UI"),
+			@"header": SCILocalized(@"Notes & QuickSnap"),
 			@"rows": @[
 				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Friends Maps")
-											   subtitle:SCILocalized(@"Shows the map entry in Direct Notes")
-											defaultsKey:@"igt_directnotes_friendmap"];
-					s.icon = [SCISymbol symbolWithName:@"friends_maps" color:UIColor.labelColor];
-					s;
+					SCISetting *qs = [SCISetting switchCellWithTitle:SCILocalized(@"QuickSnap (Instants)")
+														   subtitle:SCILocalized(@"Forces the QuickSnap / Instants surface on in feed, inbox, stories, and notes tray")
+														defaultsKey:@"igt_quicksnap"];
+					qs.disabled = YES;
+					qs;
 				}),
-				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Stories Tray")
-											   subtitle:@""
-											defaultsKey:@"sci_story_tray"
-										requiresRestart:NO];
-					s.icon = [SCISymbol symbolWithName:@"story_tray" color:UIColor.labelColor];
-					s;
-				}),
-				({
-					SCISetting *s = [SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header")
-											subtitle:@""
-												menu:[self menus][@"ig_wordmark_variant"]];
-					s.icon = [SCISymbol symbolWithName:@"custom_feed_header" color:UIColor.labelColor];
-					s;
-				}),
-				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School")
-											   subtitle:@""
-											defaultsKey:@"sci_statusbar_oldschool"
-										requiresRestart:NO];
-					s.icon = [SCISymbol symbolWithName:@"statusbar_oldschool" color:UIColor.labelColor];
-					s;
-				}),
-				({
-					SCISetting *s = [SCISetting switchCellWithTitle:SCILocalized(@"Instagram Plus")
-									   subtitle:SCILocalized(@"Unlocks client-side IG+ benefits (custom lists, story extend/rewatch/superlikes, silent posts, bio font, pinned limit). Server side unchanged.")
-									defaultsKey:@"sci_force_igplus_all"
-									requiresRestart:YES];
-					s.icon = [SCISymbol symbolWithName:@"instagram_plus" color:UIColor.labelColor];
-					s;
-				}),
+				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Friend Map")
+									   subtitle:SCILocalized(@"Shows the friend map entry in Direct Notes")
+									defaultsKey:@"igt_directnotes_friendmap"],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Audio reply")
+									   subtitle:SCILocalized(@"Enables the audio-note reply type")
+									defaultsKey:@"igt_directnotes_audio_reply"],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Avatar reply")
+									   subtitle:SCILocalized(@"Enables the avatar reply type")
+									defaultsKey:@"igt_directnotes_avatar_reply"],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — GIFs & stickers reply")
+									   subtitle:SCILocalized(@"Enables GIF/sticker replies")
+									defaultsKey:@"igt_directnotes_gifs_reply"],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Direct Notes — Photo reply")
+									   subtitle:SCILocalized(@"Enables photo replies")
+									defaultsKey:@"igt_directnotes_photo_reply"],
 			]
 		},
 		@{

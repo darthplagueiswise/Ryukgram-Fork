@@ -1,5 +1,6 @@
-// Long-press a GIF in the native picker to favorite (pinned to top of grid)
-// or download it.
+// Long-press a picker GIF to favorite (pinned to top), copy its link, or download it.
+// Favorites inject into the picker; on tap we hand IG a model so the send builds, then
+// step aside so the message renders with IG's real model.
 
 #import <UIKit/UIKit.h>
 #import "../../Utils.h"
@@ -11,9 +12,15 @@
 #import "../../ActionButton/SCIMediaActions.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <substrate.h>
 
 static char kSCIGifFavLPKey;
 static char kSCIGifFavBadgeKey;
+
+static id sci_kv(id obj, NSString *key) {
+    if (!obj) return nil;
+    @try { return [obj valueForKey:key]; } @catch (__unused id e) { return nil; }
+}
 
 #pragma mark - Storage
 
@@ -52,17 +59,49 @@ BOOL sciGifFavToggleId(NSString *giphyId) {
     return nowFav;
 }
 
+#pragma mark - State
+
+// Hand IG our model only while a send is in flight; the render path must fall through
+// to IG's own model or the bubble goes blank.
+static NSString *gSendingPK;
+static __weak id gFetchService;
+static __weak id gLauncherSet;
+
 #pragma mark - VM <-> fav dict
 
-// Only pk + dimensions persist — picker VM URLs carry expiring giphy search
-// tokens, so playback URLs are always rebuilt canonical from the pk.
+static NSString *sci_cfgURL(id imageModel, NSString *cfgKey) {
+    @try {
+        id cfg = [imageModel valueForKey:cfgKey];
+        id u = cfg ? [cfg valueForKey:@"url"] : nil;
+        return [u isKindOfClass:[NSString class]] && [u length] ? u : nil;
+    } @catch (__unused id e) { return nil; }
+}
+
+// Capture rendition URLs off IG's model at favorite time; guessing from the id breaks when a rendition is missing.
 static NSDictionary *sci_favFromVM(id vm) {
     @try {
         NSString *pk = [vm valueForKey:@"pk"];
         if (![pk isKindOfClass:[NSString class]] || !pk.length) return nil;
         double w = [[vm valueForKey:@"width"] doubleValue];
         double h = [[vm valueForKey:@"height"] doubleValue];
-        return @{ @"pk": pk, @"w": @(w > 0 ? w : 200), @"h": @(h > 0 ? h : 200) };
+        NSMutableDictionary *fav = [@{ @"pk": pk } mutableCopy];
+        id im = nil;
+        @try { im = [vm valueForKey:@"imageModel"]; } @catch (__unused id e) {}
+        if (im) {
+            double iw = [[im valueForKey:@"width"] doubleValue];
+            double ih = [[im valueForKey:@"height"] doubleValue];
+            if (iw > 0) w = iw;
+            if (ih > 0) h = ih;
+            NSString *gif = sci_cfgURL(im, @"gifConfig");
+            NSString *mp4 = sci_cfgURL(im, @"mp4Config");
+            NSString *webp = sci_cfgURL(im, @"webpConfig");
+            if (gif) fav[@"gif"] = gif;
+            if (mp4) fav[@"mp4"] = mp4;
+            if (webp) fav[@"webp"] = webp;
+        }
+        fav[@"w"] = @(w > 0 ? w : 200);
+        fav[@"h"] = @(h > 0 ? h : 200);
+        return fav;
     } @catch (__unused id e) { return nil; }
 }
 
@@ -81,30 +120,59 @@ static id sci_buildFavModeConfig(Class cfgCls, NSString *urlStr) {
     return ((id(*)(id, SEL, id, double))objc_msgSend)([cfgCls alloc], cfgInit, urlStr, 0.0);
 }
 
-static id sci_vmFromFav(NSDictionary *fav) {
+// Prefer captured URLs; fall back to the legacy original for favs saved with the id only (e.g. from a comment).
+static void sci_favURLs(NSDictionary *fav, NSString **gif, NSString **mp4, NSString **webp, double *w, double *h) {
+    NSString *pk = fav[@"pk"];
+    *gif  = [fav[@"gif"]  isKindOfClass:[NSString class]] ? fav[@"gif"]
+        : [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.gif",  pk];
+    *mp4  = [fav[@"mp4"]  isKindOfClass:[NSString class]] ? fav[@"mp4"]
+        : [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.mp4",  pk];
+    *webp = [fav[@"webp"] isKindOfClass:[NSString class]] ? fav[@"webp"]
+        : [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.webp", pk];
+    *w = [fav[@"w"] doubleValue] ?: 200;
+    *h = [fav[@"h"] doubleValue] ?: 200;
+}
+
+static id sci_buildImageModel(NSDictionary *fav) {
     Class cfgCls = NSClassFromString(@"IGGiphyGIFModelModeConfig");
     Class imgCls = NSClassFromString(@"IGGiphyImageModel");
-    Class vmCls  = NSClassFromString(@"IGDirectAnimatedMediaViewModel");
-    if (!cfgCls || !imgCls || !vmCls) return nil;
-
-    NSString *pk = fav[@"pk"];
-    if (![pk isKindOfClass:[NSString class]] || !pk.length) return nil;
-    NSString *gif  = [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.gif",  pk];
-    NSString *mp4  = [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.mp4",  pk];
-    NSString *webp = [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.webp", pk];
-    double w = [fav[@"w"] doubleValue] ?: 200;
-    double h = [fav[@"h"] doubleValue] ?: 200;
-
+    if (!cfgCls || !imgCls) return nil;
+    NSString *gif, *mp4, *webp; double w, h;
+    sci_favURLs(fav, &gif, &mp4, &webp, &w, &h);
     id gifCfg  = sci_buildFavModeConfig(cfgCls, gif);
     id mp4Cfg  = sci_buildFavModeConfig(cfgCls, mp4);
     id webpCfg = sci_buildFavModeConfig(cfgCls, webp);
     if (!gifCfg && !mp4Cfg) return nil;
-
     SEL imgInit = @selector(initWithGifConfig:mp4Config:webpConfig:width:height:);
     if (![imgCls instancesRespondToSelector:imgInit]) return nil;
-    id imgModel = ((id(*)(id, SEL, id, id, id, double, double))objc_msgSend)(
+    return ((id(*)(id, SEL, id, id, id, double, double))objc_msgSend)(
         [imgCls alloc], imgInit, gifCfg, mp4Cfg, webpCfg, w, h);
+}
 
+// Sendable model: one image model keyed by NSNumber 1 (IG's shape); no videoModel/altText, they blocked the send.
+static id sci_buildGiphyModel(NSDictionary *fav) {
+    Class gifModelCls = NSClassFromString(@"IGGiphyGIFModel");
+    NSString *pk = fav[@"pk"];
+    if (!gifModelCls || ![pk isKindOfClass:[NSString class]] || !pk.length) return nil;
+    id imgModel = sci_buildImageModel(fav);
+    if (!imgModel) return nil;
+    NSDictionary *imageModels = @{ @1: imgModel };
+    SEL mInit = @selector(initWithIdentifier:imageModels:videoModel:verifiedUsername:isSticker:isAvatarSticker:isAIGenerated:title:expressionId:gifCategory:creationTs:altText:);
+    if (![gifModelCls instancesRespondToSelector:mInit]) return nil;
+    return ((id(*)(id, SEL, id, id, id, id, BOOL, BOOL, BOOL, id, id, id, id, id))objc_msgSend)(
+        [gifModelCls alloc], mInit,
+        pk, imageModels, nil, nil, NO, NO, NO, nil, nil, nil, nil, nil);
+}
+
+static id sci_vmFromFav(NSDictionary *fav) {
+    Class vmCls = NSClassFromString(@"IGDirectAnimatedMediaViewModel");
+    if (!vmCls) return nil;
+    NSString *pk = fav[@"pk"];
+    if (![pk isKindOfClass:[NSString class]] || !pk.length) return nil;
+    NSString *gif, *mp4, *webp; double w, h;
+    sci_favURLs(fav, &gif, &mp4, &webp, &w, &h);
+    id imgModel = sci_buildImageModel(fav);
+    if (!imgModel) return nil;
     SEL vmInit = NSSelectorFromString(@"initWithPk:url:cacheIdentifier:width:height:format:backgroundColor:isSticker:imageModel:animatedImageResolver:previewImageSpecifier:creatorUsername:altText:");
     if (![vmCls instancesRespondToSelector:vmInit]) return nil;
     return ((id(*)(id, SEL, id, id, id, double, double, long long, id, BOOL, id, id, id, id, id))objc_msgSend)(
@@ -112,6 +180,67 @@ static id sci_vmFromFav(NSDictionary *fav) {
         pk, [NSURL URLWithString:mp4], mp4,
         w, h, 2 /*format*/, nil, NO,
         imgModel, nil, nil, nil, @"");
+}
+
+#pragma mark - Media priming
+
+// Prime the giphy media like IG's search does so the sent bubble has it; the message plays the MP4, so prime video too.
+static void sci_primeMedia(NSDictionary *fav) {
+    id model = sci_buildGiphyModel(fav);
+    if (!model) return;
+    id svc = gFetchService;
+    if (!svc) {
+        Class fc = NSClassFromString(@"IGDirectInstamadilloMediaAssetFetchService")
+                 ?: NSClassFromString(@"_TtC42IGDirectInstamadilloMediaAssetFetchService42IGDirectInstamadilloMediaAssetFetchService");
+        if (fc && gLauncherSet && [fc instancesRespondToSelector:@selector(initWithLauncherSet:)])
+            svc = ((id(*)(id, SEL, id))objc_msgSend)([fc alloc], @selector(initWithLauncherSet:), gLauncherSet);
+    }
+    id session = [SCIUtils activeUserSession];
+    SEL sel = @selector(fetchAnimatedMediaWithGiphyModel:userSession:completionHandler:);
+    if (!svc || !session || ![svc respondsToSelector:sel]) return;
+    void(^noop)(NSURL *, NSData *, CGSize, NSError *) = ^(NSURL *u, NSData *d, CGSize s, NSError *e) {};
+    ((void(*)(id, SEL, id, id, id))objc_msgSend)(svc, sel, model, session, noop);
+
+    NSString *gif, *mp4, *webp; double w, h;
+    sci_favURLs(fav, &gif, &mp4, &webp, &w, &h);
+    NSURL *vu = mp4.length ? [NSURL URLWithString:mp4] : nil;
+    SEL vsel = @selector(fetchVideoWithVideoURL:orVideoResolver:userSession:completionHandler:);
+    if (vu && [svc respondsToSelector:vsel]) {
+        void(^vnoop)(id, id) = ^(id asset, id err) {};
+        ((void(*)(id, SEL, id, id, id, id))objc_msgSend)(svc, vsel, vu, nil, session, vnoop);
+    }
+}
+
+#pragma mark - Deleted-gif warning
+
+static NSString *sci_favMP4URLForPK(NSString *pk) {
+    NSArray<NSDictionary *> *list = sci_favList();
+    NSUInteger idx = sci_favIndexOfPK(list, pk);
+    if (idx != NSNotFound) {
+        NSDictionary *fav = list[idx];
+        if ([fav[@"mp4"] isKindOfClass:[NSString class]]) return fav[@"mp4"];
+        if ([fav[@"gif"] isKindOfClass:[NSString class]]) return fav[@"gif"];
+    }
+    return [NSString stringWithFormat:@"https://media.giphy.com/media/%@/giphy.mp4", pk];
+}
+
+// A deleted giphy id sends nothing; HEAD-probe so we can surface an error toast.
+static void sci_warnIfFavGone(NSString *pk) {
+    if (!pk.length) return;
+    NSURL *u = [NSURL URLWithString:sci_favMP4URLForPK(pk)];
+    if (!u) return;
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:u];
+    req.HTTPMethod = @"HEAD";
+    req.timeoutInterval = 12;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *resp, NSError *err) {
+        NSInteger code = [resp isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)resp statusCode] : 0;
+        if (!err && code < 400) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            SCINotifyError(SCI_NOTIF_GIF_FAVORITE,
+                           SCILocalized(@"Favorite GIF unavailable"),
+                           SCILocalized(@"This GIF may have been removed. Long-press it to unfavorite."));
+        });
+    }] resume];
 }
 
 #pragma mark - Favorite badge
@@ -195,6 +324,7 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
         [sheet addAction:[UIAlertAction actionWithTitle:toggleTitle
                                                   style:(isFav ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault)
                                                 handler:^(UIAlertAction *_) {
+            BOOL added = !isFav;
             if (isFav) {
                 [list removeObjectAtIndex:existing];
                 SCINotifySuccess(SCI_NOTIF_GIF_FAVORITE, SCILocalized(@"Removed from favorites"), nil);
@@ -203,9 +333,26 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
                 SCINotifySuccess(SCI_NOTIF_GIF_FAVORITE, SCILocalized(@"Added to favorites"), nil);
             }
             sci_favSave(list);
-            SEL upd = NSSelectorFromString(@"performUpdatesAnimated:completion:");
-            if ([adapter respondsToSelector:upd])
-                ((void(*)(id, SEL, BOOL, id))objc_msgSend)(adapter, upd, YES, nil);
+            // performUpdates diffs by giphy id and collides with the replaced picker
+            // cell (hangs on a spinner); hard reload rebuilds so the image fetches.
+            SEL reload = NSSelectorFromString(@"reloadDataWithCompletion:");
+            void (^done)(BOOL) = ^(BOOL finished) {
+                if (added && cv.numberOfSections > 0)
+                    [cv scrollToItemAtIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]
+                               atScrollPosition:UICollectionViewScrollPositionTop animated:YES];
+            };
+            if ([adapter respondsToSelector:reload])
+                ((void(*)(id, SEL, id))objc_msgSend)(adapter, reload, done);
+        }]];
+
+        NSString *pk = fav[@"pk"];
+        [sheet addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copy GIF link")
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction *_) {
+            if (!pk.length) return;
+            [UIPasteboard generalPasteboard].string =
+                [NSString stringWithFormat:@"https://giphy.com/gifs/%@", pk];
+            SCINotifySuccess(SCI_NOTIF_COPY_GIF, SCILocalized(@"GIF link copied"), nil);
         }]];
     }
 
@@ -252,7 +399,29 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
 
 @end
 
-#pragma mark - Hook
+#pragma mark - Hooks
+
+// Sticker-tray GIF tab: prime the media, mark the send in flight, warn if the gif is gone.
+%hook IGDirectStoryStickerViewControllerAdapter
+
+- (void)gifViewController:(id)gifVC didSelectAnimatedMediaModel:(id)vm gifCategory:(id)cat stickerContentSize:(CGSize)size {
+    NSString *pk = nil;
+    @try { pk = [vm valueForKey:@"pk"]; } @catch (__unused id e) {}
+    BOOL isFav = [pk isKindOfClass:[NSString class]] && sciGifFavContains(pk);
+    @try { if (!gLauncherSet) gLauncherSet = [gifVC valueForKey:@"launcherSet"]; } @catch (__unused id e) {}
+    if (isFav) {
+        NSArray<NSDictionary *> *list = sci_favList();
+        NSUInteger idx = sci_favIndexOfPK(list, pk);
+        if (idx != NSNotFound) sci_primeMedia(list[idx]);
+    }
+    NSString *prevSend = gSendingPK;
+    if (isFav) gSendingPK = pk;
+    %orig;
+    gSendingPK = prevSend;
+    if (isFav) sci_warnIfFavGone(pk);
+}
+
+%end
 
 %hook IGDirectGIFViewController
 
@@ -266,6 +435,8 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
 
     NSArray<NSDictionary *> *favs = sci_favList();
     if (!favs.count) return orig;
+
+    @try { if (!gLauncherSet) gLauncherSet = [self valueForKey:@"launcherSet"]; } @catch (__unused id e) {}
 
     NSMutableArray *out = [NSMutableArray arrayWithCapacity:orig.count + favs.count];
     NSMutableSet *favPKs = [NSMutableSet set];
@@ -302,8 +473,7 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
 
 %end
 
-// Star badge on favorited cells. Global adapter hook, but exits unless the
-// collection view carries our GIF-picker long-press marker.
+// Star badge on favorited cells; exits unless the CV carries our picker marker.
 %hook IGListAdapter
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
@@ -316,3 +486,49 @@ static void sci_setFavBadge(UICollectionViewCell *cell, BOOL show) {
 }
 
 %end
+
+// Pinned-only favs have an empty store: while a send is in flight hand IG a built model, else fall through to IG.
+%hook IGGiphyDataStore
+
+- (id)giphyModelForGiphyId:(id)giphyId {
+    id model = %orig;
+    if (model) return model;
+    NSString *pk = [giphyId isKindOfClass:[NSString class]] ? giphyId : nil;
+    if (pk && [pk isEqualToString:gSendingPK]) {
+        NSArray<NSDictionary *> *list = sci_favList();
+        NSUInteger idx = sci_favIndexOfPK(list, pk);
+        if (idx != NSNotFound) return sci_buildGiphyModel(list[idx]);
+    }
+    return model;
+}
+
+%end
+
+// The send is forwarded here — bracket it so the getter above supplies a model.
+%hook IGDirectThreadViewStickersController
+
+- (void)storyStickerViewControllerAdapter:(id)adapter didSelectAnimatedMedia:(id)media {
+    NSString *ident = sci_kv(media, @"identifier");
+    BOOL isFav = [ident isKindOfClass:[NSString class]] && sciGifFavContains(ident);
+    NSString *prev = gSendingPK;
+    if (isFav) gSendingPK = ident;
+    %orig;
+    gSendingPK = prev;
+}
+
+%end
+
+// Capture IG's media fetch service so we can prime favorites through it.
+static void (*sci_orig_fetchAnimatedMedia)(id, SEL, id, id, id);
+static void sci_fetchAnimatedMedia(id self, SEL _cmd, id giphyModel, id session, id completion) {
+    gFetchService = self;
+    sci_orig_fetchAnimatedMedia(self, _cmd, giphyModel, session, completion);
+}
+
+%ctor {
+    Class fetchCls = NSClassFromString(@"IGDirectInstamadilloMediaAssetFetchService")
+                   ?: NSClassFromString(@"_TtC42IGDirectInstamadilloMediaAssetFetchService42IGDirectInstamadilloMediaAssetFetchService");
+    SEL sel = @selector(fetchAnimatedMediaWithGiphyModel:userSession:completionHandler:);
+    if (fetchCls && [fetchCls instancesRespondToSelector:sel])
+        MSHookMessageEx(fetchCls, sel, (IMP)sci_fetchAnimatedMedia, (IMP *)&sci_orig_fetchAnimatedMedia);
+}

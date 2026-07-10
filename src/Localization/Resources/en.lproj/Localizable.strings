@@ -92,6 +92,7 @@
 "App Icon" = "App Icon";
 "Audio page" = "Audio page";
 "Auto-reveals sensitive media" = "Auto-reveals sensitive media";
+"Block surveys" = "Block surveys";
 "Blocks the viewer-count heartbeat so the broadcaster doesn't see you — you also won't see the viewer count" = "Blocks the viewer-count heartbeat so the broadcaster doesn't see you — you also won't see the viewer count";
 "Browser" = "Browser";
 "Change the app icon from the bundled icons" = "Change the app icon from the bundled icons";
@@ -146,6 +147,8 @@
 "Hides the meta ai buttons/functionality within the app" = "Hides the meta ai buttons/functionality within the app";
 "Hides the notes tray in the DM inbox" = "Hides the notes tray in the DM inbox";
 "Hides the suggested broadcast channels in direct messages" = "Hides the suggested broadcast channels in direct messages";
+"Hide DM search suggestions" = "Hide DM search suggestions";
+"Removes suggested accounts and channels from direct message search" = "Removes suggested accounts and channels from direct message search";
 "Hides the trending searches under the explore search bar" = "Hides the trending searches under the explore search bar";
 "Hold down on the Instagram logo to change the app icon" = "Hold down on the Instagram logo to change the app icon";
 "Keeps the iOS 26 scroll-edge blur visible instead of letting it fade out" = "Keeps the iOS 26 scroll-edge blur visible instead of letting it fade out";
@@ -179,6 +182,7 @@
 "Solid color" = "Solid color";
 "Sponsored posts in main, contextual, video, and chaining feeds" = "Sponsored posts in main, contextual, video, and chaining feeds";
 "Sponsored posts on the explore grid" = "Sponsored posts on the explore grid";
+"Stops Instagram's in-app surveys and feedback prompts" = "Stops Instagram's in-app surveys and feedback prompts";
 "Sponsored reels in the sundial feed" = "Sponsored reels in the sundial feed";
 "Start" = "Start";
 "Story ads and sponsored entries in the story tray" = "Story ads and sponsored entries in the story tray";
@@ -220,6 +224,8 @@
 "Download to Photos" = "Download to Photos";
 "Save with music" = "Save with music";
 "Gallery with music" = "Gallery with music";
+"Save image (no music)" = "Save image (no music)";
+"Gallery image (no music)" = "Gallery image (no music)";
 "Photo with music" = "Photo with music";
 "Enabled" = "Enabled";
 "Expand" = "Expand";
@@ -253,7 +259,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 "Action button" = "Action button";
-"Adds 'View profile picture' and 'View cover' to story tray long-press menus" = "Adds 'View profile picture' and 'View cover' to story tray long-press menus";
+"Adds 'Profile picture' to story tray long-press menus" = "Adds 'Profile picture' to story tray long-press menus";
 "Adds a RyukGram action button under each feed post with download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "Adds a RyukGram action button under each feed post with download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below.";
 "Choose Instagram's default feed or force the Following feed" = "Choose Instagram's default feed or force the Following feed";
 "Main feed" = "Main feed";
@@ -308,6 +314,8 @@
 "Long-press a GIF in the picker to pin it — favorites show first" = "Long-press a GIF in the picker to pin it — favorites show first";
 "Added to favorites" = "Added to favorites";
 "Removed from favorites" = "Removed from favorites";
+"Favorite GIF unavailable" = "Favorite GIF unavailable";
+"This GIF may have been removed. Long-press it to unfavorite." = "This GIF may have been removed. Long-press it to unfavorite.";
 "Failed to build GIF model" = "Failed to build GIF model";
 "GIF link copied" = "GIF link copied";
 "Image" = "Image";
@@ -325,6 +333,14 @@
 
 "Adds a RyukGram action button above the reel sidebar with view-cover/download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "Adds a RyukGram action button above the reel sidebar with view-cover/download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below.";
 "Always show progress scrubber" = "Always show progress scrubber";
+"Auto-scroll reels" = "Auto-scroll reels";
+"Speed, seek and auto-scroll controls" = "Speed, seek and auto-scroll controls";
+"Enabled controls appear when you hold the ⋯ or audio button on a reel." = "Enabled controls appear when you hold the ⋯ or audio button on a reel.";
+"Seek controls" = "Seek controls";
+"Auto-scroll control" = "Auto-scroll control";
+"Seek" = "Seek";
+"Custom seek step" = "Custom seek step";
+"Enter the number of seconds to skip" = "Enter the number of seconds to skip";
 "Change what happens when you tap on a reel" = "Change what happens when you tap on a reel";
 "Confirm reel refresh" = "Confirm reel refresh";
 "Custom speed" = "Custom speed";
@@ -345,7 +361,6 @@
 "Hides the repost button on the reels sidebar" = "Hides the repost button on the reels sidebar";
 "Hides the top navigation bar when watching reels" = "Hides the top navigation bar when watching reels";
 "Hiding" = "Hiding";
-"Hold the 3-dot on any reel to open speed picker" = "Hold the 3-dot on any reel to open speed picker";
 "IG default" = "IG default";
 "Limits" = "Limits";
 "Limits the amount of reels available to scroll at any given time, and prevents refreshing" = "Limits the amount of reels available to scroll at any given time, and prevents refreshing";
@@ -480,6 +495,35 @@
 // Settings → Stories tab                                                   //
 //////////////////////////////////////////////////////////////////////////////
 
+"Arrange overlay buttons" = "Arrange overlay buttons";
+"Overlay layout" = "Overlay layout";
+"Drag to position the buttons" = "Drag to position the buttons";
+"Drag the buttons onto the story. The dimmed strip is the reply bar." = "Drag the buttons onto the story. The dimmed strip is the reply bar.";
+"Send message" = "Send message";
+
+"Pinned" = "Pinned";
+"Liked the story" = "Liked the story";
+"Default (recent first)" = "Default (recent first)";
+"Liked first" = "Liked first";
+"Load all viewers" = "Load all viewers";
+"%lu viewers" = "%lu viewers";
+"Viewer pinned" = "Viewer pinned";
+"Viewer unpinned" = "Viewer unpinned";
+"Pin a viewer" = "Pin a viewer";
+"Pin order" = "Pin order";
+"Pin this viewer?" = "Pin this viewer?";
+"Filter, sort & pin viewers" = "Filter, sort & pin viewers";
+"Adds controls to your story viewers list" = "Adds controls to your story viewers list";
+"Add by username, remove, reorder" = "Add by username, remove, reorder";
+"Pinned viewers (%lu)" = "Pinned viewers (%lu)";
+"Viewers list" = "Viewers list";
+"Settings are saved and reused next time." = "Settings are saved and reused next time.";
+"Tick several to combine them. Pinned viewers always stay on top and ignore these filters." = "Tick several to combine them. Pinned viewers always stay on top and ignore these filters.";
+"Pinned viewers" = "Pinned viewers";
+"Pin" = "Pin";
+"On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list." = "On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list.";
+"Username or raw user PK. Pinned viewers always stay at the top of your story viewers list." = "Username or raw user PK. Pinned viewers always stay at the top of your story viewers list.";
+
 "Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below." = "Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below.";
 "Adds a speaker button to the story overlay to unmute/mute audio. Also available in the 3-dot menu" = "Adds a speaker button to the story overlay to unmute/mute audio. Also available in the 3-dot menu";
 "Adds the eye button to story overlays. Off keeps seen blocking on without the button" = "Adds the eye button to story overlays. Off keeps seen blocking on without the button";
@@ -607,6 +651,8 @@
 "Makes view-once messages behave like normal visual messages (loopable/pauseable)" = "Makes view-once messages behave like normal visual messages (loopable/pauseable)";
 "Note actions" = "Note actions";
 "Preserves messages that others unsend" = "Preserves messages that others unsend";
+"Keep my deleted messages" = "Keep my deleted messages";
+"Also preserves messages you unsend yourself" = "Also preserves messages you unsend yourself";
 "Prevents accidental swipe-up activation of vanish mode" = "Prevents accidental swipe-up activation of vanish mode";
 "Quick list button in chats" = "Quick list button in chats";
 "Removes the audio call button from DM thread header" = "Removes the audio call button from DM thread header";
@@ -734,9 +780,20 @@
 // Settings → Messages tab                                                  //
 //////////////////////////////////////////////////////////////////////////////
 
+"In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor" = "In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor";
+"Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect." = "Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect.";
+
+"Send image as drawing" = "Send image as drawing";
+
+"Bypass \"You can't send messages\"" = "Bypass \"You can't send messages\"";
 "Custom chat background" = "Custom chat background";
+"DM Save button" = "DM Save button";
 "Incoming calls stay silent — no ring, no screen, no notification" = "Incoming calls stay silent — no ring, no screen, no notification";
+"Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share" = "Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share";
 "Messages" = "Messages";
+"Removes the blocked composer banner and restores the text input in restricted threads" = "Removes the blocked composer banner and restores the text input in restricted threads";
+"Reroute native Save" = "Reroute native Save";
+"Save media" = "Save media";
 "Silence incoming calls" = "Silence incoming calls";
 "Threads" = "Threads";
 "Use your own images as chat backgrounds" = "Use your own images as chat backgrounds";
@@ -789,6 +846,18 @@
 "Lets you swipe to switch between navigation bar tabs" = "Lets you swipe to switch between navigation bar tabs";
 "Messages only" = "Messages only";
 "Messages-only mode" = "Messages-only mode";
+"Automatic schedule" = "Automatic schedule";
+"DM-only client, hide tabs, auto schedule" = "DM-only client, hide tabs, auto schedule";
+"Start time" = "Start time";
+"End time" = "End time";
+"Switch into Messages-only on its own during a time window" = "Switch into Messages-only on its own during a time window";
+"Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends." = "Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends.";
+"Active now · ends %@" = "Active now · ends %@";
+"Next window starts %@" = "Next window starts %@";
+"Messages-only starting" = "Messages-only starting";
+"Messages-only ending" = "Messages-only ending";
+"Your Messages-only window has started. Restart Instagram to switch to DM-only." = "Your Messages-only window has started. Restart Instagram to switch to DM-only.";
+"Your Messages-only window has ended. Restart Instagram to bring back the other tabs." = "Your Messages-only window has ended. Restart Instagram to bring back the other tabs.";
 "Navigation" = "Navigation";
 "Swipe between tabs" = "Swipe between tabs";
 "Tab the app opens to. Ignored when Messages-only is on" = "Tab the app opens to. Ignored when Messages-only is on";
@@ -844,7 +913,7 @@
 "Shows an alert before sending an emoji reaction on a note" = "Shows an alert before sending an emoji reaction on a note";
 "Shows an alert before sending an emoji reaction on a story" = "Shows an alert before sending an emoji reaction on a story";
 "Shows an alert before sending an emoji reaction on an Instant" = "Shows an alert before sending an emoji reaction on an Instant";
-"Shows an alert before taking a photo with the Instants camera" = "Shows an alert before taking a photo with the Instants camera";
+"Shows an alert before sending a photo or video from the Instants camera" = "Shows an alert before sending a photo or video from the Instants camera";
 "Shows an alert before tapping to switch to the next/previous Instant" = "Shows an alert before tapping to switch to the next/previous Instant";
 "Shows an alert to confirm before sending a voice message" = "Shows an alert to confirm before sending a voice message";
 "Shows an alert to confirm before toggling vanish mode" = "Shows an alert to confirm before toggling vanish mode";
@@ -890,6 +959,7 @@
 "Biometric" = "Biometric";
 "Change passcode" = "Change passcode";
 "Chat hidden" = "Chat hidden";
+"Chat unhidden" = "Chat unhidden";
 "Chat locked" = "Chat locked";
 "Chat unlocked" = "Chat unlocked";
 "Choose a code you'll remember." = "Choose a code you'll remember.";
@@ -911,7 +981,13 @@
 "every use" = "every use";
 "Every use" = "Every use";
 "Hidden chats" = "Hidden chats";
+"Hidden chats hidden" = "Hidden chats hidden";
+"Hidden chats revealed" = "Hidden chats revealed";
+"👁 Shown in the inbox · Tap to hide" = "👁 Shown in the inbox · Tap to hide";
+" · shown in inbox" = " · shown in inbox";
 "Hide chat" = "Hide chat";
+"Unhide chat" = "Unhide chat";
+"Hold name to reveal" = "Hold name to reveal";
 "Hide message preview" = "Hide message preview";
 "Hide this chat?" = "Hide this chat?";
 "Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts." = "Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts.";
@@ -932,6 +1008,7 @@
 "Long-press a chat to lock it individually" = "Long-press a chat to lock it individually";
 "Long-press a DM thread → Hide chat to add it here. Hidden chats are filtered out of the inbox until you remove them from this list." = "Long-press a DM thread → Hide chat to add it here. Hidden chats are filtered out of the inbox until you remove them from this list.";
 "Long-press a DM to add" = "Long-press a DM to add";
+"Long-press the account name atop the DM inbox to show or hide your hidden chats" = "Long-press the account name atop the DM inbox to show or hide your hidden chats";
 "Longest idle window" = "Longest idle window";
 "Manage locked chats" = "Manage locked chats";
 "Master switch. Turn off to disable every lock target without losing per-target configuration." = "Master switch. Turn off to disable every lock target without losing per-target configuration.";
@@ -961,6 +1038,8 @@
 "Re-lock on background" = "Re-lock on background";
 "re-lock on bg" = "re-lock on bg";
 "Recently hidden" = "Recently hidden";
+"Prompt before holding the inbox name reveals hidden chats" = "Prompt before holding the inbox name reveals hidden chats";
+"Reveal hidden chats" = "Reveal hidden chats";
 "Recently locked" = "Recently locked";
 "Redact RyukGram buttons from screenshots, screen recordings, and mirroring" = "Redact RyukGram buttons from screenshots, screen recordings, and mirroring";
 "Remove screenshot alert" = "Remove screenshot alert";
@@ -1253,6 +1332,15 @@
 // inside DM threads.                                                       //
 //////////////////////////////////////////////////////////////////////////////
 
+"Free" = "Free";
+"Remove background" = "Remove background";
+"No subject found" = "No subject found";
+"No stickers yet" = "No stickers yet";
+"Send drawing" = "Send drawing";
+"Send my drawing" = "Send my drawing";
+"Paste image / sticker" = "Paste image / sticker";
+"Tap any sticker on your keyboard\nto add it to your drawing" = "Tap any sticker on your keyboard\nto add it to your drawing";
+
 "  %lu votes · avg %.0f%%  " = "  %lu votes · avg %.0f%%  ";
 "%@ can't be converted" = "%@ can't be converted";
 "%@ unsent a message" = "%@ unsent a message";
@@ -1372,14 +1460,18 @@
 "Change default" = "Change default";
 "Chat Backgrounds" = "Chat Backgrounds";
 "Choose an image used when no chat override exists" = "Choose an image used when no chat override exists";
-"Choose Image" = "Choose Image";
 "Clear default" = "Clear default";
 "Couldn't import image" = "Couldn't import image";
+"Adjust settings" = "Adjust settings";
+"Choose Media" = "Choose Media";
+"Converting GIF" = "Converting GIF";
+"Couldn't import video" = "Couldn't import video";
+"Crop & resize" = "Crop & resize";
+"Crop & trim" = "Crop & trim";
 "Custom Chat Background" = "Custom Chat Background";
 "Default background" = "Default background";
 "Delete library images, default background, and chat overrides" = "Delete library images, default background, and chat overrides";
 "Dim in dark mode" = "Dim in dark mode";
-"Edit image settings" = "Edit image settings";
 "Enable custom backgrounds" = "Enable custom backgrounds";
 "Enter a username, chat name, or thread ID." = "Enter a username, chat name, or thread ID.";
 "Group" = "Group";
@@ -1479,7 +1571,7 @@
 "Turn every theme option off and restart" = "Turn every theme option off and restart";
 "Turn Location Services on in Settings → Privacy to use your current location." = "Turn Location Services on in Settings → Privacy to use your current location.";
 "Type an emoji to use as the note bubble icon." = "Type an emoji to use as the note bubble icon.";
-"View profile picture" = "View profile picture";
+"Profile picture" = "Profile picture";
 
 //////////////////////////////////////////////////////////////////////////////
 //                            PROFILE ANALYZER                              //
@@ -1499,6 +1591,7 @@
 "%lu followers · %lu following" = "%lu followers · %lu following";
 "%lu followers removed" = "%lu followers removed";
 "%lu of %lu" = "%lu of %lu";
+"%lu of %lu checks on" = "%lu of %lu checks on";
 "%lu saved · comparing against %@" = "%lu saved · comparing against %@";
 "(empty)" = "(empty)";
 "(no analyzer data)" = "(no analyzer data)";
@@ -1516,6 +1609,7 @@
 "Batch unfollow" = "Batch unfollow";
 "Batch unfollow finished" = "Batch unfollow finished";
 "Categories" = "Categories";
+"Checks" = "Checks";
 "Clear visited profiles" = "Clear visited profiles";
 "Compare next scan against" = "Compare next scan against";
 "Comparing against %@" = "Comparing against %@";
@@ -1553,6 +1647,9 @@
 "Mutual followers" = "Mutual followers";
 "Name: %@ → %@" = "Name: %@ → %@";
 "New followers" = "New followers";
+"NEW" = "NEW";
+"New first" = "New first";
+"New only" = "New only";
 "No active Instagram session found" = "No active Instagram session found";
 "No results" = "No results";
 "No scan yet" = "No scan yet";
@@ -1564,6 +1661,7 @@
 "Older snapshots beyond the limit are removed automatically" = "Older snapshots beyond the limit are removed automatically";
 "Older snapshots beyond this limit are deleted on the next scan." = "Older snapshots beyond this limit are deleted on the next scan.";
 "Pick what to remove. Snapshots clears the scan diffs and every recorded snapshot; visited profiles wipes the visit history." = "Pick what to remove. Snapshots clears the scan diffs and every recorded snapshot; visited profiles wipes the visit history.";
+"Pick which categories each scan computes. A disabled check is greyed out and skipped — it won't be calculated or shown." = "Pick which categories each scan computes. A disabled check is greyed out and skipped — it won't be calculated or shown.";
 "Posts" = "Posts";
 "Preferences" = "Preferences";
 "Previous scan" = "Previous scan";
@@ -1595,6 +1693,7 @@
 "Settings" = "Settings";
 "Since last scan" = "Since last scan";
 "Snapshot" = "Snapshot";
+"Snapshot saved" = "Snapshot saved";
 "Snapshots" = "Snapshots";
 "Snapshots let you archive each scan and pick which one new scans compare against. Track visits records every profile you open so you can review them here." = "Snapshots let you archive each scan and pick which one new scans compare against. Track visits records every profile you open so you can review them here.";
 "Sort" = "Sort";
@@ -1627,6 +1726,7 @@
 "You don't follow back" = "You don't follow back";
 "You follow them, they don't follow back" = "You follow them, they don't follow back";
 "You started following" = "You started following";
+"Your current scan was archived" = "Your current scan was archived";
 "You unfollowed" = "You unfollowed";
 "your previous scan" = "your previous scan";
 "“Previous scan” always measures against your last run. Pick a saved snapshot to compare against a fixed point in time instead." = "“Previous scan” always measures against your last run. Pick a saved snapshot to compare against a fixed point in time instead.";
@@ -2171,6 +2271,7 @@
 
 "Adds an extra shortcut button beside the create-post + button on the home top bar." = "Adds an extra shortcut button beside the create-post + button on the home top bar.";
 "All buttons" = "All buttons";
+"Instagram language" = "Instagram language";
 "Choose icon, reorder actions, and enable menu items" = "Choose icon, reorder actions, and enable menu items";
 "Choose the icon shown on the home top bar. Auto uses the selected action icon when only one action is enabled." = "Choose the icon shown on the home top bar. Auto uses the selected action icon when only one action is enabled.";
 "Configure button" = "Configure button";
@@ -2186,6 +2287,9 @@
 //                              NOTIFICATIONS                               //
 // Settings → Interface → Notifications + the universal pill / toast system //
 //////////////////////////////////////////////////////////////////////////////
+
+"Drag the pill to position it" = "Drag the pill to position it";
+"Drag the pill where you want it. Higher than center slides down, lower slides up." = "Drag the pill where you want it. Higher than center slides down, lower slides up.";
 
 "Notifications" = "Notifications";
 "Appearance" = "Appearance";
@@ -2259,6 +2363,12 @@
 "Share-sheet recipient pinned" = "Share-sheet recipient pinned";
 "Unsent message detected" = "Unsent message detected";
 "Reaction removed detected" = "Reaction removed detected";
+"%lu messages unsent" = "%lu messages unsent";
+"%lu reactions removed" = "%lu reactions removed";
+"%lu chats marked seen" = "%lu chats marked seen";
+"%lu stories marked seen" = "%lu stories marked seen";
+"%lu of your messages read" = "%lu of your messages read";
+"%lu notifications" = "%lu notifications";
 "Live comments toggled" = "Live comments toggled";
 "Custom GIF sent" = "Custom GIF sent";
 "GIF favorited / unfavorited" = "GIF favorited / unfavorited";
@@ -2366,18 +2476,159 @@
 "read your message" = "read your message";
 "Also track reads in group chats. Off by default — groups can be noisy" = "Also track reads in group chats. Off by default — groups can be noisy";
 "Refreshing…" = "Refreshing…";
-"Instagram UI" = "Instagram UI";
-"Maps" = "Maps";
-"Shows the map entry in Direct Notes" = "Shows the map entry in Direct Notes";
-"Stories Tray" = "Stories Tray";
-"Custom Feed Header" = "Custom Feed Header";
-"Wordmark 1" = "Wordmark 1";
-"Wordmark 1A" = "Wordmark 1A";
-"Wordmark 2" = "Wordmark 2";
-"Wordmark 2A" = "Wordmark 2A";
 
-"Friends Maps" = "Friends Maps";
+//////////////////////////////////////////////////////////////////////////////
+//                               DEVICE ID                                  //
+// Settings -> Advanced -> Device ID, and the login-screen Device ID button //
+//////////////////////////////////////////////////////////////////////////////
+"Roll a new fingerprint" = "Roll a new fingerprint";
+"New device fingerprint" = "New device fingerprint";
+"Roll new ID" = "Roll new ID";
+"Roll + clear IG data" = "Roll + clear IG data";
+"Generate fresh device identifiers" = "Generate fresh device identifiers";
+"Enter ID manually…" = "Enter ID manually…";
+"Manual device ID" = "Manual device ID";
+"Paste or type the UUID this device should report." = "Paste or type the UUID this device should report.";
+"Device ID set" = "Device ID set";
+"New fingerprint ready" = "New fingerprint ready";
+"Relaunch Instagram now so the new device identity applies from a clean start?" = "Relaunch Instagram now so the new device identity applies from a clean start?";
+"Copy current ID" = "Copy current ID";
+"Revert to my real device ID" = "Revert to my real device ID";
+"Restore the original, stop masking" = "Restore the original, stop masking";
+"Spoofing off" = "Spoofing off";
+"Relaunch now" = "Relaunch now";
+"Relaunch to apply" = "Relaunch to apply";
+"Clear device & relaunch" = "Clear device & relaunch";
+"Clear device & relaunch?" = "Clear device & relaunch?";
+"Clear & relaunch" = "Clear & relaunch";
+"Full reset to a brand-new device" = "Full reset to a brand-new device";
+"Device ID" = "Device ID";
+"Device identity" = "Device identity";
+"Masked" = "Masked";
+"Real" = "Real";
+"Show button on login screen" = "Show button on login screen";
+"Floating Device ID button while signed out" = "Floating Device ID button while signed out";
+"Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen." = "Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen.";
+"Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards." = "Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards.";
+"Rolls a fresh device ID, family device ID, vendor ID and clears the machine ID so Instagram re-registers as a new device. Or also wipe saved logins for a full reset." = "Rolls a fresh device ID, family device ID, vendor ID and clears the machine ID so Instagram re-registers as a new device. Or also wipe saved logins for a full reset.";
+"Apple attestation" = "Apple attestation";
+"Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on." = "Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on.";
+"Block Apple device attestation" = "Block Apple device attestation";
+"Stop the hardware attestation that links the device" = "Stop the hardware attestation that links the device";
+"Block Apple attestation: %@" = "Block Apple attestation: %@";
+"Attestation blocked" = "Attestation blocked";
+"Attestation allowed" = "Attestation allowed";
+"Roll + clear, then sign in fresh" = "Roll + clear, then sign in fresh";
+
+//////////////////////////////////////////////////////////////////////////
+//                         FOLLOW REQUESTS TRACKER                        //
+// Settings → Follow Requests Tracker                                     //
+//////////////////////////////////////////////////////////////////////////
+"Follow Requests Tracker" = "Follow Requests Tracker";
+"Follow Requests" = "Follow Requests";
+"Show follow requests" = "Show follow requests";
+"Check now" = "Check now";
+"Reset tracked data" = "Reset tracked data";
+"Enable tracker" = "Enable tracker";
+"Log requests and check outcomes" = "Log requests and check outcomes";
+"Logs follow requests you send and receive, and catches who cancels a request before you answer. All on-device." = "Logs follow requests you send and receive, and catches who cancels a request before you answer. All on-device.";
+"What to track" = "What to track";
+"Requests I send" = "Requests I send";
+"To private accounts" = "To private accounts";
+"Requests I receive" = "Requests I receive";
+"From people who want to follow you" = "From people who want to follow you";
+"Background check" = "Background check";
+"Check interval" = "Check interval";
+"How often to check for outcomes while the app is open. Also checks on launch and when you open the list." = "How often to check for outcomes while the app is open. Also checks on launch and when you open the list.";
+"Off (manual only)" = "Off (manual only)";
+"Every 15 minutes" = "Every 15 minutes";
+"Every 30 minutes" = "Every 30 minutes";
+"Every hour" = "Every hour";
+"Every 6 hours" = "Every 6 hours";
+"My request accepted" = "My request accepted";
+"A private account accepted you" = "A private account accepted you";
+"My request declined" = "My request declined";
+"No longer pending" = "No longer pending";
+"New request received" = "New request received";
+"Someone asked to follow you" = "Someone asked to follow you";
+"Request withdrawn" = "Request withdrawn";
+"Someone cancelled their request" = "Someone cancelled their request";
+"Sent by me" = "Sent by me";
+"Received" = "Received";
+"Sent" = "Sent";
+"Accepted" = "Accepted";
+"Rejected" = "Rejected";
+"Requested" = "Requested";
+"Approved" = "Approved";
+"Withdrawn" = "Withdrawn";
+"No follow requests tracked yet" = "No follow requests tracked yet";
+"Cancel requests" = "Cancel requests";
+"Delete %lu record(s) from history?" = "Delete %lu record(s) from history?";
+"Cancel %lu pending request(s)?" = "Cancel %lu pending request(s)?";
+"Follow back %lu account(s)?" = "Follow back %lu account(s)?";
+"Clear all tracked follow requests?" = "Clear all tracked follow requests?";
+"Reset tracked follow requests for this account?" = "Reset tracked follow requests for this account?";
+"Enable the tracker first" = "Enable the tracker first";
+"Checking…" = "Checking…";
+"%ld request(s) updated" = "%ld request(s) updated";
+"No changes" = "No changes";
+"Working…" = "Working…";
+"Follow request accepted" = "Follow request accepted";
+"%@ accepted your request" = "%@ accepted your request";
+"Follow request declined" = "Follow request declined";
+"%@ is no longer pending" = "%@ is no longer pending";
+"New follow request" = "New follow request";
+"%@ asked to follow you" = "%@ asked to follow you";
+"Follow request withdrawn" = "Follow request withdrawn";
+"%@ withdrew their request" = "%@ withdrew their request";
+"Follow requests log" = "Follow requests log";
+
+//////////////////////////////////////////////////////////////////////////////
+//                              INSTAGRAM PLUS                               //
+// Settings → General → Instagram Plus                                        //
+//////////////////////////////////////////////////////////////////////////////
+
 "Instagram Plus" = "Instagram Plus";
-"Forces all client-side Instagram Plus benefit getters" = "Forces all client-side Instagram Plus benefit getters";
-"Wordmark 3" = "Wordmark 3";
-"Wordmark 4" = "Wordmark 4";
+"Unlock Instagram's paid features" = "Unlock Instagram's paid features";
+"Turn on Instagram's paid subscriber features inside the app." = "Turn on Instagram's paid subscriber features inside the app.";
+"Instagram Plus is Instagram's paid subscription. These switches turn its features on inside the app. Some work completely. Others only reveal the option, because the content is loaded from Instagram's servers and still needs a real subscription, so they may show up empty or do nothing. Turn on what you want and tap Apply. If Instagram fails to launch three times in a row, these switches reset themselves." = "Instagram Plus is Instagram's paid subscription. These switches turn its features on inside the app. Some work completely. Others only reveal the option, because the content is loaded from Instagram's servers and still needs a real subscription, so they may show up empty or do nothing. Turn on what you want and tap Apply. If Instagram fails to launch three times in a row, these switches reset themselves.";
+"Turn everything on" = "Turn everything on";
+"Turn everything off" = "Turn everything off";
+"Reset Instagram Plus" = "Reset Instagram Plus";
+"Reset Instagram Plus?" = "Reset Instagram Plus?";
+"Turn every Instagram Plus feature off" = "Turn every Instagram Plus feature off";
+"Every Instagram Plus feature turns off and Instagram restarts." = "Every Instagram Plus feature turns off and Instagram restarts.";
+"Story peek" = "Story peek";
+"Hold a story in the tray to preview it without opening it." = "Hold a story in the tray to preview it without opening it.";
+"Story fonts" = "Story fonts";
+"Adds the subscriber fonts when you add text to a story." = "Adds the subscriber fonts when you add text to a story.";
+"Search story viewers" = "Search story viewers";
+"Search the list of people who viewed your story." = "Search the list of people who viewed your story.";
+"Viewer timestamps" = "Viewer timestamps";
+"Shows when each person viewed your story." = "Shows when each person viewed your story.";
+"Silent post to profile" = "Silent post to profile";
+"Share to your profile without notifying your followers." = "Share to your profile without notifying your followers.";
+"Silent post to highlights" = "Silent post to highlights";
+"Add to a highlight without notifying your followers." = "Add to a highlight without notifying your followers.";
+"Story rewatch" = "Story rewatch";
+"Rewatch a story right after it finishes." = "Rewatch a story right after it finishes.";
+"Story extend" = "Story extend";
+"Keep your story up longer than 24 hours." = "Keep your story up longer than 24 hours.";
+"Story spotlight" = "Story spotlight";
+"Boost your story to more viewers. Loads from Instagram, so it may not work." = "Boost your story to more viewers. Loads from Instagram, so it may not work.";
+"Story super likes" = "Story super likes";
+"Send super likes on stories. Loads from Instagram, so it may not work." = "Send super likes on stories. Loads from Instagram, so it may not work.";
+"Message peek" = "Message peek";
+"Hold a chat in the inbox to preview it." = "Hold a chat in the inbox to preview it.";
+"Chat fonts" = "Chat fonts";
+"Adds the subscriber fonts in direct messages." = "Adds the subscriber fonts in direct messages.";
+"Chat themes" = "Chat themes";
+"Unlocks the premium chat themes. Loads from Instagram, so it may not work." = "Unlocks the premium chat themes. Loads from Instagram, so it may not work.";
+"App icons" = "App icons";
+"Opens the alternate app icon picker." = "Opens the alternate app icon picker.";
+"Bio font" = "Bio font";
+"Use a subscriber font for your bio." = "Use a subscriber font for your bio.";
+"Custom story lists" = "Custom story lists";
+"Make lists to pick exactly who sees a story." = "Make lists to pick exactly who sees a story.";
+"More pinned posts" = "More pinned posts";
+"Pin more posts to the top of your profile." = "Pin more posts to the top of your profile.";

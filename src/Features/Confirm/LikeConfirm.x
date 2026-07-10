@@ -50,220 +50,177 @@ __attribute__((constructor)) static void _sciHookReelsLikeHandler(void) {
         MSHookMessageEx(meta, s2, (IMP)new_sciHandleTapComp, (IMP *)&orig_sciHandleTapComp);
 }
 
-#define CONFIRMPOSTLIKE(orig)                                                                    \
+#define CONFIRMPOSTLIKE_BLOCK(blk)                                                              \
     if ([SCIUtils getBoolPref:@"like_confirm"])                                                  \
-        [SCIUtils showConfirmation:^(void) { orig; } title:SCILocalized(@"Confirm like: Posts")]; \
-    else return orig;
+        [SCIUtils showConfirmation:blk title:SCILocalized(@"Confirm like: Posts")];               \
+    else blk();
 
-#define CONFIRMREELSLIKE(orig)                                                                    \
+#define CONFIRMREELSLIKE_BLOCK(blk)                                                              \
     if ([SCIUtils getBoolPref:@"like_confirm_reels"])                                             \
-        [SCIUtils showConfirmation:^(void) { orig; } title:SCILocalized(@"Confirm like: Reels")]; \
-    else return orig;
+        [SCIUtils showConfirmation:blk title:SCILocalized(@"Confirm like: Reels")];                \
+    else blk();
+
+// Feed double-tap-to-like has several entry points across surfaces / A-B; confirm on
+// all of them, guarded so one gesture through more than one only prompts once.
+static BOOL sciDblTapInFlight = NO;
+#define CONFIRMDBLTAP_BLOCK(blk)                                                                  \
+    if ([SCIUtils getBoolPref:@"like_confirm"] && !sciDblTapInFlight) {                            \
+        sciDblTapInFlight = YES;                                                                   \
+        [SCIUtils showConfirmation:^(void) { blk(); sciDblTapInFlight = NO; }                      \
+                     cancelHandler:^(void) { sciDblTapInFlight = NO; }                             \
+                             title:SCILocalized(@"Confirm like: Posts")];                          \
+    } else blk();
 
 // Liking posts
 %hook IGUFIButtonBarView
 - (void)_onLikeButtonPressed:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 - (void)_onLikeButtonPressed {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 %end
 %hook IGFeedPhotoView
 - (void)_onDoubleTap:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMDBLTAP_BLOCK(sciOrigBlk);
 }
 - (void)_onDoubleTap {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMDBLTAP_BLOCK(sciOrigBlk);
 }
 %end
-%hook IGVideoPlayerOverlayContainerView
-- (void)_handleDoubleTapGesture:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+%hook IGFeedItemPhotoCell
+- (void)feedPhotoDidDoubleTapToLike:(id)arg1 locationInfo:(id)arg2 {
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMDBLTAP_BLOCK(sciOrigBlk);
+}
+%end
+%hook _TtC33IGFeedCaptionDoubleTapLikeHandler33IGFeedCaptionDoubleTapLikeHandler
+- (void)animateHeartAndPerformDoubleTapLikeForMediaCell:(id)cell locationInMediaCell:(CGPoint)loc {
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMDBLTAP_BLOCK(sciOrigBlk);
+}
+%end
+%hook _TtC25IGModernFeedVideoOverlays33IGVideoPlayerOverlayContainerView
+- (void)handleDoubleTapGesture:(id)arg1 {
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 %end
 
 // Liking reels
 %hook IGSundialViewerVideoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 %end
 %hook IGSundialViewerPhotoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 - (void)swift_photoCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 %end
 %hook IGSundialViewerCarouselCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 - (void)carouselCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Reels")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMREELSLIKE_BLOCK(sciOrigBlk);
 }
 %end
 
 // Liking comments
 %hook IGCommentCellController
 - (void)commentCell:(id)arg1 didTapLikeButton:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 - (void)commentCell:(id)arg1 didTapLikedByButtonForUser:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 - (void)commentCellDidLongPressOnLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 - (void)commentCellDidEndLongPressOnLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 - (void)commentCellDidDoubleTap:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 %end
 %hook IGFeedItemPreviewCommentCell
-- (void)_didTapLikeButton {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
+- (void)didTapLikeButton {
+    void (^sciOrigBlk)(void) = ^{
+        %orig;
+    };
+    CONFIRMPOSTLIKE_BLOCK(sciOrigBlk);
 }
 %end
 
 // Story like/emoji confirm handled by SCIStoryInteractionPipeline.
-
-// DM like button
-%hook IGDirectThreadViewController
-- (void)_didTapLikeButton {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-            %orig;
-        } title:SCILocalized(@"Confirm like: Posts")];
-    } else {
-        return %orig;
-    }
-}
-%end

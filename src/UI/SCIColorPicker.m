@@ -38,7 +38,7 @@ static const void *kSCIColorPickerOnChange = &kSCIColorPickerOnChange;
 
 + (void)configureSheetForPicker:(UIColorPickerViewController *)vc {
 	vc.modalPresentationStyle = UIModalPresentationPageSheet;
-	vc.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	vc.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	UISheetPresentationController *sheet = vc.sheetPresentationController;
 	if (!sheet) return;

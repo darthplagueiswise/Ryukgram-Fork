@@ -26,7 +26,7 @@ typedef NS_ENUM(NSInteger, SCIDownloadJobKind) {
 @property (nonatomic, copy, nullable) NSString *subtitle;     // attribution / source
 @property (nonatomic, assign) SCIDownloadJobKind kind;
 @property (nonatomic, assign) SCIDownloadJobState state;
-@property (nonatomic, assign) float progress;                 // 0..1
+@property (nonatomic, assign) float progress;
 @property (nonatomic, copy, nullable) NSString *stageText;    // "Downloading 42%", "Encoding…", "Queued"
 @property (nonatomic, strong, nullable) NSError *error;
 @property (nonatomic, strong, readonly) NSDate *createdAt;

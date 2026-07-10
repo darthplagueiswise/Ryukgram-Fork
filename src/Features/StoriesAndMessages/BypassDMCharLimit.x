@@ -1,6 +1,6 @@
 // Bypass DM char limit — IGDirectComposer caps message length via the
-// _characterLimit ivar (q, signed long long). We overwrite it with LLONG_MAX
-// from the entry points where IG would consult it for input/send checks.
+// characterLimit ivar (signed long long). We overwrite it with LLONG_MAX from
+// the entry points where IG would consult it for input/send checks.
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
@@ -15,15 +15,16 @@ static void sciBumpCharacterLimit(id composer) {
     static Ivar sCharLimitIvar = NULL;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        Class cls = NSClassFromString(@"IGDirectComposer");
-        if (cls) sCharLimitIvar = class_getInstanceVariable(cls, "_characterLimit");
+        Class cls = NSClassFromString(@"_TtC16IGDirectComposer16IGDirectComposer");
+        if (cls) sCharLimitIvar = class_getInstanceVariable(cls, "characterLimit")
+                              ?: class_getInstanceVariable(cls, "_characterLimit");
     });
     if (!sCharLimitIvar) return;
     long long *slot = (long long *)((uintptr_t)(__bridge void *)composer + (uintptr_t)ivar_getOffset(sCharLimitIvar));
     if (*slot != LLONG_MAX) *slot = LLONG_MAX;
 }
 
-%hook IGDirectComposer
+%hook _TtC16IGDirectComposer16IGDirectComposer
 
 - (void)didMoveToWindow {
     %orig;

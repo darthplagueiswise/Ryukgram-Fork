@@ -194,12 +194,38 @@ static SCIGallerySaveMetadata *sciDMMetadataAndStem(UIViewController *dmVC) {
     return md;
 }
 
+// The IGVideo backing the current visual message (rawVideo for view-once,
+// _visualMediaInfo._media._video_video otherwise). nil for photo messages.
+static id sciDMVisualVideoObject(UIViewController *dmVC) {
+    if (!dmVC) return nil;
+    Ivar dsIvar = class_getInstanceVariable([dmVC class], "_dataSource");
+    id ds = dsIvar ? object_getIvar(dmVC, dsIvar) : nil;
+    Ivar msgIvar = ds ? class_getInstanceVariable([ds class], "_currentMessage") : nil;
+    id msg = msgIvar ? object_getIvar(ds, msgIvar) : nil;
+    if (!msg) return nil;
+
+    @try { id rawVideo = [msg valueForKey:@"rawVideo"]; if (rawVideo) return rawVideo; } @catch (__unused id e) {}
+
+    Ivar vmiIvar = class_getInstanceVariable([msg class], "_visualMediaInfo");
+    id vmi = vmiIvar ? object_getIvar(msg, vmiIvar) : nil;
+    Ivar mIvar = vmi ? class_getInstanceVariable([vmi class], "_media") : nil;
+    id visMedia = mIvar ? object_getIvar(vmi, mIvar) : nil;
+    Ivar vvIvar = visMedia ? class_getInstanceVariable([visMedia class], "_video_video") : nil;
+    return vvIvar ? object_getIvar(visMedia, vvIvar) : nil;
+}
+
 static void sciDMStartDownload(UIViewController *dmVC, DownloadAction action) {
+    // Video carries an inline DASH manifest with higher-bitrate reps than the
+    // single progressive URL — route through the HD picker first.
+    SCIGallerySaveMetadata *md = sciDMMetadataAndStem(dmVC);
+    id video = sciDMVisualVideoObject(dmVC);
+    if (video && [SCIMediaActions downloadVisualDMVideo:video action:action metadata:md]) return;
+
     BOOL isVideo = NO;
     NSURL *url = sciDMMediaURL(dmVC, &isVideo);
     if (!url) { [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Could not find media")]; return; }
     SCIDownloadDelegate *dl = [[SCIDownloadDelegate alloc] initWithAction:action showProgress:YES];
-    dl.pendingGallerySaveMetadata = sciDMMetadataAndStem(dmVC);
+    dl.pendingGallerySaveMetadata = md;
     [dl downloadFileWithURL:url fileExtension:(isVideo ? @"mp4" : @"jpg") hudLabel:nil];
 }
 

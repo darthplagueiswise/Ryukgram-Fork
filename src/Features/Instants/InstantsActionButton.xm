@@ -1,15 +1,13 @@
-// Instants action button — Expand / Save / Gallery / Share / bulk variants —
-// plus auto-save: every viewed instant saved once to Photos or the gallery.
-//
-// Adds a native-style action button to the QuickSnap/Instants consumption
-// header. Actions are wired through SCIActionMenuConfig (source = Instants), so
-// users can reorder entries, hide them, and choose a default tap action.
-// Pref key `instants_download_btn` is kept for backward compatibility.
+// Instants action button on the consumption header — Expand / Save / Gallery /
+// Share / bulk, plus auto-save. Handles photo and video instants. Actions wired
+// through SCIActionMenuConfig (source = Instants) for reorder/hide/default-tap.
 
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
 #import "../../Utils.h"
+#import "../../InstagramHeaders.h"
 #import "../../Downloader/Download.h"
 #import "../../Downloader/Manager.h"
 #import "../../Gallery/SCIGalleryFile.h"
@@ -40,6 +38,7 @@ typedef struct {
 
 static UIImageView *sciFindIGImageViewIn(UIView *root);
 static NSURL *sciIGImageViewURL(UIImageView *iv);
+static BOOL sciSnapIsVideo(UIView *snap);
 
 #pragma mark - Header / view helpers
 
@@ -93,6 +92,8 @@ static BOOL sciSnapIsUsable(UIView *snap) {
 	CGAffineTransform t = snap.transform;
 	CGFloat rotated = fabs(t.a - 1.0) + fabs(t.b) + fabs(t.c) + fabs(t.d - 1.0);
 	if (rotated > 0.1) return NO;
+
+	if (sciSnapIsVideo(snap)) return YES;
 
 	UIImageView *iv = sciFindIGImageViewIn(snap);
 	return iv && (iv.image || sciIGImageViewURL(iv));
@@ -265,6 +266,44 @@ static NSURL *sciIGImageViewURL(UIImageView *iv) {
 	return [url isKindOfClass:NSURL.class] ? url : nil;
 }
 
+#pragma mark - Video discovery
+
+static id sciSnapIvarObject(UIView *snap, const char *name) {
+	Ivar iv = snap ? class_getInstanceVariable([snap class], name) : NULL;
+	return iv ? object_getIvar(snap, iv) : nil;
+}
+
+static IGAssetPlayerView *sciSnapVideoView(UIView *snap) {
+	id v = sciSnapIvarObject(snap, "videoView");
+	return [v isKindOfClass:NSClassFromString(@"IGAssetPlayerView")] ? v : nil;
+}
+
+static BOOL sciSnapIsVideo(UIView *snap) {
+	return sciSnapVideoView(snap) != nil;
+}
+
+static AVAsset *sciAssetFromPlayerView(IGAssetPlayerView *videoView) {
+	if (!videoView) return nil;
+
+	AVAsset *asset = nil;
+	@try { asset = videoView.asset; } @catch (__unused id e) {}
+	if ([asset isKindOfClass:AVAsset.class]) return asset;
+
+	AVPlayerItem *item = sciSnapIvarObject(videoView, "_currentItem");
+	if ([item isKindOfClass:AVPlayerItem.class] && [item.asset isKindOfClass:AVAsset.class]) return item.asset;
+
+	AVPlayer *player = sciSnapIvarObject(videoView, "_player");
+	if ([player isKindOfClass:AVPlayer.class] && [player.currentItem.asset isKindOfClass:AVAsset.class]) return player.currentItem.asset;
+
+	return nil;
+}
+
+static NSURL *sciVideoURLFromAsset(AVAsset *asset) {
+	if ([asset isKindOfClass:AVURLAsset.class]) return ((AVURLAsset *)asset).URL;
+	return nil;
+}
+
+
 #pragma mark - Save / share
 
 static DownloadAction sciDLActionForTarget(SCIInstantTarget target) {
@@ -311,11 +350,80 @@ static void sciSaveImageViaDelegate(UIImage *image, SCIInstantTarget target, SCI
 	[delegate saveLocalFileURL:tmp hudLabel:sciInstantHudLabel(ctx)];
 }
 
+static void sciExportAssetThenSave(AVAsset *asset, SCIInstantTarget target, SCIInstantContext ctx, BOOL bulk) {
+	NSURL *out = [SCITempFiles claimWithExt:@"mp4" ttl:600 tag:sciInstantFilenameTag(ctx)];
+
+	AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:asset presetName:AVAssetExportPresetHighestQuality];
+	session.outputURL = out;
+	session.outputFileType = AVFileTypeMPEG4;
+	session.shouldOptimizeForNetworkUse = YES;
+
+	SCINotificationHandle *hud = SCINotifyProgress(SCI_NOTIF_DOWNLOAD, sciInstantHudLabel(ctx), nil);
+
+	[session exportAsynchronouslyWithCompletionHandler:^{
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if (session.status != AVAssetExportSessionStatusCompleted) {
+				NSLog(@"[SCInsta][InstantsVideo] export failed status=%ld err=%@", (long)session.status, session.error);
+				[SCITempFiles releaseURL:out];
+				[hud error:SCILocalized(@"Failed to save")];
+				return;
+			}
+			[hud dismiss];
+			SCIDownloadDelegate *delegate = [[SCIDownloadDelegate alloc] initWithAction:sciDLActionForTarget(target) showProgress:NO];
+			delegate.pendingGallerySaveMetadata = sciInstantMetadata(ctx, bulk);
+			[delegate saveLocalFileURL:out hudLabel:sciInstantHudLabel(ctx)];
+		});
+	}];
+}
+
+static BOOL sciSaveVideoSnap(UIView *snap, SCIInstantTarget target, BOOL bulk) {
+	IGAssetPlayerView *videoView = sciSnapVideoView(snap);
+	if (!videoView) return NO;
+
+	AVAsset *asset = sciAssetFromPlayerView(videoView);
+	if (!asset) {
+		SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Download failed"), SCILocalized(@"No media available to save"));
+		return YES;
+	}
+
+	SCIInstantContext ctx = sciContextForSnap(snap);
+	NSURL *url = sciVideoURLFromAsset(asset);
+
+	if (url && url.isFileURL) {
+		NSString *ext = url.pathExtension.length ? url.pathExtension.lowercaseString : @"mp4";
+		NSURL *copy = [SCITempFiles claimWithExt:ext ttl:600 tag:sciInstantFilenameTag(ctx)];
+		NSError *copyErr = nil;
+		[NSFileManager.defaultManager removeItemAtURL:copy error:nil];
+		if (![NSFileManager.defaultManager copyItemAtURL:url toURL:copy error:&copyErr]) {
+			NSLog(@"[SCInsta][InstantsVideo] cache copy failed %@ -> %@ err=%@", url, copy, copyErr);
+			[SCITempFiles releaseURL:copy];
+			sciExportAssetThenSave(asset, target, ctx, bulk);
+			return YES;
+		}
+		SCIDownloadDelegate *delegate = [[SCIDownloadDelegate alloc] initWithAction:sciDLActionForTarget(target) showProgress:NO];
+		delegate.pendingGallerySaveMetadata = sciInstantMetadata(ctx, bulk);
+		[delegate saveLocalFileURL:copy hudLabel:sciInstantHudLabel(ctx)];
+		return YES;
+	}
+
+	if (url) {
+		SCIDownloadDelegate *delegate = [[SCIDownloadDelegate alloc] initWithAction:sciDLActionForTarget(target) showProgress:YES];
+		delegate.pendingGallerySaveMetadata = sciInstantMetadata(ctx, bulk);
+		[delegate downloadFileWithURL:url fileExtension:@"mp4" hudLabel:sciInstantHudLabel(ctx)];
+		return YES;
+	}
+
+	sciExportAssetThenSave(asset, target, ctx, bulk);
+	return YES;
+}
+
 static void sciSaveSnapView(UIView *snap, SCIInstantTarget target, BOOL bulk) {
 	if (!snap) {
 		SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Download failed"), SCILocalized(@"Could not locate the instant on screen"));
 		return;
 	}
+
+	if (sciSaveVideoSnap(snap, target, bulk)) return;
 
 	SCIInstantContext ctx = sciContextForSnap(snap);
 	UIImageView *iv = sciFindIGImageViewIn(snap);
@@ -341,8 +449,10 @@ static void sciSaveAllInstants(UIView *fromView, SCIInstantTarget target) {
 	NSUInteger queued = 0;
 
 	for (UIView *snap in sciAllSnapViewsIn(fromView.window)) {
-		UIImageView *iv = sciFindIGImageViewIn(snap);
-		if (!iv || (!iv.image && !sciIGImageViewURL(iv))) continue;
+		if (!sciSnapIsVideo(snap)) {
+			UIImageView *iv = sciFindIGImageViewIn(snap);
+			if (!iv || (!iv.image && !sciIGImageViewURL(iv))) continue;
+		}
 
 		sciSaveSnapView(snap, target, YES);
 		queued++;
@@ -448,6 +558,21 @@ static void sciAutoSaveTick(void) {
 	UIView *snap = sciActiveSnapInWindow(window);
 	if (!snap) return;
 
+	BOOL gallery = [mode isEqualToString:@"gallery"] && [SCIUtils getBoolPref:@"sci_gallery_enabled"];
+	SCIInstantTarget target = gallery ? SCIInstantTargetGallery : SCIInstantTargetPhotos;
+
+	if (sciSnapIsVideo(snap)) {
+		AVAsset *asset = sciAssetFromPlayerView(sciSnapVideoView(snap));
+		NSURL *videoURL = sciVideoURLFromAsset(asset);
+		NSString *key = videoURL.path.length ? videoURL.path : nil;
+		if (!asset || !key || [sciAutoSaveSeen() containsObject:key]) return;
+
+		[sciAutoSaveSeen() addObject:key];
+		sciAutoSavePersist();
+		sciSaveVideoSnap(snap, target, NO);
+		return;
+	}
+
 	UIImageView *iv = sciFindIGImageViewIn(snap);
 	NSURL *url = sciIGImageViewURL(iv);
 	if (!iv || (!iv.image && !url)) return;
@@ -458,8 +583,6 @@ static void sciAutoSaveTick(void) {
 	[sciAutoSaveSeen() addObject:key];
 	sciAutoSavePersist();
 
-	BOOL gallery = [mode isEqualToString:@"gallery"] && [SCIUtils getBoolPref:@"sci_gallery_enabled"];
-	SCIInstantTarget target = gallery ? SCIInstantTargetGallery : SCIInstantTargetPhotos;
 	SCIInstantContext ctx = sciContextForSnap(snap);
 
 	if (iv.image) {
@@ -488,6 +611,22 @@ static void sciAutoSaveEnsureTimer(void) {
 static void sciExpandSnapView(UIView *snap) {
 	if (!snap) {
 		SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Download failed"), SCILocalized(@"Could not locate the instant on screen"));
+		return;
+	}
+
+	if (sciSnapIsVideo(snap)) {
+		AVAsset *asset = sciAssetFromPlayerView(sciSnapVideoView(snap));
+		NSURL *url = sciVideoURLFromAsset(asset);
+		if (url) {
+			SCIInstantContext ctx = sciContextForSnap(snap);
+			SCIMediaViewerItem *item = [SCIMediaViewerItem itemWithVideoURL:url
+																   photoURL:nil
+																	caption:ctx.username.length ? [@"@" stringByAppendingString:ctx.username] : nil];
+			item.metadata = sciInstantMetadata(ctx, NO);
+			[SCIMediaViewer showItem:item];
+			return;
+		}
+		SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Download failed"), SCILocalized(@"No media available to save"));
 		return;
 	}
 

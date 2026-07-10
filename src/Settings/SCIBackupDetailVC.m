@@ -2,7 +2,6 @@
 #import "SCISearchBarStyler.h"
 #import "../Utils.h"
 #import "../Localization/SCILocalization.h"
-#import "../UI/SCIUIKit26LiquidGlass.h"
 
 @interface SCIBackupDetailVC () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchControllerDelegate>
 @property (nonatomic, copy) NSArray<NSDictionary *> *allSections;
@@ -24,9 +23,7 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -42,7 +39,7 @@
 	self.searchController.obscuresBackgroundDuringPresentation = NO;
 	self.searchController.searchBar.placeholder = SCILocalized(@"Search");
 	self.navigationItem.searchController = self.searchController;
-	SCIUIKit26ConfigureSearchNavigationItem(self.navigationItem);
+	self.navigationItem.hidesSearchBarWhenScrolling = NO;
 	self.definesPresentationContext = YES;
 }
 
@@ -95,7 +92,6 @@
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	static NSString *rid = @"row";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:rid];
 	NSDictionary *r = self.visibleSections[indexPath.section][@"rows"][indexPath.row];
 	cell.textLabel.text = r[@"title"];

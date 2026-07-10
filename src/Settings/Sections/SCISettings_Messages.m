@@ -1,4 +1,6 @@
 #import "SCISettingsSections.h"
+#import "../SCIOverlayLayoutEditorViewController.h"
+#import "../../Features/StoriesAndMessages/SCIDMButtonLayout.h"
 #import "../../Features/DeletedMessages/SCIDeletedMessagesCapture.h"
 #import "../../Features/ReadReceipts/SCIReadReceiptLogViewController.h"
 
@@ -33,6 +35,7 @@
 																			@"footer": SCILocalized(@"⚠️ Pull-to-refresh in the DMs tab clears all preserved messages. Enable the warning below to get a confirmation dialog."),
 																			@"rows": @[
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Keep deleted messages") subtitle:SCILocalized(@"Preserves messages that others unsend") defaultsKey:@"keep_deleted_message"],
+																					[SCISetting switchCellWithTitle:SCILocalized(@"Keep my deleted messages") subtitle:SCILocalized(@"Also preserves messages you unsend yourself") defaultsKey:@"keep_my_deleted_messages"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Indicate unsent messages") subtitle:SCILocalized(@"Shows an \"Unsent\" label on preserved messages") defaultsKey:@"indicate_unsent_messages"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Unsent message notification") subtitle:SCILocalized(@"Shows a notification pill when a message is unsent") defaultsKey:@"unsent_message_toast"],
 																				[SCISetting switchCellWithTitle:SCILocalized(@"Warn before clearing on refresh") subtitle:SCILocalized(@"Confirmation dialog before clearing preserved messages") defaultsKey:@"warn_refresh_clears_preserved"],
@@ -164,6 +167,19 @@
 											@"header": SCILocalized(@"Files"),
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Send files (experimental)") subtitle:SCILocalized(@"Adds a 'Send File' option to the plus menu in DMs. Supported file types may be limited by Instagram") defaultsKey:@"send_file"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Send image as drawing")
+																		subtitle:SCILocalized(@"In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor")
+																		   value:^BOOL{ return [SCIUtils getBoolPref:@"sci_doodle_image_enabled"]; }
+																		  action:^(BOOL on) {
+																			[NSUserDefaults.standardUserDefaults setBool:on forKey:@"sci_doodle_image_enabled"];
+																			if (!on) return;
+																			UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"Send image as drawing")
+																				message:SCILocalized(@"Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect.")
+																				preferredStyle:UIAlertControllerStyleAlert];
+																			[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Restart") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) { exit(0); }]];
+																			[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Later") style:UIAlertActionStyleCancel handler:nil]];
+																			[sciTopVC() presentViewController:a animated:YES completion:nil];
+																		}],
 											]
 										},
 										@{
@@ -171,6 +187,17 @@
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"Send audio as file") subtitle:SCILocalized(@"Adds an 'Audio File' option to the plus menu in DMs to send audio files as voice messages") defaultsKey:@"send_audio_as_file" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Download voice messages") subtitle:SCILocalized(@"Adds a 'Download' option to the long-press menu on voice messages to save them as M4A audio") defaultsKey:@"download_audio_message"],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Media"),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Reroute native Save") subtitle:SCILocalized(@"Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share") defaultsKey:@"dm_native_save_enabled" requiresRestart:YES],
+												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"Configure menu")
+																			subtitle:SCILocalized(@"Reorder, enable/disable, set default tap")
+																				icon:nil
+																	  viewController:[[SCIActionMenuConfigViewController alloc] initForSource:SCIActionSourceDMNativeSave]];
+												   s.whatsNewID = @"ui_cfg_actionmenu"; s; }),
 											]
 										},
 										@{
@@ -196,6 +223,10 @@
 										@{
 											@"header": SCILocalized(@"Disappearing media"),
 											@"rows": @[
+												[SCISetting navigationCellWithTitle:SCILocalized(@"Arrange overlay buttons")
+																			subtitle:SCILocalized(@"Drag to position the buttons")
+																				icon:[SCISymbol symbolWithIGName:@"ig_icon_edit_list_outline_24" fallback:@"hand.draw"]
+																	  viewController:[[SCIOverlayLayoutEditorViewController alloc] initWithLayoutClass:SCIDMButtonLayout.class]],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Show action button") subtitle:SCILocalized(@"Inserts a button on disappearing media overlays") defaultsKey:@"dm_visual_action_button" requiresRestart:YES],
 												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"Configure menu")
 																			subtitle:SCILocalized(@"Reorder, enable/disable, set default tap")
@@ -216,12 +247,18 @@
 												[SCISetting switchCellWithTitle:SCILocalized(@"Send from gallery") subtitle:SCILocalized(@"Adds a gallery button to the instants camera so you can send a photo from your album") defaultsKey:@"instants_send_from_gallery" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Auto advance after reaction") subtitle:SCILocalized(@"Automatically moves to the next instant after you like or react") defaultsKey:@"instant_auto_advance_reaction"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Instants action button") subtitle:SCILocalized(@"Adds a RyukGram action button to the instants viewer header with expand, save, share, and bulk-save entries") defaultsKey:@"instants_download_btn"],
-												[SCISetting menuCellWithTitle:SCILocalized(@"Auto-save instants") subtitle:SCILocalized(@"Automatically saves every instant you view, including as you swipe — each one only once") menu:[self menus][@"instants_auto_save"]],
 												({ SCISetting *s = [SCISetting navigationCellWithTitle:SCILocalized(@"Configure menu")
 																			subtitle:SCILocalized(@"Reorder, enable/disable, set default tap, show date")
 																				icon:nil
 																	  viewController:[[SCIActionMenuConfigViewController alloc] initForSource:SCIActionSourceInstants]];
 												   s.whatsNewID = @"ui_cfg_actionmenu"; s; }),
+												[SCISetting menuCellWithTitle:SCILocalized(@"Auto-save instants") subtitle:SCILocalized(@"Automatically saves every instant you view, including as you swipe — each one only once") menu:[self menus][@"instants_auto_save"]],
+											]
+										},
+										@{
+											@"header": SCILocalized(@"Advanced"),
+											@"rows": @[
+												[SCISetting switchCellWithTitle:SCILocalized(@"Bypass \"You can't send messages\"") subtitle:SCILocalized(@"Removes the blocked composer banner and restores the text input in restricted threads") defaultsKey:@"unlock_send_composer" requiresRestart:YES],
 											]
 										}]
 				];

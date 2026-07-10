@@ -297,7 +297,7 @@ static BOOL sciIsPhotoMuteEnabled(void) {
 
 // ============ UFI: SYNC DOWNLOAD BUTTON + SETUP KVO ============
 
-%hook IGSundialViewerVerticalUFI
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
 
 - (void)setAlpha:(CGFloat)alpha {
 	%orig;

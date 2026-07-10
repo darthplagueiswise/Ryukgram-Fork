@@ -126,16 +126,14 @@ static NSString *sciThresholdText(void) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.title = SCILocalized(@"Date format");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	_tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	_tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	_tableView.backgroundColor = self.view.backgroundColor;
 	_tableView.dataSource = self;
-	SCIUIKit26ConfigureTableView(_tableView);
 	_tableView.delegate = self;
 
 	[self.view addSubview:_tableView];
@@ -200,7 +198,6 @@ static NSString *sciThresholdText(void) {
 
 	if (indexPath.row >= presets + (NSInteger)customs.count) {
 		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"formatAdd"];
-	SCIUIKit26ConfigureTableCell(cell);
 		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"formatAdd"];
 
 		cell.textLabel.text = SCILocalized(@"Add custom format…");
@@ -215,7 +212,6 @@ static NSString *sciThresholdText(void) {
 
 	if (indexPath.row >= presets) {
 		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"formatCustom"];
-	SCIUIKit26ConfigureTableCell(cell);
 		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"formatCustom"];
 
 		NSDictionary *entry = customs[indexPath.row - presets];
@@ -234,7 +230,6 @@ static NSString *sciThresholdText(void) {
 	}
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"format"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"format"];
 
 	NSString *key = sciDateFormatOptions()[indexPath.row][0];
@@ -254,7 +249,6 @@ static NSString *sciThresholdText(void) {
 - (UITableViewCell *)relativeCellForTableView:(UITableView *)tableView indexPath:(NSIndexPath *)indexPath {
 	if (indexPath.row == 0) {
 		UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"threshold"];
-	SCIUIKit26ConfigureTableCell(cell);
 		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"threshold"];
 
 		cell.textLabel.text = SCILocalized(@"Relative within");
@@ -278,7 +272,6 @@ static NSString *sciThresholdText(void) {
 	}
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"combine"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"combine"];
 
 	cell.textLabel.text = SCILocalized(@"Combine with date");
@@ -294,7 +287,6 @@ static NSString *sciThresholdText(void) {
 
 - (UITableViewCell *)switchCellForTableView:(UITableView *)tableView title:(NSString *)title subtitle:(NSString *)subtitle key:(NSString *)key action:(SEL)action reuseID:(NSString *)reuseID {
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseID];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:reuseID];
 
 	UIListContentConfiguration *config = cell.defaultContentConfiguration;
@@ -504,7 +496,7 @@ static NSString *sciThresholdText(void) {
 	[super viewDidLoad];
 
 	self.title = SCILocalized(@"Custom");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
 	NSString *tpl = nil;
 	for (NSDictionary *entry in SCIDateFormatCustomList()) {
@@ -615,7 +607,6 @@ static NSString *sciThresholdText(void) {
 	if (indexPath.section == 0) return indexPath.row == 0 ? _fieldCell : _previewCell;
 
 	UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"token"];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"token"];
 
 	NSArray *row = _tokenRows[indexPath.row];

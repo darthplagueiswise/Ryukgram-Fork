@@ -55,6 +55,10 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 /// YES if the post (or its carousel parent) carries a downloadable music track.
 + (BOOL)mediaHasMusic:(id)media parentMedia:(nullable id)parentMedia;
 
+/// YES for an image story carrying IG-set music, so the raw image can be saved
+/// without the muxed soundtrack.
++ (BOOL)mediaIsStillImageWithAudio:(id)media parentMedia:(nullable id)parentMedia;
+
 /// Download photo + attached music, trim to the post's play window, mux into
 /// a video. `action` is saveToPhotos or saveToGallery.
 + (void)downloadPhotoWithMusicForMedia:(id)media
@@ -71,6 +75,13 @@ typedef NS_ENUM(NSInteger, SCIActionContext) {
 /// Best URL for a single (non-carousel) media item. Prefers video URL, falls
 /// back to photo URL. Returns nil if nothing extractable.
 + (nullable NSURL *)bestURLForMedia:(id)media;
+
+/// HD download for a DM disappearing-media IGVideo via its inline DASH
+/// manifest (quality sheet / mux). Returns NO when unavailable so the caller
+/// can fall back to the progressive URL.
++ (BOOL)downloadVisualDMVideo:(id)igVideo
+                       action:(DownloadAction)action
+                     metadata:(nullable id)metadata;
 
 /// Cover/poster image URL for a video-type media (first frame). Works for
 /// reels, feed videos, and story videos.

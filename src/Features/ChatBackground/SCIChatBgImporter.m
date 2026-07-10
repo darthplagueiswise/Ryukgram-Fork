@@ -1,38 +1,13 @@
 #import "SCIChatBgImporter.h"
 #import "SCIChatBackgroundManager.h"
-#import "SCIChatBgCropController.h"
+#import "SCIChatBgEditor.h"
 #import "../../Utils.h"
+#import "../../SCITempFiles.h"
 #import "../../Gallery/SCIGalleryViewController.h"
 #import "../../Gallery/SCIGalleryFile.h"
 #import <PhotosUI/PhotosUI.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/runtime.h>
-
-static UIImage *SCIImageFromURL(NSURL *url) {
-	if (!url) return nil;
-
-	BOOL scoped = [url startAccessingSecurityScopedResource];
-	NSData *data = [NSData dataWithContentsOfURL:url];
-	if (scoped) [url stopAccessingSecurityScopedResource];
-
-	return data.length ? [UIImage imageWithData:data] : nil;
-}
-
-static void SCIImportCropped(UIViewController *host, UIImage *image, void (^completion)(NSString *_Nullable)) {
-	if (!host || !image) {
-		if (completion) completion(nil);
-		return;
-	}
-
-	SCIChatBgCropController *crop = [SCIChatBgCropController new];
-	crop.sourceImage = image;
-	crop.onConfirm = ^(UIImage *cropped) {
-		NSString *rel = cropped ? [[SCIChatBackgroundManager shared] importImage:cropped] : nil;
-		if (cropped && !rel) [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Couldn't import image")];
-		if (completion) completion(rel);
-	};
-
-	[host presentViewController:crop animated:YES completion:nil];
-}
 
 @interface _SCIChatBgPickerDelegate : NSObject <PHPickerViewControllerDelegate, UIDocumentPickerDelegate>
 @property (nonatomic, weak) UIViewController *host;
@@ -56,39 +31,61 @@ static void SCIImportCropped(UIViewController *host, UIImage *image, void (^comp
 	if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(asset); });
 }
 
-- (void)importImage:(UIImage *)image afterDismiss:(UIViewController *)picker {
+- (void)editImage:(UIImage *)image afterDismiss:(UIViewController *)picker {
 	UIViewController *host = self.host;
-
 	[picker dismissViewControllerAnimated:YES completion:^{
-		if (!image) {
-			[self finish:nil];
-			return;
-		}
+		[SCIChatBgEditor editImage:image from:host completion:^(NSString *rel) { [self finish:rel]; }];
+	}];
+}
 
-		SCIImportCropped(host, image, ^(NSString *rel) {
-			[self finish:rel];
+// The provider's temp file is deleted when the block returns, so copy it out first.
+- (void)loadFile:(NSItemProvider *)provider type:(NSString *)typeID afterDismiss:(UIViewController *)picker {
+	[provider loadFileRepresentationForTypeIdentifier:typeID completionHandler:^(NSURL *url, __unused NSError *error) {
+		NSURL *copy = nil;
+		if (url) {
+			NSString *ext = url.pathExtension.length ? url.pathExtension : @"mov";
+			copy = [SCITempFiles claimWithExt:ext ttl:300 tag:@"bgpick"];
+			if (![NSFileManager.defaultManager copyItemAtURL:url toURL:copy error:NULL]) { [SCITempFiles releaseURL:copy]; copy = nil; }
+		}
+		dispatch_async(dispatch_get_main_queue(), ^{
+			UIViewController *host = self.host;
+			[picker dismissViewControllerAnimated:YES completion:^{
+				if (!copy) { [self finish:nil]; return; }
+				[SCIChatBgEditor editFileURL:copy from:host completion:^(NSString *rel) {
+					[SCITempFiles releaseURL:copy];
+					[self finish:rel];
+				}];
+			}];
 		});
 	}];
 }
 
 - (void)picker:(PHPickerViewController *)picker didFinishPicking:(NSArray<PHPickerResult *> *)results {
 	PHPickerResult *result = results.firstObject;
-	if (!result) {
-		[self importImage:nil afterDismiss:picker];
+	if (!result) { [self editImage:nil afterDismiss:picker]; return; }
+
+	NSItemProvider *ip = result.itemProvider;
+	if ([ip hasItemConformingToTypeIdentifier:UTTypeMovie.identifier]) {
+		[self loadFile:ip type:UTTypeMovie.identifier afterDismiss:picker];
+		return;
+	}
+	if ([ip hasItemConformingToTypeIdentifier:UTTypeGIF.identifier]) {
+		[self loadFile:ip type:UTTypeGIF.identifier afterDismiss:picker];
 		return;
 	}
 
-	[result.itemProvider loadObjectOfClass:UIImage.class completionHandler:^(__kindof id<NSItemProviderReading> obj, __unused NSError *error) {
+	[ip loadObjectOfClass:UIImage.class completionHandler:^(__kindof id<NSItemProviderReading> obj, __unused NSError *error) {
 		UIImage *image = [obj isKindOfClass:UIImage.class] ? (UIImage *)obj : nil;
-		dispatch_async(dispatch_get_main_queue(), ^{
-			[self importImage:image afterDismiss:picker];
-		});
+		dispatch_async(dispatch_get_main_queue(), ^{ [self editImage:image afterDismiss:picker]; });
 	}];
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)picker didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
-	UIImage *image = SCIImageFromURL(urls.firstObject);
-	[self importImage:image afterDismiss:picker];
+	NSURL *url = urls.firstObject;
+	UIViewController *host = self.host;
+	[picker dismissViewControllerAnimated:YES completion:^{
+		[SCIChatBgEditor editFileURL:url from:host completion:^(NSString *rel) { [self finish:rel]; }];
+	}];
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)picker {
@@ -107,7 +104,7 @@ static void SCIImportCropped(UIViewController *host, UIImage *image, void (^comp
 
 + (void)presentPhotoLibraryFrom:(UIViewController *)host completion:(void (^)(NSString *_Nullable))completion {
 	PHPickerConfiguration *config = [PHPickerConfiguration new];
-	config.filter = PHPickerFilter.imagesFilter;
+	config.filter = [PHPickerFilter anyFilterMatchingSubfilters:@[PHPickerFilter.imagesFilter, PHPickerFilter.videosFilter]];
 	config.selectionLimit = 1;
 
 	PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
@@ -122,7 +119,7 @@ static void SCIImportCropped(UIViewController *host, UIImage *image, void (^comp
 	// initForOpeningContentTypes: never fires its delegate on sideload — only the deprecated init works.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-	picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.image"] inMode:UIDocumentPickerModeImport];
+	picker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[@"public.image", @"public.movie", @"com.compuserve.gif"] inMode:UIDocumentPickerModeImport];
 #pragma clang diagnostic pop
 
 	picker.allowsMultipleSelection = NO;
@@ -132,12 +129,11 @@ static void SCIImportCropped(UIViewController *host, UIImage *image, void (^comp
 }
 
 + (void)presentGalleryFrom:(UIViewController *)host completion:(void (^)(NSString *_Nullable))completion {
-	[SCIGalleryViewController presentPickerWithMediaTypes:@[@(SCIGalleryMediaTypeImage)]
-													title:SCILocalized(@"Choose Image")
+	[SCIGalleryViewController presentPickerWithMediaTypes:@[@(SCIGalleryMediaTypeImage), @(SCIGalleryMediaTypeVideo), @(SCIGalleryMediaTypeGIF)]
+													title:SCILocalized(@"Choose Media")
 												   fromVC:host
 											   completion:^(NSURL *pickedURL, __unused SCIGalleryFile *pickedFile) {
-		UIImage *image = SCIImageFromURL(pickedURL);
-		SCIImportCropped(host, image, completion);
+		[SCIChatBgEditor editFileURL:pickedURL from:host completion:completion];
 	}];
 }
 

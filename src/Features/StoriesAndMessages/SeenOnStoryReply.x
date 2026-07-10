@@ -10,13 +10,44 @@
 extern __weak UIViewController *sciActiveStoryVC;
 extern BOOL sciAdvanceBypassActive;
 
-// Text reply — IGDirectComposer is shared with DMs, gate by active story VC.
-%hook IGDirectComposer
-- (void)_didTapSend:(id)arg {
+// Reply-to-author sheet path: text / sticker / voice.
+%hook IGDirectReplyToAuthorSendManager
+- (void)sendWithText:(id)text privateReplyEmoji:(id)emoji selectedMusic:(id)music {
     %orig;
     if (sciActiveStoryVC) sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
 }
-- (void)_send {
+- (void)sendStickerReply:(id)sticker {
+    %orig;
+    if (sciActiveStoryVC) sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
+}
+- (void)sendAudioClipWithURL:(id)url waveform:(id)waveform duration:(double)duration {
+    %orig;
+    if (sciActiveStoryVC) sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
+}
+%end
+
+// Inline reply bar: the send pill lives inside IGDirectComposerOvalContainerView —
+// match the container, not the label, so it's language-independent.
+%hook IGTapButton
+- (void)didTapSwiftOnALButton:(id)arg {
+    %orig;
+    if (!sciActiveStoryVC) return;
+    for (UIView *a = ((UIView *)self).superview; a; a = a.superview) {
+        if ([NSStringFromClass(a.class) containsString:@"IGDirectComposerOvalContainer"]) {
+            sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
+            return;
+        }
+    }
+}
+%end
+
+// Composer's send callback (alternate path).
+%hook IGDirectReplyToAuthorViewController
+- (void)replyToAuthorComposerViewControllerDidSend {
+    %orig;
+    if (sciActiveStoryVC) sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
+}
+- (void)replyToAuthorComposerViewControllerDidTapSendButton:(id)composer text:(id)text {
     %orig;
     if (sciActiveStoryVC) sciStoryInteraction(SCIStoryInteractionTextReply, nil, nil, nil);
 }

@@ -13,6 +13,7 @@ typedef NS_ENUM(NSInteger, SCIActionSource) {
     SCIActionSourceDM,
     SCIActionSourceProfile,
     SCIActionSourceInstants,
+    SCIActionSourceDMNativeSave,
     SCIActionSourceCount
 };
 
@@ -29,6 +30,8 @@ extern NSString *const SCIAID_DownloadSave;     // to Photos
 extern NSString *const SCIAID_DownloadGallery;  // to RyukGram Gallery (no-op until Phase 2)
 extern NSString *const SCIAID_DownloadWithMusic;        // photo posts with a music track → Photos
 extern NSString *const SCIAID_DownloadWithMusicGallery; // photo posts with a music track → Gallery
+extern NSString *const SCIAID_DownloadImageOnly;        // image stories with IG music → raw image, no audio → Photos
+extern NSString *const SCIAID_DownloadImageOnlyGallery; // same → Gallery
 extern NSString *const SCIAID_BulkCopyURLs;
 extern NSString *const SCIAID_BulkDownloadShare;
 extern NSString *const SCIAID_BulkDownloadSave;

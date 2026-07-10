@@ -20,6 +20,7 @@ static const NSInteger kWaveTag = 8801;
 @property (nonatomic, strong) UIView *rightHandle;
 @property (nonatomic, strong) UIView *playhead;
 @property (nonatomic, strong) UIButton *closeButton;
+@property (nonatomic, strong) UIButton *backButton;
 @property (nonatomic, strong) UIButton *playButton;
 @property (nonatomic, strong) UIButton *stopButton;
 @property (nonatomic, strong) UIButton *sendButton;
@@ -34,7 +35,6 @@ static const NSInteger kWaveTag = 8801;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
 	self.view.backgroundColor = [UIColor colorWithRed:0.055 green:0.055 blue:0.075 alpha:1.0];
@@ -52,7 +52,12 @@ static const NSInteger kWaveTag = 8801;
 	UIEdgeInsets s = self.view.safeAreaInsets;
 	CGFloat w = CGRectGetWidth(b), h = CGRectGetHeight(b), cw = w - kMargin * 2.0;
 
-	self.closeButton.frame = CGRectMake(14.0, s.top + 10.0, 38.0, 38.0);
+	if (self.backButton) {
+		self.backButton.frame = CGRectMake(14.0, s.top + 10.0, 38.0, 38.0);
+		self.closeButton.frame = CGRectMake(w - 14.0 - 38.0, s.top + 10.0, 38.0, 38.0);
+	} else {
+		self.closeButton.frame = CGRectMake(14.0, s.top + 10.0, 38.0, 38.0);
+	}
 	self.sendButton.frame = CGRectMake(kMargin, h - s.bottom - 66.0, cw, 52.0);
 	self.playButton.frame = CGRectMake((w - 58.0) * 0.5, CGRectGetMinY(self.sendButton.frame) - 76.0, 58.0, 58.0);
 	self.stopButton.frame = CGRectMake(CGRectGetMaxX(self.playButton.frame) + 16.0, CGRectGetMidY(self.playButton.frame) - 21.0, 42.0, 42.0);
@@ -119,6 +124,12 @@ static const NSInteger kWaveTag = 8801;
 	self.closeButton = [self button:@"xmark" size:16.0 bg:0.09 radius:19.0];
 	[self.closeButton addTarget:self action:@selector(cancelTapped) forControlEvents:UIControlEventTouchUpInside];
 	[self.view addSubview:self.closeButton];
+
+	if (self.onBack) {
+		self.backButton = [self button:@"chevron.left" size:17.0 bg:0.09 radius:19.0];
+		[self.backButton addTarget:self action:@selector(backTapped) forControlEvents:UIControlEventTouchUpInside];
+		[self.view addSubview:self.backButton];
+	}
 
 	self.preview = UIView.new;
 	self.preview.backgroundColor = self.isVideo ? UIColor.blackColor : [UIColor colorWithWhite:1.0 alpha:0.055];
@@ -414,6 +425,16 @@ static const NSInteger kWaveTag = 8801;
 	[self deletePreConvertedTempIfNeeded];
 
 	void (^callback)(void) = self.onCancel;
+	[self dismissViewControllerAnimated:YES completion:^{
+		if (callback) callback();
+	}];
+}
+
+- (void)backTapped {
+	[self cleanup];
+	[self deletePreConvertedTempIfNeeded];
+
+	void (^callback)(void) = self.onBack;
 	[self dismissViewControllerAnimated:YES completion:^{
 		if (callback) callback();
 	}];

@@ -180,7 +180,7 @@ static void new_setHasSent(id self, SEL _cmd, BOOL sent) {
 }
 
 // Send-initiation: fires the instant you tap send, so media marks even if you swipe back before it uploads.
-%hook IGDirectThreadMessageSenderListenerController
+%hook _TtC45IGDirectThreadMessageSenderListenerController45IGDirectThreadMessageSenderListenerController
 
 - (void)outgoingMessagePayloadWillSend:(id)payload {
 	%orig;

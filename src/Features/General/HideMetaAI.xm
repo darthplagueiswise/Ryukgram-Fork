@@ -1,7 +1,6 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 #import <objc/runtime.h>
-#import <objc/message.h>
 
 %group HideMetaAI
 
@@ -98,7 +97,7 @@
 %end
 
 // Write with meta ai in message composer
-%hook IGDirectComposer
+%hook _TtC16IGDirectComposer16IGDirectComposer
 - (id)initWithLayoutSpecProvider:(id)arg1
 					 userSession:(id)arg2
 				 userLauncherSet:(id)arg3
@@ -404,11 +403,8 @@ sponsoredSupportConfiguration:(id)supportConfig
 	for (id obj in buttons) {
 		BOOL shouldHide = NO;
 
-		id button = nil;
-		if ([obj respondsToSelector:@selector(button)]) {
-			button = ((id (*)(id, SEL))objc_msgSend)(obj, @selector(button));
-		}
-		if ([button respondsToSelector:@selector(accessibilityIdentifier)] && [[button accessibilityIdentifier] isEqualToString:@"contextual-background"]) shouldHide = YES;
+		id button = [obj button];
+		if (button && [[button accessibilityIdentifier] isEqualToString:@"contextual-background"]) shouldHide = YES;
 
 		if (shouldHide) {
 			if (!filteredObjs) {

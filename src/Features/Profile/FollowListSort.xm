@@ -5,16 +5,15 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-// Client-side filter + sort for followers/following lists. The list feeds
-// IGUserListItemConfiguration rows (wrapping IGUser) mixed with header/
-// suggestion rows we leave in place. friendship_status' following/followedBy
-// getters return NSNumber — following = I follow them, followedBy = they follow me.
+// Client-side filter / sort / search for followers / following lists.
+// friendship_status: following = I follow them, followedBy = they follow me.
 
 typedef NS_OPTIONS(NSUInteger, SCIFollowFilter) {
 	SCIFilterMutual    = 1 << 0,
 	SCIFilterIFollow   = 1 << 1,
 	SCIFilterFollowsMe = 1 << 2,
 	SCIFilterVerified  = 1 << 3,
+	SCIFilterNotFollowsMe = 1 << 4,
 };
 
 typedef NS_ENUM(NSInteger, SCIFollowSortKey) {
@@ -30,6 +29,7 @@ static const void *kFilterKey  = &kFilterKey;
 static const void *kSortKey    = &kSortKey;
 static const void *kReverseKey = &kReverseKey;
 static const void *kButtonKey  = &kButtonKey;
+static const void *kQueryKey   = &kQueryKey;
 
 @interface IGFollowListViewController (SCISort)
 - (void)sci_installSortButton;
@@ -81,11 +81,11 @@ static id sciIvarObj(id obj, const char *name) {
 
 typedef struct { BOOL following; BOOL followedBy; BOOL verified; } SCIUserAttr;
 
-static SCIUserAttr sciAttrForConfig(id cfg, NSString **outName) {
+static SCIUserAttr sciAttrForConfig(id cfg, NSString **outName, NSString **outFull) {
 	SCIUserAttr a = (SCIUserAttr){NO, NO, NO};
 	id user = nil;
 	@try { user = [cfg valueForKey:@"user"]; } @catch (__unused id e) {}
-	if (!user) { if (outName) *outName = @""; return a; }
+	if (!user) { if (outName) *outName = @""; if (outFull) *outFull = @""; return a; }
 
 	id rel = sciFieldCache(user, @"friendship_status");
 	a.following  = sciRelFlag(rel, @selector(following));
@@ -97,6 +97,10 @@ static SCIUserAttr sciAttrForConfig(id cfg, NSString **outName) {
 		if (![n isKindOfClass:NSString.class]) { @try { n = [user valueForKey:@"username"]; } @catch (__unused id e) {} }
 		*outName = [n isKindOfClass:NSString.class] ? n : @"";
 	}
+	if (outFull) {
+		id f = sciFieldCache(user, @"full_name");
+		*outFull = [f isKindOfClass:NSString.class] ? f : @"";
+	}
 	return a;
 }
 
@@ -105,12 +109,14 @@ static SCIUserAttr sciAttrForConfig(id cfg, NSString **outName) {
 static SCIFollowFilter sciFilter(id vc) { return (SCIFollowFilter)[objc_getAssociatedObject(vc, kFilterKey) unsignedIntegerValue]; }
 static SCIFollowSortKey sciSort(id vc)  { return (SCIFollowSortKey)[objc_getAssociatedObject(vc, kSortKey) integerValue]; }
 static BOOL sciReverse(id vc)           { return [objc_getAssociatedObject(vc, kReverseKey) boolValue]; }
-static BOOL sciActive(id vc)            { return sciFilter(vc) != 0 || sciSort(vc) != SCISortDefault || sciReverse(vc); }
+static NSString *sciQuery(id vc)        { NSString *q = objc_getAssociatedObject(vc, kQueryKey); return [q isKindOfClass:NSString.class] ? q : @""; }
+static BOOL sciActive(id vc)            { return sciFilter(vc) != 0 || sciSort(vc) != SCISortDefault || sciReverse(vc) || sciQuery(vc).length > 0; }
 
 static BOOL sciPassesFilter(SCIFollowFilter f, SCIUserAttr a) {
 	if ((f & SCIFilterMutual)    && !(a.following && a.followedBy)) return NO;
 	if ((f & SCIFilterIFollow)   && !a.following)                  return NO;
 	if ((f & SCIFilterFollowsMe) && !a.followedBy)                 return NO;
+	if ((f & SCIFilterNotFollowsMe) && a.followedBy)              return NO;
 	if ((f & SCIFilterVerified)  && !a.verified)                   return NO;
 	return YES;
 }
@@ -122,6 +128,7 @@ static NSArray<NSDictionary *> *sciFilterRows(void) {
 		@{@"t": SCILocalized(@"Mutuals"),         @"i": @"person.2.fill",          @"v": @(SCIFilterMutual)},
 		@{@"t": SCILocalized(@"People I follow"), @"i": @"person.fill.checkmark",  @"v": @(SCIFilterIFollow)},
 		@{@"t": SCILocalized(@"Follows me"),      @"i": @"arrow.left.circle.fill", @"v": @(SCIFilterFollowsMe)},
+		@{@"t": SCILocalized(@"Doesn't follow you"), @"i": @"person.crop.circle.badge.xmark", @"v": @(SCIFilterNotFollowsMe)},
 		@{@"t": SCILocalized(@"Verified"),        @"i": @"checkmark.seal.fill",    @"v": @(SCIFilterVerified)},
 	];
 }
@@ -138,8 +145,9 @@ static NSArray<NSDictionary *> *sciSortRows(void) {
 
 #pragma mark - options sheet
 
-@interface SCIFollowSortSheet : UITableViewController
+@interface SCIFollowSortSheet : UITableViewController <UISearchBarDelegate>
 @property (nonatomic, weak) IGFollowListViewController *listVC;
+@property (nonatomic, strong) UISearchBar *searchBar;
 - (void)refresh;
 @end
 
@@ -154,10 +162,52 @@ static NSArray<NSDictionary *> *sciSortRows(void) {
 	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
 		initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(sci_done)];
+
+	UISearchBar *sb = [[UISearchBar alloc] init];
+	sb.placeholder = SCILocalized(@"Search by name or username");
+	sb.delegate = self;
+	sb.searchBarStyle = UISearchBarStyleMinimal;
+	sb.autocapitalizationType = UITextAutocapitalizationTypeNone;
+	sb.autocorrectionType = UITextAutocorrectionTypeNo;
+	sb.text = sciQuery(self.listVC);
+	[sb sizeToFit];
+	self.tableView.tableHeaderView = sb;
+	self.searchBar = sb;
 }
 
 - (void)sci_done { [self dismissViewControllerAnimated:YES completion:nil]; }
 - (void)refresh { [self.tableView reloadData]; }
+
+- (void)searchBar:(UISearchBar *)sb textDidChange:(NSString *)text {
+	IGFollowListViewController *vc = self.listVC;
+	if (!vc) return;
+	objc_setAssociatedObject(vc, kQueryKey, text ?: @"", OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	[vc sci_changed];
+}
+- (void)searchBarSearchButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+- (void)searchBarTextDidBeginEditing:(UISearchBar *)sb { [sb setShowsCancelButton:YES animated:YES]; [self sci_setSearching:YES]; }
+- (void)searchBarTextDidEndEditing:(UISearchBar *)sb   { [sb setShowsCancelButton:NO  animated:YES]; [self sci_setSearching:NO];  }
+- (void)searchBarCancelButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+
+// Short fixed detent while typing keeps the list visible above the keyboard
+// (a lone detent can't be keyboard-expanded like medium/large).
+- (void)sci_setSearching:(BOOL)searching {
+	if (@available(iOS 16.0, *)) {
+		UISheetPresentationController *spc = self.navigationController.sheetPresentationController;
+		[spc animateChanges:^{
+			if (searching) {
+				UISheetPresentationControllerDetent *small = [UISheetPresentationControllerDetent
+					customDetentWithIdentifier:@"sciSearch"
+					resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> ctx) { return 240.0; }];
+				spc.detents = @[small];
+				spc.largestUndimmedDetentIdentifier = @"sciSearch";
+			} else {
+				spc.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+				spc.largestUndimmedDetentIdentifier = UISheetPresentationControllerDetentIdentifierMedium;
+			}
+		}];
+	}
+}
 
 - (void)viewDidDisappear:(BOOL)animated {
 	[super viewDidDisappear:animated];
@@ -276,6 +326,8 @@ static NSArray<NSDictionary *> *sciSortRows(void) {
 		objc_setAssociatedObject(vc, kFilterKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		objc_setAssociatedObject(vc, kSortKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		objc_setAssociatedObject(vc, kReverseKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		objc_setAssociatedObject(vc, kQueryKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		self.searchBar.text = @"";
 		[vc sci_changed];
 	}
 	[self refresh];
@@ -297,12 +349,16 @@ static NSArray<NSDictionary *> *sciSortRows(void) {
 	SCIFollowSortKey sortKey = sciSort(self);
 	BOOL reverse = sciReverse(self);
 
+	NSString *query = sciQuery(self);
 	NSMutableArray *deco = [NSMutableArray array];
 	for (id o in objs) {
 		if (![o isKindOfClass:%c(IGUserListItemConfiguration)]) continue;
-		NSString *name = nil;
-		SCIUserAttr a = sciAttrForConfig(o, &name);
+		NSString *name = nil, *full = nil;
+		SCIUserAttr a = sciAttrForConfig(o, &name, &full);
 		if (!sciPassesFilter(filter, a)) continue;
+		if (query.length &&
+			[name rangeOfString:query options:NSCaseInsensitiveSearch].location == NSNotFound &&
+			[full rangeOfString:query options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
 		[deco addObject:@{ @"cfg": o, @"i": @(deco.count), @"name": name ?: @"",
 			@"mutual": @(a.following && a.followedBy), @"fme": @(a.followedBy),
 			@"ifo": @(a.following), @"ver": @(a.verified) }];

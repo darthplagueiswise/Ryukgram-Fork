@@ -1,0 +1,221 @@
+name: Release RyukGram
+
+on:
+    workflow_dispatch:
+        inputs:
+            include_rootless:
+                description: "Attach rootless .deb"
+                default: true
+                required: false
+                type: boolean
+            include_trollfools:
+                description: "Attach TrollFools zip"
+                default: false
+                required: false
+                type: boolean
+            include_dylib:
+                description: "Attach standalone RyukGram.dylib"
+                default: false
+                required: false
+                type: boolean
+            include_zxinject:
+                description: "Attach standalone zxPluginsInject.dylib (needed by buildapp-from-release: sideload)"
+                default: true
+                required: false
+                type: boolean
+            include_noplugins_patch:
+                description: "Attach standalone NoPluginsPatch.dylib (needed by buildapp-from-release: no-plugins)"
+                default: true
+                required: false
+                type: boolean
+            draft:
+                description: "Create as draft (don't publish)"
+                default: true
+                required: false
+                type: boolean
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: Build RyukGram
+        runs-on: macos-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Validate selection
+              run: |
+                if [ "${{ inputs.include_rootless }}" != "true" ] && \
+                   [ "${{ inputs.include_trollfools }}" != "true" ] && \
+                   [ "${{ inputs.include_dylib }}" != "true" ] && \
+                   [ "${{ inputs.include_zxinject }}" != "true" ] && \
+                   [ "${{ inputs.include_noplugins_patch }}" != "true" ]; then
+                  echo "::error::Select at least one asset to attach."
+                  exit 1
+                fi
+
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                submodules: recursive
+                fetch-depth: 0
+
+            - name: Install Dependencies
+              run: brew install ldid dpkg make
+
+            - name: Set PATH
+              run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+            - name: Setup Theos
+              uses: actions/checkout@v4
+              with:
+                repository: theos/theos
+                ref: master
+                path: ${{ github.workspace }}/theos
+                submodules: recursive
+
+            - name: SDK Caching
+              id: SDK
+              uses: actions/cache@v4
+              env:
+                cache-name: iPhoneOS16.2.sdk
+              with:
+                path: ${{ github.workspace }}/theos/sdks/
+                key: ${{ env.cache-name }}
+                restore-keys: ${{ env.cache-name }}
+
+            - name: Download iOS SDK
+              if: steps.SDK.outputs.cache-hit != 'true'
+              run: |
+                git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
+                cd iOS-SDKs
+                git sparse-checkout set --no-cone iPhoneOS16.2.sdk
+                git checkout
+                mv *.sdk $THEOS/sdks
+              env:
+                THEOS: ${{ github.workspace }}/theos
+
+            - name: Get Version
+              id: version
+              run: |
+                VERSION=$(awk '/Version:/ {print $2}' control)
+                echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+                echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+            - name: Setup FFmpegKit
+              run: ./scripts/setup-ffmpegkit.sh
+
+            - name: Build rootless deb
+              if: ${{ inputs.include_rootless }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh rootless
+                cd packages
+                DEB="$(ls -t *-rootless.deb | head -n1)"
+                [ -n "$DEB" ] && mv "$DEB" "RyukGram_${VERSION}_rootless.deb"
+                ls -la
+
+            - name: Build TrollFools zip
+              if: ${{ inputs.include_trollfools }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh trollfools
+                cd packages
+                mv RyukGram-trollfools.zip "RyukGram_trollfools_v${VERSION}.zip"
+                ls -la
+
+            - name: Build standalone RyukGram.dylib
+              if: ${{ inputs.include_dylib }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh dylib
+                cd packages
+                mv RyukGram.dylib "RyukGram_v${VERSION}.dylib"
+                ls -la
+
+            - name: Build standalone zxPluginsInject.dylib
+              if: ${{ inputs.include_zxinject }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                make -C modules/zxPluginsInject FINALPACKAGE=1
+                cp modules/zxPluginsInject/.theos/obj/zxPluginsInject.dylib "packages/zxPluginsInject_v${VERSION}.dylib"
+                install_name_tool -id "@rpath/zxPluginsInject.dylib" "packages/zxPluginsInject_v${VERSION}.dylib" || true
+                ls -la packages
+
+            - name: Build standalone NoPluginsPatch.dylib
+              if: ${{ inputs.include_noplugins_patch }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh sideloadpatch
+                cp packages/NoPluginsPatch.dylib "packages/NoPluginsPatch_v${VERSION}.dylib"
+                ls -la packages
+
+            - name: Generate release notes
+              id: notes
+              run: |
+                [ -f NOTES.md ] || { echo "::error::NOTES.md not found in repo."; exit 1; }
+
+                # Title = text after [release] on the line carrying it, else version.
+                SUBJECT=$(grep -m1 '\[release\]' NOTES.md | sed 's/^.*\[release\][[:space:]]*//' | xargs || true)
+                TITLE="${SUBJECT:-RyukGram v${VERSION}}"
+                echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+                # Strip the HTML steering comment + the [release] token line.
+                sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d' NOTES.md > /tmp/body.md
+
+                PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${VERSION}$" | head -n1 || true)
+                {
+                  echo "## Changelog"
+                  echo ""
+                  cat /tmp/body.md
+                  echo ""
+                  echo "## Downloads"
+                  echo ""
+                  echo "| File | Description |"
+                  echo "|------|-------------|"
+                  if [ "${{ inputs.include_rootless }}" = "true" ]; then
+                    echo "| \`RyukGram_${VERSION}_rootless.deb\` | Rootless .deb. |"
+                  fi
+                  if [ "${{ inputs.include_trollfools }}" = "true" ]; then
+                    echo "| \`RyukGram_trollfools_v${VERSION}.zip\` | TrollFools injection bundle (dylib + resources + frameworks). |"
+                  fi
+                  if [ "${{ inputs.include_dylib }}" = "true" ]; then
+                    echo "| \`RyukGram_v${VERSION}.dylib\` | Standalone tweak dylib. |"
+                  fi
+                  if [ "${{ inputs.include_zxinject }}" = "true" ]; then
+                    echo "| \`zxPluginsInject_v${VERSION}.dylib\` | Sideload plugin-injection helper dylib. |"
+                  fi
+                  if [ "${{ inputs.include_noplugins_patch }}" = "true" ]; then
+                    echo "| \`NoPluginsPatch_v${VERSION}.dylib\` | No-plugins sideload compat patch (keychain / app groups / CloudKit). |"
+                  fi
+                  echo ""
+                  if [ -n "$PREV_TAG" ]; then
+                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
+                  else
+                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/main)**"
+                  fi
+                } > /tmp/release_notes.md
+
+            - name: Create Release
+              run: |
+                FILES=()
+                [ "${{ inputs.include_rootless }}" = "true" ] && FILES+=("packages/RyukGram_${VERSION}_rootless.deb")
+                [ "${{ inputs.include_trollfools }}" = "true" ] && FILES+=("packages/RyukGram_trollfools_v${VERSION}.zip")
+                [ "${{ inputs.include_dylib }}" = "true" ] && FILES+=("packages/RyukGram_v${VERSION}.dylib")
+                [ "${{ inputs.include_zxinject }}" = "true" ] && FILES+=("packages/zxPluginsInject_v${VERSION}.dylib")
+                [ "${{ inputs.include_noplugins_patch }}" = "true" ] && FILES+=("packages/NoPluginsPatch_v${VERSION}.dylib")
+
+                DRAFT_FLAG=""
+                [ "${{ inputs.draft }}" = "true" ] && DRAFT_FLAG="--draft"
+
+                gh release create "v${VERSION}" \
+                  --repo "${{ github.repository }}" \
+                  --title "${{ steps.notes.outputs.title }}" \
+                  --notes-file /tmp/release_notes.md \
+                  $DRAFT_FLAG \
+                  "${FILES[@]}"
+              env:
+                GH_TOKEN: ${{ github.token }}

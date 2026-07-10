@@ -1,5 +1,4 @@
 #import "SCINotificationPillView.h"
-#import "../SCIUIKit26LiquidGlass.h"
 #import <math.h>
 
 static CGFloat const kPillCorner = 30.0;
@@ -234,11 +233,9 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 }
 
 - (void)sciBuildBackground {
-	UIVisualEffect *effect = SCIUIKit26GlassEffect(YES, YES, [UIColor colorWithWhite:1.0 alpha:0.08]);
-	if (!effect) effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterial];
-	self.blurView = [[UIVisualEffectView alloc] initWithEffect:effect];
+	UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
+	self.blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
 	self.blurView.translatesAutoresizingMaskIntoConstraints = NO;
-	self.blurView.backgroundColor = UIColor.clearColor;
 	self.blurView.layer.cornerRadius = kPillCorner;
 	self.blurView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.blurView.clipsToBounds = YES;
@@ -248,7 +245,8 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	self.chromeOverlayView = [UIView new];
 	self.chromeOverlayView.translatesAutoresizingMaskIntoConstraints = NO;
 	self.chromeOverlayView.userInteractionEnabled = NO;
-	self.chromeOverlayView.backgroundColor = UIColor.clearColor;
+	// Dark base for HDR-content visibility. Tone gradient stacks on top.
+	self.chromeOverlayView.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.22];
 	self.chromeOverlayView.layer.cornerRadius = kPillCorner;
 	self.chromeOverlayView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.chromeOverlayView.clipsToBounds = YES;
@@ -258,7 +256,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	self.chromeGradientLayer = [CAGradientLayer layer];
 	self.chromeGradientLayer.startPoint = CGPointMake(0.0, 0.0);
 	self.chromeGradientLayer.endPoint = CGPointMake(1.0, 1.0);
-	self.chromeGradientLayer.opacity = 0.26;
+	self.chromeGradientLayer.opacity = 0.9;
 	[self.chromeOverlayView.layer addSublayer:self.chromeGradientLayer];
 }
 
@@ -480,28 +478,28 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 
 - (NSArray *)sciChromeColorsForTone:(SCINotificationTone)tone {
 	if (_style == SCINotificationStyleIsland) {
-		return @[(id)[UIColor colorWithWhite:1.0 alpha:0.00].CGColor,
-				 (id)[UIColor colorWithWhite:1.0 alpha:0.00].CGColor];
+		return @[(id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor,
+				 (id)[UIColor colorWithWhite:0.0 alpha:0.0].CGColor];
 	}
 	if (_style == SCINotificationStyleMinimal) {
-		return @[(id)[UIColor colorWithWhite:1.0 alpha:0.10].CGColor,
-				 (id)[UIColor colorWithWhite:1.0 alpha:0.05].CGColor];
+		return @[(id)[UIColor colorWithWhite:1.0 alpha:0.20].CGColor,
+				 (id)[UIColor colorWithWhite:0.85 alpha:0.14].CGColor];
 	}
 
 	switch (tone) {
 		case SCINotificationToneSuccess:
-			return @[(id)[UIColor colorWithRed:0.22 green:0.95 blue:0.60 alpha:0.22].CGColor,
-					 (id)[UIColor colorWithRed:0.10 green:0.60 blue:0.42 alpha:0.14].CGColor];
+			return @[(id)[UIColor colorWithRed:0.12 green:0.35 blue:0.29 alpha:0.46].CGColor,
+					 (id)[UIColor colorWithRed:0.11 green:0.29 blue:0.24 alpha:0.38].CGColor];
 		case SCINotificationToneError:
-			return @[(id)[UIColor colorWithRed:1.00 green:0.25 blue:0.38 alpha:0.22].CGColor,
-					 (id)[UIColor colorWithRed:0.75 green:0.08 blue:0.18 alpha:0.14].CGColor];
+			return @[(id)[UIColor colorWithRed:0.42 green:0.14 blue:0.20 alpha:0.45].CGColor,
+					 (id)[UIColor colorWithRed:0.32 green:0.10 blue:0.13 alpha:0.38].CGColor];
 		case SCINotificationToneWarning:
-			return @[(id)[UIColor colorWithRed:1.00 green:0.74 blue:0.22 alpha:0.23].CGColor,
-					 (id)[UIColor colorWithRed:0.85 green:0.48 blue:0.08 alpha:0.14].CGColor];
+			return @[(id)[UIColor colorWithRed:0.45 green:0.32 blue:0.10 alpha:0.46].CGColor,
+					 (id)[UIColor colorWithRed:0.34 green:0.23 blue:0.07 alpha:0.38].CGColor];
 		case SCINotificationToneInfo:
 		default:
-			return @[(id)[UIColor colorWithRed:0.28 green:0.66 blue:1.00 alpha:0.22].CGColor,
-					 (id)[UIColor colorWithRed:0.05 green:0.36 blue:0.78 alpha:0.14].CGColor];
+			return @[(id)[UIColor colorWithRed:0.06 green:0.35 blue:0.75 alpha:0.42].CGColor,
+					 (id)[UIColor colorWithRed:0.04 green:0.25 blue:0.55 alpha:0.35].CGColor];
 	}
 }
 
@@ -649,23 +647,23 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 		if (island) {
 			self.chromeGradientLayer.opacity = 0.0;
 			self.layer.shadowColor = UIColor.blackColor.CGColor;
-			self.layer.shadowOpacity = 0.18;
+			self.layer.shadowOpacity = 0.28;
 			self.layer.shadowRadius = 14.0;
 			self.layer.shadowOffset = CGSizeMake(0, 4);
-			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
 		} else if (glow) {
-			self.chromeGradientLayer.opacity = 0.34;
+			self.chromeGradientLayer.opacity = 0.9;
 			self.layer.shadowColor = [self sciGlowColorForTone:self->_tone].CGColor;
-			self.layer.shadowOpacity = 0.32;
+			self.layer.shadowOpacity = 0.55;
 			self.layer.shadowRadius = 22.0;
 			self.layer.shadowOffset = CGSizeMake(0, 5);
 			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.24].CGColor;
 		} else if (self->_style == SCINotificationStyleColorful) {
-			self.chromeGradientLayer.opacity = 0.34;
+			self.chromeGradientLayer.opacity = 0.9;
 			self.layer.shadowColor = UIColor.blackColor.CGColor;
-			self.layer.shadowOpacity = 0.16;
+			self.layer.shadowOpacity = 0.22;
 			self.layer.shadowRadius = 12.0;
 			self.layer.shadowOffset = CGSizeMake(0, 4);
 			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
@@ -675,7 +673,7 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 			self.layer.shadowColor = UIColor.clearColor.CGColor;
 			self.layer.shadowOpacity = 0.0;
 			self.layer.shadowRadius = 0.0;
-			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+			self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
 			self.iconBadgeView.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
 		}
 
@@ -835,6 +833,10 @@ static CGFloat SCITextWidth(NSString *text, UIFont *font) {
 	[UIView animateWithDuration:0.4 delay:0 usingSpringWithDamping:0.72 initialSpringVelocity:0.6 options:UIViewAnimationOptionCurveEaseOut animations:^{
 		[self.superview layoutIfNeeded];
 	} completion:nil];
+}
+
+- (CGFloat)pillTargetHeight {
+	return self.heightConstraint.constant > 1.0 ? self.heightConstraint.constant : self.bounds.size.height;
 }
 
 - (void)pulseIcon {

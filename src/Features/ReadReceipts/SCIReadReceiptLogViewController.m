@@ -95,11 +95,11 @@ static NSUInteger rrUnseenCountForGroup(SCIReadReceiptGroup *g, NSString *ownerP
 @implementation SCIRRGroupCell
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
     if ((self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid])) {
-        self.backgroundColor = SCIUIKit26PanelFillColor();
+        self.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
         _avatar = [UIImageView new];
         _avatar.contentMode = UIViewContentModeScaleAspectFill;
         _avatar.layer.cornerRadius = 23; _avatar.layer.masksToBounds = YES;
-        _avatar.backgroundColor = SCIUIKit26PanelFillColor();
+        _avatar.backgroundColor = UIColor.secondarySystemBackgroundColor;
         _titleLbl = [UILabel new]; _titleLbl.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
         _subLbl = [UILabel new]; _subLbl.font = [UIFont systemFontOfSize:13]; _subLbl.textColor = UIColor.secondaryLabelColor;
         _mutedIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"eye.slash.fill"]];
@@ -154,9 +154,7 @@ static NSUInteger rrUnseenCountForGroup(SCIReadReceiptGroup *g, NSString *ownerP
 @implementation SCIRRDetailViewController
 - (void)viewDidLoad {
     [super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [SCIPopupChrome backgroundColor];
     self.title = self.navTitle.length ? self.navTitle : SCILocalized(@"Reads");
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -223,7 +221,7 @@ static NSUInteger rrUnseenCountForGroup(SCIReadReceiptGroup *g, NSString *ownerP
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = SCILocalized(@"Ignored");
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [SCIPopupChrome backgroundColor];
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.tableView.backgroundColor = UIColor.clearColor;
@@ -259,7 +257,7 @@ static NSUInteger rrUnseenCountForGroup(SCIReadReceiptGroup *g, NSString *ownerP
 }
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [t dequeueReusableCellWithIdentifier:@"i"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"i"];
-    c.backgroundColor = SCIUIKit26PanelFillColor();
+    c.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
     NSString *id_ = self.ids[ip.row];
     if ([id_ hasPrefix:@"u:"]) {
         NSString *pk = [id_ substringFromIndex:2];
@@ -318,7 +316,7 @@ static NSUInteger rrUnseenCountForGroup(SCIReadReceiptGroup *g, NSString *ownerP
     [super viewDidLoad];
     self.ownerPK = [SCIUtils currentUserPK];
     self.title = SCILocalized(@"Read receipts");
-    self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+    self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;

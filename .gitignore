@@ -41,6 +41,7 @@ upstream-scinsta*
 *.dylib
 deploy.sh
 PENDING_CHANGES.*
+IG*.md
 wrapper/
 scripts/*.py
 !scripts/ig_symbol_diff.py
@@ -72,3 +73,9 @@ scratch/
 .local-backups/
 
 RyukGram*.log
+
+Instagram*.ips
+.source-env
+deploy-source.sh
+.source-env*
+.backups/

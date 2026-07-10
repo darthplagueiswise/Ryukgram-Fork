@@ -2,6 +2,8 @@
 
 #import "../../Utils.h"
 #import "../../CallButtonHelpers.h"
+#import <objc/message.h>
+#import <objc/runtime.h>
 
 static BOOL sciIsCallButton(UIView *b) {
     return [b isKindOfClass:NSClassFromString(@"IGDirectCallButton")] ||
@@ -43,12 +45,35 @@ static BOOL sciPlatterContainsHiddenButton(UIView *platter) {
           [SCIUtils getBoolPref:@"hide_video_call_button"]))
         return items;
     if (![items isKindOfClass:[NSArray class]]) return items;
-    Ivar iv = class_getInstanceVariable([self class], "_consolidatedCallingButton");
-    id callBtn = iv ? object_getIvar(self, iv) : nil;
+    // IG 434 moved the calling button into IGDirectThreadCallButtonsComponent
+    id callBtn = nil;
+    if ([self respondsToSelector:@selector(consolidatedCallingButton)])
+        callBtn = ((id (*)(id, SEL))objc_msgSend)(self, @selector(consolidatedCallingButton));
+    if (!callBtn) {
+        Ivar iv = class_getInstanceVariable([self class], "_consolidatedCallingButton");
+        callBtn = iv ? object_getIvar(self, iv) : nil;
+    }
     if (!callBtn || ![items containsObject:callBtn]) return items;
     NSMutableArray *out = [items mutableCopy];
     [out removeObject:callBtn];
     return out;
+}
+%end
+
+// IG 434 moved calling into this component.
+%hook IGDirectThreadCallButtonsComponent
+- (id)createCallingButtons {
+    id r = %orig;
+    if ([SCIUtils getBoolPref:@"hide_voice_call_button"] &&
+        [SCIUtils getBoolPref:@"hide_video_call_button"] &&
+        [r isKindOfClass:[NSArray class]])
+        return @[];
+    return r;
+}
+- (void)_didTapConsolidatedCallingButton {
+    if ([SCIUtils getBoolPref:@"hide_voice_call_button"] &&
+        [SCIUtils getBoolPref:@"hide_video_call_button"]) return;
+    %orig;
 }
 %end
 
@@ -63,6 +88,14 @@ static BOOL sciPlatterContainsHiddenButton(UIView *platter) {
     %orig;
 }
 - (void)_didTapButtonWithCallType:(long long)type {
+    BOOL resolved = NO;
+    BOOL isVideo = sciCallTypeIsVideo(self, type, &resolved);
+    BOOL hidden = isVideo ? [SCIUtils getBoolPref:@"hide_video_call_button"]
+                          : [SCIUtils getBoolPref:@"hide_voice_call_button"];
+    if (resolved && hidden) return;
+    %orig;
+}
+- (void)_didTapButtonWithCallType:(long long)type tapSource:(id)tapSource {
     BOOL resolved = NO;
     BOOL isVideo = sciCallTypeIsVideo(self, type, &resolved);
     BOOL hidden = isVideo ? [SCIUtils getBoolPref:@"hide_video_call_button"]

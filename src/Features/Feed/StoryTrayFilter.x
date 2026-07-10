@@ -76,9 +76,10 @@ static NSArray *hook_objectsForListAdapter(id self, SEL _cmd, id adapter) {
 
 // Dropping the highlights row (type 11) here also removes the separator IG
 // injects downstream only when a highlight survives — no leftover divider.
-%hook IGMainStoryTrayDataSource
-- (id)allItemsForTrayUsingCachedValue:(BOOL)cached {
-    NSArray *items = %orig(cached);
+// IGMainStoryTrayDataSource is Swift-mangled on IG 434+ — hook via runtime.
+static id (*orig_allItemsForTray)(id, SEL, BOOL);
+static id hook_allItemsForTray(id self, SEL _cmd, BOOL cached) {
+    NSArray *items = orig_allItemsForTray(self, _cmd, cached);
     BOOL hideUsers = [SCIUtils getBoolPref:@"no_suggested_users"];
     BOOL hideAds = [SCIUtils getBoolPref:@"hide_ads"] && [SCIUtils getBoolPref:@"hide_ads_stories"];
     BOOL hideHighlights = [SCIUtils getBoolPref:@"hide_story_highlights"];
@@ -100,7 +101,6 @@ static NSArray *hook_objectsForListAdapter(id self, SEL _cmd, id adapter) {
     }
     return out.copy;
 }
-%end
 
 %hook IGStoryTraySectionController
 - (void)storyTrayControllerShowSUPOGEducationBump {
@@ -110,8 +110,17 @@ static NSArray *hook_objectsForListAdapter(id self, SEL _cmd, id adapter) {
 
 %ctor {
     Class cls = NSClassFromString(@"IGStoryTrayListAdapterDataSource");
-    if (!cls) return;
-    SEL sel = NSSelectorFromString(@"objectsForListAdapter:");
-    if (!class_getInstanceMethod(cls, sel)) return;
-    MSHookMessageEx(cls, sel, (IMP)hook_objectsForListAdapter, (IMP *)&orig_objectsForListAdapter);
+    if (cls) {
+        SEL sel = NSSelectorFromString(@"objectsForListAdapter:");
+        if (class_getInstanceMethod(cls, sel))
+            MSHookMessageEx(cls, sel, (IMP)hook_objectsForListAdapter, (IMP *)&orig_objectsForListAdapter);
+    }
+
+    Class trayDS = NSClassFromString(@"_TtC25IGMainStoryTrayDataSource25IGMainStoryTrayDataSource")
+                   ?: NSClassFromString(@"IGMainStoryTrayDataSource");
+    if (trayDS) {
+        SEL sel = NSSelectorFromString(@"allItemsForTrayUsingCachedValue:");
+        if (class_getInstanceMethod(trayDS, sel))
+            MSHookMessageEx(trayDS, sel, (IMP)hook_allItemsForTray, (IMP *)&orig_allItemsForTray);
+    }
 }

@@ -92,6 +92,7 @@
 "App Icon" = "應用程式圖示";
 "Audio page" = "音訊頁";
 "Auto-reveals sensitive media" = "自動顯示敏感內容";
+"Block surveys" = "封鎖問卷調查";
 "Blocks the viewer-count heartbeat so the broadcaster doesn't see you — you also won't see the viewer count" = "封鎖觀眾數心跳，讓直播主看不到你 — 你也看不到觀眾數";
 "Browser" = "瀏覽器";
 "Change the app icon from the bundled icons" = "從內建圖示中變更應用程式圖示";
@@ -144,6 +145,8 @@
 "Hides the meta ai buttons/functionality within the app" = "隱藏應用程式內的 Meta AI 按鈕／功能";
 "Hides the notes tray in the DM inbox" = "隱藏私訊收件匣中的筆記托盤";
 "Hides the suggested broadcast channels in direct messages" = "隱藏私訊中的建議廣播頻道";
+"Hide DM search suggestions" = "隱藏私訊搜尋建議";
+"Removes suggested accounts and channels from direct message search" = "從私訊搜尋中移除建議的帳號和頻道";
 "Hides the trending searches under the explore search bar" = "隱藏探索搜尋列下方的熱門搜尋";
 "Hold down on the Instagram logo to change the app icon" = "長按 Instagram 標誌以更換應用程式圖示";
 "Lets the photo sticker picker show videos too, not just photos" = "讓相片貼圖選擇器也顯示影片，不只是相片";
@@ -179,6 +182,7 @@
 "Solid color" = "純色";
 "Sponsored posts in main, contextual, video, and chaining feeds" = "主動態、情境、影片與串接動態中的贊助貼文";
 "Sponsored posts on the explore grid" = "探索格狀畫面中的贊助貼文";
+"Stops Instagram's in-app surveys and feedback prompts" = "阻擋 Instagram 應用程式內的問卷調查與意見回饋提示";
 "Sponsored reels in the sundial feed" = "日晷動態中的贊助連續短片";
 "Start" = "起始";
 "Story ads and sponsored entries in the story tray" = "限時動態列中的廣告與贊助項目";
@@ -220,6 +224,8 @@
 "Download to Photos" = "下載至相簿";
 "Save with music" = "儲存（含音樂）";
 "Gallery with music" = "存入圖庫（含音樂）";
+"Save image (no music)" = "儲存圖片（無音樂）";
+"Gallery image (no music)" = "存入圖庫（無音樂）";
 "Photo with music" = "帶音樂的照片";
 "Enabled" = "啟用";
 "Expand" = "展開";
@@ -253,7 +259,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 "Action button" = "動作按鈕";
-"Adds 'View profile picture' and 'View cover' to story tray long-press menus" = "在限時動態長按選單中新增「查看大頭貼」和「查看封面」";
+"Adds 'Profile picture' to story tray long-press menus" = "在限時動態長按選單中新增「大頭貼照」";
 "Adds a RyukGram action button under each feed post with download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "在每則動態消息貼文下方新增 RyukGram 動作按鈕，包含下載／分享／複製／展開／轉貼選項。預設點擊會開啟選單；可於下方更改點擊行為。";
 "Choose Instagram's default feed or force the Following feed" = "選擇 Instagram 預設動態或強制使用「追蹤中」動態";
 "Main feed" = "主要動態";
@@ -308,6 +314,8 @@
 "Long-press a GIF in the picker to pin it — favorites show first" = "在選擇器中長按 GIF 即可置頂 — 收藏的 GIF 優先顯示";
 "Added to favorites" = "已加入收藏";
 "Removed from favorites" = "已從收藏中移除";
+"Favorite GIF unavailable" = "收藏的 GIF 無法使用";
+"This GIF may have been removed. Long-press it to unfavorite." = "此 GIF 可能已被移除。長按即可取消收藏。";
 "Failed to build GIF model" = "無法建立 GIF 模型";
 "GIF link copied" = "已複製 GIF 連結";
 "Image" = "圖片";
@@ -325,6 +333,14 @@
 
 "Adds a RyukGram action button above the reel sidebar with view-cover/download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "在短片側邊欄上方新增 RyukGram 操作按鈕，包含觀看封面/下載/分享/複製/展開/轉貼項目。預設點擊開啟選單；可在下方更改點擊行為。";
 "Always show progress scrubber" = "始終顯示進度條";
+"Auto-scroll reels" = "自動捲動短片";
+"Speed, seek and auto-scroll controls" = "速度、快轉和自動捲動控制";
+"Enabled controls appear when you hold the ⋯ or audio button on a reel." = "在連續短片上長按 ⋯ 或音訊按鈕時會顯示已啟用的控制項。";
+"Seek controls" = "快轉控制";
+"Auto-scroll control" = "自動捲動控制";
+"Seek" = "快轉";
+"Custom seek step" = "自訂快轉間隔";
+"Enter the number of seconds to skip" = "輸入要跳過的秒數";
 "Change what happens when you tap on a reel" = "更改點擊短片時的動作";
 "Confirm reel refresh" = "確認短片重新整理";
 "Custom speed" = "自訂速度";
@@ -345,7 +361,6 @@
 "Hides the repost button on the reels sidebar" = "隱藏短片側邊欄的轉貼按鈕";
 "Hides the top navigation bar when watching reels" = "觀看短片時隱藏頂部導覽列";
 "Hiding" = "隱藏";
-"Hold the 3-dot on any reel to open speed picker" = "長按任一連續短片上的「⋯」即可開啟速度選擇器";
 "IG default" = "IG 預設";
 "Limits" = "限制";
 "Limits the amount of reels available to scroll at any given time, and prevents refreshing" = "限制同時可捲動的短片數量，並防止重新整理";
@@ -480,6 +495,12 @@
 // Settings → Stories tab                                                   //
 //////////////////////////////////////////////////////////////////////////////
 
+"Arrange overlay buttons" = "排列疊加按鈕";
+"Overlay layout" = "疊加版面";
+"Drag to position the buttons" = "拖曳以放置按鈕";
+"Drag the buttons onto the story. The dimmed strip is the reply bar." = "將按鈕拖到限時動態上。變暗的區域是回覆列。";
+"Send message" = "傳送訊息";
+
 "Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below." = "在限時動態的觀看按鈕旁新增 RyukGram 動作按鈕，包含下載/分享/複製/展開/轉發/查看提及等選項。預設點擊開啟選單；可在下方更改點擊行為。";
 "Adds a speaker button to the story overlay to unmute/mute audio. Also available in the 3-dot menu" = "在限時動態覆蓋層新增喇叭按鈕，可靜音/取消靜音音訊。此功能亦可在三點選單中使用";
 "Adds the eye button to story overlays. Off keeps seen blocking on without the button" = "在故事覆蓋層加入眼睛按鈕。關閉時仍保留已查看封鎖，只是不顯示按鈕";
@@ -607,6 +628,8 @@
 "Makes view-once messages behave like normal visual messages (loopable/pauseable)" = "讓一次觀看訊息行為如一般視覺訊息（可循環/暫停）";
 "Note actions" = "備註操作";
 "Preserves messages that others unsend" = "保留他人收回的訊息";
+"Keep my deleted messages" = "保留我刪除的訊息";
+"Also preserves messages you unsend yourself" = "也保留你自己收回的訊息";
 "Prevents accidental swipe-up activation of vanish mode" = "防止誤觸上滑啟用 Vanish 模式";
 "Quick list button in chats" = "聊天中的快速列表按鈕";
 "Removes the audio call button from DM thread header" = "從私訊頁首移除語音通話按鈕";
@@ -734,7 +757,18 @@
 // Settings → Messages tab                                                  //
 //////////////////////////////////////////////////////////////////////////////
 
+"In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor" = "在繪圖工具中，將圖片作為塗鴉傳送，來自圖庫、照片、貼圖或貼上，內建裁剪與移除背景編輯器";
+"Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect." = "畫一條線或形狀，然後點按傳送並選擇圖片來源：圖庫、照片、貼圖或貼上。\n\n圖片會取代你畫的內容，並沿用其位置與大小，所以畫得越大圖片越大。\n\n重新啟動 Instagram 後生效。";
+
+"Send image as drawing" = "將圖片作為塗鴉傳送";
+
+"Bypass \"You can't send messages\"" = "繞過「你無法傳送訊息」";
+"Removes the blocked composer banner and restores the text input in restricted threads" = "移除被封鎖的輸入列橫幅，並在受限對話中還原文字輸入框";
 "Custom chat background" = "自訂聊天背景";
+"DM Save button" = "私訊儲存按鈕";
+"Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share" = "讓 Instagram 私訊圖片和影片上的原生儲存按鈕改為下載到「照片」、圖庫或分享";
+"Reroute native Save" = "重新導向原生儲存";
+"Save media" = "儲存媒體";
 "Incoming calls stay silent — no ring, no screen, no notification" = "來電保持靜音 — 不響鈴、不顯示畫面、不通知";
 "Messages" = "訊息";
 "Silence incoming calls" = "將來電靜音";
@@ -789,6 +823,18 @@
 "Lets you swipe to switch between navigation bar tabs" = "允許滑動切換導覽列分頁";
 "Messages only" = "僅限訊息";
 "Messages-only mode" = "僅限訊息模式";
+"Automatic schedule" = "自動排程";
+"DM-only client, hide tabs, auto schedule" = "僅限私訊用戶端、隱藏分頁、自動排程";
+"Start time" = "開始時間";
+"End time" = "結束時間";
+"Switch into Messages-only on its own during a time window" = "在某個時間段內自動切換到僅限訊息模式";
+"Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends." = "使用上方開關，在每天的某個時間段（例如晚上 10:00 – 早上 6:00）自動開啟僅限訊息模式。時間段開始和結束時會提示你重新啟動。";
+"Active now · ends %@" = "目前啟用 · %@ 結束";
+"Next window starts %@" = "下個時間段 %@ 開始";
+"Messages-only starting" = "僅限訊息模式開始";
+"Messages-only ending" = "僅限訊息模式結束";
+"Your Messages-only window has started. Restart Instagram to switch to DM-only." = "你的僅限訊息時間段已開始。重新啟動 Instagram 以切換到僅限私訊。";
+"Your Messages-only window has ended. Restart Instagram to bring back the other tabs." = "你的僅限訊息時間段已結束。重新啟動 Instagram 以還原其他分頁。";
 "Navigation" = "導覽";
 "Swipe between tabs" = "在分頁間滑動";
 "Tab the app opens to. Ignored when Messages-only is on" = "應用程式開啟時的分頁。啟用僅限訊息時忽略此設定";
@@ -844,7 +890,7 @@
 "Shows an alert before sending an emoji reaction on a note" = "發送筆記表情反應前顯示警告";
 "Shows an alert before sending an emoji reaction on a story" = "發送限時動態表情反應前顯示警告";
 "Shows an alert before sending an emoji reaction on an Instant" = "在向 Instant 傳送表情反應前顯示提示";
-"Shows an alert before taking a photo with the Instants camera" = "在使用 Instants 相機拍照前顯示提示";
+"Shows an alert before sending a photo or video from the Instants camera" = "從 Instants 相機傳送相片或影片前顯示提示";
 "Shows an alert before tapping to switch to the next/previous Instant" = "在點擊切換到下一個/上一個 Instant 前顯示提示";
 "Shows an alert to confirm before sending a voice message" = "發送語音訊息前顯示確認提示";
 "Shows an alert to confirm before toggling vanish mode" = "切換消失模式前顯示確認提示";
@@ -890,6 +936,7 @@
 "Biometric" = "生物辨識";
 "Change passcode" = "更改密碼";
 "Chat hidden" = "已隱藏聊天";
+"Chat unhidden" = "已取消隱藏聊天";
 "Chat locked" = "已鎖定聊天";
 "Chat unlocked" = "已解鎖聊天";
 "Choose a code you'll remember." = "請選擇你能記住的密碼。";
@@ -912,6 +959,7 @@
 "Every use" = "每次使用";
 "Hidden chats" = "已隱藏的聊天";
 "Hide chat" = "隱藏聊天";
+"Unhide chat" = "取消隱藏聊天";
 "Hide message preview" = "隱藏訊息預覽";
 "Hide this chat?" = "隱藏此聊天？";
 "Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts." = "從截圖/錄影中隱藏 RyukGram 介面，並繞過 Instagram 各功能的截圖警告。";
@@ -1253,6 +1301,15 @@
 // inside DM threads.                                                       //
 //////////////////////////////////////////////////////////////////////////////
 
+"Free" = "自由";
+"Remove background" = "移除背景";
+"No subject found" = "找不到主體";
+"No stickers yet" = "尚無貼圖";
+"Send drawing" = "傳送塗鴉";
+"Send my drawing" = "傳送我的塗鴉";
+"Paste image / sticker" = "貼上圖片／貼圖";
+"Tap any sticker on your keyboard\nto add it to your drawing" = "點按鍵盤上的任何貼圖\n加入你的塗鴉";
+
 "  %lu votes · avg %.0f%%  " = "  %lu 票 · 平均 %.0f%%  ";
 "%@ can't be converted" = "無法轉換 %@";
 "%@ unsent a message" = "%@ 撤回了一則訊息";
@@ -1372,14 +1429,18 @@
 "Change default" = "變更預設";
 "Chat Backgrounds" = "聊天背景";
 "Choose an image used when no chat override exists" = "選擇一張圖片，於聊天未設定個別背景時使用";
-"Choose Image" = "選擇圖片";
 "Clear default" = "清除預設";
 "Couldn't import image" = "無法匯入圖片";
+"Adjust settings" = "調整設定";
+"Choose Media" = "選擇媒體";
+"Converting GIF" = "正在轉換 GIF";
+"Couldn't import video" = "無法匯入影片";
+"Crop & resize" = "裁剪與調整大小";
+"Crop & trim" = "裁剪與修剪";
 "Custom Chat Background" = "自訂聊天背景";
 "Default background" = "預設背景";
 "Delete library images, default background, and chat overrides" = "刪除圖庫圖片、預設背景與聊天個別設定";
 "Dim in dark mode" = "深色模式時調暗";
-"Edit image settings" = "編輯圖片設定";
 "Enable custom backgrounds" = "啟用自訂背景";
 "Enter a username, chat name, or thread ID." = "輸入使用者名稱、聊天名稱或對話 ID。";
 "Group" = "群組";
@@ -1479,7 +1540,7 @@
 "Turn every theme option off and restart" = "關閉所有主題選項並重新啟動";
 "Turn Location Services on in Settings → Privacy to use your current location." = "請在設定 → 隱私中開啟定位服務以使用目前位置。";
 "Type an emoji to use as the note bubble icon." = "輸入用作便箋氣泡圖示的表情符號。";
-"View profile picture" = "查看大頭貼照";
+"Profile picture" = "大頭貼照";
 
 //////////////////////////////////////////////////////////////////////////////
 //                            PROFILE ANALYZER                              //
@@ -1487,6 +1548,11 @@
 //////////////////////////////////////////////////////////////////////////////
 
 " BETA " = " BETA ";
+"%lu of %lu checks on" = "已開啟 %2$lu 項檢查中的 %1$lu 項";
+"Checks" = "檢查項";
+"Pick which categories each scan computes. A disabled check is greyed out and skipped — it won't be calculated or shown." = "選擇每次掃描計算哪些類別。已關閉的檢查會顯示為灰色並被略過——既不會計算也不會顯示。";
+"Snapshot saved" = "快照已儲存";
+"Your current scan was archived" = "您目前的掃描已封存";
 "%@ %lu accounts? The first %ld will be processed to avoid rate limits." = "%@ %lu 個帳號？為避免速率限制，僅處理前 %ld 個。";
 "%@ %lu accounts? This runs sequentially with a short pause between each." = "%@ %lu 個帳號？此操作會依序執行，每個之間有短暫停頓。";
 "%@ followers · %@ following" = "%@ 位粉絲 · %@ 個追蹤中";
@@ -1549,6 +1615,9 @@
 "Mutual followers" = "互相追蹤";
 "Name: %@ → %@" = "名稱：%@ → %@";
 "New followers" = "新粉絲";
+"NEW" = "新";
+"New first" = "新的優先";
+"New only" = "僅限新增";
 "No active Instagram session found" = "找不到已登入的 Instagram 工作階段";
 "No results" = "無結果";
 "No scan yet" = "尚未掃描";
@@ -2162,6 +2231,7 @@
 // Settings → Interface (renamed Navigation tab)                            //
 //////////////////////////////////////////////////////////////////////////////
 
+"Instagram language" = "Instagram 語言";
 "Adds an extra shortcut button beside the create-post + button on the home top bar." = "在首頁頂部列建立貼文「+」按鈕旁新增一個額外的捷徑按鈕。";
 "All buttons" = "所有按鈕";
 "Choose icon, reorder actions, and enable menu items" = "選擇圖示、重新排序動作並啟用選單項目";
@@ -2179,6 +2249,9 @@
 //                              NOTIFICATIONS                               //
 // Settings → Interface → Notifications + the universal pill / toast system //
 //////////////////////////////////////////////////////////////////////////////
+
+"Drag the pill to position it" = "拖曳以放置通知";
+"Drag the pill where you want it. Higher than center slides down, lower slides up." = "將通知拖到想要的位置。高於中心向下滑出，低於則向上。";
 
 "Notifications" = "通知";
 "Appearance" = "外觀";
@@ -2252,6 +2325,12 @@
 "Share-sheet recipient pinned" = "分享對象已釘選";
 "Unsent message detected" = "偵測到收回的訊息";
 "Reaction removed detected" = "偵測到移除回應";
+"%lu messages unsent" = "已撤回 %lu 則訊息";
+"%lu reactions removed" = "已移除 %lu 個回應";
+"%lu chats marked seen" = "已將 %lu 個聊天標示為已讀";
+"%lu stories marked seen" = "已將 %lu 則限時動態標示為已看";
+"%lu of your messages read" = "你的 %lu 則訊息已讀";
+"%lu notifications" = "%lu 則通知";
 "Live comments toggled" = "已切換直播留言";
 "Custom GIF sent" = "已傳送自訂 GIF";
 "GIF favorited / unfavorited" = "GIF 已收藏 / 取消收藏";
@@ -2366,3 +2445,189 @@
 "read your message" = "讀了你的訊息";
 "Also track reads in group chats. Off by default — groups can be noisy" = "同時追蹤群聊中的已讀。預設關閉——群聊可能較吵";
 "Refreshing…" = "正在重新整理…";
+"Pinned" = "已置頂";
+"Liked the story" = "讚過該限時動態";
+"Default (recent first)" = "預設（最近優先）";
+"Liked first" = "按讚者優先";
+"Load all viewers" = "載入所有觀看者";
+"%lu viewers" = "%lu 位觀看者";
+"Viewer pinned" = "已置頂觀看者";
+"Viewer unpinned" = "已取消置頂觀看者";
+"Pin a viewer" = "置頂觀看者";
+"Pin order" = "置頂順序";
+"Pin this viewer?" = "置頂此觀看者？";
+"Filter, sort & pin viewers" = "篩選、排序和置頂觀看者";
+"Adds controls to your story viewers list" = "在你的限時動態觀看者列表中加入控制項";
+"Add by username, remove, reorder" = "依使用者名稱新增、移除、重新排序";
+"Pinned viewers (%lu)" = "已置頂觀看者 (%lu)";
+"Viewers list" = "觀看者列表";
+"Settings are saved and reused next time." = "設定會被儲存並在下次沿用。";
+"Tick several to combine them. Pinned viewers always stay on top and ignore these filters." = "勾選多個可組合使用。已置頂的觀看者一律顯示在最上方，並忽略這些篩選。";
+"Pinned viewers" = "已置頂觀看者";
+"Pin" = "置頂";
+"On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list." = "在「誰看過我的限時動態」列表中加入一個篩選/排序按鈕（右下角），設定會被儲存。長按某位觀看者即可置頂。已置頂的觀看者一律保持在列表最上方。";
+"Username or raw user PK. Pinned viewers always stay at the top of your story viewers list." = "使用者名稱或原始使用者 PK。已置頂的觀看者一律保持在你的限時動態觀看者列表頂端。";
+
+//////////////////////////////////////////////////////////////////////////////
+//                               DEVICE ID                                  //
+// Settings -> Advanced -> Device ID, and the login-screen Device ID button //
+//////////////////////////////////////////////////////////////////////////////
+"Roll a new fingerprint" = "產生新指紋";
+"Roll new ID" = "產生新 ID";
+"Roll + clear IG data" = "產生新 ID + 清除 IG 資料";
+"Generate fresh device identifiers" = "產生全新的裝置識別碼";
+"New fingerprint ready" = "新指紋已就緒";
+"Relaunch Instagram now so the new device identity applies from a clean start?" = "立即重新啟動 Instagram，讓新的裝置身分從乾淨狀態開始套用嗎？";
+"Full reset to a brand-new device" = "完整重設為全新裝置";
+"Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen." = "遮罩 Instagram 用來識別此裝置指紋的識別碼：裝置 ID、家庭裝置 ID、供應商 ID 和機器 ID。變更在重新啟動後套用。相同的控制項也會出現在登入畫面。";
+"Rolls a fresh device ID, family device ID, vendor ID and clears the machine ID so Instagram re-registers as a new device. Or also wipe saved logins for a full reset." = "產生全新的裝置 ID、家庭裝置 ID、供應商 ID，並清除機器 ID，讓 Instagram 以新裝置重新註冊。或一併清除已儲存的登入資訊以進行完整重設。";
+"Apple attestation" = "Apple 認證";
+"Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on." = "封鎖 Instagram 的 Apple 裝置認證（DeviceCheck 和 App Attest）。這些與硬體綁定且無法變更，因此會在每次重設後持續連結此裝置。封鎖後會讓 Instagram 看到一台不支援這些功能的裝置。僅在開啟遮罩時有效。";
+"Block Apple device attestation" = "封鎖 Apple 裝置認證";
+"Stop the hardware attestation that links the device" = "停止連結此裝置的硬體認證";
+"Block Apple attestation: %@" = "封鎖 Apple 認證：%@";
+"Attestation blocked" = "認證已封鎖";
+"Attestation allowed" = "認證已允許";
+"Roll + clear, then sign in fresh" = "產生新 ID + 清除，然後重新登入";
+"New device fingerprint" = "新裝置指紋";
+"Enter ID manually…" = "手動輸入 ID…";
+"Manual device ID" = "手動裝置 ID";
+"Paste or type the UUID this device should report." = "貼上或輸入此裝置應回報的 UUID。";
+"Device ID set" = "已設定裝置 ID";
+"Copy current ID" = "複製目前 ID";
+"Revert to my real device ID" = "還原為我的真實裝置 ID";
+"Restore the original, stop masking" = "還原原始值並停止遮罩";
+"Spoofing off" = "偽裝已關閉";
+"Relaunch now" = "立即重新啟動";
+"Relaunch to apply" = "重新啟動以套用";
+"Clear device & relaunch" = "清除裝置並重新啟動";
+"Clear device & relaunch?" = "清除裝置並重新啟動？";
+"Clear & relaunch" = "清除並重新啟動";
+"Device ID" = "裝置 ID";
+"Device identity" = "裝置身分";
+"Masked" = "已遮罩";
+"Real" = "真實";
+"Show button on login screen" = "在登入畫面顯示按鈕";
+"Floating Device ID button while signed out" = "登出時顯示的浮動裝置 ID 按鈕";
+"Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards." = "忘記所有已儲存的登入資訊、Cookie 和已儲存的裝置身分，然後重新啟動，讓 Instagram 以全新裝置啟動。之後你需要重新登入。";
+
+//////////////////////////////////////////////////////////////////////////
+//                         FOLLOW REQUESTS TRACKER                        //
+// Settings → Follow Requests Tracker                                     //
+//////////////////////////////////////////////////////////////////////////
+"Follow Requests Tracker" = "追蹤請求追蹤器";
+"Follow Requests" = "追蹤請求";
+"Show follow requests" = "顯示追蹤請求";
+"Check now" = "立即檢查";
+"Reset tracked data" = "重置已記錄的資料";
+"Enable tracker" = "啟用追蹤器";
+"Log requests and check outcomes" = "記錄請求並檢查結果";
+"Logs follow requests you send and receive, and catches who cancels a request before you answer. All on-device." = "記錄你發送和收到的追蹤請求，並捕捉在你回應之前撤回請求的人。全部在裝置本機。";
+"What to track" = "追蹤內容";
+"Requests I send" = "我發送的請求";
+"To private accounts" = "發往私密帳號";
+"Requests I receive" = "我收到的請求";
+"From people who want to follow you" = "來自想追蹤你的人";
+"Background check" = "背景檢查";
+"Check interval" = "檢查間隔";
+"How often to check for outcomes while the app is open. Also checks on launch and when you open the list." = "應用程式開啟時檢查結果的頻率。也會在啟動時和開啟列表時檢查。";
+"Off (manual only)" = "關閉（僅手動）";
+"Every 15 minutes" = "每 15 分鐘";
+"Every 30 minutes" = "每 30 分鐘";
+"Every hour" = "每小時";
+"Every 6 hours" = "每 6 小時";
+"My request accepted" = "我的請求已接受";
+"A private account accepted you" = "一個私密帳號接受了你";
+"My request declined" = "我的請求已拒絕";
+"No longer pending" = "不再等待";
+"New request received" = "收到新請求";
+"Someone asked to follow you" = "有人請求追蹤你";
+"Request withdrawn" = "請求已撤回";
+"Someone cancelled their request" = "有人取消了請求";
+"Sent by me" = "我發送的";
+"Received" = "已收到";
+"Sent" = "已發送";
+"Accepted" = "已接受";
+"Rejected" = "已拒絕";
+"Requested" = "已請求";
+"Approved" = "已批准";
+"Withdrawn" = "已撤回";
+"No follow requests tracked yet" = "尚未記錄任何追蹤請求";
+"Cancel requests" = "取消請求";
+"Delete %lu record(s) from history?" = "從歷史記錄中刪除 %lu 條記錄？";
+"Cancel %lu pending request(s)?" = "取消 %lu 個待處理請求？";
+"Follow back %lu account(s)?" = "回追 %lu 個帳號？";
+"Clear all tracked follow requests?" = "清除所有已記錄的追蹤請求？";
+"Reset tracked follow requests for this account?" = "重置此帳號已記錄的追蹤請求？";
+"Enable the tracker first" = "請先啟用追蹤器";
+"Checking…" = "正在檢查…";
+"%ld request(s) updated" = "已更新 %ld 個請求";
+"No changes" = "無變化";
+"Working…" = "處理中…";
+"Follow request accepted" = "追蹤請求已接受";
+"%@ accepted your request" = "%@ 接受了你的請求";
+"Follow request declined" = "追蹤請求已拒絕";
+"%@ is no longer pending" = "%@ 不再處於等待狀態";
+"New follow request" = "新的追蹤請求";
+"%@ asked to follow you" = "%@ 要求追蹤你";
+"Follow request withdrawn" = "追蹤請求已撤回";
+"%@ withdrew their request" = "%@ 撤回了請求";
+"Follow requests log" = "追蹤請求日誌";
+"Hidden chats hidden" = "已隱藏隱藏聊天";
+"Hidden chats revealed" = "已顯示隱藏聊天";
+"Hold name to reveal" = "長按名稱以顯示";
+"Long-press the account name atop the DM inbox to show or hide your hidden chats" = "長按私訊收件匣頂部的帳號名稱以顯示或隱藏您的隱藏聊天";
+"Reveal hidden chats" = "顯示隱藏聊天";
+"Prompt before holding the inbox name reveals hidden chats" = "長按名稱顯示隱藏聊天前先詢問";
+"👁 Shown in the inbox · Tap to hide" = "👁 已在收件匣顯示 · 點按隱藏";
+" · shown in inbox" = " · 已在收件匣顯示";
+
+//////////////////////////////////////////////////////////////////////////////
+//                              INSTAGRAM PLUS                               //
+// Settings → General → Instagram Plus                                        //
+//////////////////////////////////////////////////////////////////////////////
+
+"Instagram Plus" = "Instagram Plus";
+"Unlock Instagram's paid features" = "解鎖 Instagram 的付費功能";
+"Turn on Instagram's paid subscriber features inside the app." = "在應用程式內開啟 Instagram 的付費訂閱功能。";
+"Instagram Plus is Instagram's paid subscription. These switches turn its features on inside the app. Some work completely. Others only reveal the option, because the content is loaded from Instagram's servers and still needs a real subscription, so they may show up empty or do nothing. Turn on what you want and tap Apply. If Instagram fails to launch three times in a row, these switches reset themselves." = "Instagram Plus 是 Instagram 的付費訂閱。這些開關會在應用程式內啟用它的功能。部分功能可完整運作，其他則只會顯示選項，因為內容是從 Instagram 伺服器載入，仍需要有效的訂閱，所以可能顯示為空白或沒有作用。開啟你想要的項目後點一下「Apply」。若 Instagram 連續三次無法啟動，這些開關會自動重設。";
+"Turn everything on" = "全部開啟";
+"Turn everything off" = "全部關閉";
+"Reset Instagram Plus" = "重設 Instagram Plus";
+"Reset Instagram Plus?" = "要重設 Instagram Plus 嗎？";
+"Turn every Instagram Plus feature off" = "關閉所有 Instagram Plus 功能";
+"Every Instagram Plus feature turns off and Instagram restarts." = "所有 Instagram Plus 功能都會關閉，並重新啟動 Instagram。";
+"Story peek" = "限時動態預覽";
+"Hold a story in the tray to preview it without opening it." = "在動態列上按住限時動態，即可預覽而不開啟。";
+"Story fonts" = "限時動態字型";
+"Adds the subscriber fonts when you add text to a story." = "在限時動態加入文字時提供訂閱者專屬字型。";
+"Search story viewers" = "搜尋動態瀏覽者";
+"Search the list of people who viewed your story." = "搜尋瀏覽過你限時動態的人員清單。";
+"Viewer timestamps" = "瀏覽時間";
+"Shows when each person viewed your story." = "顯示每個人瀏覽你限時動態的時間。";
+"Silent post to profile" = "靜默發佈到個人檔案";
+"Share to your profile without notifying your followers." = "發佈到個人檔案，且不通知你的粉絲。";
+"Silent post to highlights" = "靜默加入精選";
+"Add to a highlight without notifying your followers." = "加入精選，且不通知你的粉絲。";
+"Story rewatch" = "重看限時動態";
+"Rewatch a story right after it finishes." = "在限時動態播放結束後立即重看。";
+"Story extend" = "延長限時動態";
+"Keep your story up longer than 24 hours." = "讓你的限時動態保留超過 24 小時。";
+"Story spotlight" = "限時動態加強曝光";
+"Boost your story to more viewers. Loads from Instagram, so it may not work." = "讓更多人看到你的限時動態。內容從 Instagram 載入，因此可能無法運作。";
+"Story super likes" = "限時動態超級讚";
+"Send super likes on stories. Loads from Instagram, so it may not work." = "在限時動態送出超級讚。內容從 Instagram 載入，因此可能無法運作。";
+"Message peek" = "訊息預覽";
+"Hold a chat in the inbox to preview it." = "在收件匣按住聊天即可預覽。";
+"Chat fonts" = "聊天字型";
+"Adds the subscriber fonts in direct messages." = "在私人訊息中提供訂閱者專屬字型。";
+"Chat themes" = "聊天主題";
+"Unlocks the premium chat themes. Loads from Instagram, so it may not work." = "解鎖進階聊天主題。內容從 Instagram 載入，因此可能無法運作。";
+"App icons" = "應用程式圖示";
+"Opens the alternate app icon picker." = "開啟替代應用程式圖示選擇器。";
+"Bio font" = "簡介字型";
+"Use a subscriber font for your bio." = "為你的簡介使用訂閱者專屬字型。";
+"Custom story lists" = "自訂動態名單";
+"Make lists to pick exactly who sees a story." = "建立名單以精確指定誰能看到限時動態。";
+"More pinned posts" = "更多釘選貼文";
+"Pin more posts to the top of your profile." = "在個人檔案頂端釘選更多貼文。";

@@ -92,6 +92,7 @@
 "App Icon" = "앱 아이콘";
 "Audio page" = "오디오 페이지";
 "Auto-reveals sensitive media" = "민감한 콘텐츠를 자동으로 표시합니다";
+"Block surveys" = "설문조사 차단";
 "Blocks the viewer-count heartbeat so the broadcaster doesn't see you — you also won't see the viewer count" = "시청자 수 하트비트를 차단하여 방송자가 당신을 보지 못하게 합니다 — 당신도 시청자 수를 볼 수 없습니다";
 "Browser" = "브라우저";
 "Change the app icon from the bundled icons" = "기본 제공 아이콘으로 앱 아이콘 변경";
@@ -144,6 +145,8 @@
 "Hides the meta ai buttons/functionality within the app" = "앱 내의 Meta AI 버튼/기능을 숨깁니다";
 "Hides the notes tray in the DM inbox" = "DM 받은 편지함에서 노트 트레이를 숨깁니다";
 "Hides the suggested broadcast channels in direct messages" = "다이렉트 메시지에서 추천 공지 채널을 숨깁니다";
+"Hide DM search suggestions" = "메시지 검색 추천 숨기기";
+"Removes suggested accounts and channels from direct message search" = "다이렉트 메시지 검색에서 추천 계정과 채널을 제거합니다";
 "Hides the trending searches under the explore search bar" = "탐색 검색창 아래의 인기 검색어를 숨깁니다";
 "Hold down on the Instagram logo to change the app icon" = "Instagram 로고를 길게 눌러 앱 아이콘을 변경합니다";
 "Lets the photo sticker picker show videos too, not just photos" = "사진 스티커 선택기에서 사진뿐 아니라 동영상도 표시하도록 합니다";
@@ -179,6 +182,7 @@
 "Solid color" = "단색";
 "Sponsored posts in main, contextual, video, and chaining feeds" = "메인, 맥락, 동영상, 연결 피드의 스폰서 게시물";
 "Sponsored posts on the explore grid" = "탐색 그리드의 스폰서 게시물";
+"Stops Instagram's in-app surveys and feedback prompts" = "Instagram 앱 내 설문조사와 피드백 요청을 차단합니다";
 "Sponsored reels in the sundial feed" = "선다이얼 피드의 스폰서 릴스";
 "Start" = "시작";
 "Story ads and sponsored entries in the story tray" = "스토리 트레이의 스토리 광고 및 스폰서 항목";
@@ -220,6 +224,8 @@
 "Download to Photos" = "사진 앱에 다운로드";
 "Save with music" = "음악과 함께 저장";
 "Gallery with music" = "음악과 함께 갤러리에";
+"Save image (no music)" = "이미지 저장 (음악 없음)";
+"Gallery image (no music)" = "이미지 갤러리에 (음악 없음)";
 "Photo with music" = "음악이 있는 사진";
 "Enabled" = "활성화됨";
 "Expand" = "확장";
@@ -253,7 +259,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 "Action button" = "작업 버튼";
-"Adds 'View profile picture' and 'View cover' to story tray long-press menus" = "스토리 트레이를 길게 누를 때의 메뉴에 '프로필 사진 보기' 및 '커버 보기'를 추가합니다";
+"Adds 'Profile picture' to story tray long-press menus" = "스토리 트레이를 길게 누를 때의 메뉴에 '프로필 사진'을 추가합니다";
 "Adds a RyukGram action button under each feed post with download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "각 피드 게시물 아래에 다운로드/공유/복사/확장/리포스트 항목이 있는 RyukGram 작업 버튼을 추가합니다. 탭하면 기본적으로 메뉴가 열립니다. 아래에서 탭 동작을 변경하세요.";
 "Choose Instagram's default feed or force the Following feed" = "Instagram의 기본 피드를 사용하거나 팔로잉 피드를 강제합니다";
 "Main feed" = "메인 피드";
@@ -308,6 +314,8 @@
 "Long-press a GIF in the picker to pin it — favorites show first" = "선택기에서 GIF를 길게 눌러 고정하세요 — 즐겨찾기가 먼저 표시됩니다";
 "Added to favorites" = "즐겨찾기에 추가됨";
 "Removed from favorites" = "즐겨찾기에서 제거됨";
+"Favorite GIF unavailable" = "즐겨찾는 GIF를 사용할 수 없음";
+"This GIF may have been removed. Long-press it to unfavorite." = "이 GIF가 삭제되었을 수 있습니다. 길게 눌러 즐겨찾기에서 제거하세요.";
 "Failed to build GIF model" = "GIF 모델 생성 실패";
 "GIF link copied" = "GIF 링크가 복사되었습니다";
 "Image" = "이미지";
@@ -325,6 +333,14 @@
 
 "Adds a RyukGram action button above the reel sidebar with view-cover/download/share/copy/expand/repost entries. Tap opens the menu by default; change the tap behavior below." = "릴스 사이드바 위에 커버 보기/다운로드/공유/복사/확장/리포스트 항목이 있는 RyukGram 작업 버튼을 추가합니다. 탭하면 기본적으로 메뉴가 열립니다. 아래에서 탭 동작을 변경하세요.";
 "Always show progress scrubber" = "항상 재생 진행 바 표시";
+"Auto-scroll reels" = "릴스 자동 스크롤";
+"Speed, seek and auto-scroll controls" = "속도, 탐색 및 자동 스크롤 컨트롤";
+"Enabled controls appear when you hold the ⋯ or audio button on a reel." = "활성화된 컨트롤은 릴스에서 ⋯ 또는 오디오 버튼을 길게 누르면 나타납니다.";
+"Seek controls" = "탐색 컨트롤";
+"Auto-scroll control" = "자동 스크롤 컨트롤";
+"Seek" = "탐색";
+"Custom seek step" = "사용자 지정 탐색 간격";
+"Enter the number of seconds to skip" = "건너뛸 시간(초)을 입력하세요";
 "Change what happens when you tap on a reel" = "릴스를 탭할 때 발생하는 동작을 변경합니다";
 "Confirm reel refresh" = "릴스 새로고침 확인";
 "Custom speed" = "사용자 지정 속도";
@@ -345,7 +361,6 @@
 "Hides the repost button on the reels sidebar" = "릴스 사이드바에서 리포스트 버튼을 숨깁니다";
 "Hides the top navigation bar when watching reels" = "릴스를 시청할 때 상단 내비게이션 바를 숨깁니다";
 "Hiding" = "숨김";
-"Hold the 3-dot on any reel to open speed picker" = "릴스에서 점 3개를 길게 눌러 속도 선택기를 엽니다";
 "IG default" = "IG 기본값";
 "Limits" = "제한";
 "Limits the amount of reels available to scroll at any given time, and prevents refreshing" = "한 번에 스크롤할 수 있는 릴스의 양을 제한하고 새로고침을 방지합니다";
@@ -480,6 +495,12 @@
 // Settings → Stories tab                                                   //
 //////////////////////////////////////////////////////////////////////////////
 
+"Arrange overlay buttons" = "오버레이 버튼 배치";
+"Overlay layout" = "오버레이 레이아웃";
+"Drag to position the buttons" = "드래그하여 버튼 위치 지정";
+"Drag the buttons onto the story. The dimmed strip is the reply bar." = "버튼을 스토리 위로 드래그하세요. 어두운 영역은 답장 표시줄입니다.";
+"Send message" = "메시지 보내기";
+
 "Adds a RyukGram action button next to the eye button on stories with download/share/copy/expand/repost/view-mentions entries. Tap opens the menu by default; change the tap behavior below." = "스토리의 눈 모양 버튼 옆에 다운로드/공유/복사/확장/리포스트/멘션 보기 항목이 있는 RyukGram 작업 버튼을 추가합니다. 탭하면 기본적으로 메뉴가 열립니다. 아래에서 탭 동작을 변경하세요.";
 "Adds a speaker button to the story overlay to unmute/mute audio. Also available in the 3-dot menu" = "스토리 오버레이에 오디오 음소거/해제를 위한 스피커 버튼을 추가합니다. 점 3개 메뉴에서도 사용할 수 있습니다.";
 "Adds the eye button to story overlays. Off keeps seen blocking on without the button" = "스토리 오버레이에 눈 버튼을 추가합니다. 끄면 버튼 없이 읽음 차단이 그대로 유지됩니다.";
@@ -607,6 +628,8 @@
 "Makes view-once messages behave like normal visual messages (loopable/pauseable)" = "한 번 보기 메시지를 일반 시각적 메시지처럼 작동하게 합니다(반복 재생/일시 정지 가능)";
 "Note actions" = "노트 작업";
 "Preserves messages that others unsend" = "다른 사람이 전송 취소한 메시지를 보존합니다";
+"Keep my deleted messages" = "내 삭제된 메시지 보존";
+"Also preserves messages you unsend yourself" = "직접 전송 취소한 메시지도 보존합니다";
 "Prevents accidental swipe-up activation of vanish mode" = "실수로 위로 스와이프하여 배니시 모드가 활성화되는 것을 방지합니다";
 "Quick list button in chats" = "채팅의 빠른 목록 버튼";
 "Removes the audio call button from DM thread header" = "DM 스레드 헤더에서 음성 통화 버튼을 제거합니다";
@@ -734,7 +757,18 @@
 // Settings → Messages tab                                                  //
 //////////////////////////////////////////////////////////////////////////////
 
+"In the Draw tool, send an image as your doodle, from the gallery, Photos, stickers or paste, with a built-in crop and background removal editor" = "그리기 도구에서 이미지를 그림으로 보내기, 갤러리·사진·스티커 또는 붙여넣기에서, 자르기 및 배경 제거 편집기 내장";
+"Draw a line or shape, then tap Send and pick where to get the image from: gallery, Photos, stickers or paste.\n\nThe image takes the place of what you drew and matches its position and size, so draw bigger for a bigger image.\n\nRestart Instagram for it to take effect." = "선이나 도형을 그린 다음 보내기를 누르고 이미지를 가져올 위치를 선택하세요: 갤러리, 사진, 스티커 또는 붙여넣기.\n\n이미지는 그린 자리를 대체하며 위치와 크기를 그대로 따르므로, 크게 그리면 이미지도 커집니다.\n\n적용하려면 인스타그램을 다시 시작하세요.";
+
+"Send image as drawing" = "이미지를 그림으로 보내기";
+
+"Bypass \"You can't send messages\"" = "“메시지를 보낼 수 없습니다” 우회";
+"Removes the blocked composer banner and restores the text input in restricted threads" = "차단된 입력창 배너를 제거하고 제한된 대화에서 텍스트 입력을 복원합니다";
 "Custom chat background" = "맞춤 채팅 배경";
+"DM Save button" = "DM 저장 버튼";
+"Make Instagram's built-in Save button on DM photos & videos download to Photos, the Gallery, or Share" = "DM 사진 및 동영상의 Instagram 기본 저장 버튼을 사진, 갤러리 또는 공유로 다운로드하도록 변경합니다";
+"Reroute native Save" = "기본 저장 동작 변경";
+"Save media" = "미디어 저장";
 "Incoming calls stay silent — no ring, no screen, no notification" = "걸려오는 전화를 무음으로 유지 — 벨소리, 화면, 알림 없음";
 "Messages" = "메시지";
 "Silence incoming calls" = "걸려오는 전화 무음";
@@ -789,6 +823,18 @@
 "Lets you swipe to switch between navigation bar tabs" = "스와이프하여 내비게이션 바 탭 간에 전환할 수 있습니다";
 "Messages only" = "메시지 전용";
 "Messages-only mode" = "메시지 전용 모드";
+"Automatic schedule" = "자동 예약";
+"DM-only client, hide tabs, auto schedule" = "DM 전용 클라이언트, 탭 숨기기, 자동 예약";
+"Start time" = "시작 시간";
+"End time" = "종료 시간";
+"Switch into Messages-only on its own during a time window" = "지정한 시간대 동안 자동으로 메시지 전용 모드로 전환";
+"Turn Messages-only on by itself during a daily window (e.g. 10:00 PM – 6:00 AM) using the toggles above. You'll be asked to restart when the window starts and when it ends." = "위 토글을 사용해 매일 지정한 시간대(예: 오후 10:00 – 오전 6:00) 동안 메시지 전용 모드를 자동으로 켭니다. 시간대가 시작되고 끝날 때 재시작하라는 안내가 표시됩니다.";
+"Active now · ends %@" = "현재 활성 · %@에 종료";
+"Next window starts %@" = "다음 시간대 %@ 시작";
+"Messages-only starting" = "메시지 전용 모드 시작";
+"Messages-only ending" = "메시지 전용 모드 종료";
+"Your Messages-only window has started. Restart Instagram to switch to DM-only." = "메시지 전용 모드 시간대가 시작되었습니다. 인스타그램을 재시작하여 DM 전용으로 전환하세요.";
+"Your Messages-only window has ended. Restart Instagram to bring back the other tabs." = "메시지 전용 모드 시간대가 종료되었습니다. 인스타그램을 재시작하여 다른 탭을 복원하세요.";
 "Navigation" = "내비게이션";
 "Swipe between tabs" = "탭 간 스와이프 전환";
 "Tab the app opens to. Ignored when Messages-only is on" = "앱이 열리는 탭입니다. 메시지 전용 모드가 켜져 있으면 무시됩니다.";
@@ -844,7 +890,7 @@
 "Shows an alert before sending an emoji reaction on a note" = "노트에 이모티콘 반응을 보내기 전에 경고를 표시합니다";
 "Shows an alert before sending an emoji reaction on a story" = "스토리에 이모티콘 반응을 보내기 전에 경고를 표시합니다";
 "Shows an alert before sending an emoji reaction on an Instant" = "Instant에 이모티콘 반응을 보내기 전에 알림 표시";
-"Shows an alert before taking a photo with the Instants camera" = "Instants 카메라로 사진을 찍기 전에 알림 표시";
+"Shows an alert before sending a photo or video from the Instants camera" = "Instants 카메라에서 사진이나 동영상을 보내기 전에 알림을 표시합니다";
 "Shows an alert before tapping to switch to the next/previous Instant" = "다음/이전 Instant로 전환하기 위해 탭하기 전에 알림 표시";
 "Shows an alert to confirm before sending a voice message" = "음성 메시지를 보내기 전에 확인할 경고를 표시합니다";
 "Shows an alert to confirm before toggling vanish mode" = "배니시 모드를 전환하기 전에 확인 경고를 표시합니다";
@@ -890,6 +936,7 @@
 "Biometric" = "생체 인증";
 "Change passcode" = "암호 변경";
 "Chat hidden" = "채팅이 숨겨졌습니다";
+"Chat unhidden" = "채팅 숨김이 해제되었습니다";
 "Chat locked" = "채팅이 잠겼습니다";
 "Chat unlocked" = "채팅이 잠금 해제되었습니다";
 "Choose a code you'll remember." = "기억할 수 있는 코드를 선택하세요.";
@@ -912,6 +959,7 @@
 "Every use" = "매번";
 "Hidden chats" = "숨긴 채팅";
 "Hide chat" = "채팅 숨기기";
+"Unhide chat" = "채팅 숨김 해제";
 "Hide message preview" = "메시지 미리보기 숨기기";
 "Hide this chat?" = "이 채팅을 숨기시겠습니까?";
 "Hides RyukGram UI from screenshots/recordings and routes around IG's per-feature screenshot alerts." = "스크린샷/녹화에서 RyukGram UI를 숨기고 Instagram의 기능별 스크린샷 경고를 우회합니다.";
@@ -1253,6 +1301,15 @@
 // inside DM threads.                                                       //
 //////////////////////////////////////////////////////////////////////////////
 
+"Free" = "자유";
+"Remove background" = "배경 제거";
+"No subject found" = "대상을 찾을 수 없음";
+"No stickers yet" = "아직 스티커가 없습니다";
+"Send drawing" = "그림 보내기";
+"Send my drawing" = "내 그림 보내기";
+"Paste image / sticker" = "이미지/스티커 붙여넣기";
+"Tap any sticker on your keyboard\nto add it to your drawing" = "키보드의 스티커를 탭하여\n그림에 추가하세요";
+
 "  %lu votes · avg %.0f%%  " = "  투표 %lu개 · 평균 %.0f%%  ";
 "%@ can't be converted" = "%@ 변환 불가";
 "%@ unsent a message" = "%@님이 메시지 전송을 취소했습니다";
@@ -1372,14 +1429,18 @@
 "Change default" = "기본값 변경";
 "Chat Backgrounds" = "채팅 배경";
 "Choose an image used when no chat override exists" = "채팅별 설정이 없을 때 사용할 이미지를 선택합니다";
-"Choose Image" = "이미지 선택";
 "Clear default" = "기본값 지우기";
 "Couldn't import image" = "이미지를 가져올 수 없습니다";
+"Adjust settings" = "설정 조정";
+"Choose Media" = "미디어 선택";
+"Converting GIF" = "GIF 변환 중";
+"Couldn't import video" = "동영상을 가져올 수 없습니다";
+"Crop & resize" = "자르기 및 크기 조절";
+"Crop & trim" = "자르기 및 트림";
 "Custom Chat Background" = "맞춤 채팅 배경";
 "Default background" = "기본 배경";
 "Delete library images, default background, and chat overrides" = "라이브러리 이미지, 기본 배경, 채팅별 설정을 삭제합니다";
 "Dim in dark mode" = "다크 모드에서 어둡게";
-"Edit image settings" = "이미지 설정 편집";
 "Enable custom backgrounds" = "맞춤 배경 사용";
 "Enter a username, chat name, or thread ID." = "사용자 이름, 채팅 이름 또는 스레드 ID를 입력하세요.";
 "Group" = "그룹";
@@ -1479,7 +1540,7 @@
 "Turn every theme option off and restart" = "모든 테마 옵션을 끄고 재시작";
 "Turn Location Services on in Settings → Privacy to use your current location." = "현재 위치를 사용하려면 설정 → 개인정보에서 위치 서비스를 켜세요.";
 "Type an emoji to use as the note bubble icon." = "노트 말풍선 아이콘으로 사용할 이모지를 입력하세요.";
-"View profile picture" = "프로필 사진 보기";
+"Profile picture" = "프로필 사진";
 
 //////////////////////////////////////////////////////////////////////////////
 //                            PROFILE ANALYZER                              //
@@ -1487,6 +1548,11 @@
 //////////////////////////////////////////////////////////////////////////////
 
 " BETA " = " BETA ";
+"%lu of %lu checks on" = "검사 %lu개 중 %lu개 켜짐";
+"Checks" = "검사";
+"Pick which categories each scan computes. A disabled check is greyed out and skipped — it won't be calculated or shown." = "각 스캔이 계산할 카테고리를 선택하세요. 비활성화된 검사는 흐리게 표시되며 건너뛰어 계산되지도 표시되지도 않습니다.";
+"Snapshot saved" = "스냅샷 저장됨";
+"Your current scan was archived" = "현재 스캔이 보관되었습니다";
 "%@ %lu accounts? The first %ld will be processed to avoid rate limits." = "%@ %lu개 계정? API 제한을 피하기 위해 처음 %ld개만 처리됩니다.";
 "%@ %lu accounts? This runs sequentially with a short pause between each." = "%@ %lu개 계정? 각 요청 사이에 짧은 간격을 두고 순차적으로 실행됩니다.";
 "%@ followers · %@ following" = "팔로워 %@ · 팔로잉 %@";
@@ -1549,6 +1615,9 @@
 "Mutual followers" = "맞팔 팔로워";
 "Name: %@ → %@" = "이름: %@ → %@";
 "New followers" = "새 팔로워";
+"NEW" = "신규";
+"New first" = "새 항목 먼저";
+"New only" = "새 항목만";
 "No active Instagram session found" = "활성화된 Instagram 세션을 찾을 수 없습니다";
 "No results" = "결과 없음";
 "No scan yet" = "분석 기록 없음";
@@ -2162,6 +2231,7 @@
 // Settings → Interface (renamed Navigation tab)                            //
 //////////////////////////////////////////////////////////////////////////////
 
+"Instagram language" = "Instagram 언어";
 "Adds an extra shortcut button beside the create-post + button on the home top bar." = "홈 상단 바의 게시물 작성 + 버튼 옆에 추가 단축 버튼을 표시합니다.";
 "All buttons" = "모든 버튼";
 "Choose icon, reorder actions, and enable menu items" = "아이콘 선택, 작업 순서 변경, 메뉴 항목 활성화";
@@ -2179,6 +2249,9 @@
 //                              NOTIFICATIONS                               //
 // Settings → Interface → Notifications + the universal pill / toast system //
 //////////////////////////////////////////////////////////////////////////////
+
+"Drag the pill to position it" = "드래그하여 알림 위치 지정";
+"Drag the pill where you want it. Higher than center slides down, lower slides up." = "알림을 원하는 곳으로 드래그하세요. 가운데보다 위는 아래로, 아래는 위로 슬라이드됩니다.";
 
 "Notifications" = "알림";
 "Appearance" = "모양";
@@ -2252,6 +2325,12 @@
 "Share-sheet recipient pinned" = "공유 시트 수신자 고정됨";
 "Unsent message detected" = "전송 취소된 메시지 감지됨";
 "Reaction removed detected" = "반응 제거 감지됨";
+"%lu messages unsent" = "메시지 %lu개 전송 취소됨";
+"%lu reactions removed" = "반응 %lu개 제거됨";
+"%lu chats marked seen" = "채팅 %lu개 읽음 표시됨";
+"%lu stories marked seen" = "스토리 %lu개 읽음 표시됨";
+"%lu of your messages read" = "내 메시지 %lu개 읽음";
+"%lu notifications" = "알림 %lu개";
 "Live comments toggled" = "라이브 댓글 전환됨";
 "Custom GIF sent" = "사용자 지정 GIF 전송됨";
 "GIF favorited / unfavorited" = "GIF 즐겨찾기 추가 / 해제";
@@ -2366,3 +2445,189 @@
 "read your message" = "메시지를 읽음";
 "Also track reads in group chats. Off by default — groups can be noisy" = "그룹 채팅의 읽음도 추적합니다. 기본 꺼짐 — 그룹은 알림이 많을 수 있습니다";
 "Refreshing…" = "새로 고치는 중…";
+"Pinned" = "고정됨";
+"Liked the story" = "스토리에 좋아요";
+"Default (recent first)" = "기본 (최신순)";
+"Liked first" = "좋아요한 사람 먼저";
+"Load all viewers" = "모든 조회자 불러오기";
+"%lu viewers" = "조회자 %lu명";
+"Viewer pinned" = "조회자 고정됨";
+"Viewer unpinned" = "조회자 고정 해제됨";
+"Pin a viewer" = "조회자 고정";
+"Pin order" = "고정 순서";
+"Pin this viewer?" = "이 조회자를 고정할까요?";
+"Filter, sort & pin viewers" = "조회자 필터·정렬·고정";
+"Adds controls to your story viewers list" = "스토리 조회자 목록에 컨트롤을 추가합니다";
+"Add by username, remove, reorder" = "사용자 이름으로 추가, 삭제, 순서 변경";
+"Pinned viewers (%lu)" = "고정된 조회자 (%lu)";
+"Viewers list" = "조회자 목록";
+"Settings are saved and reused next time." = "설정이 저장되어 다음에 다시 사용됩니다.";
+"Tick several to combine them. Pinned viewers always stay on top and ignore these filters." = "여러 개를 선택하면 함께 적용됩니다. 고정된 조회자는 항상 맨 위에 표시되며 이 필터를 무시합니다.";
+"Pinned viewers" = "고정된 조회자";
+"Pin" = "고정";
+"On the 'who viewed my story' list, adds a filter/sort button (bottom-right) with sticky settings. Long-press a viewer to pin them. Pinned viewers always stay at the top of the list." = "'내 스토리를 본 사람' 목록에 설정이 저장되는 필터/정렬 버튼(오른쪽 아래)을 추가합니다. 조회자를 길게 눌러 고정하세요. 고정된 조회자는 항상 목록 맨 위에 유지됩니다.";
+"Username or raw user PK. Pinned viewers always stay at the top of your story viewers list." = "사용자 이름 또는 사용자 PK. 고정된 조회자는 항상 스토리 조회자 목록 맨 위에 유지됩니다.";
+
+//////////////////////////////////////////////////////////////////////////////
+//                               DEVICE ID                                  //
+// Settings -> Advanced -> Device ID, and the login-screen Device ID button //
+//////////////////////////////////////////////////////////////////////////////
+"Roll a new fingerprint" = "새 지문 생성";
+"Roll new ID" = "새 ID 생성";
+"Roll + clear IG data" = "새 ID 생성 + IG 데이터 삭제";
+"Generate fresh device identifiers" = "새 기기 식별자 생성";
+"New fingerprint ready" = "새 지문 준비됨";
+"Relaunch Instagram now so the new device identity applies from a clean start?" = "새 기기 신원이 처음부터 깨끗하게 적용되도록 지금 Instagram을 다시 실행할까요?";
+"Full reset to a brand-new device" = "완전히 새 기기로 전체 초기화";
+"Masks the identifiers Instagram uses to fingerprint this device: device ID, family device ID, vendor ID and machine ID. Changes apply after a relaunch. The same controls appear on the login screen." = "Instagram이 이 기기를 식별하는 데 사용하는 식별자(기기 ID, 패밀리 기기 ID, 벤더 ID, 머신 ID)를 마스킹합니다. 변경 사항은 다시 실행한 후 적용됩니다. 동일한 제어 항목이 로그인 화면에도 표시됩니다.";
+"Rolls a fresh device ID, family device ID, vendor ID and clears the machine ID so Instagram re-registers as a new device. Or also wipe saved logins for a full reset." = "새 기기 ID, 패밀리 기기 ID, 벤더 ID를 생성하고 머신 ID를 지워 Instagram이 새 기기로 다시 등록되도록 합니다. 또는 저장된 로그인 정보까지 지워 전체 초기화할 수 있습니다.";
+"Apple attestation" = "Apple 증명";
+"Blocks Instagram's Apple device attestation (DeviceCheck and App Attest). These are bound to the hardware and can't be changed, so they keep linking the device across resets. Blocking makes Instagram see a device that doesn't support them. Only works while masking is on." = "Instagram의 Apple 기기 증명(DeviceCheck 및 App Attest)을 차단합니다. 이 항목들은 하드웨어에 묶여 있어 변경할 수 없으므로 초기화해도 기기를 계속 연결시킵니다. 차단하면 Instagram이 이를 지원하지 않는 기기로 인식합니다. 마스킹이 켜져 있을 때만 작동합니다.";
+"Block Apple device attestation" = "Apple 기기 증명 차단";
+"Stop the hardware attestation that links the device" = "기기를 연결시키는 하드웨어 증명 중지";
+"Block Apple attestation: %@" = "Apple 증명 차단: %@";
+"Attestation blocked" = "증명 차단됨";
+"Attestation allowed" = "증명 허용됨";
+"Roll + clear, then sign in fresh" = "새로 생성 + 삭제 후 새로 로그인";
+"New device fingerprint" = "새 기기 지문";
+"Enter ID manually…" = "ID 직접 입력…";
+"Manual device ID" = "수동 기기 ID";
+"Paste or type the UUID this device should report." = "이 기기가 보고할 UUID를 붙여넣거나 입력하세요.";
+"Device ID set" = "기기 ID 설정됨";
+"Copy current ID" = "현재 ID 복사";
+"Revert to my real device ID" = "내 실제 기기 ID로 되돌리기";
+"Restore the original, stop masking" = "원본 복원, 마스킹 중지";
+"Spoofing off" = "스푸핑 꺼짐";
+"Relaunch now" = "지금 다시 실행";
+"Relaunch to apply" = "적용하려면 다시 실행하세요";
+"Clear device & relaunch" = "기기 초기화 후 다시 실행";
+"Clear device & relaunch?" = "기기를 초기화하고 다시 실행할까요?";
+"Clear & relaunch" = "초기화 후 다시 실행";
+"Device ID" = "기기 ID";
+"Device identity" = "기기 신원";
+"Masked" = "마스킹됨";
+"Real" = "실제";
+"Show button on login screen" = "로그인 화면에 버튼 표시";
+"Floating Device ID button while signed out" = "로그아웃 상태에서 떠 있는 기기 ID 버튼";
+"Forgets every saved login, cookie and the stored device identity, then relaunches so Instagram starts as a brand-new device. You'll sign in again afterwards." = "저장된 모든 로그인 정보, 쿠키, 저장된 기기 신원을 잊은 다음 다시 실행하여 Instagram이 완전히 새 기기로 시작되도록 합니다. 이후 다시 로그인해야 합니다.";
+
+//////////////////////////////////////////////////////////////////////////
+//                         FOLLOW REQUESTS TRACKER                        //
+// Settings → Follow Requests Tracker                                     //
+//////////////////////////////////////////////////////////////////////////
+"Follow Requests Tracker" = "팔로우 요청 트래커";
+"Follow Requests" = "팔로우 요청";
+"Show follow requests" = "팔로우 요청 보기";
+"Check now" = "지금 확인";
+"Reset tracked data" = "추적 데이터 초기화";
+"Enable tracker" = "트래커 켜기";
+"Log requests and check outcomes" = "요청을 기록하고 결과 확인";
+"Logs follow requests you send and receive, and catches who cancels a request before you answer. All on-device." = "보내고 받는 팔로우 요청을 기록하고, 답하기 전에 요청을 취소하는 사람을 포착합니다. 모두 기기에서 처리됩니다.";
+"What to track" = "추적할 항목";
+"Requests I send" = "내가 보내는 요청";
+"To private accounts" = "비공개 계정으로";
+"Requests I receive" = "내가 받는 요청";
+"From people who want to follow you" = "회원님을 팔로우하려는 사람들";
+"Background check" = "백그라운드 확인";
+"Check interval" = "확인 간격";
+"How often to check for outcomes while the app is open. Also checks on launch and when you open the list." = "앱이 열려 있는 동안 결과를 확인하는 빈도입니다. 실행 시와 목록을 열 때도 확인합니다.";
+"Off (manual only)" = "끔 (수동만)";
+"Every 15 minutes" = "15분마다";
+"Every 30 minutes" = "30분마다";
+"Every hour" = "1시간마다";
+"Every 6 hours" = "6시간마다";
+"My request accepted" = "내 요청 수락됨";
+"A private account accepted you" = "비공개 계정이 회원님을 수락했습니다";
+"My request declined" = "내 요청 거절됨";
+"No longer pending" = "더 이상 대기 중 아님";
+"New request received" = "새 요청 수신됨";
+"Someone asked to follow you" = "누군가 회원님을 팔로우하려고 요청했습니다";
+"Request withdrawn" = "요청 취소됨";
+"Someone cancelled their request" = "누군가 요청을 취소했습니다";
+"Sent by me" = "내가 보낸 것";
+"Received" = "받음";
+"Sent" = "보냄";
+"Accepted" = "수락됨";
+"Rejected" = "거절됨";
+"Requested" = "요청됨";
+"Approved" = "승인됨";
+"Withdrawn" = "취소됨";
+"No follow requests tracked yet" = "아직 추적된 팔로우 요청이 없습니다";
+"Cancel requests" = "요청 취소";
+"Delete %lu record(s) from history?" = "기록에서 %lu개 항목을 삭제할까요?";
+"Cancel %lu pending request(s)?" = "대기 중인 요청 %lu개를 취소할까요?";
+"Follow back %lu account(s)?" = "%lu개 계정을 맞팔로우할까요?";
+"Clear all tracked follow requests?" = "추적된 팔로우 요청을 모두 지울까요?";
+"Reset tracked follow requests for this account?" = "이 계정의 추적된 팔로우 요청을 초기화할까요?";
+"Enable the tracker first" = "먼저 트래커를 켜세요";
+"Checking…" = "확인 중…";
+"%ld request(s) updated" = "요청 %ld개 업데이트됨";
+"No changes" = "변경 사항 없음";
+"Working…" = "처리 중…";
+"Follow request accepted" = "팔로우 요청 수락됨";
+"%@ accepted your request" = "%@님이 회원님의 요청을 수락했습니다";
+"Follow request declined" = "팔로우 요청 거절됨";
+"%@ is no longer pending" = "%@님이 더 이상 대기 중이 아닙니다";
+"New follow request" = "새 팔로우 요청";
+"%@ asked to follow you" = "%@님이 회원님을 팔로우하려고 요청했습니다";
+"Follow request withdrawn" = "팔로우 요청 취소됨";
+"%@ withdrew their request" = "%@님이 요청을 취소했습니다";
+"Follow requests log" = "팔로우 요청 로그";
+"Hidden chats hidden" = "숨긴 채팅 숨김";
+"Hidden chats revealed" = "숨긴 채팅 표시됨";
+"Hold name to reveal" = "이름을 길게 눌러 표시";
+"Long-press the account name atop the DM inbox to show or hide your hidden chats" = "DM 받은편지함 상단의 계정 이름을 길게 눌러 숨긴 채팅을 표시하거나 숨깁니다";
+"Reveal hidden chats" = "숨긴 채팅 표시";
+"Prompt before holding the inbox name reveals hidden chats" = "이름을 길게 눌러 숨긴 채팅을 표시하기 전에 요청";
+"👁 Shown in the inbox · Tap to hide" = "👁 받은편지함에 표시됨 · 탭하여 숨기기";
+" · shown in inbox" = " · 받은편지함에 표시됨";
+
+//////////////////////////////////////////////////////////////////////////////
+//                              INSTAGRAM PLUS                               //
+// Settings → General → Instagram Plus                                        //
+//////////////////////////////////////////////////////////////////////////////
+
+"Instagram Plus" = "Instagram Plus";
+"Unlock Instagram's paid features" = "Instagram 유료 기능 잠금 해제";
+"Turn on Instagram's paid subscriber features inside the app." = "앱 안에서 Instagram 유료 구독 기능을 켭니다.";
+"Instagram Plus is Instagram's paid subscription. These switches turn its features on inside the app. Some work completely. Others only reveal the option, because the content is loaded from Instagram's servers and still needs a real subscription, so they may show up empty or do nothing. Turn on what you want and tap Apply. If Instagram fails to launch three times in a row, these switches reset themselves." = "Instagram Plus는 Instagram의 유료 구독입니다. 이 스위치들은 앱 안에서 해당 기능을 켭니다. 일부는 완전히 작동합니다. 나머지는 옵션만 표시되는데, 콘텐츠가 Instagram 서버에서 불러와지며 실제 구독이 필요하기 때문에 비어 있거나 아무 반응이 없을 수 있습니다. 원하는 항목을 켜고 Apply를 탭하세요. Instagram이 연속 세 번 실행에 실패하면 이 스위치들은 자동으로 초기화됩니다.";
+"Turn everything on" = "모두 켜기";
+"Turn everything off" = "모두 끄기";
+"Reset Instagram Plus" = "Instagram Plus 초기화";
+"Reset Instagram Plus?" = "Instagram Plus를 초기화할까요?";
+"Turn every Instagram Plus feature off" = "모든 Instagram Plus 기능 끄기";
+"Every Instagram Plus feature turns off and Instagram restarts." = "모든 Instagram Plus 기능이 꺼지고 Instagram이 다시 시작됩니다.";
+"Story peek" = "스토리 미리보기";
+"Hold a story in the tray to preview it without opening it." = "트레이에서 스토리를 길게 눌러 열지 않고 미리 봅니다.";
+"Story fonts" = "스토리 글꼴";
+"Adds the subscriber fonts when you add text to a story." = "스토리에 텍스트를 추가할 때 구독자 전용 글꼴을 추가합니다.";
+"Search story viewers" = "스토리 조회자 검색";
+"Search the list of people who viewed your story." = "내 스토리를 본 사람 목록을 검색합니다.";
+"Viewer timestamps" = "조회 시간 표시";
+"Shows when each person viewed your story." = "각 사람이 내 스토리를 본 시간을 표시합니다.";
+"Silent post to profile" = "프로필에 조용히 게시";
+"Share to your profile without notifying your followers." = "팔로워에게 알리지 않고 프로필에 공유합니다.";
+"Silent post to highlights" = "하이라이트에 조용히 추가";
+"Add to a highlight without notifying your followers." = "팔로워에게 알리지 않고 하이라이트에 추가합니다.";
+"Story rewatch" = "스토리 다시 보기";
+"Rewatch a story right after it finishes." = "스토리가 끝난 직후에 다시 봅니다.";
+"Story extend" = "스토리 연장";
+"Keep your story up longer than 24 hours." = "스토리를 24시간보다 오래 유지합니다.";
+"Story spotlight" = "스토리 스포트라이트";
+"Boost your story to more viewers. Loads from Instagram, so it may not work." = "스토리를 더 많은 사람에게 노출합니다. Instagram에서 불러오므로 작동하지 않을 수 있습니다.";
+"Story super likes" = "스토리 슈퍼 좋아요";
+"Send super likes on stories. Loads from Instagram, so it may not work." = "스토리에 슈퍼 좋아요를 보냅니다. Instagram에서 불러오므로 작동하지 않을 수 있습니다.";
+"Message peek" = "메시지 미리보기";
+"Hold a chat in the inbox to preview it." = "받은편지함에서 채팅을 길게 눌러 미리 봅니다.";
+"Chat fonts" = "채팅 글꼴";
+"Adds the subscriber fonts in direct messages." = "다이렉트 메시지에 구독자 전용 글꼴을 추가합니다.";
+"Chat themes" = "채팅 테마";
+"Unlocks the premium chat themes. Loads from Instagram, so it may not work." = "프리미엄 채팅 테마를 잠금 해제합니다. Instagram에서 불러오므로 작동하지 않을 수 있습니다.";
+"App icons" = "앱 아이콘";
+"Opens the alternate app icon picker." = "대체 앱 아이콘 선택 화면을 엽니다.";
+"Bio font" = "소개 글꼴";
+"Use a subscriber font for your bio." = "소개에 구독자 전용 글꼴을 사용합니다.";
+"Custom story lists" = "맞춤 스토리 목록";
+"Make lists to pick exactly who sees a story." = "스토리를 볼 사람을 정확히 고를 수 있는 목록을 만듭니다.";
+"More pinned posts" = "더 많은 게시물 고정";
+"Pin more posts to the top of your profile." = "프로필 상단에 더 많은 게시물을 고정합니다.";

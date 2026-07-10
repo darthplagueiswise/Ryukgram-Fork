@@ -5,7 +5,6 @@
 #import "SCILockedSurfaceNavigationController.h"
 #import "UI/SCILockPasscodeViewController.h"
 #import "../UI/SCIPopupChrome.h"
-#import "../UI/SCIUIKit26LiquidGlass.h"
 #import "../Localization/SCILocalization.h"
 
 @implementation SCILockGate
@@ -39,6 +38,7 @@ static BOOL sciGroupInheritsSettingsLock(NSString *gid) {
     if ([gid isEqualToString:SCILockGroupApp]) return NO;
     if ([gid isEqualToString:SCILockGroupSettings]) return NO;
     if ([gid isEqualToString:SCILockGroupMessagesTab]) return NO;
+    if ([gid isEqualToString:SCILockGroupHiddenReveal]) return NO;
     return YES;
 }
 
@@ -93,21 +93,12 @@ static BOOL sciGroupInheritsSettingsLock(NSString *gid) {
 + (void)presentLockedVC:(UIViewController *)contentVC
                 forGroup:(NSString *)groupID
                     from:(UIViewController *)presenter {
-    [self presentLockedVC:contentVC forGroup:groupID from:presenter sourceView:nil];
-}
-
-+ (void)presentLockedVC:(UIViewController *)contentVC
-                forGroup:(NSString *)groupID
-                    from:(UIViewController *)presenter
-              sourceView:(UIView *)sourceView {
     if (!contentVC) return;
-    (void)sourceView;
     [self runGated:groupID from:presenter then:^{
         SCILockedSurfaceNavigationController *nav = [[SCILockedSurfaceNavigationController alloc] initWithRootViewController:contentVC];
         nav.lockGroupID = groupID;
         nav.modalPresentationStyle = UIModalPresentationFullScreen;
-        SCIUIKit26ApplyContainerBackgroundToViewController(nav);
-        SCIConfigureNavigationChromeForGlass(contentVC);
+        [SCIPopupChrome applyBackdropTo:contentVC];
         if (!contentVC.navigationItem.leftBarButtonItem
             && !contentVC.navigationItem.leftBarButtonItems.count) {
             UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark"]

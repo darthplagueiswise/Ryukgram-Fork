@@ -73,3 +73,4 @@ int rebind_symbols_image(void *header,
 #endif //__cplusplus
 
 #endif //fishhook_h
+

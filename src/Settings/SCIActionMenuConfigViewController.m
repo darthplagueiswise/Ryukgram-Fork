@@ -52,7 +52,7 @@ static UIImageView *sciSymbol(UIImage *image, UIColor *tint) {
 }
 
 static UIColor *sciBackground(void) {
-	return SCIUIKit26BaseSurfaceColor();
+	return [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 }
 
 static void sciInstallReorderRow(UITableViewCell *cell, NSString *iconName, NSString *title, UIView *accessory) {
@@ -118,8 +118,6 @@ static void sciInstallReorderRow(UITableViewCell *cell, NSString *iconName, NSSt
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	UIColor *bg = sciBackground();
 	self.view.backgroundColor = bg;
 	self.tableView.backgroundColor = bg;

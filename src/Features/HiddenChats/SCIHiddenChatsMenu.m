@@ -11,14 +11,27 @@
     NSString *tid = entry[@"threadId"];
     if (![tid isKindOfClass:[NSString class]] || !tid.length) return @[];
 
-    // Once hidden the row vanishes so the user can't reach the context menu;
-    // surface only the "Hide chat" action here. Unhide is done from the
-    // Security & Privacy → Hidden chats list.
+    // A hidden row is only reachable while the list is revealed — offer Unhide there.
+    if ([SCIHiddenChats isHidden:tid]) {
+        UIAction *unhide = [UIAction actionWithTitle:SCILocalized(@"Unhide chat")
+                                               image:[SCIIcon imageNamed:@"ig_icon_direct_prism_outline_24" pointSize:20]
+                                          identifier:nil
+                                             handler:^(__kindof UIAction *_) {
+            [SCIHiddenChats removeThreadId:tid];
+            [SCIHiddenChats refreshInboxInPlace];
+            SCINotifySuccess(SCI_NOTIF_LOCK_CHAT_TOGGLE,
+                             SCILocalized(@"Chat unhidden"),
+                             entry[@"threadName"]);
+        }];
+        return @[unhide];
+    }
+
     UIAction *hide = [UIAction actionWithTitle:SCILocalized(@"Hide chat")
                                           image:[SCIIcon imageNamed:@"ig_icon_direct_off_prism_outline_24" pointSize:20]
                                      identifier:nil
                                         handler:^(__kindof UIAction *_) {
         [SCIHiddenChats addEntry:entry];
+        [SCIHiddenChats refreshInboxInPlace];
         SCINotifySuccess(SCI_NOTIF_LOCK_CHAT_TOGGLE,
                          SCILocalized(@"Chat hidden"),
                          entry[@"threadName"]);

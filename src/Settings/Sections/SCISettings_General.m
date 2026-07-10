@@ -37,6 +37,13 @@
 											]
 										},
 										@{
+											@"header": SCILocalized(@"Instagram Plus"),
+											@"footer": SCILocalized(@"Turn on Instagram's paid subscriber features inside the app."),
+											@"rows": @[
+												[self instaPlusNavCell],
+											]
+										},
+										@{
 											@"header": SCILocalized(@"Date format"),
 											@"footer": SCILocalized(@"Replace IG's relative timestamps (\"3d ago\") with a custom format. Toggle which surfaces it applies to inside the picker."),
 											@"rows": @[
@@ -95,9 +102,11 @@
 											@"rows": @[
 												[SCISetting switchCellWithTitle:SCILocalized(@"No suggested users") subtitle:SCILocalized(@"Hides all suggested users for you to follow, outside your feed") defaultsKey:@"no_suggested_users" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"No suggested chats") subtitle:SCILocalized(@"Hides the suggested broadcast channels in direct messages") defaultsKey:@"no_suggested_chats"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Hide DM search suggestions") subtitle:SCILocalized(@"Removes suggested accounts and channels from direct message search") defaultsKey:@"no_dm_search_suggestions"],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide explore posts grid") subtitle:SCILocalized(@"Hides the grid of suggested posts on the explore/search tab") defaultsKey:@"hide_explore_grid" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Hide trending searches") subtitle:SCILocalized(@"Hides the trending searches under the explore search bar") defaultsKey:@"hide_trending_searches" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Skip sensitive content covers") subtitle:SCILocalized(@"Auto-reveals sensitive media") defaultsKey:@"skip_sensitive_content"],
+												[SCISetting switchCellWithTitle:SCILocalized(@"Block surveys") subtitle:SCILocalized(@"Stops Instagram's in-app surveys and feedback prompts") defaultsKey:@"suppress_surveys" requiresRestart:YES],
 											]
 										},
 										@{

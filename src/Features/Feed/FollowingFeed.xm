@@ -9,7 +9,7 @@ static BOOL sciFollowingFeedEnabled(void) {
     return [[SCIUtils getStringPref:@"main_feed_mode"] isEqualToString:@"following"];
 }
 
-%hook IGHomeFeedPickerMenuController
+%hook _TtC16IGHomeFeedPicker30IGHomeFeedPickerMenuController
 - (id)initWithUserSession:(id)userSession menuItems:(NSArray *)menuItems homeFeedViewModel:(id)homeViewModel analyticsModule:(id)analyticsModule navigationController:(id)navigationController isForYouContentLaneEnabled:(BOOL)forYouEnabled {
     if (!sciFollowingFeedEnabled())
         return %orig;
@@ -19,11 +19,6 @@ static BOOL sciFollowingFeedEnabled(void) {
     [items removeObject:@(IGHomeFeedPickerMenuItemForYou)];
     [items insertObject:@(IGHomeFeedPickerMenuItemFollowing) atIndex:0];
     return %orig(userSession, items, homeViewModel, analyticsModule, navigationController, YES);
-}
-- (void)_didSelectItem:(id)item {
-    if (sciFollowingFeedEnabled() && MSHookIvar<NSInteger>(item, "_feed_type") == IGHomeFeedPickerMenuItemFollowing)
-        return;
-    %orig;
 }
 %end
 
@@ -35,7 +30,7 @@ static BOOL sciFollowingFeedEnabled(void) {
 }
 %end
 
-%hook IGHomeFeedHeaderView
+%hook _TtC16IGHomeFeedHeader20IGHomeFeedHeaderView
 - (void)setTitle:(id)title animated:(BOOL)animated {
     if (sciFollowingFeedEnabled() && [title isEqual:@"For you"])
         %orig(SCILocalized(@"Following"), animated);
@@ -53,7 +48,7 @@ static BOOL sciFollowingFeedEnabled(void) {
 %end
 
 %hook IGMainFeedViewModel
-- (id)initWithDeps:(id)deps posts:(id)posts nextMaxID:(id)nextMaxID initialPaginationSource:(NSString *)paginationSource contentCoordinator:(id)coordinator dataSourceSupplementaryItemsProvider:(id)supplementaryProvider disableAutomaticRefresh:(BOOL)disableRefresh disableSerialization:(BOOL)disableSerialization sessionId:(id)sessionId analyticsModule:(id)analyticsModule disableFlashFeedTLI:(BOOL)disableFlashFeedTLI disableFlashFeedOnColdStart:(BOOL)disableColdStart disableResponseDeferral:(BOOL)disableResponseDeferral hidesStoriesTray:(BOOL)hidesStoriesTray isSecondaryFeed:(BOOL)isSecondaryFeed collectionViewBackgroundColorOverride:(id)backgroundColor minWarmStartFetchInterval:(double)minWarmStart peakMinWarmStartFetchInterval:(double)peakMinWarmStart minimumWarmStartBackgroundedInterval:(double)backgroundedMinWarmStart peakMinimumWarmStartBackgroundedInterval:(double)peakBackgroundedMinWarmStart supplementalFeedHoistedMediaID:(id)hoistedMediaId headerTitleOverride:(id)headerTitle isInFollowingTab:(BOOL)isInFollowingTab useShimmerLoadingWhenNoStoriesTray:(BOOL)useShimmer mainFeedDataFetcher:(id)dataFetcher {
+- (id)initWithDeps:(id)deps posts:(id)posts nextMaxID:(id)nextMaxID initialPaginationSource:(NSString *)paginationSource contentCoordinator:(id)coordinator dataSourceSupplementaryItemsProvider:(id)supplementaryProvider disableAutomaticRefresh:(BOOL)disableRefresh disableSerialization:(BOOL)disableSerialization sessionId:(id)sessionId analyticsModule:(id)analyticsModule disableFlashFeedTLI:(BOOL)disableFlashFeedTLI disableFlashFeedOnColdStart:(BOOL)disableColdStart disableResponseDeferral:(BOOL)disableResponseDeferral hidesStoriesTray:(BOOL)hidesStoriesTray shouldRegisterAsStoryDataListener:(BOOL)shouldRegisterAsStoryDataListener isSecondaryFeed:(BOOL)isSecondaryFeed collectionViewBackgroundColorOverride:(id)backgroundColor minWarmStartFetchInterval:(double)minWarmStart peakMinWarmStartFetchInterval:(double)peakMinWarmStart minimumWarmStartBackgroundedInterval:(double)backgroundedMinWarmStart peakMinimumWarmStartBackgroundedInterval:(double)peakBackgroundedMinWarmStart supplementalFeedHoistedMediaID:(id)hoistedMediaId headerTitleOverride:(id)headerTitle isInFollowingTab:(BOOL)isInFollowingTab useShimmerLoadingWhenNoStoriesTray:(BOOL)useShimmer mainFeedDataFetcher:(id)dataFetcher {
     if (sciFollowingFeedEnabled()) {
         paginationSource = @"following";
         isInFollowingTab = YES;

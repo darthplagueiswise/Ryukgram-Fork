@@ -14,12 +14,52 @@ static NSString *const kUserInfoKey           = @"sci_mirror";
 
 static const NSTimeInterval kRepeatThrottle = 2.0;
 
+// ───── Tap actions ─────
+// Keyed by notification identifier; in-memory, so a tap after IG was killed
+// just opens the app.
+static NSMutableDictionary<NSString *, void (^)(void)> *sciTapMap(void) {
+	static NSMutableDictionary *map;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ map = [NSMutableDictionary new]; });
+	return map;
+}
+
+// Foregrounding via a notification tap delivers the response while the app is
+// still inactive — presenting then races IG's UI restore, so defer to active.
+static void sciRunWhenActive(void (^block)(void)) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+			block();
+			return;
+		}
+		__block id token = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+		                                                                   object:nil
+		                                                                    queue:NSOperationQueue.mainQueue
+		                                                               usingBlock:^(__unused NSNotification *note) {
+			[NSNotificationCenter.defaultCenter removeObserver:token];
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
+		}];
+	});
+}
+
 // ───── Tap guard ─────
 // IG's delegate must never parse our foreign userInfo — swallow the response,
-// the app just opens.
+// run our stored tap action (if any) once the app is active.
 static void (*orig_didReceiveResponse)(id, SEL, UNUserNotificationCenter *, UNNotificationResponse *, void (^)(void));
 static void sci_didReceiveResponse(id self, SEL _cmd, UNUserNotificationCenter *center, UNNotificationResponse *response, void (^completion)(void)) {
 	if ([response.notification.request.content.userInfo[kUserInfoKey] boolValue]) {
+		NSString *identifier = response.notification.request.identifier;
+		void (^tap)(void) = nil;
+
+		NSMutableDictionary *map = sciTapMap();
+		@synchronized (map) {
+			tap = map[identifier];
+			if (tap) [map removeObjectForKey:identifier];
+		}
+
+		if (tap && [response.actionIdentifier isEqualToString:UNNotificationDefaultActionIdentifier])
+			sciRunWhenActive(tap);
+
 		if (completion) completion();
 		return;
 	}
@@ -67,7 +107,7 @@ static void sciInstallTapGuardIfNeeded(void) {
 	return ![[SCIUtils getStringPref:key] isEqualToString:@"off"];
 }
 
-+ (void)mirrorActionID:(NSString *)actionID title:(NSString *)title subtitle:(NSString *)subtitle {
++ (void)mirrorActionID:(NSString *)actionID title:(NSString *)title subtitle:(NSString *)subtitle onTap:(void (^)(void))onTap {
 	if (!title.length) return;
 
 	// Deterministic identifier — an identical repeat replaces its NC entry
@@ -77,6 +117,13 @@ static void sciInstallTapGuardIfNeeded(void) {
 	                        (unsigned long)(title.hash ^ (subtitle.hash * 31))];
 
 	if ([self sciIsThrottled:identifier]) return;
+
+	NSMutableDictionary *map = sciTapMap();
+	@synchronized (map) {
+		if (map.count > 64) [map removeAllObjects];
+		if (onTap) map[identifier] = [onTap copy];
+		else [map removeObjectForKey:identifier];
+	}
 
 	sciInstallTapGuardIfNeeded();
 
@@ -129,7 +176,13 @@ static void sciInstallTapGuardIfNeeded(void) {
 		for (UNNotification *notif in delivered)
 			if ([notif.request.identifier hasPrefix:kIdentifierPrefix]) [ids addObject:notif.request.identifier];
 
-		if (ids.count) [center removeDeliveredNotificationsWithIdentifiers:ids];
+		if (!ids.count) return;
+		[center removeDeliveredNotificationsWithIdentifiers:ids];
+
+		NSMutableDictionary *map = sciTapMap();
+		@synchronized (map) {
+			[map removeObjectsForKeys:ids];
+		}
 	}];
 }
 

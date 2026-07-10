@@ -2,6 +2,7 @@
 #import "../Utils.h"
 #import "../SCIURLOpener.h"
 #import "../PhotoAlbum.h"
+#import "SCIMediaActions.h"
 #import "../UI/Notification/SCINotificationCenter.h"
 #import "../UI/Notification/SCINotificationActions.h"
 #import <Photos/Photos.h>
@@ -20,7 +21,8 @@
 
     NSString *ext = [[url lastPathComponent] pathExtension];
     if (!ext.length) ext = isVideo ? @"mp4" : @"jpg";
-    NSURL *fileURL = [SCITempFiles claimWithExt:ext ttl:900 tag:@"repost"];
+    NSString *cleanName = [[SCIMediaActions filenameStemForUsername:nil contextLabel:@"repost"] stringByAppendingPathExtension:ext];
+    NSURL *fileURL = [SCITempFiles claimNamedFile:cleanName ttl:900 tag:@"repost"];
 
     NSURLSessionDownloadTask *task = [[NSURLSession sharedSession]
         downloadTaskWithURL:url completionHandler:^(NSURL *loc, NSURLResponse *resp, NSError *err) {

@@ -26,17 +26,15 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.title = SCILocalized(@"Lock with passcode");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.navigationController.navigationBar.prefersLargeTitles = NO;
 
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.tableView.contentInset = UIEdgeInsetsZero;
-	self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
+	self.tableView.backgroundColor = self.view.backgroundColor;
+	self.tableView.contentInset = UIEdgeInsetsMake(-10.0, 0.0, 0.0, 0.0);
 	self.tableView.estimatedRowHeight = 60.0;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	self.tableView.dataSource = self;
@@ -102,7 +100,7 @@
 
 	UIView *card = UIView.new;
 	card.translatesAutoresizingMaskIntoConstraints = NO;
-	card.backgroundColor = SCIUIKit26PanelFillColor();
+	card.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 	card.layer.cornerRadius = 22.0;
 	card.layer.cornerCurve = kCACornerCurveContinuous;
 

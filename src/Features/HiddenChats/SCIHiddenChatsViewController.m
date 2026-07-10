@@ -69,7 +69,14 @@
 
 	cfg.onRemoveItem = ^(NSDictionary *e) {
 		[SCIHiddenChats removeThreadId:e[@"threadId"]];
+		[SCIHiddenChats refreshInboxInPlace];
 	};
+
+	cfg.statusProvider = ^NSString *{
+		return [SCIHiddenChats revealed] ? SCILocalized(@"👁 Shown in the inbox · Tap to hide") : nil;
+	};
+	__weak typeof(self) weak = self;
+	cfg.onStatusTap = ^{ [SCIHiddenChats toggleRevealFrom:weak]; };
 
 	cfg.onAddRequest = ^(NSString *input, UIViewController *vc, void(^reload)(void)) {
 		if (!input.length) return;
@@ -134,8 +141,8 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:SCIAvatarLoadedNotification object:nil];
+	[NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload) name:SCIHiddenChatsRevealDidChangeNotification object:nil];
 }
 
 - (void)dealloc {

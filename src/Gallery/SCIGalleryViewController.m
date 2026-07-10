@@ -220,9 +220,8 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	[[NSNotificationCenter defaultCenter] addObserver:self
 											 selector:@selector(handleGalleryPreferencesChanged:)
@@ -526,7 +525,6 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	_collectionView.translatesAutoresizingMaskIntoConstraints = NO;
 	_collectionView.backgroundColor = self.view.backgroundColor;
 	_collectionView.dataSource = self;
-	SCIUIKit26ConfigureCollectionView(_collectionView);
 	_collectionView.delegate = self;
 	_collectionView.alwaysBounceVertical = YES;
 	_collectionView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
@@ -1103,7 +1101,6 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 - (__kindof UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
 	if ([self isFolderIndexPath:indexPath]) {
 		SCIGalleryFolderCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:kFolderCellID forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
 		SCIGalleryFolderCellLayout layout = (self.viewMode == SCIGalleryViewModeGrid)
 			? SCIGalleryFolderCellLayoutGrid
 			: SCIGalleryFolderCellLayoutList;
@@ -1135,7 +1132,6 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 
 	if (self.viewMode == SCIGalleryViewModeGrid) {
 		SCIGalleryGridCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:kGridCellID forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
 
 		[cell configureWithGalleryFile:file
 						 selectionMode:self.selectionMode
@@ -1145,7 +1141,6 @@ static NSString *SCIGalleryImmediateChildPath(NSString *folderPath, NSString *ba
 	}
 
 	SCIGalleryListCollectionCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:kListCellID forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
 
 	[cell configureWithGalleryFile:file
 					 selectionMode:self.selectionMode

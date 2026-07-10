@@ -21,6 +21,7 @@ DEF(SCI_NOTIF_BLOCK_TOGGLE,         "block_toggle");
 DEF(SCI_NOTIF_EXCLUDE_CHAT,         "exclude_chat");
 DEF(SCI_NOTIF_EXCLUDE_STORY,        "exclude_story");
 DEF(SCI_NOTIF_PIN_THREAD,           "pin_thread");
+DEF(SCI_NOTIF_PIN_STORY_VIEWER,     "pin_story_viewer");
 
 DEF(SCI_NOTIF_SEEN_DM,              "seen_dm");
 DEF(SCI_NOTIF_SEEN_STORY,           "seen_story");
@@ -37,6 +38,10 @@ DEF(SCI_NOTIF_GIF_FAVORITE,         "gif_favorite");
 
 DEF(SCI_NOTIF_ANALYZER_DONE,        "analyzer_done");
 DEF(SCI_NOTIF_ANALYZER_RUN,         "analyzer_run");
+DEF(SCI_NOTIF_FOLLOW_REQ_ACCEPTED,  "follow_req_accepted");
+DEF(SCI_NOTIF_FOLLOW_REQ_REJECTED,  "follow_req_rejected");
+DEF(SCI_NOTIF_FOLLOW_REQ_RECEIVED,  "follow_req_received");
+DEF(SCI_NOTIF_FOLLOW_REQ_WITHDRAWN, "follow_req_withdrawn");
 
 DEF(SCI_NOTIF_MEDIA_ERROR,          "media_error");
 DEF(SCI_NOTIF_PERMISSION_ERROR,     "permission_error");
@@ -93,6 +98,7 @@ NSArray<SCINotificationActionInfo *> *SCINotificationActionsAll(void) {
     dispatch_once(&once, ^{
         SCINotificationActionCaps tog  = SCINotificationActionCapsAllowOff | SCINotificationActionCapsAllowIG;
         SCINotificationActionCaps prog = SCINotificationActionCapsAllowOff | SCINotificationActionCapsProgress;
+        SCINotificationActionCaps togC = tog | SCINotificationActionCapsCoalesce;  // backlog-bursty
 
         all = @[
             // Downloads & saving
@@ -114,19 +120,20 @@ NSArray<SCINotificationActionInfo *> *SCINotificationActionsAll(void) {
             A(SCI_NOTIF_COPY_DESCRIPTION,   kCatCopy,      @"Copied description text",   tog),
 
             // Read receipts & seen
-            A(SCI_NOTIF_SEEN_DM,            kCatSeen,      @"DM seen / read receipts",    tog),
-            A(SCI_NOTIF_SEEN_STORY,         kCatSeen,      @"Story seen / read receipts", tog),
-            A(SCI_NOTIF_READ_RECEIPT,       kCatSeen,      @"Someone read your message",  tog),
+            A(SCI_NOTIF_SEEN_DM,            kCatSeen,      @"DM seen / read receipts",    togC),
+            A(SCI_NOTIF_SEEN_STORY,         kCatSeen,      @"Story seen / read receipts", togC),
+            A(SCI_NOTIF_READ_RECEIPT,       kCatSeen,      @"Someone read your message",  togC),
 
             // Block, exclude & pin
             A(SCI_NOTIF_BLOCK_TOGGLE,       kCatRelations, @"User blocked / unblocked",   tog),
             A(SCI_NOTIF_EXCLUDE_CHAT,       kCatRelations, @"Chat added / removed from exclude", tog),
             A(SCI_NOTIF_EXCLUDE_STORY,      kCatRelations, @"Story user added / removed from exclude", tog),
             A(SCI_NOTIF_PIN_THREAD,         kCatRelations, @"Share-sheet recipient pinned", tog),
+            A(SCI_NOTIF_PIN_STORY_VIEWER,   kCatRelations, @"Story viewer pinned", tog),
 
             // Stories & messages
-            A(SCI_NOTIF_UNSENT_MESSAGE,     kCatStories,   @"Unsent message detected",   tog),
-            A(SCI_NOTIF_REACTION_REMOVED,   kCatStories,   @"Reaction removed detected",  tog),
+            A(SCI_NOTIF_UNSENT_MESSAGE,     kCatStories,   @"Unsent message detected",   togC),
+            A(SCI_NOTIF_REACTION_REMOVED,   kCatStories,   @"Reaction removed detected",  togC),
             A(SCI_NOTIF_LIVE_TOGGLE,        kCatStories,   @"Live comments toggled",     tog),
             A(SCI_NOTIF_GIF_SENT,           kCatStories,   @"Custom GIF sent",           tog),
             A(SCI_NOTIF_GIF_FAVORITE,       kCatStories,   @"GIF favorited / unfavorited", tog),
@@ -138,6 +145,10 @@ NSArray<SCINotificationActionInfo *> *SCINotificationActionsAll(void) {
             // Profile
             A(SCI_NOTIF_ANALYZER_RUN,       kCatProfile,   @"Profile Analyzer progress", prog),
             A(SCI_NOTIF_ANALYZER_DONE,      kCatProfile,   @"Profile Analyzer complete", tog),
+            A(SCI_NOTIF_FOLLOW_REQ_ACCEPTED, kCatProfile,  @"Follow request accepted",   tog),
+            A(SCI_NOTIF_FOLLOW_REQ_REJECTED, kCatProfile,  @"Follow request declined",   tog),
+            A(SCI_NOTIF_FOLLOW_REQ_RECEIVED, kCatProfile,  @"Follow request received",   tog),
+            A(SCI_NOTIF_FOLLOW_REQ_WITHDRAWN, kCatProfile, @"Follow request withdrawn",  tog),
 
             // Errors
             A(SCI_NOTIF_MEDIA_ERROR,        kCatErrors,    @"Media extraction failed",   tog),

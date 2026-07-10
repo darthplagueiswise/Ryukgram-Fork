@@ -4,6 +4,7 @@
 #import "../Theme/SCITheme.h"
 #import <CommonCrypto/CommonDigest.h>
 #import <CoreImage/CoreImage.h>
+#import <AVFoundation/AVFoundation.h>
 
 NSString *const SCIChatBackgroundDidChangeNotification = @"SCIChatBackgroundDidChangeNotification";
 NSString *const SCIChatBackgroundRenderDirtyNotification = @"SCIChatBackgroundRenderDirtyNotification";
@@ -186,17 +187,28 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 
 #pragma mark - Helpers
 
+// Observers relayout IG views, so notifications must fire on the main thread
+// (imports can complete on a background queue).
+static void sciPostOnMain(void (^block)(void)) {
+	if (NSThread.isMainThread) block();
+	else dispatch_async(dispatch_get_main_queue(), block);
+}
+
 - (void)postChange {
 	[self.imageCache removeAllObjects];
 	[self.processedCache removeAllObjects];
 	[self.bubbleColorCache removeAllObjects];
-	[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundDidChangeNotification object:nil];
-	[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundRenderDirtyNotification object:nil];
+	sciPostOnMain(^{
+		[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundDidChangeNotification object:nil];
+		[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundRenderDirtyNotification object:nil];
+	});
 }
 
 - (void)postRenderDirty {
 	[self.processedCache removeAllObjects];
-	[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundRenderDirtyNotification object:nil];
+	sciPostOnMain(^{
+		[NSNotificationCenter.defaultCenter postNotificationName:SCIChatBackgroundRenderDirtyNotification object:nil];
+	});
 }
 
 - (BOOL)fileExistsForAsset:(NSString *)asset {
@@ -281,6 +293,40 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 	[NSUserDefaults.standardUserDefaults setObject:perImage forKey:SCIPrefChatBackgroundPerImage];
 
 	[self.imageCache removeObjectForKey:relPath];
+	[self postChange];
+}
+
+// Re-edit yields a new hash: migrate default/thread/per-image refs, keep the library
+// slot, delete the old file.
+- (void)replaceAsset:(NSString *)oldRel withAsset:(NSString *)newRel {
+	if (!oldRel.length || !newRel.length || [oldRel isEqualToString:newRel]) return;
+
+	if ([[self defaultAsset] isEqualToString:oldRel]) [self setDefaultAsset:newRel];
+
+	NSMutableDictionary *threadMap = [[self allThreadAssets] mutableCopy];
+	for (NSString *tid in [threadMap.allKeys copy])
+		if ([threadMap[tid] isEqualToString:oldRel]) threadMap[tid] = newRel;
+	[SCIAccountScopedDefaults setObject:threadMap forKey:SCIPrefChatBackgroundThreadMap];
+
+	NSMutableDictionary *perImage = [[self perImageDict] mutableCopy];
+	if (perImage[oldRel] && !perImage[newRel]) perImage[newRel] = perImage[oldRel];
+	[perImage removeObjectForKey:oldRel];
+	[NSUserDefaults.standardUserDefaults setObject:perImage forKey:SCIPrefChatBackgroundPerImage];
+
+	NSMutableArray *library = [[self libraryAssets] mutableCopy];
+	NSUInteger oldIdx = [library indexOfObject:oldRel];
+	[library removeObject:newRel];
+	if (oldIdx != NSNotFound) {
+		library[oldIdx] = newRel;
+	} else if (![library containsObject:newRel]) {
+		[library addObject:newRel];
+	}
+	[NSUserDefaults.standardUserDefaults setObject:library forKey:SCIPrefChatBackgroundLibrary];
+
+	NSURL *oldURL = [self urlForRelativeAsset:oldRel];
+	if (oldURL) [NSFileManager.defaultManager removeItemAtURL:oldURL error:nil];
+	[self.imageCache removeObjectForKey:oldRel];
+
 	[self postChange];
 }
 
@@ -382,9 +428,27 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 	NSURL *url = [self urlForRelativeAsset:asset];
 	if (!url.path.length) return nil;
 
-	UIImage *img = [UIImage imageWithContentsOfFile:url.path];
+	UIImage *img = [SCIChatBackgroundManager isVideoAsset:asset]
+		? [self posterFrameForURL:url]
+		: [UIImage imageWithContentsOfFile:url.path];
 	if (img) [self.imageCache setObject:img forKey:asset];
 
+	return img;
+}
+
+- (UIImage *)posterFrameForURL:(NSURL *)url {
+	if (!url) return nil;
+
+	AVAsset *asset = [AVAsset assetWithURL:url];
+	AVAssetImageGenerator *gen = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
+	gen.appliesPreferredTrackTransform = YES;
+	gen.maximumSize = CGSizeMake(1080, 1080);
+
+	CGImageRef cg = [gen copyCGImageAtTime:CMTimeMakeWithSeconds(0.0, 600) actualTime:NULL error:NULL];
+	if (!cg) return nil;
+
+	UIImage *img = [UIImage imageWithCGImage:cg];
+	CGImageRelease(cg);
 	return img;
 }
 
@@ -534,8 +598,7 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 	UIColor *cached = [self.bubbleColorCache objectForKey:asset];
 	if (cached) return cached;
 
-	NSURL *url = [self urlForRelativeAsset:asset];
-	UIImage *img = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+	UIImage *img = [self imageForAsset:asset];
 	UIColor *color = SCIVibrantColor(img);
 	if (color) [self.bubbleColorCache setObject:color forKey:asset];
 	return color;
@@ -665,6 +728,14 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 
 #pragma mark - Import
 
++ (BOOL)isVideoExtension:(NSString *)ext {
+	return [@[@"mp4", @"mov", @"m4v"] containsObject:ext.lowercaseString];
+}
+
++ (BOOL)isVideoAsset:(NSString *)relPath {
+	return relPath.length && [self isVideoExtension:relPath.pathExtension];
+}
+
 - (NSString *)importImage:(UIImage *)image {
 	if (!image) return nil;
 
@@ -685,6 +756,7 @@ static UIColor *SCIDarkerVariant(UIColor *c) {
 	if (!data.length) return nil;
 
 	NSString *ext = src.pathExtension.lowercaseString;
+	if ([SCIChatBackgroundManager isVideoExtension:ext]) return [self importData:data ext:ext];
 	if (![@[@"jpg", @"jpeg", @"png", @"heic", @"webp", @"gif"] containsObject:ext]) ext = @"jpg";
 
 	return [self importData:data ext:ext];

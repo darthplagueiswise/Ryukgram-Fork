@@ -1,5 +1,4 @@
 #import <substrate.h>
-#import <objc/runtime.h>
 #import "InstagramHeaders.h"
 #import "Tweak.h"
 #import "Utils.h"
@@ -12,14 +11,14 @@
 #import "Lock/SCILockGroups.h"
 #import "Features/HiddenChats/SCIHiddenChats.h"
 #import "Features/DeletedMessages/SCIDeletedMessagesCapture.h"
+#import "Features/FollowRequests/SCIFollowRequestTracker.h"
+#import "Features/General/SCIMessagesOnlySchedule.h"
 #include "../modules/fishhook/fishhook.h"
 
 #define SCI_PREF(key) [SCIUtils getBoolPref:key]
 #define SCI_SCREENSHOT_BLOCKED SCI_PREF(@"remove_screenshot_alert")
-#define VOID_HANDLESCREENSHOT(orig) do { if (!SCI_SCREENSHOT_BLOCKED) { orig; } } while (0)
-#define NONVOID_HANDLESCREENSHOT(orig) do { if (SCI_SCREENSHOT_BLOCKED) return nil; return orig; } while (0)
 
-NSString *SCIVersionString = @"v1.3.1";
+NSString *SCIVersionString = @"v1.3.3";
 BOOL dmVisualMsgsViewedButtonEnabled = false;
 
 static BOOL sLGButtons = NO;
@@ -59,6 +58,9 @@ static BOOL sDidShowSettings;
 	[SCITempFiles sweepLeftovers];
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ SCIFileLogExportToDocuments(); });
 	sciDMUpdateKeepAlive();
+	[[SCIFollowRequestTracker shared] refreshFromPrefs];
+	[[SCIMessagesOnlySchedule shared] start];
+	[SCICacheManager runAutoClearIfDue];
 	return result;
 }
 - (void)applicationDidEnterBackground:(id)arg1 {
@@ -86,7 +88,6 @@ static BOOL sDidShowSettings;
 
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 		if (!topMostController().presentedViewController) {
-			NSLog(@"[SCInsta] First run — showing settings modal");
 			[SCIUtils showSettingsVC:self.view.window];
 		}
 	});
@@ -147,14 +148,47 @@ static BOOL sDidShowSettings;
 
 // MARK: - Liquid glass
 
-// NOTE: os getters BOOL de IGDSLauncherConfig (isLiquidGlass*) foram CONSOLIDADOS
-// em src/Features/Gating/SCIIGDSLauncherConfigHook.x. Havia dois %hook
-// IGDSLauncherConfig (aqui e lá); como dezenas de getters compartilham o mesmo
-// IMP, os dois grupos colidiam na cadeia de %orig e o toggle do Dev não surtia
-// efeito. Agora há um único %hook no projeto. As prefs do menu Interface
-// (liquid_glass_buttons / liquid_glass_force_off) são lidas por aquele hook.
-// O %group SCILiquidGlassGroup foi removido (ficaria vazio); os hooks de runtime
-// LG (tab bar/surfaces) são instalados por sciInstallLiquidGlassHooks().
+%group SCILiquidGlassGroup
+
+%hook IGDSLauncherConfig
+- (_Bool)isLiquidGlassInAppNotificationEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassToastEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassToastPeekEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassIconBarButtonEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassNavigationContentStylePinningEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassEaseInOutBlurEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+- (_Bool)isLiquidGlassCGContextBlurEnabled {
+    if (sLGForceOff) return NO;
+    if (sLGButtons) return YES;
+    return %orig;
+}
+%end
+
+%end
 
 // MARK: - Progressive blur (iOS 26+ scroll-edge effect)
 // Keep iOS 26-only UIKit classes runtime-resolved. The host app uses SDK 26.2
@@ -211,27 +245,25 @@ static void sciInstallProgressiveBlurHooks(void) {
 %group SCIScreenshotBlockGroup
 %hook IGStoryViewerContainerView
 - (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 %hook IGDirectVisualMessageViewerSession
 - (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
-	if (SCI_SCREENSHOT_BLOCKED) return nil;
-	return %orig;
+    if (SCI_SCREENSHOT_BLOCKED) return nil;
+    return %orig;
 }
 %end
 %hook IGDirectVisualMessageReplayService
 - (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
-	if (SCI_SCREENSHOT_BLOCKED) return nil;
-	return %orig;
+    if (SCI_SCREENSHOT_BLOCKED) return nil;
+    return %orig;
 }
 %end
 %hook IGDirectVisualMessageReportService
 - (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
-	if (SCI_SCREENSHOT_BLOCKED) return nil;
-	return %orig;
+    if (SCI_SCREENSHOT_BLOCKED) return nil;
+    return %orig;
 }
 %end
 
@@ -245,73 +277,62 @@ static void sciInstallProgressiveBlurHooks(void) {
 
 %hook IGScreenshotObserver
 - (id)initForController:(id)arg1 {
-	if (SCI_SCREENSHOT_BLOCKED) return nil;
-	return %orig;
+    if (SCI_SCREENSHOT_BLOCKED) return nil;
+    return %orig;
 }
 %end
 
 %hook IGScreenshotObserverDelegate
 - (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 - (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 
 %hook IGDirectMediaViewerViewController
 - (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 - (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 
 %hook IGStoryViewerViewController
 - (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 - (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 
 %hook IGSundialFeedViewController
 - (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 - (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 
 %hook IGDirectVisualMessageViewerController
 - (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 - (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
-	if (!SCI_SCREENSHOT_BLOCKED) {
-		%orig;
-	}
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
+}
+%end
+
+%hook _TtC27IGDirectMediaViewerKitSwift33IGDirectMediaViewerViewController
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+    if (!SCI_SCREENSHOT_BLOCKED) %orig;
 }
 %end
 %end
@@ -384,7 +405,7 @@ static void sciInstallProgressiveBlurHooks(void) {
 		&& [[SCILockManager shared] isGroupLocked:SCILockGroupChats];
 	NSArray<NSString *> *lockedIDs = hideLockedChats ? [[SCILockManager shared] lockedChatIDs] : nil;
 	NSArray<NSString *> *hiddenIDs = [SCIHiddenChats allThreadIDs];
-	BOOL hasHiddenChats = hiddenIDs.count > 0;
+	BOOL hasHiddenChats = hiddenIDs.count > 0 && ![SCIHiddenChats revealed];
 
 	if (!hideUsers && !hideNotes && !hideLockedChats && !hasHiddenChats) return items;
 
@@ -397,7 +418,7 @@ static void sciInstallProgressiveBlurHooks(void) {
 			hide = hideUsers && (sciStringEquals(title, @"Suggestions") || [title hasPrefix:@"Accounts to"]);
 		} else if ([obj isKindOfClass:%c(IGDirectInboxSuggestedThreadCellViewModel)]) {hide = hideUsers;
 		} else if ([obj isKindOfClass:%c(IGDiscoverPeopleItemConfiguration)] || [obj isKindOfClass:%c(IGDiscoverPeopleConnectionItemConfiguration)]) {hide = hideUsers;
-		} else if ([obj isKindOfClass:%c(IGDirectNotesTrayRowViewModel)]) {hide = hideNotes;
+		} else if ([obj isKindOfClass:NSClassFromString(@"_TtC28IGDirectNotesViewModelsSwift29IGDirectNotesTrayRowViewModel")]) {hide = hideNotes;
 		} else if ([obj isKindOfClass:%c(IGDirectInboxThreadCellViewModel)]) {
 			NSString *tid = sciSafeValue(obj, @"threadId");
 			if (tid.length) {
@@ -477,16 +498,22 @@ static void sciInstallProgressiveBlurHooks(void) {
 
 - (void)UFIButtonBarDidTapOnLike:(id)arg1 {
 	if (!SCI_PREF(@"like_confirm")) return %orig;
-	[SCIUtils showConfirmation:^{
-		%orig;
-	} title:SCILocalized(@"Confirm like: Posts")];
+	{
+		void (^sciOrigBlock)(void) = ^ {
+			%orig;
+		};
+		[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm like: Posts")];
+	}
 }
 
 - (void)UFIButtonBarDidTapOnRepost:(id)arg1 {
 	if (!SCI_PREF(@"repost_confirm")) return %orig;
-	[SCIUtils showConfirmation:^{
-		%orig;
-	} title:SCILocalized(@"Confirm repost")];
+	{
+		void (^sciOrigBlock)(void) = ^ {
+			%orig;
+		};
+		[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm repost")];
+	}
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 {
@@ -510,25 +537,22 @@ static void sciInstallProgressiveBlurHooks(void) {
 }
 %end
 
-%hook IGSundialViewerVerticalUFI
-- (void)_didTapLikeButton:(id)arg1 {
-	if (!SCI_PREF(@"like_confirm_reels")) return %orig;
-	[SCIUtils showConfirmation:^{
-		%orig;
-	} title:SCILocalized(@"Confirm like: Reels")];
-}
-- (void)_didLongPressLikeButton:(id)arg1 {
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
+- (void)didLongPressLikeButton:(id)arg1 {
 	if (!SCI_PREF(@"like_confirm_reels")) return %orig;
 }
-- (void)_didTapRepostButton {
+- (void)didTapRepostButton {
 	if (SCI_PREF(@"hide_reels_repost")) return;
 	if (!SCI_PREF(@"repost_confirm")) return %orig;
-	[SCIUtils showConfirmation:^{
-		%orig;
-	} title:SCILocalized(@"Confirm repost")];
+	{
+		void (^sciOrigBlock)(void) = ^ {
+			%orig;
+		};
+		[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm repost")];
+	}
 }
 
-- (void)_didLongPressRepostButton:(id)arg1 {
+- (void)didLongPressRepostButton:(id)arg1 {
 	if (SCI_PREF(@"hide_reels_repost") || SCI_PREF(@"repost_confirm")) return;
 	%orig;
 }
@@ -617,22 +641,13 @@ static void sciInstallLiquidGlassHooks(void) {
 %ctor {
 	SCIRegisterDefaultsOnce();
 
-	// Conformidade: o menu Dev>IGDSLauncher segue o MESMO padrão do resto da
-	// tweak. As prefs do Dev de LiquidGlass alimentam as MESMAS static BOOLs que
-	// o mecanismo real (sciInstallLiquidGlassHooks) consome. Assim, ligar
-	// LiquidGlass no Dev dispara o mesmo ponto de decisão validado no binário:
-	// os símbolos C IGTabBarStyleForLauncherSet/IGFloatingTabBarEnabled (FBShared,
-	// importados pelo exec) + IGLiquidGlassSwizzleToggle.isEnabled. Os getters de
-	// IGDSLauncherConfig sozinhos NÃO ligam o LiquidGlass (são config/telemetria).
-	BOOL devLG  = SCI_PREF(@"sci_igds_liquidglass") || SCI_PREF(@"sci_igds_launcher_all") || SCI_PREF(@"sci_apply_liquidglass");
-
 	sLGForceOff = SCI_PREF(@"liquid_glass_force_off");
 
 	if (@available(iOS 19.0, *)) {
-		sLGButtons = !sLGForceOff && (SCI_PREF(@"liquid_glass_buttons") || devLG);
+		sLGButtons = !sLGForceOff && SCI_PREF(@"liquid_glass_buttons");
 	}
 
-	sLGSurfaces = !sLGForceOff && (SCI_PREF(@"liquid_glass_surfaces") || devLG);
+	sLGSurfaces = !sLGForceOff && SCI_PREF(@"liquid_glass_surfaces");
 
 	if (@available(iOS 26.0, *)) {
 		sLGProgressiveBlur = SCI_PREF(@"liquid_glass_progressive_blur") && objc_getClass("UIScrollEdgeEffect") != nil;
@@ -652,9 +667,7 @@ static void sciInstallLiquidGlassHooks(void) {
 	if (sciFlexEnabled()) {%init(SCIFlexGroup);}
 
 	if (sLGButtons || sLGSurfaces || sLGForceOff) {
-		// %init(SCILiquidGlassGroup) removido: os getters de IGDSLauncherConfig
-		// agora vivem só em SCIIGDSLauncherConfigHook.x (fonte única). Aqui ficam
-		// apenas os hooks de runtime de tab bar/surfaces.
+		%init(SCILiquidGlassGroup);
 		sciInstallLiquidGlassHooks();
 	}
 

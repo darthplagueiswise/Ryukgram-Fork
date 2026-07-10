@@ -146,6 +146,10 @@ static BOOL SCIStringLooksLikeUUIDFilename(NSString *baseName) {
 	return u != nil;
 }
 
+static BOOL SCIStringLooksLikeScratchFilename(NSString *baseName) {
+	return [baseName hasPrefix:@"ryuk_tmp_"] || [baseName hasPrefix:@"sci_tmp_"];
+}
+
 NSString *SCIFileNameForMedia(NSURL *fileURL,
 							  SCIGalleryMediaType mediaType,
 							  SCIGallerySaveMetadata * _Nullable metadata) {
@@ -172,7 +176,7 @@ NSString *SCIFileNameForMedia(NSURL *fileURL,
 	}
 
 	NSString *base = [orig stringByDeletingPathExtension];
-	if (SCIStringLooksLikeUUIDFilename(base) || base.length == 0) {
+	if (SCIStringLooksLikeUUIDFilename(base) || SCIStringLooksLikeScratchFilename(base) || base.length == 0) {
 		return [NSString stringWithFormat:@"media_%@_%@.%@", slug, dateCompact, ext];
 	}
 
@@ -459,6 +463,13 @@ NSString *SCIFileNameForMedia(NSURL *fileURL,
 		return [rel substringFromIndex:sep.location + 1];
 	}
 	return rel;
+}
+
+- (NSString *)exportFilename {
+	NSString *name = self.displayName;
+	NSString *fileExt = self.fileURL.pathExtension;
+	if (fileExt.length && !name.pathExtension.length) return [name stringByAppendingPathExtension:fileExt];
+	return name;
 }
 
 - (NSString *)sourceLabel {

@@ -19,7 +19,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 static UIColor *SCIDMReceivedBubbleColor(void) {
-	return SCIUIKit26PanelFillColor();
+	return UIColor.secondarySystemBackgroundColor;
 }
 
 #pragma mark - Adaptive message cell
@@ -37,6 +37,12 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 @property (nonatomic, strong) UIView *bubbleContent;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleMaxWidth;
 @property (nonatomic, strong) NSLayoutConstraint *bubbleLeading;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleTrailing;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleLeadingGE;
+@property (nonatomic, strong) NSLayoutConstraint *bubbleTrailingLE;
+@property (nonatomic, strong) NSLayoutConstraint *metaLeading;
+@property (nonatomic, strong) NSLayoutConstraint *metaTrailing;
+@property (nonatomic) BOOL outgoing;
 
 @property (nonatomic, strong) UIView *senderRow;
 @property (nonatomic, strong) UIImageView *senderAvatar;
@@ -62,7 +68,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 @property (nonatomic, strong) UIImageView *checkbox;
 - (void)applySelectionMode:(BOOL)on selected:(BOOL)selected selectable:(BOOL)selectable;
-- (void)applyMessage:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK playing:(BOOL)playing;
+- (void)applyMessage:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK playing:(BOOL)playing outgoing:(BOOL)outgoing;
 - (void)applySenderHeaderVisible:(BOOL)visible message:(SCIDeletedMessage *)m;
 - (void)setVoiceProgressSeconds:(double)seconds;
 
@@ -130,6 +136,11 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 		UILayoutGuide *m = self.contentView.layoutMarginsGuide;
 		_bubbleMaxWidth = [_bubble.widthAnchor constraintLessThanOrEqualToConstant:kSCIDMBubbleMaxWidth];
 		_bubbleLeading = [_bubble.leadingAnchor constraintEqualToAnchor:m.leadingAnchor];
+		_bubbleTrailing = [_bubble.trailingAnchor constraintEqualToAnchor:m.trailingAnchor];
+		_bubbleLeadingGE = [_bubble.leadingAnchor constraintGreaterThanOrEqualToAnchor:m.leadingAnchor constant:32];
+		_bubbleTrailingLE = [_bubble.trailingAnchor constraintLessThanOrEqualToAnchor:m.trailingAnchor constant:-32];
+		_metaLeading = [_metaLabel.leadingAnchor constraintEqualToAnchor:_bubble.leadingAnchor constant:6];
+		_metaTrailing = [_metaLabel.trailingAnchor constraintEqualToAnchor:_bubble.trailingAnchor constant:-6];
 		_senderRowHeight = [_senderRow.heightAnchor constraintEqualToConstant:6];
 
 		// Sub-required so the avatar yields to the 6pt collapse without log spam.
@@ -154,11 +165,11 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 			[_senderLabel.trailingAnchor constraintLessThanOrEqualToAnchor:_senderRow.trailingAnchor],
 
 			_bubbleLeading,
+			_bubbleTrailingLE,
 			[_bubble.topAnchor constraintEqualToAnchor:_senderRow.bottomAnchor],
-			[_bubble.trailingAnchor constraintLessThanOrEqualToAnchor:m.trailingAnchor constant:-32],
 			_bubbleMaxWidth,
 
-			[_metaLabel.leadingAnchor constraintEqualToAnchor:_bubble.leadingAnchor constant:6],
+			_metaLeading,
 			[_metaLabel.topAnchor constraintEqualToAnchor:_bubble.bottomAnchor constant:4],
 			[_metaLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-6],
 
@@ -211,6 +222,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	self.isVoicePlaying = NO;
 	self.voiceDragging = NO;
 	self.messageId = nil;
+	self.outgoing = NO;
+	[self updateAlignment];
 }
 
 - (void)resetBubble {
@@ -282,10 +295,23 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 #pragma mark - Apply
 
-- (void)applyMessage:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK playing:(BOOL)playing {
+- (void)updateAlignment {
+	BOOL out = self.outgoing;
+	self.bubbleLeading.active = !out;
+	self.bubbleTrailingLE.active = !out;
+	self.metaLeading.active = !out;
+	self.bubbleTrailing.active = out;
+	self.bubbleLeadingGE.active = out;
+	self.metaTrailing.active = out;
+	self.metaLabel.textAlignment = out ? NSTextAlignmentRight : NSTextAlignmentLeft;
+}
+
+- (void)applyMessage:(SCIDeletedMessage *)m ownerPK:(NSString *)ownerPK playing:(BOOL)playing outgoing:(BOOL)outgoing {
 	[self resetBubble];
 	self.messageId = m.messageId;
 	self.isVoicePlaying = playing;
+	self.outgoing = outgoing;
+	[self updateAlignment];
 
 	NSString *kindName = SCIDeletedMessageKindLocalizedName(m.kind);
 	NSString *time = [SCIDeletedMessagesDate stringForDate:(m.deletedAt ?: m.capturedAt ?: m.sentAt)];
@@ -324,12 +350,13 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 #pragma mark - Variants
 
 - (void)installTextBubble:(NSString *)text {
-	self.bubble.backgroundColor = SCIDMReceivedBubbleColor();
+	UIColor *accent = [SCIUtils SCIColor_Primary] ?: UIColor.systemBlueColor;
+	self.bubble.backgroundColor = self.outgoing ? accent : SCIDMReceivedBubbleColor();
 
 	UILabel *l = [UILabel new];
 	l.translatesAutoresizingMaskIntoConstraints = NO;
 	l.font = [UIFont systemFontOfSize:15.5];
-	l.textColor = UIColor.labelColor;
+	l.textColor = self.outgoing ? UIColor.whiteColor : UIColor.labelColor;
 	l.numberOfLines = 0;
 	l.text = text;
 	[self.bubble addSubview:l];
@@ -351,7 +378,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	iv.contentMode = UIViewContentModeScaleAspectFill;
 	iv.layer.cornerRadius = kSCIDMBubbleCorner;
 	iv.layer.masksToBounds = YES;
-	iv.backgroundColor = SCIUIKit26PanelFillColor();
+	iv.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	[self.bubble addSubview:iv];
 	self.bubbleContent = iv;
 
@@ -928,10 +955,8 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
-	self.tableView.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
+	self.tableView.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.tableView.estimatedRowHeight = 80;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	self.tableView.estimatedSectionHeaderHeight = 32;
@@ -1021,7 +1046,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.title = self.group.senderUsername.length ? [@"@" stringByAppendingString:self.group.senderUsername] : SCILocalized(@"Deleted messages");
 
 	[self installSearchController];
@@ -1071,6 +1096,10 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 
 #pragma mark - Small helpers
 
+- (BOOL)isOutgoingMessage:(SCIDeletedMessage *)m {
+	return m.senderPk.length && self.ownerPK.length && [m.senderPk isEqualToString:self.ownerPK];
+}
+
 - (NSURL *)localFileURLForMessage:(SCIDeletedMessage *)m {
 	NSString *abs = [SCIDeletedMessagesStorage absolutePathForRelativePath:m.mediaPath ownerPK:self.ownerPK];
 	return (abs.length && [NSFileManager.defaultManager fileExistsAtPath:abs]) ? [NSURL fileURLWithPath:abs] : nil;
@@ -1093,6 +1122,26 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 		[urls addObject:url];
 		[metas addObject:[self gallerySaveMetadataForMessage:m]];
 	}
+}
+
+// DM media lives under a `<messageId>.<ext>` name — build the gallery-scheme filename, real extension kept.
+- (NSString *)cleanFilenameForFileURL:(NSURL *)src metadata:(SCIGallerySaveMetadata *)md {
+	SCIGalleryMediaType mt = SCIGalleryMediaTypeForExtension(src.pathExtension);
+	NSString *ext = src.pathExtension;
+	NSString *name = SCIFileNameForMedia(src, mt, md);
+	return ext.length ? [[name stringByDeletingPathExtension] stringByAppendingPathExtension:ext] : name;
+}
+
+// Share via a clean-named hardlink so the message id never surfaces as the filename.
+- (NSURL *)shareURLForFileURL:(NSURL *)src metadata:(SCIGallerySaveMetadata *)md {
+	if (!src) return nil;
+	NSString *name = [self cleanFilenameForFileURL:src metadata:md];
+	if ([src.lastPathComponent isEqualToString:name]) return src;
+	NSURL *dst = [SCITempFiles claimNamedFile:name ttl:600 tag:@"dmshare"];
+	NSFileManager *fm = NSFileManager.defaultManager;
+	if ([fm linkItemAtURL:src toURL:dst error:nil] || [fm copyItemAtURL:src toURL:dst error:nil]) return dst;
+	[SCITempFiles releaseURL:dst];
+	return src;
 }
 
 - (void)presentShareSheetWithURLs:(NSArray<NSURL *> *)urls fromView:(UIView *)anchor exitOnComplete:(BOOL)exitOnComplete {
@@ -1283,7 +1332,12 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	if ([SCIUtils getBoolPref:@"sci_gallery_enabled"]) {
 		[SCIMediaActions bulkSaveFilesToGallery:urls perFileMetadata:metas defaultMetadata:nil];
 	}
-	[self presentShareSheetWithURLs:urls fromView:self.navigationController.toolbar ?: self.view exitOnComplete:YES];
+
+	NSMutableArray<NSURL *> *shareURLs = [NSMutableArray arrayWithCapacity:urls.count];
+	[urls enumerateObjectsUsingBlock:^(NSURL *u, NSUInteger i, __unused BOOL *stop) {
+		[shareURLs addObject:[self shareURLForFileURL:u metadata:(i < metas.count ? metas[i] : nil)]];
+	}];
+	[self presentShareSheetWithURLs:shareURLs fromView:self.navigationController.toolbar ?: self.view exitOnComplete:YES];
 }
 
 - (void)confirmDeleteSelected {
@@ -1339,7 +1393,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 - (UIView *)buildBannerHeader {
 	UIView *banner = [UIView new];
 	banner.frame = CGRectMake(0, 0, self.view.bounds.size.width, 64);
-	banner.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	banner.backgroundColor = [SCIPopupChrome backgroundColor];
 
 	UIImageView *avatar = [UIImageView new];
 	avatar.contentMode = UIViewContentModeScaleAspectFill;
@@ -1347,7 +1401,7 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 	avatar.layer.masksToBounds = YES;
 	avatar.image = [UIImage systemImageNamed:@"person.circle.fill"];
 	avatar.tintColor = UIColor.systemGray3Color;
-	avatar.backgroundColor = SCIUIKit26PanelFillColor();
+	avatar.backgroundColor = UIColor.secondarySystemBackgroundColor;
 	avatar.translatesAutoresizingMaskIntoConstraints = NO;
 	[banner addSubview:avatar];
 
@@ -1469,10 +1523,15 @@ static const CGFloat kSCIDMBubbleCorner			= 18.0;
 		g.isGroup = isGroup;
 		g.threadTitle = title;
 		g.threadAvatarURL = avatar;
+		SCIDeletedMessage *cp = nil;
+		for (SCIDeletedMessage *m in all) {
+			if (![self isOutgoingMessage:m]) { cp = m; break; }
+		}
+		cp = cp ?: all.firstObject;
 		g.senderPk = self.senderPk;
-		g.senderUsername = all.firstObject.senderUsername;
-		g.senderFullName = all.firstObject.senderFullName;
-		g.senderProfilePicURL = all.firstObject.senderProfilePicURL;
+		g.senderUsername = cp.senderUsername;
+		g.senderFullName = cp.senderFullName;
+		g.senderProfilePicURL = cp.senderProfilePicURL;
 		g.messages = all;
 		self.group = g;
 	}
@@ -1606,12 +1665,12 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
 	SCIDMMessageCell *cell = [tv dequeueReusableCellWithIdentifier:@"msg" forIndexPath:ip];
-	SCIUIKit26ConfigureTableCell(cell);
 	SCIDeletedMessage *m = self.visibleMessages[ip.row];
 	BOOL playing = m.kind == SCIDeletedMessageKindVoice && [self.playingMessageId isEqualToString:m.messageId] && self.audioIsPlaying;
+	BOOL outgoing = [self isOutgoingMessage:m];
 
-	[cell applyMessage:m ownerPK:self.ownerPK playing:playing];
-	[cell applySenderHeaderVisible:self.group.isGroup message:m];
+	[cell applyMessage:m ownerPK:self.ownerPK playing:playing outgoing:outgoing];
+	[cell applySenderHeaderVisible:(self.group.isGroup && !outgoing) message:m];
 
 	__weak typeof(self) ws = self;
 	cell.onCellTap = self.inSelectionMode ? ^{ [ws toggleSelectionForMessage:m]; } : nil;
@@ -1681,7 +1740,8 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 
 	if (fileURL && hasMedia && !isAudioOnly) {
 		[saveSection addObject:[UIAction actionWithTitle:SCILocalized(@"Save to Photos") image:[UIImage systemImageNamed:@"photo.on.rectangle"] identifier:nil handler:^(__kindof UIAction *_) {
-			[SCIPhotoAlbum saveFileToAlbum:fileURL completion:^(BOOL ok, NSError *err) {
+			NSString *cleanName = [ws cleanFilenameForFileURL:fileURL metadata:[ws gallerySaveMetadataForMessage:m]];
+			[SCIPhotoAlbum saveFileToAlbum:fileURL originalFilename:cleanName completion:^(BOOL ok, NSError *err) {
 				if (ok) SCINotifySuccess(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Saved to Photos"), nil);
 				else SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Save failed"), err.localizedDescription ?: @"");
 			}];
@@ -1699,7 +1759,8 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 			if ([SCIUtils getBoolPref:@"sci_gallery_enabled"]) {
 				[SCIMediaActions bulkSaveFilesToGallery:@[fileURL] perFileMetadata:@[[ws gallerySaveMetadataForMessage:m]] defaultMetadata:nil];
 			}
-			[ws presentShareSheetWithURLs:@[fileURL] fromView:ws.view exitOnComplete:NO];
+			NSURL *shareURL = [ws shareURLForFileURL:fileURL metadata:[ws gallerySaveMetadataForMessage:m]] ?: fileURL;
+			[ws presentShareSheetWithURLs:@[shareURL] fromView:ws.view exitOnComplete:NO];
 		}]];
 	}
 
@@ -1946,7 +2007,7 @@ static NSArray<NSArray<NSArray *> *> *sciFilterKindSections(void) {
 		if (![cell isKindOfClass:SCIDMMessageCell.class]) continue;
 
 		BOOL playing = [self.playingMessageId isEqualToString:m.messageId] && self.audioIsPlaying;
-		[cell applyMessage:m ownerPK:self.ownerPK playing:playing];
+		[cell applyMessage:m ownerPK:self.ownerPK playing:playing outgoing:[self isOutgoingMessage:m]];
 
 		__weak typeof(self) ws = self;
 		cell.onBubbleTap = ^{ [ws openMessage:m]; };

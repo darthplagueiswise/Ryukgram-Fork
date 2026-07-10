@@ -11,9 +11,12 @@
 - (void)handleBottomSwipeableScrollUpdate {
     if ([SCIUtils getBoolPref:@"disable_disappearing_mode_swipe"]) return;
     if ([SCIUtils getBoolPref:@"shh_mode_confirm"])
-        [SCIUtils showConfirmation:^(void) {
-        	%orig;
-        } title:SCILocalized(@"Confirm vanish mode")];
+        {
+        	void (^sciOrigBlock)(void) = ^(void) {
+        		%orig;
+        	};
+        	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm vanish mode")];
+        }
     else %orig;
 }
 - (id)getSwipeableScrollHintTextInfo {
@@ -25,17 +28,23 @@
 %hook IGDirectThreadViewController
 - (void)messageListViewControllerDidToggleShhMode:(id)arg1 {
     if ([SCIUtils getBoolPref:@"shh_mode_confirm"])
-        [SCIUtils showConfirmation:^(void) {
-        	%orig;
-        } title:SCILocalized(@"Confirm vanish mode")];
+        {
+        	void (^sciOrigBlock)(void) = ^(void) {
+        		%orig;
+        	};
+        	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm vanish mode")];
+        }
     else %orig;
 }
 
 - (void)messageListViewControllerDidReplayInShhMode:(id)arg1 {
     if ([SCIUtils getBoolPref:@"shh_mode_confirm"])
-        [SCIUtils showConfirmation:^(void) {
-        	%orig;
-        } title:SCILocalized(@"Confirm vanish mode")];
+        {
+        	void (^sciOrigBlock)(void) = ^(void) {
+        		%orig;
+        	};
+        	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm vanish mode")];
+        }
     else %orig;
 }
 %end

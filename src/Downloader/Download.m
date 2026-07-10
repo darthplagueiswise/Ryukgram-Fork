@@ -333,7 +333,7 @@ static NSString *sciJobTitle(id meta, NSString *ext, NSString **outSubtitle) {
 		switch (self.action) {
 			case share:
 				self.job.successText = SCILocalized(@"Done");
-				[SCIUtils showShareVC:fileURL];
+				[SCIUtils showShareVC:[self sciShareReadyURL:fileURL]];
 				if ([galleryMode isEqualToString:@"mirror"] && self.pendingGallerySaveMetadata) {
 					[self logFileToGalleryQuiet:fileURL];
 				}
@@ -409,7 +409,29 @@ static NSString *sciJobTitle(id meta, NSString *ext, NSString **outSubtitle) {
 	                                metadata:metadata
 	                                   error:error];
 }
+// Gallery-scheme filename with the real extension kept, so a scratch fileURL never leaks its name.
+- (NSString *)sciCleanFilenameForURL:(NSURL *)fileURL {
+	SCIGallerySaveMetadata *md = [self.pendingGallerySaveMetadata isKindOfClass:[SCIGallerySaveMetadata class]]
+		? self.pendingGallerySaveMetadata : nil;
+	SCIGalleryMediaType mediaType = SCIGalleryMediaTypeForExtension(fileURL.pathExtension);
+	NSString *ext = fileURL.pathExtension;
+	NSString *name = SCIFileNameForMedia(fileURL, mediaType, md);
+	return ext.length ? [[name stringByDeletingPathExtension] stringByAppendingPathExtension:ext] : name;
+}
+
+// Scratch files get a clean-named hardlink for share (no data copy); clean names pass through.
+- (NSURL *)sciShareReadyURL:(NSURL *)fileURL {
+	NSString *name = fileURL.lastPathComponent;
+	if (![name hasPrefix:@"ryuk_tmp_"] && ![name hasPrefix:@"sci_tmp_"]) return fileURL;
+	NSURL *dst = [SCITempFiles claimNamedFile:[self sciCleanFilenameForURL:fileURL] ttl:600 tag:@"share"];
+	NSFileManager *fm = NSFileManager.defaultManager;
+	if ([fm linkItemAtURL:fileURL toURL:dst error:nil] || [fm copyItemAtURL:fileURL toURL:dst error:nil]) return dst;
+	[SCITempFiles releaseURL:dst];
+	return fileURL;
+}
+
 - (void)saveFileToPhotos:(NSURL *)fileURL {
+	NSString *cleanName = [self sciCleanFilenameForURL:fileURL];
 	[PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
 		if (status != PHAuthorizationStatusAuthorized && status != PHAuthorizationStatusLimited) {
 			dispatch_async(dispatch_get_main_queue(), ^{
@@ -432,7 +454,7 @@ static NSString *sciJobTitle(id meta, NSString *ext, NSString **outSubtitle) {
 			});
 		};
 		if (useAlbum) {
-			[SCIPhotoAlbum saveFileToAlbum:fileURL completion:done];
+			[SCIPhotoAlbum saveFileToAlbum:fileURL originalFilename:cleanName completion:done];
 			return;
 		}
 		[[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
@@ -441,6 +463,7 @@ static NSString *sciJobTitle(id meta, NSString *ext, NSString **outSubtitle) {
 			PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
 			PHAssetResourceCreationOptions *options = PHAssetResourceCreationOptions.new;
 			options.shouldMoveFile = YES;
+			if (cleanName.length) options.originalFilename = cleanName;
 			[request addResourceWithType:(isVideo ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto) fileURL:fileURL options:options];
 			request.creationDate = NSDate.date;
 		} completionHandler:done];

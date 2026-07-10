@@ -3,6 +3,8 @@
 #import "SCIProfileAnalyzerModels.h"
 #import "SCIProfileAnalyzerStorage.h"
 #import "SCIProfileAnalyzerService.h"
+#import "SCIProfileAnalyzerChecks.h"
+#import "SCIProfileAnalyzerChecksViewController.h"
 #import "SCIProfileAnalyzerListViewController.h"
 #import "SCIProfileAnalyzerSnapshotsViewController.h"
 #import "../../Utils.h"
@@ -15,18 +17,8 @@ extern NSNotificationName const SCIProfileAnalyzerDataDidChangeNotification;
 
 #pragma mark - Category descriptor
 
-typedef NS_ENUM(NSInteger, SCIPACategory) {
-	SCIPACategoryMutual,
-	SCIPACategoryNotFollowingBack,
-	SCIPACategoryDontFollowBack,
-	SCIPACategoryNewFollowers,
-	SCIPACategoryLostFollowers,
-	SCIPACategoryYouStartedFollowing,
-	SCIPACategoryYouUnfollowed,
-	SCIPACategoryProfileUpdates,
-	SCIPACategoryVisitedProfiles,
-};
-
+// Runtime row state for one category — static definition lives in
+// SCIProfileAnalyzerChecks; this adds the live count / unread / enabled flags.
 @interface SCIPACategoryDescriptor : NSObject
 @property (nonatomic, assign) SCIPACategory category;
 @property (nonatomic, copy) NSString *title;
@@ -37,6 +29,7 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 @property (nonatomic, assign) NSInteger unread;
 @property (nonatomic, assign) BOOL requiresPrevious;
 @property (nonatomic, assign) BOOL standalone;
+@property (nonatomic, assign) BOOL enabled;
 @end
 @implementation SCIPACategoryDescriptor @end
 
@@ -73,7 +66,7 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 
 	_imageView = [UIImageView new];
 	_imageView.contentMode = UIViewContentModeScaleAspectFill;
-	_imageView.backgroundColor = SCIUIKit26PanelFillColor();
+	_imageView.backgroundColor = [UIColor secondarySystemBackgroundColor];
 	_imageView.layer.masksToBounds = YES;
 	_imageView.image = [UIImage systemImageNamed:@"person.circle.fill"];
 	_imageView.tintColor = [UIColor systemGrayColor];
@@ -134,7 +127,7 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 - (instancetype)initWithFrame:(CGRect)frame {
 	self = [super initWithFrame:frame];
 	if (!self) return self;
-	self.backgroundColor = SCIUIKit26PanelFillColor();
+	self.backgroundColor = [UIColor secondarySystemBackgroundColor];
 	self.layer.cornerRadius = 18;
 
 	_avatar = [[SCIPAAvatarRingView alloc] init];
@@ -396,15 +389,14 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 @property (nonatomic, assign) BOOL pendingHeaderFetch;
 // Counts this VC as the analyzer's surface; re-appear after popping a child is a no-op.
 @property (nonatomic, assign) BOOL attachedToService;
+- (NSArray<NSString *> *)identityIDsForCategory:(SCIPACategory)category;
 @end
 
 @implementation SCIProfileAnalyzerViewController
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor];
 	self.title = SCILocalized(@"Profile Analyzer");
 	self.navigationItem.titleView = [self buildTitleViewWithBeta];
 
@@ -777,43 +769,20 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 }
 
 - (void)rebuildCategories {
-	SCIProfileAnalyzerReport *r = self.report;
-	NSArray<SCIPACategoryDescriptor *> *(^build)(void) = ^NSArray *{
-		SCIPACategoryDescriptor *(^make)(SCIPACategory, NSString *, NSString *, NSString *, UIColor *, NSInteger, BOOL) =
-		^SCIPACategoryDescriptor *(SCIPACategory c, NSString *t, NSString *s, NSString *sym, UIColor *col, NSInteger count, BOOL needsPrev) {
-			SCIPACategoryDescriptor *d = [SCIPACategoryDescriptor new];
-			d.category = c; d.title = t; d.subtitle = s; d.symbol = sym; d.color = col;
-			d.count = count; d.requiresPrevious = needsPrev;
-			return d;
-		};
-		return @[
-			make(SCIPACategoryMutual, SCILocalized(@"Mutual followers"),
-				 SCILocalized(@"You both follow each other"),
-				 @"person.2.fill", [UIColor systemBlueColor], r.mutualFollowers.count, NO),
-			make(SCIPACategoryNotFollowingBack, SCILocalized(@"Not following you back"),
-				 SCILocalized(@"You follow them, they don't follow back"),
-				 @"person.fill.xmark", [UIColor systemOrangeColor], r.notFollowingYouBack.count, NO),
-			make(SCIPACategoryDontFollowBack, SCILocalized(@"You don't follow back"),
-				 SCILocalized(@"They follow you, you don't follow back"),
-				 @"person.fill.questionmark", [UIColor systemTealColor], r.youDontFollowBack.count, NO),
-			make(SCIPACategoryNewFollowers, SCILocalized(@"New followers"),
-				 SCILocalized(@"Gained since last scan"),
-				 @"person.fill.badge.plus", [UIColor systemGreenColor], r.recentFollowers.count, YES),
-			make(SCIPACategoryLostFollowers, SCILocalized(@"Lost followers"),
-				 SCILocalized(@"Unfollowed you since last scan"),
-				 @"person.fill.badge.minus", [UIColor systemRedColor], r.lostFollowers.count, YES),
-			make(SCIPACategoryYouStartedFollowing, SCILocalized(@"You started following"),
-				 SCILocalized(@"Since last scan"),
-				 @"arrow.up.forward.circle.fill", [UIColor systemIndigoColor], r.youStartedFollowing.count, YES),
-			make(SCIPACategoryYouUnfollowed, SCILocalized(@"You unfollowed"),
-				 SCILocalized(@"Since last scan"),
-				 @"arrow.down.backward.circle.fill", [UIColor systemPurpleColor], r.youUnfollowed.count, YES),
-			make(SCIPACategoryProfileUpdates, SCILocalized(@"Profile updates"),
-				 SCILocalized(@"Username, name or picture changes"),
-				 @"person.crop.circle.badge.exclamationmark", [UIColor systemPinkColor], r.profileUpdates.count, YES),
-		];
-	};
-	self.categories = build();
+	NSMutableArray<SCIPACategoryDescriptor *> *cats = [NSMutableArray array];
+	for (SCIPACheckDescriptor *chk in [SCIProfileAnalyzerChecks allChecks]) {
+		SCIPACategoryDescriptor *d = [SCIPACategoryDescriptor new];
+		d.category = chk.category;
+		d.title = SCILocalized(chk.title);
+		d.subtitle = SCILocalized(chk.subtitle);
+		d.symbol = chk.symbol;
+		d.color = chk.color;
+		d.requiresPrevious = chk.requiresPrevious;
+		d.enabled = [SCIProfileAnalyzerChecks isCheckEnabledForKey:chk.prefKey];
+		d.count = [self identityIDsForCategory:chk.category].count;
+		[cats addObject:d];
+	}
+	self.categories = cats;
 
 	SCIPACategoryDescriptor *visited = [SCIPACategoryDescriptor new];
 	visited.category = SCIPACategoryVisitedProfiles;
@@ -825,17 +794,18 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 	visited.color = [UIColor systemTealColor];
 	visited.count = self.visits.count;
 	visited.standalone = YES;
+	visited.enabled = YES;   // tracking has its own toggle, not a check
 	self.trackingCategories = @[visited];
 
 	[self computeUnreadForDescriptors:self.categories];
 	[self computeUnreadForDescriptors:self.trackingCategories];
 }
 
-// Stable per-item identity used to detect new entries since the last open.
-- (NSArray<NSString *> *)identityIDsForCategory:(SCIPACategoryDescriptor *)d {
+// Per-item identity used to count a category and badge new entries since last open.
+- (NSArray<NSString *> *)identityIDsForCategory:(SCIPACategory)category {
 	SCIProfileAnalyzerReport *r = self.report;
 	NSArray<SCIProfileAnalyzerUser *> *users = nil;
-	switch (d.category) {
+	switch (category) {
 		case SCIPACategoryMutual:             users = r.mutualFollowers; break;
 		case SCIPACategoryNotFollowingBack:   users = r.notFollowingYouBack; break;
 		case SCIPACategoryDontFollowBack:     users = r.youDontFollowBack; break;
@@ -865,8 +835,9 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 - (void)computeUnreadForDescriptors:(NSArray<SCIPACategoryDescriptor *> *)descs {
 	NSString *pk = [SCIUtils currentUserPK];
 	for (SCIPACategoryDescriptor *d in descs) {
+		if (!d.enabled) { d.unread = 0; continue; }
 		NSString *key = [NSString stringWithFormat:@"%ld", (long)d.category];
-		NSArray<NSString *> *ids = [self identityIDsForCategory:d];
+		NSArray<NSString *> *ids = [self identityIDsForCategory:d.category];
 		NSArray<NSString *> *seen = [SCIProfileAnalyzerStorage seenIDsForUserPK:pk categoryKey:key];
 		if (!seen) {                                  // first sight — seed silently
 			[SCIProfileAnalyzerStorage markSeenIDs:ids forUserPK:pk categoryKey:key];
@@ -881,7 +852,7 @@ typedef NS_ENUM(NSInteger, SCIPACategory) {
 }
 
 - (void)markCategorySeen:(SCIPACategoryDescriptor *)d {
-	[SCIProfileAnalyzerStorage markSeenIDs:[self identityIDsForCategory:d]
+	[SCIProfileAnalyzerStorage markSeenIDs:[self identityIDsForCategory:d.category]
 								forUserPK:[SCIUtils currentUserPK]
 							  categoryKey:[NSString stringWithFormat:@"%ld", (long)d.category]];
 	d.unread = 0;
@@ -1106,7 +1077,7 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section {
 	if (section == 0) return (NSInteger)self.categories.count;
 	if (section == 1) return (NSInteger)self.trackingCategories.count;
-	if (section == 2) return 2;
+	if (section == 2) return 3;
 	return 2;
 }
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)section {
@@ -1124,18 +1095,21 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 	if (indexPath.section == 2) return [self preferencesCellForRow:indexPath.row tableView:tv];
 	if (indexPath.section == 3) return [self actionCellForRow:indexPath.row tableView:tv];
 	SCIPACategoryCell *cell = [tv dequeueReusableCellWithIdentifier:@"cat" forIndexPath:indexPath];
-	SCIUIKit26ConfigureTableCell(cell);
 	SCIPACategoryDescriptor *d = (indexPath.section == 1)
 		? self.trackingCategories[indexPath.row]
 		: self.categories[indexPath.row];
+	BOOL turnedOff = !d.enabled;   // standalone rows are always enabled
 	BOOL waitingForPrev = d.requiresPrevious && !self.report.previous;
 	BOOL hasReport = self.report.current != nil;
 	// Locked while running — the report is about to be replaced.
-	BOOL disabled = d.standalone ? (d.count == 0)
-	                              : (self.running || waitingForPrev || !hasReport || d.count == 0);
+	BOOL disabled = turnedOff
+	              || (d.standalone ? (d.count == 0)
+	                               : (self.running || waitingForPrev || !hasReport || d.count == 0));
 
 	cell.titleLabel.text = d.title;
-	if (d.standalone) {
+	if (turnedOff) {
+		cell.subtitleLabel.text = SCILocalized(@"Disabled");
+	} else if (d.standalone) {
 		cell.subtitleLabel.text = d.subtitle;
 	} else if (waitingForPrev) {
 		cell.subtitleLabel.text = SCILocalized(@"Available after your next scan");
@@ -1143,7 +1117,8 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 		cell.subtitleLabel.text = d.subtitle;
 	}
 	BOOL showDash = !d.standalone && (waitingForPrev || !hasReport);
-	cell.countLabel.text = showDash ? @"—" : [NSString stringWithFormat:@"%ld", (long)d.count];
+	cell.countLabel.text = turnedOff ? SCILocalized(@"Off")
+	                     : (showDash ? @"—" : [NSString stringWithFormat:@"%ld", (long)d.count]);
 	cell.iconBadge.backgroundColor = disabled ? [UIColor systemGray3Color] : d.color;
 	cell.iconView.image = [UIImage systemImageNamed:d.symbol];
 	cell.contentView.alpha = disabled ? 0.5 : 1.0;
@@ -1160,6 +1135,8 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 	[tv deselectRowAtIndexPath:indexPath animated:YES];
 	if (indexPath.section == 2) {
 		if (indexPath.row == 0) {
+			[self.navigationController pushViewController:[SCIProfileAnalyzerChecksViewController new] animated:YES];
+		} else if (indexPath.row == 1) {
 			SCIProfileAnalyzerSnapshotsViewController *vc = [[SCIProfileAnalyzerSnapshotsViewController alloc] initWithUserPK:[SCIUtils currentUserPK]];
 			[self.navigationController pushViewController:vc animated:YES];
 		}
@@ -1173,22 +1150,53 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 	SCIPACategoryDescriptor *d = (indexPath.section == 1)
 		? self.trackingCategories[indexPath.row]
 		: self.categories[indexPath.row];
+	if (!d.enabled) return;
 	if (!d.standalone) {
 		if (self.running) return;
 		if (d.requiresPrevious && !self.report.previous) return;
 		if (!self.report.current) return;
 	}
 	if (d.count == 0) return;
+	NSSet<NSString *> *newIDs = [self unseenIDSetForCategory:d];   // capture before marking seen
 	[self markCategorySeen:d];
 	[tv reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
-	[self.navigationController pushViewController:[self listVCForCategory:d] animated:YES];
+	UIViewController *vc = [self listVCForCategory:d];
+	if ([vc isKindOfClass:[SCIProfileAnalyzerListViewController class]])
+		((SCIProfileAnalyzerListViewController *)vc).unseenEntryIDs = newIDs;
+	[self.navigationController pushViewController:vc animated:YES];
+}
+
+- (NSSet<NSString *> *)unseenIDSetForCategory:(SCIPACategoryDescriptor *)d {
+	NSString *pk = [SCIUtils currentUserPK];
+	NSString *key = [NSString stringWithFormat:@"%ld", (long)d.category];
+	NSArray<NSString *> *seen = [SCIProfileAnalyzerStorage seenIDsForUserPK:pk categoryKey:key];
+	if (!seen) return nil;   // first sight — everything seeded as seen, nothing's "new"
+	NSSet *seenSet = [NSSet setWithArray:seen];
+	NSMutableSet<NSString *> *out = [NSMutableSet set];
+	for (NSString *i in [self identityIDsForCategory:d.category])
+		if (![seenSet containsObject:i]) [out addObject:i];
+	return out;
 }
 
 - (UITableViewCell *)preferencesCellForRow:(NSInteger)row tableView:(UITableView *)tv {
 	if (row == 0) {
+		static NSString *rid = @"pref_checks";
+		UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
+		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:rid];
+		cell.detailTextLabel.numberOfLines = 0;
+		cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+		cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+		cell.textLabel.text = SCILocalized(@"Checks");
+		cell.detailTextLabel.text = [self checksSubtitle];
+		cell.imageView.image = [UIImage systemImageNamed:@"checklist"];
+		cell.imageView.tintColor = [UIColor systemBlueColor];
+		return cell;
+	}
+
+	if (row == 1) {
 		static NSString *rid = @"pref_snap";
 		UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 		if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:rid];
 		cell.detailTextLabel.numberOfLines = 0;
 		cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
@@ -1203,7 +1211,6 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 
 	static NSString *rid = @"pref_visit";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:rid];
 	cell.selectionStyle = UITableViewCellSelectionStyleNone;
 	cell.detailTextLabel.numberOfLines = 0;
@@ -1219,6 +1226,14 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 	[sw addTarget:self action:@selector(trackVisitsToggled:) forControlEvents:UIControlEventValueChanged];
 	cell.accessoryView = sw;
 	return cell;
+}
+
+- (NSString *)checksSubtitle {
+	NSArray<SCIPACheckDescriptor *> *all = [SCIProfileAnalyzerChecks allChecks];
+	NSUInteger on = 0;
+	for (SCIPACheckDescriptor *c in all)
+		if ([SCIProfileAnalyzerChecks isCheckEnabledForKey:c.prefKey]) on++;
+	return [NSString stringWithFormat:SCILocalized(@"%lu of %lu checks on"), (unsigned long)on, (unsigned long)all.count];
 }
 
 - (NSString *)snapshotsSubtitle {
@@ -1245,7 +1260,6 @@ static NSInteger sciHeaderInteger(NSDictionary *d, NSString *key) {
 - (UITableViewCell *)actionCellForRow:(NSInteger)row tableView:(UITableView *)tv {
 	static NSString *rid = @"action";
 	UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:rid];
-	SCIUIKit26ConfigureTableCell(cell);
 	if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid];
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.imageView.contentMode = UIViewContentModeCenter;

@@ -3,9 +3,12 @@
 %hook IGCommentComposer.IGCommentComposerController
 - (void)onSendButtonTap {
     if ([SCIUtils getBoolPref:@"post_comment_confirm"]) {
-        [SCIUtils showConfirmation:^(void) {
-        	%orig;
-        } title:SCILocalized(@"Confirm posting comment")];
+        {
+        	void (^sciOrigBlock)(void) = ^(void) {
+        		%orig;
+        	};
+        	[SCIUtils showConfirmation:sciOrigBlock title:SCILocalized(@"Confirm posting comment")];
+        }
     } else {
         return %orig;
     }

@@ -21,6 +21,9 @@ typedef NS_ENUM(NSInteger, SCIPAListKind) {
               profileUpdates:(NSArray<SCIProfileAnalyzerProfileChange *> *)updates;
 - (instancetype)initVisitedListWithTitle:(NSString *)title
                                    visits:(NSArray<SCIProfileAnalyzerVisit *> *)visits;
+
+// Identity IDs new since the list was last opened; surfaces a NEW pill + New-first sort.
+@property (nonatomic, copy, nullable) NSSet<NSString *> *unseenEntryIDs;
 @end
 
 NS_ASSUME_NONNULL_END

@@ -94,11 +94,6 @@ static NSURL *sciURL(id v) {
         }
     }
     [stack addPointer:(__bridge void *)vc];
-
-    NSLog(@"[RyukGram][Profile] register vc=%@ user=@%@ pk=%@",
-          NSStringFromClass([vc class]),
-          [self usernameForUser:user] ?: @"?",
-          [self pkForUser:user] ?: @"?");
 }
 
 + (void)unregisterProfileVC:(UIViewController *)vc {

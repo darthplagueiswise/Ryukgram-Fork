@@ -1,5 +1,5 @@
-// Story tray long-press actions — adds "View profile picture" to the action sheet.
-// Fetches HD profile pic via /api/v1/users/{pk}/info/.
+// Story tray long-press actions — adds "Profile picture" to the legacy action sheet
+// and the IG-Subscriptions story-peek prism menu. HD pic via /api/v1/users/{pk}/info/.
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
@@ -10,6 +10,7 @@
 #import <substrate.h>
 
 static __weak id sciLongPressedTrayCell = nil;
+static __weak id sciPeekCell = nil;
 
 // ── Helpers ──
 
@@ -137,6 +138,8 @@ static void hook_didLongPressCell(id self, SEL _cmd, UIGestureRecognizer *gestur
 
 static void (*orig_present)(id, SEL, id, BOOL, id);
 static void hook_present(id self, SEL _cmd, id vc, BOOL animated, id completion) {
+    if (sciLongPressedTrayCell && [NSStringFromClass([vc class]) containsString:@"StoryPeek"])
+        sciPeekCell = sciLongPressedTrayCell;
     if (sciLongPressedTrayCell && [SCIUtils getBoolPref:@"story_tray_actions"]) {
         Ivar actIvar = class_getInstanceVariable([vc class], "_actions");
         NSArray *actions = actIvar ? object_getIvar(vc, actIvar) : nil;
@@ -155,7 +158,7 @@ static void hook_present(id self, SEL _cmd, id vc, BOOL animated, id completion)
                 void (^handler)(void) = ^{ sciShowHDProfilePic(pk, caption, localPic); };
                 id action = ((InitFn)objc_msgSend)([actionCls alloc],
                     @selector(initWithTitle:subtitle:style:handler:accessibilityIdentifier:accessibilityLabel:),
-                    SCILocalized(@"View profile picture"), nil, (NSInteger)0, handler, nil, nil);
+                    SCILocalized(@"Profile picture"), nil, (NSInteger)0, handler, nil, nil);
 
                 if (action) {
                     NSMutableArray *newActions = [actions mutableCopy];
@@ -170,7 +173,98 @@ static void hook_present(id self, SEL _cmd, id vc, BOOL animated, id completion)
     orig_present(self, _cmd, vc, animated, completion);
 }
 
+// The story-peek menu (IGDSPrismMenuView) is built from fixed Swift handlers (no
+// items array), so we inject a row from the menu's own layoutSubviews, styled from
+// the last native row; tap dismisses the peek and opens the HD profile pic.
+@interface SCITrayPeekTap : NSObject <UIGestureRecognizerDelegate>
+@property (nonatomic, weak) UIView *menuView;
+@property (nonatomic, copy) NSString *pk;
+@property (nonatomic, copy) NSString *caption;
+@property (nonatomic, strong) UIImage *fallback;
+@end
+@implementation SCITrayPeekTap
+- (void)tap {
+    NSString *pk = self.pk; NSString *cap = self.caption; UIImage *fb = self.fallback;
+    UIResponder *r = self.menuView;
+    while (r && ![r isKindOfClass:UIViewController.class]) r = r.nextResponder;
+    UIViewController *vc = (UIViewController *)r;
+    if (vc) [vc dismissViewControllerAnimated:YES completion:^{ sciShowHDProfilePic(pk, cap, fb); }];
+    else sciShowHDProfilePic(pk, cap, fb);
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)g shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)o { return YES; }
+@end
+
+static const void *kSciPeekInjectedKey = &kSciPeekInjectedKey;
+
+static void sciInjectPeekRow(UIView *menuView, id cell) {
+    if (!menuView || objc_getAssociatedObject(menuView, kSciPeekInjectedKey)) return;
+    NSString *pk = sciUserPKFromCell(cell);
+    if (!pk) return;
+
+    Ivar elIvar = class_getInstanceVariable([menuView class], "menuElementViews");
+    NSArray *elements = elIvar ? object_getIvar(menuView, elIvar) : nil;
+    if (![elements isKindOfClass:[NSArray class]] || elements.count == 0) return;
+    UIView *template = elements.lastObject;
+    if (!template.superview) return;
+
+    Class builderClass = NSClassFromString(@"IGDSPrismMenuItemBuilder");
+    Class itemViewClass = NSClassFromString(@"_TtC13IGDSPrismMenu21IGDSPrismMenuItemView");
+    if (!builderClass || !itemViewClass) return;
+
+    id builder = ((id(*)(id,SEL,id))objc_msgSend)([builderClass alloc], @selector(initWithTitle:), SCILocalized(@"Profile picture"));
+    builder = ((id(*)(id,SEL,id))objc_msgSend)(builder, @selector(withHandler:), ^{});
+    id menuItem = ((id(*)(id,SEL))objc_msgSend)(builder, @selector(build));
+    if (!menuItem) return;
+
+    BOOL edr = NO;
+    Ivar edrIv = class_getInstanceVariable([template class], "edrEnabled");
+    if (edrIv) edr = *(BOOL *)((uint8_t *)(__bridge void *)template + ivar_getOffset(edrIv));
+    UIView *itemView = ((id(*)(id,SEL,id,BOOL,BOOL,BOOL))objc_msgSend)([itemViewClass alloc],
+        @selector(initWithMenuItem:edrEnabled:isHeader:isSubmenu:), menuItem, edr, NO, NO);
+    if (!itemView) return;
+
+    CGFloat h = template.frame.size.height, x = template.frame.origin.x, w = template.frame.size.width;
+    CGFloat y = CGRectGetMaxY(template.frame);
+
+    SCITrayPeekTap *target = [SCITrayPeekTap new];
+    target.menuView = menuView;
+    target.pk = pk;
+    target.caption = sciCaptionFromCell(cell);
+    target.fallback = sciProfileImageFromCell(cell);
+
+    UIControl *wrapper = [[UIControl alloc] initWithFrame:CGRectMake(x, y, w, h)];
+    itemView.frame = wrapper.bounds;
+    itemView.userInteractionEnabled = NO;
+    [wrapper addSubview:itemView];
+    [wrapper addTarget:target action:@selector(tap) forControlEvents:UIControlEventTouchUpInside];
+    UITapGestureRecognizer *ownTap = [[UITapGestureRecognizer alloc] initWithTarget:target action:@selector(tap)];
+    ownTap.delegate = target;
+    [wrapper addGestureRecognizer:ownTap];
+    [template.superview addSubview:wrapper];
+
+    CGRect mF = menuView.frame; mF.size.height += h; menuView.frame = mF;
+    UIView *node = template.superview;
+    while (node && node != menuView) {
+        CGRect nf = node.frame; nf.size.height += h; node.frame = nf; node.clipsToBounds = NO;
+        node = node.superview;
+    }
+    menuView.clipsToBounds = NO;
+    objc_setAssociatedObject(menuView, kSciPeekInjectedKey, target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    sciPeekCell = nil;
+}
+
+static void (*orig_prismLayout)(id, SEL);
+static void new_prismLayout(id self, SEL _cmd) {
+    orig_prismLayout(self, _cmd);
+    if (sciPeekCell && [SCIUtils getBoolPref:@"story_tray_actions"])
+        sciInjectPeekRow((UIView *)self, sciPeekCell);
+}
+
 %ctor {
+    Class prism = NSClassFromString(@"_TtC13IGDSPrismMenu17IGDSPrismMenuView");
+    if (prism && class_getInstanceMethod(prism, @selector(layoutSubviews)))
+        MSHookMessageEx(prism, @selector(layoutSubviews), (IMP)new_prismLayout, (IMP *)&orig_prismLayout);
+
     Class scCls = NSClassFromString(@"IGStorySectionController");
     if (scCls) {
         SEL sel = NSSelectorFromString(@"_didLongPressCell:");

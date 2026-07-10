@@ -79,6 +79,9 @@ typedef NS_ENUM(NSInteger, SCITableCell) {
 /// action-style button cells the same tint as link cells.
 @property (nonatomic, strong, nullable) UIColor *titleColor;
 
+/// Red trailing count badge, re-evaluated per render; hidden when it returns 0.
+@property (nonatomic, copy, nullable) NSInteger (^badgeCount)(void);
+
 @property (nonatomic, strong) NSArray *navSections;
 @property (nonatomic, strong) UIViewController *navViewController;
 

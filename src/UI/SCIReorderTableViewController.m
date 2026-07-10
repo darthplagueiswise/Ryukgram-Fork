@@ -4,8 +4,6 @@
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 	self.tableView.allowsSelectionDuringEditing = YES;
 	[self setEditing:YES animated:NO];
 }

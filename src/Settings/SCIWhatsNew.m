@@ -11,38 +11,48 @@ static NSString *const kSeenKey = @"sci_whatsnew_seen";
 	static dispatch_once_t once;
 	dispatch_once(&once, ^{
 		ids = [NSSet setWithArray:@[
-			@"action_button_profile_enabled", @"adv_audio_bitrate", @"adv_audio_channels",
-			@"adv_audio_codec", @"adv_audio_samplerate", @"adv_crf",
-			@"adv_encoding_enabled", @"adv_faststart", @"adv_fps",
-			@"adv_h264_level", @"adv_h264_profile", @"adv_max_resolution",
-			@"adv_pixel_format", @"adv_preset", @"adv_strip_metadata",
-			@"adv_tune", @"adv_video_bitrate", @"adv_video_codec",
-			@"audio_page_download", @"bg_keepalive", @"bypass_dm_char_limit",
-			@"bypass_reveal_sticker", @"cache_preserve_messages_db", @"chat_bg_enabled",
-			@"confirm_send_to_group", @"follow_indicator",
-			@"custom_gif_comment", @"custom_music_sticker_color", @"deleted_messages_log_enabled",
-			@"dl_auto_retry", @"dl_auto_retry_count", @"dl_max_concurrent",
-			@"dm_tab_long_press_gallery", @"enhanced_media_resolution",
-			@"full_followers_count", @"full_posts_count", @"gallery_album_name",
-			@"gallery_save_mode", @"hide_ads_explore", @"hide_ads_feed",
-			@"hide_ads_reels", @"hide_ads_shopping", @"hide_ads_stories",
-			@"hide_made_with_edits", @"hide_reels_floating_social_context", @"hide_reels_friends_bubbles",
-			@"hide_send_to_group", @"hide_stories_midcards", @"hide_testflight_nag",
-			@"home_shortcut_enabled", @"instants_advance_confirm", @"instants_capture_confirm",
-			@"instants_download_btn", @"instants_emoji_reaction_confirm", @"instants_send_from_gallery",
-			@"liquid_glass_tabbar_mode", @"main_feed_mode", @"media_zoom_start_muted",
-			@"note_like_confirm", @"note_react_confirm", @"photo_sticker_allow_video",
-			@"reel_card_fetch_missing", @"reel_card_full_views", @"reel_card_shortened_numbers",
-			@"reel_card_show_date", @"reel_card_show_likes", @"reels_playback_speed",
-			@"reels_swipe_to_profile", @"sci_fix_duplicate_notifications", @"sci_followlist_sort_enabled",
-			@"sci_gallery_enabled", @"sci_silence_calls", @"share_sheet_pin_threads",
-			@"skip_sensitive_content", @"sticker_interact_highlights_mode", @"sticker_interact_stories_mode",
-			@"story_mentions_button", @"story_mentions_counter", @"theme_force",
-			@"theme_mode", @"whatsnew_always_show",
+			// Device ID
+			@"sci_devicespoof_login_button",
+			// Story viewers list — filter / sort / pin
+			@"sci_story_viewer_sort_enabled",
+			// Follow Requests Tracker
+			@"follow_requests_enabled", @"follow_requests_track_outgoing", @"follow_requests_track_incoming",
+			@"follow_requests_notify_accepted", @"follow_requests_notify_rejected",
+			@"follow_requests_notify_received", @"follow_requests_notify_withdrawn",
+			@"follow_requests_check_interval",
+			// Hide seen buttons + confirm mark-as-seen
+			@"show_dm_seen_button", @"show_story_seen_button",
+			@"confirm_mark_seen_dm", @"confirm_mark_seen_story", @"confirm_mark_seen_dm_visual",
+			// Disappearing media advance on mark-as-viewed
+			@"dm_visual_advance_on_mark_seen",
+			// Deleted-messages log — groups, removed reactions, disappearing media, keep-alive
+			@"deleted_messages_log_enabled", @"deleted_messages_log_reactions", @"deleted_messages_keepalive",
+			// Read receipts
+			@"read_receipts_enabled", @"read_receipts_save_log", @"read_receipts_log_groups",
+			// Reroute native DM Save button
+			@"dm_native_save_enabled",
+			// Mirror toasts to iOS notifications
+			@"notif_mirror_enabled", @"notif_mirror_clear_on_open",
+			// Instants — auto-save, auto-advance after reaction
+			@"instants_auto_save", @"instant_auto_advance_reaction",
+			// Profile hides
+			@"no_profile_suggested_users", @"hide_story_highlights",
+			// Liquid glass
+			@"liquid_glass_force_off", @"liquid_glass_progressive_blur",
+			// Messages-only keeps the search tab
+			@"messages_only_hide_search",
+			// Disable all tweak options
+			@"sci_disable_all",
+			// Bypass "You can't send messages"
+			@"unlock_send_composer",
+			// Favorite GIFs
+			@"gif_favorites_enabled",
+			// Reworked features
+			@"chat_bg_enabled", @"custom_music_sticker_color", @"action_button_profile_enabled",
 			// keyless destinations — tagged via SCISetting.whatsNewID
-			@"ui_gallery", @"ui_lock", @"ui_backup", @"ui_interface", @"ui_dateformat",
-			@"ui_notifications", @"ui_appicon", @"ui_downloadmanager", @"ui_actionicon",
-			@"ui_homeshortcut_config", @"ui_profileanalyzer", @"ui_cfg_actionmenu",
+			@"ui_deviceid", @"ui_followrequests", @"ui_taborder", @"ui_filelogging",
+			@"ui_profileanalyzer", @"ui_backup", @"ui_notifications", @"ui_dateformat",
+			@"ui_cfg_actionmenu",
 		]];
 	});
 	return ids;

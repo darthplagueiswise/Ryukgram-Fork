@@ -12,6 +12,12 @@
 
 #pragma mark - Helpers
 
+// Gallery-scheme filename, but keeping the real extension so Photos/share never show a scratch name.
+static NSString *SCICleanExportName(NSURL *source, SCIGalleryMediaType mediaType, SCIGallerySaveMetadata *metadata, NSString *ext) {
+	NSString *name = SCIFileNameForMedia(source, mediaType, metadata);
+	return ext.length ? [[name stringByDeletingPathExtension] stringByAppendingPathExtension:ext] : name;
+}
+
 static UIImageSymbolConfiguration *SCISymbolConfig(CGFloat pointSize, UIImageSymbolWeight weight) {
 	return [UIImageSymbolConfiguration configurationWithPointSize:pointSize weight:weight];
 }
@@ -103,7 +109,6 @@ static NSString *SCITimeString(double seconds) {
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.view.backgroundColor = UIColor.blackColor;
 
@@ -997,7 +1002,8 @@ static NSString *SCITimeString(double seconds) {
 
 	if (source.isFileURL) {
 		// Copy so Photos' move-on-import can't eat the file the viewer is playing.
-		NSURL *copy = [SCITempFiles claimWithExt:ext ttl:300 tag:@"save"];
+		SCIGalleryMediaType mt = item.videoURL ? SCIGalleryMediaTypeVideo : SCIGalleryMediaTypeImage;
+		NSURL *copy = [SCITempFiles claimNamedFile:SCICleanExportName(source, mt, metadata, ext) ttl:300 tag:@"save"];
 		if (![NSFileManager.defaultManager copyItemAtURL:source toURL:copy error:nil]) {
 			[SCITempFiles releaseURL:copy];
 			SCINotifyError(SCI_NOTIF_DOWNLOAD, SCILocalized(@"Save failed"), SCILocalized(@"Failed to save"));
@@ -1117,7 +1123,7 @@ static NSString *SCITimeString(double seconds) {
 				else ext = @"webp";
 			}
 
-			tempURL = [SCITempFiles claimWithExt:ext ttl:600 tag:@"share"];
+			tempURL = [SCITempFiles claimNamedFile:SCICleanExportName(item.photoURL, SCIGalleryMediaTypeImage, item.metadata, ext) ttl:600 tag:@"share"];
 			if ([output writeToURL:tempURL atomically:YES]) [items addObject:tempURL];
 		}
 

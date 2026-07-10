@@ -6,7 +6,7 @@
     %orig;
 
     if ([SCIUtils getBoolPref:@"disable_scrolling_reels"]) {
-
+        
         self.scrollEnabled = false;
     }
 }

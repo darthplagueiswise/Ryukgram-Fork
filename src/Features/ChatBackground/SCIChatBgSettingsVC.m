@@ -2,6 +2,7 @@
 #import "SCIChatBackgroundManager.h"
 #import "SCIChatBgImporter.h"
 #import "SCIChatBgPerImageSheet.h"
+#import "SCIChatBgEditor.h"
 #import "SCIChatBgChatsListViewController.h"
 #import "../../UI/SCIPopupChrome.h"
 #import "../../Utils.h"
@@ -67,6 +68,8 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 
 - (void)configureAsAdd {
 	self.imageView.image = nil;
+	self.iconView.image = [UIImage systemImageNamed:@"plus"];
+	self.iconView.tintColor = UIColor.labelColor;
 	self.iconView.hidden = NO;
 	self.contentView.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.16];
 	self.contentView.layer.borderWidth = 1.5;
@@ -74,11 +77,15 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 }
 
 - (void)configureWithAsset:(NSString *)asset {
-	self.iconView.hidden = YES;
 	self.contentView.backgroundColor = UIColor.blackColor;
+	self.imageView.image = [[SCIChatBackgroundManager shared] imageForAsset:asset];
 
-	NSURL *url = [[SCIChatBackgroundManager shared] urlForRelativeAsset:asset];
-	self.imageView.image = url ? [UIImage imageWithContentsOfFile:url.path] : nil;
+	BOOL video = [SCIChatBackgroundManager isVideoAsset:asset];
+	self.iconView.hidden = !video;
+	if (video) {
+		self.iconView.image = [UIImage systemImageNamed:@"play.circle.fill"];
+		self.iconView.tintColor = [UIColor colorWithWhite:1.0 alpha:0.9];
+	}
 }
 
 @end
@@ -133,8 +140,6 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
-	SCIUIKit26ConfigureTableView(self.tableView);
 
 	[self.tableView registerClass:SCIChatBgLibraryRowCell.class forCellReuseIdentifier:kLibraryRowCell];
 
@@ -187,7 +192,6 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 
 	SCISetting *library = [SCISetting customCellWithHeight:128 provider:^UITableViewCell *(UITableView *tableView, NSIndexPath *indexPath) {
 		SCIChatBgLibraryRowCell *cell = [tableView dequeueReusableCellWithIdentifier:kLibraryRowCell forIndexPath:indexPath];
-	SCIUIKit26ConfigureTableCell(cell);
 		cell.collectionView.dataSource = weak;
 		cell.collectionView.delegate = weak;
 		weak.libraryCollection = cell.collectionView;
@@ -267,8 +271,16 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 - (void)showAssetMenu:(NSString *)asset source:(UICollectionViewCell *)cell {
 	UIAlertController *s = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
 
-	[s addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Edit image settings") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+	BOOL video = [SCIChatBackgroundManager isVideoAsset:asset];
+
+	[s addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Adjust settings") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
 		[self openImageSettings:asset];
+	}]];
+
+	[s addAction:[UIAlertAction actionWithTitle:video ? SCILocalized(@"Crop & trim") : SCILocalized(@"Crop & resize") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+		[SCIChatBgEditor reEditAsset:asset from:self completion:^(NSString *newRel) {
+			if (newRel) [[SCIChatBackgroundManager shared] replaceAsset:asset withAsset:newRel];
+		}];
 	}]];
 
 	[s addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Set as default") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
@@ -295,7 +307,6 @@ static NSString *const kAddCell = @"SCIChatBgAdd";
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
 	BOOL isAdd = indexPath.item == (NSInteger)self.libraryAssets.count;
 	SCIChatBgLibraryCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:isAdd ? kAddCell : kAssetCell forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
 
 	isAdd ? [cell configureAsAdd] : [cell configureWithAsset:self.libraryAssets[indexPath.item]];
 	return cell;

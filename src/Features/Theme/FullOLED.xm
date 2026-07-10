@@ -30,17 +30,33 @@ static NSArray<NSString *> *SCIOLEDKeepGreyClasses(void) {
 	return names;
 }
 
+// Verdicts memoized on the Class — identity is stable, so the cache never goes stale.
 static BOOL SCIColorIsDynamic(UIColor *color) {
-	return [NSStringFromClass([color class]) containsString:@"Dynamic"];
+	Class cls = [color class];
+	static const void *key = &key;
+	NSNumber *cached = objc_getAssociatedObject(cls, key);
+	if (cached) return cached.boolValue;
+	BOOL dyn = [NSStringFromClass(cls) containsString:@"Dynamic"];
+	objc_setAssociatedObject(cls, key, @(dyn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	return dyn;
+}
+
+static BOOL SCIClassMatchesKeepGrey(Class cls) {
+	static const void *key = &key;
+	NSNumber *cached = objc_getAssociatedObject(cls, key);
+	if (cached) return cached.boolValue;
+	NSString *name = NSStringFromClass(cls);
+	BOOL match = NO;
+	for (NSString *needle in SCIOLEDKeepGreyClasses()) {
+		if ([name containsString:needle]) { match = YES; break; }
+	}
+	objc_setAssociatedObject(cls, key, @(match), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	return match;
 }
 
 static BOOL SCIOLEDKeepGrey(UIView *view) {
-	NSArray<NSString *> *keep = SCIOLEDKeepGreyClasses();
 	for (UIView *v = view; v; v = v.superview) {
-		NSString *cls = NSStringFromClass([v class]);
-		for (NSString *needle in keep) {
-			if ([cls containsString:needle]) return YES;
-		}
+		if (SCIClassMatchesKeepGrey([v class])) return YES;
 	}
 	return NO;
 }
@@ -68,12 +84,15 @@ static const void *kSCIFlattenedOriginalKey = &kSCIFlattenedOriginalKey;
 			%orig;
 			return;
 		}
-		objc_setAssociatedObject(self, kSCIFlattenedOriginalKey, color, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+		// Stash for the didMoveToWindow restore only while detached; an attached view's verdict is final.
+		if (!self.window)
+			objc_setAssociatedObject(self, kSCIFlattenedOriginalKey, color, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		%orig([SCITheme backgroundColor]);
 		return;
 	}
 
-	objc_setAssociatedObject(self, kSCIFlattenedOriginalKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	if (objc_getAssociatedObject(self, kSCIFlattenedOriginalKey))
+		objc_setAssociatedObject(self, kSCIFlattenedOriginalKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 	%orig;
 }
 

@@ -9,7 +9,7 @@ echo
 if [ "$1" == "true" ];
 then
     _scinsta_dev_before
-
+    
     # Build tweak and package into ipa
     ./build.sh sideload --dev
 

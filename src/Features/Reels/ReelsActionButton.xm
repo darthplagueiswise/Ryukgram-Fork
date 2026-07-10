@@ -7,6 +7,7 @@
 #import "../../ActionButton/SCIActionButton.h"
 #import "../../ActionButton/SCIActionIcon.h"
 #import "../../ActionButton/SCIMediaActions.h"
+#import <objc/runtime.h>
 
 static const NSInteger kReelActionBtnTag = 1337;
 static const NSInteger kReelActionHitTag = 1338;
@@ -303,7 +304,7 @@ static void sciRemoveReelButton(UIView *root) {
 	[[root viewWithTag:kReelActionBtnTag] removeFromSuperview];
 }
 
-%hook IGSundialViewerVerticalUFI
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
 
 - (void)layoutSubviews {
 	%orig;

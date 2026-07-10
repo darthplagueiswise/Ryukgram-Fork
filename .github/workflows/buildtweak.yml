@@ -6,6 +6,7 @@ on:
             - 'experiments'
             - 'experimental'
             - 'experimental2'
+            - 'experimental3'
     workflow_dispatch:
 
 concurrency:
@@ -78,6 +79,9 @@ jobs:
 
             - name: Setup FFmpegKit
               run: cd main && ./scripts/setup-ffmpegkit.sh
+
+            - name: Install Python dependencies (obfuscate-classes.py)
+              run: pip3 install lief || pip3 install lief --break-system-packages
 
             - name: Build rootless
               run: |

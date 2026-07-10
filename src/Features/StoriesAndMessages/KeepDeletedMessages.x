@@ -15,6 +15,7 @@
 #define SCI_PRESERVED_IDS_KEY		@"SCIPreservedMsgIdsByPk"
 #define SCI_PRESERVED_LEGACY_KEY	@"SCIPreservedMsgIds"
 #define SCI_PRESERVED_TAG			1399
+#define SCI_PRESERVED_ALPHA			0.45
 
 static atomic_int sciLocalDeleteInProgress = 0;
 
@@ -30,6 +31,7 @@ static void sciUpdateCellIndicator(id cell);
 #pragma mark - Prefs / runtime helpers
 
 static inline BOOL sciKeepOn(void) { return [SCIUtils getBoolPref:@"keep_deleted_message"]; }
+static inline BOOL sciKeepMineOn(void) { return [SCIUtils getBoolPref:@"keep_my_deleted_messages"]; }
 static inline BOOL sciLogOn(void) { return [SCIUtils getBoolPref:@"deleted_messages_log_enabled"]; }
 static inline BOOL sciIndicatorOn(void) { return [SCIUtils getBoolPref:@"indicate_unsent_messages"]; }
 
@@ -480,13 +482,12 @@ static BOOL sciProcessMessageUpdate(id update,
 
 	if (reason != 0) return NO;
 
-	NSMutableSet *pending = sciPendingLocalSet();
-	if (sciKeysIntersectSet(keys, pending)) {
-		sciRemoveKeysFromSet(keys, pending);
-		return NO;
-	}
+	BOOL keepMine = sciKeepMineOn();
 
-	if (atomic_load(&sciLocalDeleteInProgress) > 0) return NO;
+	NSMutableSet *pending = sciPendingLocalSet();
+	BOOL localDelete = sciKeysIntersectSet(keys, pending) || atomic_load(&sciLocalDeleteInProgress) > 0;
+	sciRemoveKeysFromSet(keys, pending);
+	if (localDelete && !keepMine) return NO;
 
 	if (sciKeysMarkedDeleteForYou(keys)) {
 		sciRemoveDeleteForYouKeys(keys);
@@ -505,7 +506,7 @@ static BOOL sciProcessMessageUpdate(id update,
 			senderPk = sciSenderPkFromMessage(sciCachedMessageForSid(applicator, sid, threadId));
 			if (senderPk.length) sciTrackInMap(sciSenderPkMap(), sid, senderPk, SCI_SENDER_MAP_MAX);
 		}
-		if (senderPk.length && [senderPk isEqualToString:ownerPk]) continue;
+		if (senderPk.length && [senderPk isEqualToString:ownerPk] && !keepMine) continue;
 
 		[unsendKeys addObject:key];
 
@@ -578,22 +579,75 @@ static UIView *sciAccessoryWrapper(UIView *view) {
 	return view;
 }
 
+static const void *kAccessoriesHiddenKey = &kAccessoriesHiddenKey;
+
 static void sciSetTrailingAccessoriesHidden(id cell, BOOL hidden) {
+	// Skip the walk when restoring a cell we never hid (the common case).
+	if (!hidden && !objc_getAssociatedObject(cell, kAccessoriesHiddenKey)) return;
+	objc_setAssociatedObject(cell, kAccessoriesHiddenKey, hidden ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	// Pre-434 path: the cell exposed accessory views via _tappableAccessoryViews.
 	NSArray *views = sciIvar(cell, "_tappableAccessoryViews");
-	if (![views isKindOfClass:NSArray.class]) return;
+	if ([views isKindOfClass:NSArray.class]) {
+		for (UIView *v in views) {
+			if (![v isKindOfClass:UIView.class]) continue;
+			UIView *wrap = sciAccessoryWrapper(v);
+			wrap.hidden = hidden;
+			if (wrap != v) v.hidden = hidden;
+		}
+		return;
+	}
 
-	for (UIView *v in views) {
-		if (![v isKindOfClass:UIView.class]) continue;
+	// IG 434+
+	if (![cell isKindOfClass:UIView.class]) return;
+	Class shortcutCls = NSClassFromString(@"IGDirectMessageCellShortcutView");
+	if (!shortcutCls) return;
 
-		UIView *wrap = sciAccessoryWrapper(v);
-		wrap.hidden = hidden;
-		if (wrap != v) v.hidden = hidden;
+	NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:cell];
+	while (stack.count) {
+		UIView *v = stack.lastObject;
+		[stack removeLastObject];
+		for (UIView *sub in v.subviews) {
+			if ([sub isKindOfClass:shortcutCls]) sub.hidden = hidden;
+			else [stack addObject:sub];
+		}
 	}
 }
 
 static BOOL sciCellIsPreserved(id cell) {
 	NSString *sid = sciCellServerId(cell);
 	return sid.length && [sciGetPreservedIds() containsObject:sid];
+}
+
+static BOOL sciCellIsOutgoing(id cell) {
+	NSString *sid = sciCellServerId(cell);
+	NSString *senderPk = sid.length ? sciSenderPkMap()[sid] : nil;
+	NSString *me = sciCurrentUserPk();
+	return senderPk.length && me.length && [senderPk isEqualToString:me];
+}
+
+static UIView *sciMessageContentContainer(id cell) {
+	UIView *parent = sciIvar(cell, "_messageContentContainerView");
+	if (!parent && [cell respondsToSelector:@selector(messageContentContainerView)]) {
+		@try { parent = ((id (*)(id, SEL))objc_msgSend)(cell, @selector(messageContentContainerView)); }
+		@catch (__unused id e) {}
+	}
+	return [parent isKindOfClass:UIView.class] ? parent : cell;
+}
+
+static const void *kBubbleDimmedKey = &kBubbleDimmedKey;
+
+static void sciSetBubbleDimmed(id cell, BOOL dimmed) {
+	if (!dimmed && !objc_getAssociatedObject(cell, kBubbleDimmedKey)) return;
+	objc_setAssociatedObject(cell, kBubbleDimmedKey, dimmed ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+	// Dim the content, not the container — the "Unsent" tag is a sibling and must stay crisp.
+	UIView *container = sciMessageContentContainer(cell);
+	container.alpha = 1.0;
+	for (UIView *sub in container.subviews) {
+		if (sub.tag == SCI_PRESERVED_TAG) continue;
+		sub.alpha = dimmed ? SCI_PRESERVED_ALPHA : 1.0;
+	}
 }
 
 static void sciUpdateCellIndicator(id cell) {
@@ -605,30 +659,40 @@ static void sciUpdateCellIndicator(id cell) {
 	if (!sciIndicatorOn() || !sciCellIsPreserved(cell)) {
 		if (old) [old removeFromSuperview];
 		sciSetTrailingAccessoriesHidden(cell, NO);
+		sciSetBubbleDimmed(cell, NO);
 		return;
 	}
 
+	sciSetBubbleDimmed(cell, YES);
 	sciSetTrailingAccessoriesHidden(cell, YES);
 	if (old) return;
 
-	UIView *parent = sciIvar(cell, "_messageContentContainerView") ?: view;
+	UIView *bubble = sciMessageContentContainer(cell);
+
+	// Tag rides on the bubble so it tracks IG's long-press move; a cell-level sibling desyncs.
+	bubble.clipsToBounds = NO;
 
 	SCIChromeLabel *label = [[SCIChromeLabel alloc] initWithText:SCILocalized(@"Unsent")];
 	label.tag = SCI_PRESERVED_TAG;
 	label.font = [UIFont italicSystemFontOfSize:10.0];
-	label.textColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:0.9];
-	[parent addSubview:label];
+	label.textColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+	[bubble addSubview:label];
+
+	NSLayoutConstraint *horizontal = sciCellIsOutgoing(cell)
+		? [label.trailingAnchor constraintEqualToAnchor:bubble.leadingAnchor constant:-4.0]
+		: [label.leadingAnchor constraintEqualToAnchor:bubble.trailingAnchor constant:4.0];
 
 	[NSLayoutConstraint activateConstraints:@[
-		[label.leadingAnchor constraintEqualToAnchor:parent.trailingAnchor constant:4.0],
-		[label.centerYAnchor constraintEqualToAnchor:parent.centerYAnchor],
+		horizontal,
+		[label.centerYAnchor constraintEqualToAnchor:bubble.centerYAnchor],
 	]];
 }
 
 static void sciRefreshVisibleCellIndicators(void) {
 	if (!sciIndicatorOn()) return;
 
-	Class cls = NSClassFromString(@"IGDirectMessageCell");
+	Class cls = NSClassFromString(@"_TtC19IGDirectMessageCell19IGDirectMessageCell")
+				?: NSClassFromString(@"IGDirectMessageCell");
 	UIWindow *window = UIApplication.sharedApplication.keyWindow;
 	if (!cls || !window) return;
 
@@ -791,7 +855,8 @@ static void new_visualViewerDidAppear(id self, SEL _cmd, BOOL animated) {
 			(IMP)new_removeMutationExecute,
 			(IMP *)&orig_removeMutationExecute);
 
-	Class cellCls = NSClassFromString(@"IGDirectMessageCell");
+	Class cellCls = NSClassFromString(@"_TtC19IGDirectMessageCell19IGDirectMessageCell")
+					?: NSClassFromString(@"IGDirectMessageCell");
 	sciHook(cellCls,
 			NSSelectorFromString(@"configureWithViewModel:ringViewSpecFactory:launcherSet:"),
 			(IMP)new_configureCell,

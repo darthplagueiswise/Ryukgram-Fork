@@ -47,7 +47,6 @@
 
     [self setPushedDown:YES];
 
-    // Trigger change for text color
     id presentingVC = [SCIUtils nearestViewControllerForView:self];
 
     if ([presentingVC isKindOfClass:%c(IGStoryTextEntryViewController)]) {
@@ -60,7 +59,8 @@
         [presentingVC isKindOfClass:(NSClassFromString(@"_TtC25IGStoryPostCaptureDrawing36IGStoryCreationDrawingViewController") ?: NSClassFromString(@"IGStoryCreationDrawingViewController"))]
         || [presentingVC isKindOfClass:%c(IGDirectThreadViewDrawingViewController)]
     ) {
-        [presentingVC drawingControls:nil didSelectColor:color];
+        if ([presentingVC respondsToSelector:@selector(drawingControls:didSelectColor:)])
+            [presentingVC drawingControls:nil didSelectColor:color];
     }
 
 };
@@ -74,10 +74,14 @@
         [colorPickingControls isKindOfClass:(NSClassFromString(@"_TtC33IGStoryPostCaptureDrawingControls27IGStoryColorPickingControls") ?: NSClassFromString(@"IGStoryColorPickingControls"))]
         || [colorPickingControls isKindOfClass:%c(IGDirectThreadColorPickingControls)]
     ) {
-        IGStoryEyedropperToggleButton *_eyedropperToggleButton = MSHookIvar<IGStoryEyedropperToggleButton *>(colorPickingControls, "_eyedropperToggleButton");
-
-        if (_eyedropperToggleButton != nil) {
-            [_eyedropperToggleButton setPushedDown:NO];
+        // Probe before reading — blind MSHookIvar on a missing ivar crashes. IG renamed it to the Swift name (no underscore); keep old name as fallback.
+        Ivar iv = class_getInstanceVariable([colorPickingControls class], "eyedropperToggleButton")
+                ?: class_getInstanceVariable([colorPickingControls class], "_eyedropperToggleButton");
+        if (iv) {
+            IGStoryEyedropperToggleButton *eyedropper = object_getIvar(colorPickingControls, iv);
+            if (eyedropper != nil) {
+                [eyedropper setPushedDown:NO];
+            }
         }
     }
 

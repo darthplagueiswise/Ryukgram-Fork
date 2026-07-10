@@ -172,6 +172,14 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 	return out ?: @[];
 }
 
+// Newest non-owner message = the 1-1 counterparty (an outgoing latest must not hijack identity).
+static SCIDeletedMessage *sciCounterparty(NSArray<SCIDeletedMessage *> *msgs, NSString *ownerPK) {
+	for (SCIDeletedMessage *m in msgs) {
+		if (!(ownerPK.length && [m.senderPk isEqualToString:ownerPK])) return m;
+	}
+	return msgs.firstObject;
+}
+
 + (NSArray<SCIDeletedMessageGroup *> *)groupedByThreadForOwnerPK:(NSString *)ownerPK {
 	__block NSArray *result = nil;
 
@@ -210,10 +218,11 @@ static BOOL sciRewrite(NSString *owner, BOOL notify, void (^mutate)(NSMutableArr
 			g.messages = msgs;
 
 			// 1-1: carry the other party's identity so the row renders as before.
-			g.senderPk = latest.senderPk;
-			g.senderUsername = latest.senderUsername;
-			g.senderFullName = latest.senderFullName;
-			g.senderProfilePicURL = latest.senderProfilePicURL;
+			SCIDeletedMessage *cp = sciCounterparty(msgs, ownerPK);
+			g.senderPk = cp.senderPk;
+			g.senderUsername = cp.senderUsername;
+			g.senderFullName = cp.senderFullName;
+			g.senderProfilePicURL = cp.senderProfilePicURL;
 
 			[groups addObject:g];
 		}

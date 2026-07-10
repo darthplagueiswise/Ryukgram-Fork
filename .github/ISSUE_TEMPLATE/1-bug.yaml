@@ -10,7 +10,7 @@ body:
     attributes:
       value: |
         <br>
-
+        
         >[!TIP]
         > If you are looking for support with the tweak, make sure to visit the [RyukGram discussions page](https://github.com/faroukbmiled/RyukGram/discussions) to get help.
   - type: checkboxes

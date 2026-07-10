@@ -4,8 +4,9 @@
 // Channels dms tab (header)
 %hook IGDirectInboxHeaderSectionController
 - (id)viewModel {
-    id sciVM = %orig;
-    if ([[sciVM title] isEqualToString:@"Suggested"]) {
+    id sciOrigViewModel = %orig;
+
+    if ([[sciOrigViewModel title] isEqualToString:@"Suggested"]) {
 
         if ([SCIUtils getBoolPref:@"no_suggested_chats"]) {
             return nil;
@@ -13,7 +14,7 @@
 
     }
 
-    return sciVM;
+    return sciOrigViewModel;
 }
 %end
 

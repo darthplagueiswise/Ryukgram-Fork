@@ -37,7 +37,7 @@ static CGFloat const kSCIGalleryGridInfoHeight = 26.0;
 
 	self.contentView.clipsToBounds = YES;
 	self.contentView.layer.cornerRadius = kSCIGalleryGridCornerRadius;
-	self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+	self.contentView.backgroundColor = UIColor.secondarySystemBackgroundColor;
 
 	[self setupThumbnail];
 	[self setupInfoOverlay];

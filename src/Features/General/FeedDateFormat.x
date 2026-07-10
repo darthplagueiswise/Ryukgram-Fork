@@ -200,6 +200,35 @@ SCI_DATE_FORMAT_ENTRIES(SCI_EMIT_HOOK)
 	} \
 } while (0);
 
+// Active-thread inbox rows ship an empty timestampText (IG shows presence in the
+// preview slot), so fill it from the message date to keep the format consistent.
+static NSDictionary *sciInboxTSAttrs = nil; // cached style for empty rows
+
+%hook IGDirectInboxThreadCellViewModel
+
+- (NSAttributedString *)timestampText {
+	NSAttributedString *orig = %orig;
+	if (![SCIUtils getBoolPref:@"date_fmt_dms"]) return orig;
+
+	if (orig.length > 0) {
+		sciInboxTSAttrs = [orig attributesAtIndex:0 effectiveRange:NULL];
+		return orig;
+	}
+
+	NSDate *date = nil;
+	@try { date = [(id)self valueForKey:@"mostRecentMessageActivityDate"]; } @catch (__unused NSException *e) {}
+	if (![date isKindOfClass:[NSDate class]]) return orig;
+
+	NSString *formatted = sciFormatDate(date);
+	if (!formatted.length) return orig;
+
+	NSDictionary *attrs = sciInboxTSAttrs ?: @{ NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
+	                                            NSFontAttributeName: [UIFont systemFontOfSize:13.0] };
+	return [[NSAttributedString alloc] initWithString:[@"· " stringByAppendingString:formatted] attributes:attrs];
+}
+
+%end
+
 %ctor {
 	SCI_DATE_FORMAT_ENTRIES(SCI_INSTALL_HOOK)
 }

@@ -17,17 +17,6 @@ NS_ASSUME_NONNULL_BEGIN
             options:(NSArray<NSDictionary<NSString *, NSString *> *> *)options
            onChange:(nullable void (^)(NSString *value))onChange;
 
-+ (void)presentFrom:(UIViewController *)presenter
-              title:(nullable NSString *)title
-               menu:(UIMenu *)menu
-             onPick:(nullable void (^)(UICommand *command))onPick;
-
-+ (void)presentFrom:(UIViewController *)presenter
-              title:(nullable NSString *)title
-               menu:(UIMenu *)menu
-         sourceView:(nullable UIView *)sourceView
-             onPick:(nullable void (^)(UICommand *command))onPick;
-
 @end
 
 NS_ASSUME_NONNULL_END

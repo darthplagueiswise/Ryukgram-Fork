@@ -7,10 +7,10 @@
 @property (nonatomic, assign) NSInteger bandwidth;
 @property (nonatomic, assign) NSInteger width;
 @property (nonatomic, assign) NSInteger height;
-@property (nonatomic, copy) NSString *contentType; // "video" or "audio"
-@property (nonatomic, copy) NSString *qualityLabel; // "1080p", "720p", etc.
+@property (nonatomic, copy) NSString *contentType;
+@property (nonatomic, copy) NSString *qualityLabel;
 @property (nonatomic, assign) float frameRate; // 0 if unknown
-@property (nonatomic, copy) NSString *codecs;  // e.g. "avc1.4d401f" or "mp4a.40.2"
+@property (nonatomic, copy) NSString *codecs;
 @end
 
 typedef NS_ENUM(NSInteger, SCIVideoQuality) {

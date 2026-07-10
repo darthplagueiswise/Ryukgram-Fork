@@ -33,6 +33,22 @@ static NSMutableArray *sciModuleEntries(void) {
 	}
 }
 
+static __weak UIView *sCapturedReelCell;
+
++ (void)captureReelContextFromAnchor:(UIView *)anchor {
+	UIView *cell = nil;
+	for (UIView *node = anchor; node; node = node.superview) {
+		if ([NSStringFromClass([node class]) hasSuffix:@"IGSundialViewerVideoCell"]) {
+			cell = node; break;
+		}
+	}
+	sCapturedReelCell = cell;
+}
+
++ (UIView *)capturedReelCell {
+	return sCapturedReelCell;
+}
+
 + (BOOL)anyModuleEnabled {
 	NSArray *snapshot;
 	NSMutableArray *list = sciModuleEntries();
@@ -126,6 +142,10 @@ static NSMutableArray *sciModuleEntries(void) {
 		_card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
 		[self addSubview:_card];
 
+		UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
+			initWithTarget:self action:@selector(_onCardPan:)];
+		[_card addGestureRecognizer:pan];
+
 		UILabel *title = [UILabel new];
 		title.translatesAutoresizingMaskIntoConstraints = NO;
 		title.text = SCILocalized(@"Playback");
@@ -192,6 +212,31 @@ static NSMutableArray *sciModuleEntries(void) {
 	[self _dismiss];
 }
 
+- (void)_onCardPan:(UIPanGestureRecognizer *)gr {
+	CGFloat ty = [gr translationInView:self].y;
+	switch (gr.state) {
+		case UIGestureRecognizerStateChanged: {
+			CGFloat y = ty > 0 ? ty : ty * 0.2;
+			_card.transform = CGAffineTransformMakeTranslation(0, y);
+			CGFloat p = ty > 0 ? MAX(0, 1 - ty / 400.0) : 1;
+			self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18 * p];
+			break;
+		}
+		case UIGestureRecognizerStateEnded:
+		case UIGestureRecognizerStateCancelled: {
+			CGFloat vy = [gr velocityInView:self].y;
+			if (ty > 90 || vy > 800) { [self _dismiss]; return; }
+			[UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5
+								options:UIViewAnimationOptionCurveEaseOut animations:^{
+				_card.transform = CGAffineTransformIdentity;
+				self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
+			} completion:nil];
+			break;
+		}
+		default: break;
+	}
+}
+
 - (void)present {
 	UIWindow *win = nil;
 	for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
@@ -253,6 +298,7 @@ static NSMutableArray *sciModuleEntries(void) {
 	if (![SCIReelsPlaybackMenu anyModuleEnabled]) return;
 
 	UIView *anchor = gr.view;
+	[SCIReelsPlaybackMenu captureReelContextFromAnchor:anchor];
 	if ([anchor isKindOfClass:[UIControl class]]) {
 		UIControl *c = (UIControl *)anchor;
 		[c cancelTrackingWithEvent:nil];
@@ -270,23 +316,26 @@ static NSMutableArray *sciModuleEntries(void) {
 
 #pragma mark - Hooks
 
-%hook IGSundialViewerVerticalUFI
-
-- (void)layoutSubviews {
-	%orig;
-	if (![SCIReelsPlaybackMenu anyModuleEnabled]) return;
-
-	UIButton *more = nil;
-	@try { more = [self valueForKey:@"moreOptionsButton"]; } @catch (__unused id e) {}
-	if (!more) return;
-	if (objc_getAssociatedObject(more, kSCIReelsPlaybackLPRKey)) return;
+static void sciAttachPlaybackLongPress(id ufi, NSString *key) {
+	UIButton *btn = nil;
+	@try { btn = [ufi valueForKey:key]; } @catch (__unused id e) {}
+	if (!btn || objc_getAssociatedObject(btn, kSCIReelsPlaybackLPRKey)) return;
 
 	UILongPressGestureRecognizer *lpr = [[UILongPressGestureRecognizer alloc]
 		initWithTarget:[SCIReelsPlaybackLPTarget shared] action:@selector(longPress:)];
 	lpr.minimumPressDuration = 0.32;
 	lpr.cancelsTouchesInView = YES;
-	[more addGestureRecognizer:lpr];
-	objc_setAssociatedObject(more, kSCIReelsPlaybackLPRKey, lpr, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+	[btn addGestureRecognizer:lpr];
+	objc_setAssociatedObject(btn, kSCIReelsPlaybackLPRKey, lpr, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
+
+- (void)layoutSubviews {
+	%orig;
+	if (![SCIReelsPlaybackMenu anyModuleEnabled]) return;
+	sciAttachPlaybackLongPress(self, @"moreOptionsButton");
+	sciAttachPlaybackLongPress(self, @"audioAttributionButton");
 }
 
 %end

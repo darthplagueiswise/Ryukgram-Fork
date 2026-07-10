@@ -3,8 +3,12 @@
 
 @implementation SCISearchBarStyler
 
+// Search-field glass is UIKit's on iOS 26+, not IG's account flag; grey only when no native glass to keep.
 + (BOOL)shouldUseNativeGlass {
-	return [SCIUtils getBoolPref:@"liquid_glass_buttons"];
+	if (@available(iOS 26.0, *)) {
+		return ![SCIUtils getBoolPref:@"liquid_glass_force_off"];
+	}
+	return NO;
 }
 
 + (UIColor *)searchFieldColor {

@@ -1,4 +1,5 @@
 #import "SCIProfileAnalyzerModels.h"
+#import "SCIProfileAnalyzerChecks.h"
 #import <objc/runtime.h>
 
 static id sciFieldCacheValueLocal(id obj, NSString *key) {
@@ -242,40 +243,45 @@ static NSArray *sciIntersect(NSArray *a, NSSet *bSet) {
 	r.profileUpdates = @[];
 	if (!current) return r;
 
+	// Disabled checks aren't computed — their arrays stay empty.
+	BOOL (^on)(SCIPACategory) = ^BOOL(SCIPACategory c) { return [SCIProfileAnalyzerChecks isCategoryEnabled:c]; };
+
 	NSSet *followersSet = [NSSet setWithArray:current.followers];
 	NSSet *followingSet = [NSSet setWithArray:current.following];
 
-	r.mutualFollowers = sciIntersect(current.followers, followingSet);
-	r.notFollowingYouBack = sciSubtract(current.following, followersSet);
-	r.youDontFollowBack = sciSubtract(current.followers, followingSet);
+	if (on(SCIPACategoryMutual))            r.mutualFollowers     = sciIntersect(current.followers, followingSet);
+	if (on(SCIPACategoryNotFollowingBack))  r.notFollowingYouBack = sciSubtract(current.following, followersSet);
+	if (on(SCIPACategoryDontFollowBack))    r.youDontFollowBack   = sciSubtract(current.followers, followingSet);
 
 	if (previous) {
 		NSSet *prevFollowers = [NSSet setWithArray:previous.followers];
 		NSSet *prevFollowing = [NSSet setWithArray:previous.following];
-		r.recentFollowers = sciSubtract(current.followers, prevFollowers);
-		r.lostFollowers = sciSubtract(previous.followers, followersSet);
-		r.youStartedFollowing = sciSubtract(current.following, prevFollowing);
-		r.youUnfollowed = sciSubtract(previous.following, followingSet);
+		if (on(SCIPACategoryNewFollowers))        r.recentFollowers     = sciSubtract(current.followers, prevFollowers);
+		if (on(SCIPACategoryLostFollowers))       r.lostFollowers       = sciSubtract(previous.followers, followersSet);
+		if (on(SCIPACategoryYouStartedFollowing)) r.youStartedFollowing = sciSubtract(current.following, prevFollowing);
+		if (on(SCIPACategoryYouUnfollowed))       r.youUnfollowed       = sciSubtract(previous.following, followingSet);
 
-		// Same pk in both snapshots, any field differs.
-		NSMutableDictionary *prevByPK = [NSMutableDictionary dictionary];
-		for (SCIProfileAnalyzerUser *u in previous.followers) prevByPK[u.pk] = u;
-		for (SCIProfileAnalyzerUser *u in previous.following) prevByPK[u.pk] = u;
+		if (on(SCIPACategoryProfileUpdates)) {
+			// Same pk in both snapshots, any field differs.
+			NSMutableDictionary *prevByPK = [NSMutableDictionary dictionary];
+			for (SCIProfileAnalyzerUser *u in previous.followers) prevByPK[u.pk] = u;
+			for (SCIProfileAnalyzerUser *u in previous.following) prevByPK[u.pk] = u;
 
-		NSMutableArray *updates = [NSMutableArray array];
-		NSMutableSet *seen = [NSMutableSet set];
-		NSArray *currentAll = [current.followers arrayByAddingObjectsFromArray:current.following];
-		for (SCIProfileAnalyzerUser *u in currentAll) {
-			if ([seen containsObject:u.pk]) continue;
-			[seen addObject:u.pk];
-			SCIProfileAnalyzerUser *prev = prevByPK[u.pk];
-			if (!prev) continue;
-			SCIProfileAnalyzerProfileChange *ch = [SCIProfileAnalyzerProfileChange new];
-			ch.previous = prev;
-			ch.current = u;
-			if (ch.usernameChanged || ch.fullNameChanged || ch.profilePicChanged) [updates addObject:ch];
+			NSMutableArray *updates = [NSMutableArray array];
+			NSMutableSet *seen = [NSMutableSet set];
+			NSArray *currentAll = [current.followers arrayByAddingObjectsFromArray:current.following];
+			for (SCIProfileAnalyzerUser *u in currentAll) {
+				if ([seen containsObject:u.pk]) continue;
+				[seen addObject:u.pk];
+				SCIProfileAnalyzerUser *prev = prevByPK[u.pk];
+				if (!prev) continue;
+				SCIProfileAnalyzerProfileChange *ch = [SCIProfileAnalyzerProfileChange new];
+				ch.previous = prev;
+				ch.current = u;
+				if (ch.usernameChanged || ch.fullNameChanged || ch.profilePicChanged) [updates addObject:ch];
+			}
+			r.profileUpdates = updates;
 		}
-		r.profileUpdates = updates;
 	}
 	return r;
 }

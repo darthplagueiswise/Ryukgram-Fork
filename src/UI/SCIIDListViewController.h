@@ -13,8 +13,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy)   NSString *addAlertMessage;
 @property (nonatomic, copy)   NSString *addAlertPlaceholder;
 @property (nonatomic, copy)   NSArray<NSString *> *sortTitles;       // nil = no sort button
-@property (nonatomic)         BOOL allowsEdit;                       // default YES
-@property (nonatomic)         BOOL allowsAdd;                        // default YES
+@property (nonatomic)         BOOL allowsEdit;
+@property (nonatomic)         BOOL allowsAdd;
 
 @property (nonatomic, copy)   NSArray<id> * _Nonnull(^itemsProvider)(void);
 @property (nonatomic, copy)   NSString * _Nonnull(^titleProvider)(id item);
@@ -28,6 +28,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) UIMenu * _Nullable(^contextMenuForItem)(id item, void(^reload)(void));
 @property (nonatomic, copy, nullable) NSArray<UIContextualAction *> * _Nonnull(^leadingSwipeActionsForItem)(id item, void(^reload)(void));
 @property (nonatomic, copy, nullable) NSArray<UIBarButtonItem *> * _Nonnull(^extraBatchActions)(NSArray *selectedItems, void(^reload)(void), void(^exitEdit)(void));
+
+// Optional pill below the search bar. Return nil/empty to hide it; tapping fires onStatusTap.
+@property (nonatomic, copy, nullable) NSString * _Nullable(^statusProvider)(void);
+@property (nonatomic, copy, nullable) void(^onStatusTap)(void);
 
 @end
 

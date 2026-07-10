@@ -3,7 +3,6 @@
 #import "../Features/Feed/SCIHomeShortcutCatalog.h"
 #import "../UI/SCIPopupChrome.h"
 #import "../UI/SCIIcon.h"
-#import "../UI/SCIUIKit26LiquidGlass.h"
 
 #pragma mark - Persistence
 
@@ -167,7 +166,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.contentView.layer.cornerCurve = kCACornerCurveContinuous;
 	self.contentView.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
 	self.contentView.layer.borderColor = UIColor.separatorColor.CGColor;
-	self.contentView.backgroundColor = SCIUIKit26PanelFillColor();
+	self.contentView.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
 
 	_iconView = UIImageView.new;
 	_iconView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -217,7 +216,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 	self.checkBadge.hidden = !selected;
 	self.iconView.tintColor = selected ? primary : UIColor.labelColor;
 	self.autoLabel.textColor = selected ? primary : UIColor.secondaryLabelColor;
-	self.contentView.backgroundColor = selected ? [primary colorWithAlphaComponent:0.16] : SCIUIKit26PanelFillColor();
+	self.contentView.backgroundColor = selected ? [primary colorWithAlphaComponent:0.16] : UIColor.secondarySystemGroupedBackgroundColor;
 	self.contentView.layer.borderColor = (selected ? primary : UIColor.separatorColor).CGColor;
 	self.contentView.layer.borderWidth = selected ? 2.0 : (1.0 / UIScreen.mainScreen.scale);
 }
@@ -256,10 +255,9 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	SCIUIKit26ConfigureViewController(self);
 
 	self.title = SCILocalized(@"Icon");
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 
 	NSMutableArray *valid = [NSMutableArray arrayWithObject:@"auto"];
 
@@ -276,7 +274,6 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 
 	self.collectionView = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:layout];
 	self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
-	SCIUIKit26ConfigureCollectionView(self.collectionView);
 	self.collectionView.backgroundColor = UIColor.clearColor;
 	self.collectionView.delegate = self;
 	self.collectionView.dataSource = self;
@@ -321,7 +318,6 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 
 - (UICollectionViewCell *)collectionView:(UICollectionView *)collectionView cellForItemAtIndexPath:(NSIndexPath *)indexPath {
 	SCIHomeShortcutIconPickerCell *cell = [collectionView dequeueReusableCellWithReuseIdentifier:@"icon" forIndexPath:indexPath];
-	SCIStyleCollectionCellForGlass(cell);
 	NSString *name = self.icons[indexPath.item];
 
 	[cell configureWithSymbol:name selected:[name isEqualToString:sciCurrentIcon()]];
@@ -366,7 +362,7 @@ static void sciInstallActionRow(UITableViewCell *cell, NSString *symbol, NSStrin
 - (void)viewDidLoad {
 	[super viewDidLoad];
 
-	self.view.backgroundColor = SCIUIKit26BaseSurfaceColor();
+	self.view.backgroundColor = [SCIPopupChrome backgroundColor] ?: UIColor.systemGroupedBackgroundColor;
 	self.tableView.backgroundColor = self.view.backgroundColor;
 	self.actions = sciLoadOrderedActions();
 }
