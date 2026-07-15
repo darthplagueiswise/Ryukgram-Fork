@@ -101,14 +101,25 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     if (done) return;
     done = YES;
 
-    // SCI-FIX 2026-07-11: install incondicional. Antes pulava quando tudo OFF,
-    // o que impedia toggles em runtime de valerem sem relançar. Rebind de 3
-    // símbolos BOOL validados (import IG + export FB) é barato e seguro; cache
-    // OFF => replacement só chama orig (no-op).
-
+    // Install incondicional. Rebind de GOT é barato e seguro; cache OFF =>
+    // replacement só chama orig (no-op). Rebind de símbolo ausente é no-op
+    // silencioso no fishhook (não acha o slot, não intercepta nada), então
+    // manter um símbolo que não existe nesta build não causa crash.
+    //
+    // SCI-FIX 2026-07-15 (revalidado contra build 438):
+    //   - IGMobileConfigBooleanValueForInternalUse: **REMOVIDO na 438** — não é
+    //     mais import do Instagram nem export do FBSharedFramework, e NÃO tem
+    //     variante renomeada (não existe nenhum símbolo C de "internal use bool"
+    //     na 438). O acesso a MobileConfig internal-use migrou pros context
+    //     managers ObjC (IGMobileConfigContextManager & cia, hookados em
+    //     SCIMobileConfigRuntimeHooks.x). Este rebind vira no-op na 438; mantido
+    //     na lista só pra continuar funcionando em builds <438 onde o símbolo
+    //     ainda existe.
+    //   - IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18: presente ✓
+    //   - MEBIsMinosDogfoodMekEncryptionVersionEnabled: presente ✓
     struct rebinding r[] = {
         {"IGMobileConfigBooleanValueForInternalUse",
-         (void *)my_MCBool, (void **)&orig_MCBool},
+         (void *)my_MCBool, (void **)&orig_MCBool},   // ausente na 438 (no-op); vivo em <438
         {"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
          (void *)my_InternalApps, (void **)&orig_InternalApps},
         {"MEBIsMinosDogfoodMekEncryptionVersionEnabled",

@@ -36,6 +36,9 @@ static NSArray<NSString *> *benefitKeys(void){ return @[
     @"sci_igplus_story_spotlight", @"sci_igplus_silent_post_highlights", @"sci_igplus_dm_peek",
     @"sci_igplus_custom_app_icon", @"sci_igplus_branded_threads", @"sci_igplus_timestamp_viewers",
     @"sci_igplus_custom_bio_font", @"sci_igplus_silent_post_profile", @"sci_igplus_pinned_posts_limit",
+    // SCI 2026-07-15: alinhadas aos 4 benefitSels novos da 438 (mesma ordem).
+    @"sci_igplus_chat_fonts", @"sci_igplus_story_fonts",
+    @"sci_igplus_links_in_media", @"sci_igplus_story_view_notify",
     @"sci_igplus_story_peek_active" ]; }
 
 static const char *benefitSels[] = {
@@ -45,6 +48,10 @@ static const char *benefitSels[] = {
     "isStorySpotlightBenefitEnabled", "isSilentPostToHighlightsBenefitEnabled", "isDirectMessagePeekBenefitEnabled",
     "isCustomAppIconBenefitEnabled", "isBrandedThreadsBenefitEnabled", "isTimestampViewersListBenefitEnabled",
     "isCustomBioFontInProfileBenefitEnabled", "isSilentPostToProfileBenefitEnabled", "isPinnedPostsIncreasedLimitEnabled",
+    // SCI 2026-07-15: benefícios IGPlus novos na build 438 (confirmados em
+    // IGConsumerSubsService).
+    "isChatFontsBenefitEnabled", "isStoryFontsBenefitEnabled",
+    "isLinksInMediaBenefitEnabled", "isStoryViewNotifyBenefitEnabled",
     NULL };
 
 #define MAXH 40

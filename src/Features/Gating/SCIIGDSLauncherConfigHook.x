@@ -191,8 +191,18 @@ static void IGDSInstall(void) {
     HookBoolGetter(cls, "isPrismContextMenuEnabled", ForcePrism);
     HookBoolGetter(cls, "isPrismContextMenuRefactorEnabled", ForcePrism);
     HookBoolGetter(cls, "isPrismIndigoButtonEnabled", ForcePrism);
-    HookBoolGetter(cls, "isPrismIndigoButtonM1DirectEnabled", ForcePrism);
+    // SCI-FIX 2026-07-15: isPrismIndigoButtonM1DirectEnabled foi REMOVIDO na build
+    // 438 (não existe mais em IGDSLauncherConfig e não tem variante renomeada).
+    // HookBoolGetter pula seletor ausente com segurança (no-op), então mantê-lo
+    // aqui é inofensivo em 438 e continua válido em builds <438.
+    HookBoolGetter(cls, "isPrismIndigoButtonM1DirectEnabled", ForcePrism); // ausente na 438 (no-op)
     HookBoolGetter(cls, "isPrismIndigoActionCellsEnabled", ForcePrism);
+    // SCI-FIX 2026-07-15: getters de ícone Prism M4 novos na 438 (confirmados
+    // B16@0:8, BOOL sem args). Em builds <438 são pulados com segurança.
+    HookBoolGetter(cls, "isPrismCameraIconM4Enabled", ForcePrism);
+    HookBoolGetter(cls, "isPrismComposeIconM4Enabled", ForcePrism);
+    HookBoolGetter(cls, "isPrismPhotoIconM4Enabled", ForcePrism);
+    HookBoolGetter(cls, "isPrismSaveIconM4Enabled", ForcePrism);
     HookBoolGetter(cls, "isIGBPrismEnabled", ForcePrism);
     HookBoolGetter(cls, "isPrismOverflowMenuEnabled", ForcePrism);
     HookBoolGetter(cls, "isPrismOverflowMenuStampWidthIncreased", ForcePrism);

@@ -107,3 +107,44 @@ Ao validar um seletor, sempre confira os DOIS aspectos:
 Uma extração de metadados ObjC correta relata os dois separadamente (`inst`/`cls` neste
 tweak's `objc_dump.py`). Se seu helper de hook só tenta um dos dois, teste explicitamente contra
 o outro antes de assumir "classe existe, seletor existe, deve estar tudo certo".
+
+## 9. Migração de coding interno muda o alvo do hook (lição da build 438)
+
+Entre 433 e 438 o Instagram migrou o acesso a feature-flags de **funções C soltas** para
+**métodos ObjC concentrados**. Exemplos concretos:
+- `IGMobileConfigBooleanValueForInternalUse` (função C, 433) → `-[IGMobileConfigContextManager
+  getBool:(mc_bool_param_t)]` (método ObjC, 438). Um único hook no `getBool:` do context
+  manager cobre TODAS as leituras de MobileConfig, inclusive internal-use.
+- Experiments passaram a ter managers unificados: `FBCCIGExperimentManager` /
+  `FBCustomExperimentManager` com `-isFeatureEnabled:(uint64)`.
+
+Regra: quando um símbolo C importado some numa build nova, **não conclua que a feature morreu** —
+quase sempre ela migrou pra um método ObjC. Procure o equivalente: (a) varra os símbolos C que
+restaram (muitos viram `getXManager()` retornando o objeto ObjC); (b) procure a classe manager/
+context e seus métodos `getBool:`/`isFeatureEnabled:`/`isEnabled:`. O hook fica mais simples
+(um método cobre o que antes eram N funções), mas o alvo mudou de GOT (fishhook) pra método ObjC
+(MSHookMessageEx).
+
+## 10. "Forçar YES cego" em gate genérico por-ID quebra o app
+
+Managers do tipo `isFeatureEnabled:(uint64)` / `getBool:(param_t)` recebem um ID e valem pra
+MILHARES de flags. Forçar o replacement a `return YES` liga tudo de uma vez — inclusive
+experiments mutuamente exclusivos, kill-switches invertidos e flags de rollout incompleto — e
+o app quebra ou entra em estado impossível.
+
+O padrão correto (usado em `SCIMobileConfigRuntimeHooks.x` e `SCIExperimentForce.x`): o hook
+**captura** o ID visto e consulta um dicionário de **override por ID**; só devolve valor forçado
+pros IDs que o usuário registrou explicitamente. Passthrough pro resto. Para gates
+**por-config nomeado** (ex.: `+[XExperimentConfig isEnabled:]`, uma classe = um experimento),
+forçar YES por-classe é aceitável, mas ainda assim ofereça toggle por-classe e deixe o "forçar
+todos" atrás de uma pref de risco separada. Nunca ligue um "force all" por padrão.
+
+## 11. Ao revalidar contra build nova, procure ADIÇÕES, não só quebras
+
+Revalidar não é só conferir se o que existia ainda existe. Builds novas adicionam getters/flags.
+Na 438: 4 getters Prism M4 novos no `IGDSLauncherConfig`, 4 benefícios IGPlus novos no
+`IGConsumerSubsService`, um getter de tray novo (`isOverlayStoriesTrayEnabled`), uma variante
+Swift nova de employee (`IGAdPlatformLogger_swift.isEmployee`). Enumere os métodos reais da
+classe na build nova e compare com a lista hookada nos DOIS sentidos — o que sumiu E o que
+apareceu. Getters renomeados (ex.: `isFeedCullingOnStoriesAccessEnabled` →
+`isFeedCullingOnStatusBarEnabled`) só aparecem se você olhar a lista completa da classe.

@@ -77,15 +77,20 @@ static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
     on ? SRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO, NO)
        : CRBO(nh, @"isProfileSegmentedTabsGlassDisabled", NO);
 
-    // ⑤ IGLiquidGlassInteractiveTabBar — ObjC, instance methods, 6 flags
-    //    Confirmados via __objc_methname + screenshots FLEX
+    // ⑤ IGLiquidGlassInteractiveTabBar — ObjC, instance methods (BOOL no-arg).
+    //    SCI-FIX 2026-07-15 (revalidado contra 438): isPanGestureEnabled foi
+    //    REMOVIDO na 438 (não renomeou — o que existe agora é o método de ação
+    //    handleTabBarPanGesture:, não um getter). Trocado pelo getter novo/real
+    //    accidentalSwipeOptimizationEnabled (confirmado B16@0:8). Os outros 5
+    //    continuam válidos. SRBO valida assinatura BOOL antes de hookar, então
+    //    seletor ausente em qualquer build é pulado com segurança.
     NSString *itb = @"IGLiquidGlassInteractiveTabBar";
     for (NSString *s in @[
         @"accessoryButtonEnabled",
         @"isAccessoryButtonVisible",
         @"isDebuggerEnabled",
         @"isHapticsEnabled",
-        @"isPanGestureEnabled",
+        @"accidentalSwipeOptimizationEnabled", // novo na 438 (era isPanGestureEnabled, removido)
         @"syncConfigWithBarAppearance",
     ]) { on ? SRBO(itb, s, NO, YES) : CRBO(itb, s, NO); }
 }
@@ -119,21 +124,31 @@ static NSString *const kWordmarkKey = @"sci_ig_wordmark_variant";
 // ─── Story Tray ───────────────────────────────────────────────────────────────
 
 + (void)applyStoryTray:(BOOL)on {
-    // IGNavConfiguration.IGHomecomingConfiguration — Swift, instance methods, 6 flags
+    // IGNavConfiguration.IGHomecomingConfiguration — Swift, instance methods.
     // Mangled: _TtC(18)IGNavConfiguration(25)IGHomecomingConfiguration
-    // Confirmados via __objc_methname scan + screenshots FLEX:
-    //   isStoriesTrayOnAllTabsEnabled ✓  showCinemaStoriesTrayOnSwipeUp ✓
-    //   isDynamicTabStoryGridEnabled ✓   isVerticalStoriesTray ✓ (NOVO)
-    //   isFeedCullingOnStoriesAccessEnabled ✓ (NOVO)
-    //   isHomecomingStoriesAccessFaceClusterEnabled ✓ (NOVO)
+    // SCI-FIX 2026-07-15 (revalidado contra 438 — 3 seletores da lista antiga
+    // sumiram; a de culling renomeou):
+    //   MANTIDOS (confirmados B16@0:8 na 438):
+    //     isStoriesTrayOnAllTabsEnabled, isDynamicTabStoryGridEnabled,
+    //     isHomecomingStoriesAccessFaceClusterEnabled
+    //   RENOMEADO: isFeedCullingOnStoriesAccessEnabled → isFeedCullingOnStatusBarEnabled
+    //   REMOVIDOS na 438 (sem equivalente direto): showCinemaStoriesTrayOnSwipeUp,
+    //     isVerticalStoriesTray
+    //   ADICIONADO (novo mecanismo de tray na 438): isOverlayStoriesTrayEnabled
+    //   NÃO forçado: hideStoriesTrayOnClassicFeed (é "hide" — forçar YES
+    //     esconderia a tray).
+    //   enableCollapsedTrayBackground: cosmético — incluído a pedido (fazemos
+    //     mudanças cosméticas também). Confirmado B16@0:8 na 438.
+    // SRBO valida assinatura BOOL antes de hookar, então seletor ausente em
+    // qualquer build é pulado com segurança.
     NSString *hc = @"_TtC18IGNavConfiguration25IGHomecomingConfiguration";
     for (NSString *s in @[
         @"isStoriesTrayOnAllTabsEnabled",
-        @"showCinemaStoriesTrayOnSwipeUp",
         @"isDynamicTabStoryGridEnabled",
-        @"isVerticalStoriesTray",
-        @"isFeedCullingOnStoriesAccessEnabled",
+        @"isFeedCullingOnStatusBarEnabled",           // era isFeedCullingOnStoriesAccessEnabled (438)
         @"isHomecomingStoriesAccessFaceClusterEnabled",
+        @"isOverlayStoriesTrayEnabled",               // novo na 438
+        @"enableCollapsedTrayBackground",             // cosmético (438)
     ]) { on ? SRBO(hc, s, NO, YES) : CRBO(hc, s, NO); }
 
     // IGNavConfiguration base — Swift, instance method (NOVO)

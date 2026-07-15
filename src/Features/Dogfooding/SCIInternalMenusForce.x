@@ -43,6 +43,16 @@ static NSUInteger SCIInternalMenusInstallLocalRuntimeBoolHooks(void) {
         installed++;
     }
 
+    // SCI 2026-07-15: variante Swift nova na build 438 do mesmo logger — também
+    // expõe -isEmployee (instance, B16@0:8). Cobre o caminho Swift de checagem de
+    // employee que não existia na 433.
+    if (objc_getClass("_TtC28IGAdInsertionLoggingKitSwift24IGAdPlatformLogger_swift")) {
+        [SCIGatingCatalog setRuntimeBoolOverride:YES
+                                            class:@"_TtC28IGAdInsertionLoggingKitSwift24IGAdPlatformLogger_swift"
+                                         selector:@"isEmployee" classMethod:NO];
+        installed++;
+    }
+
     // Autofill internal settings debug footer — linha de entrada pra superfície
     // nativa de settings internos/debug.
     if (objc_getClass("_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings")) {

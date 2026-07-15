@@ -20,6 +20,12 @@ static BOOL gDidReset = NO;
             @"igt_directnotes_avatar_reply",
             @"igt_directnotes_gifs_reply",
             @"igt_directnotes_photo_reply",
+            // SCI 2026-07-15: superfícies novas do framework de experiments 438
+            // (ver SCIExperimentForce). As prefs por-classe sci_qe_force_<Nome> são
+            // dinâmicas e não listadas aqui; o crash-guard cobre os interruptores mestres.
+            @"sci_exp_mgr_capture",
+            @"sci_qe_force_all",
+            @"sci_exp_helpers",
         ];
     });
     return keys;
