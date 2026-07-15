@@ -127,10 +127,16 @@ static void sciInstallMobileConfigRuntimeHooks(void) {
     Class c0 = NSClassFromString(@"IGMobileConfigUserSessionContextManager");
     Class c1 = NSClassFromString(@"IGMobileConfigSessionlessContextManager");
     Class c2 = NSClassFromString(@"IGMobileConfigContextManager");
-    Class c3 = NSClassFromString(@"FBMobileConfigUserSessionContext");
-    Class c4 = NSClassFromString(@"FBMobileConfigSessionlessContext");
-    Class c5 = NSClassFromString(@"FBMobileConfigContext");
-    Class c6 = NSClassFromString(@"FBMobileConfigAPI");
+    // SCI-FIX 2026-07-11: nomes antigos (FBMobileConfigUserSessionContext /
+    // FBMobileConfigSessionlessContext / FBMobileConfigContext / FBMobileConfigAPI)
+    // NÃO existem no 433 — eram 4 slots mortos (NSClassFromString→nil, no-op).
+    // Reapontados para as classes FB reais que de fato têm os getters getBool:/getInt64:/…
+    // (validado contra FBSharedFramework 433): ContextManager e ContextObjcImpl têm o
+    // conjunto completo de 16 getters; os *ContextManager de sessão têm 8.
+    Class c3 = NSClassFromString(@"FBMobileConfigContextManager");
+    Class c4 = NSClassFromString(@"FBMobileConfigContextObjcImpl");
+    Class c5 = NSClassFromString(@"FBMobileConfigUserSessionContextManager");
+    Class c6 = NSClassFromString(@"FBMobileConfigSessionlessContextManager");
     INSTALL_SLOT(c0, 0);
     INSTALL_SLOT(c1, 1);
     INSTALL_SLOT(c2, 2);
@@ -141,18 +147,14 @@ static void sciInstallMobileConfigRuntimeHooks(void) {
     sciInstallMobileConfigLiveContextHooks();
 }
 
-static void sciScheduleMobileConfigRuntimeHookRetry(NSTimeInterval delay) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        sciInstallMobileConfigRuntimeHooks();
-    });
-}
-
+// SCI-FIX 2026-07-11: removida a escada de retry dispatch_after {1,2,5}s.
+// Esta captura é instalada sob demanda quando o usuário abre o MobileConfig
+// browser — os context managers FB/IG são singletons realizados cedo, então
+// um único install basta. sciHook é install-only (sem mensagem a objeto), mas
+// mantemos o padrão "sem escada de timer" do resto do tweak.
 void SCIInstallMobileConfigRuntimeHooksIfNeeded(void) {
     if (![SCIMobileConfigRuntime runtimeHooksEnabled]) return;
     sciInstallMobileConfigRuntimeHooks();
-    sciScheduleMobileConfigRuntimeHookRetry(1.0);
-    sciScheduleMobileConfigRuntimeHookRetry(2.0);
-    sciScheduleMobileConfigRuntimeHookRetry(5.0);
 }
 
 %ctor {

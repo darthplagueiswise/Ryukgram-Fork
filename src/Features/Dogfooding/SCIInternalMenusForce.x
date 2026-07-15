@@ -14,39 +14,51 @@
 // no separate manual Apply button and nothing runs automatically at launch.
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #import "../../Utils.h"
-#import "../Gating/SCIRuntimeBoolForce.h"
+#import "../Gating/SCIGatingCatalog.h"
 #import "SCIInternalMenusForce.h"
 
+// SCI-FIX 2026-07-11: migrado de SCIRuntimeBoolForce (Mecanismo D — class_replaceMethod
+// com bloco constante, descarta o IMP original, não desliga sem relançar) para
+// SCIGatingCatalog (Mecanismo C — MSHookMessageEx + override-dict + fallback seguro pro
+// IMP original). Ver CLAUDE.md §3. Os 4 alvos abaixo foram revalidados contra o
+// Instagram 433.0.283 (classe + seletor confirmados como instance method BOOL real).
 static NSUInteger SCIInternalMenusInstallLocalRuntimeBoolHooks(void) {
     NSUInteger installed = 0;
 
-    // Master local employee gate (FBSharedFramework). This is the predicate the
-    // [ig-only]/[internal-only] action checkers consult and the dogfood entry
-    // rows depend on. Kept manual/post-launch only.
-    if ([SCIRuntimeBoolForce forceClassNamed:@"IGFacebookUserInfo"
-                                    selector:@"isEmployee"
-                                 classMethod:NO
-                                       value:YES]) installed++;
+    // Master local employee gate (FBSharedFramework). Este é o predicado que os
+    // checkers [ig-only]/[internal-only] consultam e de que as linhas de dogfood
+    // dependem.
+    if (objc_getClass("IGFacebookUserInfo")) {
+        [SCIGatingCatalog setRuntimeBoolOverride:YES class:@"IGFacebookUserInfo"
+                                         selector:@"isEmployee" classMethod:NO];
+        installed++;
+    }
 
-    // Secondary employee getter in the IG main image.
-    if ([SCIRuntimeBoolForce forceClassNamed:@"IGAdPlatformLogger_objc"
-                                    selector:@"isEmployee"
-                                 classMethod:NO
-                                       value:YES]) installed++;
+    // Getter secundário de employee na imagem principal do IG.
+    if (objc_getClass("IGAdPlatformLogger_objc")) {
+        [SCIGatingCatalog setRuntimeBoolOverride:YES class:@"IGAdPlatformLogger_objc"
+                                         selector:@"isEmployee" classMethod:NO];
+        installed++;
+    }
 
-    // Autofill internal settings debug footer — gateway row into the native
-    // internal/debug settings surface.
-    if ([SCIRuntimeBoolForce forceClassNamed:@"_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings"
-                                    selector:@"getDebugFooterEnabled"
-                                 classMethod:NO
-                                       value:YES]) installed++;
+    // Autofill internal settings debug footer — linha de entrada pra superfície
+    // nativa de settings internos/debug.
+    if (objc_getClass("_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings")) {
+        [SCIGatingCatalog setRuntimeBoolOverride:YES
+                                            class:@"_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings"
+                                         selector:@"getDebugFooterEnabled" classMethod:NO];
+        installed++;
+    }
 
     // Identity-switcher dogfood mode.
-    if ([SCIRuntimeBoolForce forceClassNamed:@"_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper"
-                                    selector:@"isFbAcquisitionEpDogfoodModeEnabled"
-                                 classMethod:NO
-                                       value:YES]) installed++;
+    if (objc_getClass("_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper")) {
+        [SCIGatingCatalog setRuntimeBoolOverride:YES
+                                            class:@"_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper"
+                                         selector:@"isFbAcquisitionEpDogfoodModeEnabled" classMethod:NO];
+        installed++;
+    }
 
     return installed;
 }

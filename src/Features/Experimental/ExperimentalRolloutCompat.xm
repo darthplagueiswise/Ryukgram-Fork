@@ -4,6 +4,7 @@
 
 #import "../../Utils.h"
 #import "../Dogfooding/SCILauncherOverride.h"
+#import "../Dogfooding/SCIInstallOnce.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
@@ -56,24 +57,6 @@ static NSString *expNameOf(id obj) {
     return nil;
 }
 
-static BOOL (*orig_meta_isIn)(id, SEL) = NULL;
-static BOOL new_meta_isIn(id self, SEL _cmd) {
-    if (shouldForceOn(expNameOf(self))) return YES;
-    return orig_meta_isIn ? orig_meta_isIn(self, _cmd) : NO;
-}
-
-static BOOL (*orig_family_isIn)(id, SEL) = NULL;
-static BOOL new_family_isIn(id self, SEL _cmd) {
-    if (shouldForceOn(expNameOf(self))) return YES;
-    return orig_family_isIn ? orig_family_isIn(self, _cmd) : NO;
-}
-
-static BOOL (*orig_lid_enabled)(id, SEL, NSString *) = NULL;
-static BOOL new_lid_enabled(id self, SEL _cmd, NSString *name) {
-    if (shouldForceOn(name)) return YES;
-    return orig_lid_enabled ? orig_lid_enabled(self, _cmd, name) : NO;
-}
-
 static id (*orig_groupName)(id, SEL) = NULL;
 static id new_groupName(id self, SEL _cmd) {
     if (shouldForceOn(expNameOf(self))) return @"test";
@@ -94,12 +77,11 @@ static void hook(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
 }
 
 %ctor {
-    // Launcher overrides replay is independent of the experiment-name hooks:
-    // schedule it whenever any are persisted, then decide whether to install
-    // the MetaLocalExperiment hooks separately.
+    // SCI-FIX 2026-07-11: dispatch_after de 2s substituído por SCIInstallOnceOnActive
+    // (mesmo padrão usado no resto do tweak pra evitar timer-source tardio mandando
+    // mensagem pra objeto que ainda não existe / já morreu).
     if ([SCILauncherOverride totalOverrideCount] > 0) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
+        SCIInstallOnceOnActive(^{
             [SCILauncherOverride replayPersistedOverrides];
         });
     }
@@ -108,15 +90,19 @@ static void hook(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
           [SCIUtils getBoolPref:@"igt_prism"] ||
           sciForcedExperiments().count > 0)) return;
 
+    // SCI-FIX 2026-07-11: RE-VERIFICADO contra 433.0.283 (parser de chained-fixups
+    // corrigido). `MetaLocalExperiment` está PRESENTE e `groupName`/`peekGroupName`
+    // são métodos REAIS (retorno @ = NSString) — esses dois hooks abaixo são o lever
+    // correto e continuam ativos.
+    //
+    // Removidos os 3 hooks que a sessão anterior mantinha "por precaução": eles
+    // NUNCA existiram como método, em nenhum binário observado — não é uma questão
+    // de versão:
+    //   - MetaLocalExperiment.isInExperiment      → não existe (métodos reais: groupName/peekGroupName)
+    //   - FamilyLocalExperiment.isInExperiment    → não existe (só init nesta imagem)
+    //   - LIDExperimentGenerator.isExperimentEnabled: → não existe (métodos reais: createLocalExperiment:/initWithDeviceID:logger:)
     Class meta = NSClassFromString(@"MetaLocalExperiment");
-    hook(meta, @"isInExperiment", (IMP)new_meta_isIn,   (IMP *)&orig_meta_isIn);
     hook(meta, @"groupName",      (IMP)new_groupName,   (IMP *)&orig_groupName);
     hook(meta, @"peekGroupName",  (IMP)new_peekGroup,   (IMP *)&orig_peekGroup);
-    // FamilyLocalExperiment is gone in current IG — keep the hook attempt for
-    // older binaries; NSClassFromString returns nil here and the hook helper
-    // bails cleanly.
-    hook(NSClassFromString(@"FamilyLocalExperiment"), @"isInExperiment",
-         (IMP)new_family_isIn, (IMP *)&orig_family_isIn);
-    hook(NSClassFromString(@"LIDExperimentGenerator"), @"isExperimentEnabled:",
-         (IMP)new_lid_enabled, (IMP *)&orig_lid_enabled);
 }
+

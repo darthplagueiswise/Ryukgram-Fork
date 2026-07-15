@@ -129,15 +129,17 @@ static void SCIInstallEasyGatingKVO(void) {
 void SCIInstallEasyGatingHooksIfNeeded(void) {
     static BOOL done = NO;
 
-    SCIRefreshEasyGatingCache();
-    BOOL any = sCacheEasyAll || sCacheEasyInternal || sCacheEasyPlatform || sCacheEasyAuth || sCacheEasyMCQ;
-    if (!any) {
-        SCILOG("skip install: all prefs disabled");
-        return;
-    }
+    SCIRefreshEasyGatingCache();   // popula o cache C; os hooks lerão isto.
 
     if (done) return;
     done = YES;
+
+    // SCI-FIX 2026-07-11: install incondicional. O rebind de GOT é barato e
+    // seguro (4 símbolos BOOL validados como import IG + export FB, em __DATA).
+    // Com todas as prefs OFF o cache começa NO e o replacement só chama orig
+    // (no-op), então não há mudança de comportamento. Antes o install era
+    // pulado quando tudo estava OFF — o que fazia toggles em runtime só valerem
+    // após relançar. Agora o KVO atualiza o cache e o efeito é imediato.
 
     struct rebinding r[] = {
         {"EasyGatingGetBoolean_Internal_DoNotUseOrMock",

@@ -145,8 +145,11 @@ static void SCIInstallAllGates(void) {
                     (IMP)new_creationLabel, (IMP *)&orig_creationLabel);
     SCIHookInstance(@"IGLaunchHorizonViewController", @[], @selector(shouldShowDebugInfo),
                     (IMP)new_launchDebug, (IMP *)&orig_launchDebug);
-    SCIHookInstance(@"LaunchHorizonViewControllerV2",
-                    @[@"_TtC16IGLaunchHorizon30LaunchHorizonViewControllerV2"],
+    // SCI-FIX 2026-07-11: removido o alt name mangled — verificado ausente em
+    // 433.0.283 (nem como classe nem em nenhuma versão observada). O nome plain
+    // "LaunchHorizonViewControllerV2" já resolve direto (confirmado: presente,
+    // com shouldShowDebugInfo como instance method), então o alt era só peso morto.
+    SCIHookInstance(@"LaunchHorizonViewControllerV2", @[],
                     @selector(shouldShowDebugInfo),
                     (IMP)new_launchDebugV2, (IMP *)&orig_launchDebugV2);
     SCIHookClass(@"_TtC20IGStoryDebugUnderlay37IGStoryOpaqueDebugUnderlayViewFactory",

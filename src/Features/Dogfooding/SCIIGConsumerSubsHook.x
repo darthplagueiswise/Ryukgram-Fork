@@ -10,9 +10,9 @@
 // subscriber for everything the client renders/decides locally. The server
 // eligibility QUERY stays server-side, but features read THESE getters.
 //
-// TIMING: one known class, ~20 selectors, installed once after
-// UIApplicationDidBecomeActive. No blind dispatch_after retry ladder, no class
-// enumeration, no main-thread scanning -> no launch slowness.
+// TIMING: one known class, ~20 selectors, hooked at %ctor (microseconds) with a
+// couple of cheap retries in case the class image initializes slightly later.
+// No class enumeration, no main-thread scanning -> no launch slowness.
 //
 // Each getter is gated by its own pref OR the master `sci_force_igplus_all`.
 

@@ -109,15 +109,14 @@ static void SCIInstallSMCKVO(void) {
 void SCIInstallSessionedMCGateHooksIfNeeded(void) {
     static BOOL done = NO;
 
-    SCIRefreshSMCCache();
-    BOOL any = sCacheSMCAll || sCacheSMCSessioned || sCacheSMCExtension || sCacheSMCExperiment;
-    if (!any) {
-        SCILOG("skip install: all prefs disabled");
-        return;
-    }
+    SCIRefreshSMCCache();   // popula o cache C; os hooks lerão isto.
 
     if (done) return;
     done = YES;
+
+    // SCI-FIX 2026-07-11: install incondicional (mesmo motivo do EasyGating).
+    // 3 símbolos BOOL validados (import IG + export FB). Cache OFF => no-op.
+    // KVO passa a valer na hora, sem relançar.
 
     struct rebinding r[] = {
         {"MSGCSessionedMobileConfigGetBoolean",

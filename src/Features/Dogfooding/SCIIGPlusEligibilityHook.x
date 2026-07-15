@@ -14,8 +14,7 @@
 // (settings mark requiresRestart), so the forced block can simply return YES and
 // never needs to trampoline the original with its argument list.
 //
-// Named classes only, installed once after UIApplicationDidBecomeActive. No
-// blind dispatch_after retry ladder and no scanning.
+// Named classes only, hooked at %ctor (+cheap retries). No scanning.
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -49,18 +48,29 @@ static void install(void) {
     if (!gDone) gDone = [NSMutableSet set];
     if (!ON(@"sci_igplus_eligibility")) return; // install-time gate (master also flips this via ON())
 
-    forceYES(@"_TtC23SUBSBenefitDataProvider23SUBSBenefitDataProvider", @"isBenefitActiveWithBenefitType:", YES);
+    forceYES(@"_TtC23SUBSBenefitDataProvider23SUBSBenefitDataProvider", @"isBenefitActiveWithBenefitType:", YES); // INSTANCE — confirmado B24@0:8@16
 
+    // SCI-FIX 2026-07-11: os 4 abaixo estavam com instance=YES (BUG REAL — nunca
+    // corrigido pelas sessões anteriores). Verificado contra Instagram 433.0.283:
+    // esses 4 seletores SÓ existem como método de CLASSE (metaclasse), não de
+    // instância. Com instance=YES, class_getInstanceMethod() retornava nil e
+    // forceYES() saía sem instalar nada — 4 dos 6 hooks de IGPlus Eligibility
+    // eram no-op silencioso desde sempre. Trocado para instance=NO (hookeia a
+    // metaclasse via object_getClass, como o helper já suporta).
     NSString *peek = @"_TtC34IGConsumerSubsStoryPeekEligibility34IGConsumerSubsStoryPeekEligibility";
-    forceYES(peek, @"isPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE: B48@0:8q16q24@32@40
-    forceYES(peek, @"isUpsellPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE
-    forceYES(peek, @"isAnyPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", YES); // INSTANCE
+    forceYES(peek, @"isPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO); // CLASS: B48@0:8q16q24@32@40
+    forceYES(peek, @"isUpsellPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO); // CLASS
+    forceYES(peek, @"isAnyPeekEligibleForEntryPoint:viewModelType:consumerSubsService:launcherSet:", NO); // CLASS
 
-    forceYES(@"_TtC29IGConsumerSubsDirectChatPeeks39IGConsumerSubsDirectChatPeekEligibility",
-             @"isChatPeekFeatureEligibleWithLauncherSet:consumerSubsService:", YES); // INSTANCE: B32@0:8@16@24
+    NSString *chatPeek = @"_TtC29IGConsumerSubsDirectChatPeeks39IGConsumerSubsDirectChatPeekEligibility";
+    forceYES(chatPeek, @"isChatPeekFeatureEligibleWithLauncherSet:consumerSubsService:", NO); // CLASS: B32@0:8@16@24
+    // SCI-FIX 2026-07-11: bônus — 2 seletores da mesma classe que faziam falta e
+    // cobrem a mesma superfície de Direct Chat Peek (também CLASS methods, confirmados):
+    forceYES(chatPeek, @"isUpsellEligibleWithLauncherSet:consumerSubsService:", NO); // CLASS: B32@0:8@16@24
+    forceYES(chatPeek, @"isThreadEligibleForPreview:", NO); // CLASS: B24@0:8@16
 
     forceYES(@"_TtC27IGConsumerSubsCustomAppIcon33IGConsumerSubsCustomAppIconHelper",
-             @"isCustomAppIconAvailableWithUserSession:", YES); // INSTANCE: B24@0:8@16
+             @"isCustomAppIconAvailableWithUserSession:", NO); // CLASS: B24@0:8@16
 }
 
 %ctor {

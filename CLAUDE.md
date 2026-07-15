@@ -76,3 +76,34 @@ Nomes confirmados no 433 (use estes):
 - Se não compilou/testou em device, **diga isso**. Faça no mínimo checagem de balanceamento `{}`/`()`/`[]` e de `#import` nos arquivos tocados.
 - Não simbolize por offset sem ter a dylib com símbolos; descreva a **classe do bug** em vez de cravar o arquivo.
 - Ao remover escadas de timer, registre o trade-off: classes Swift realizadas **depois** de `DidBecomeActive` podem ser perdidas pelo install único. O conserto certo é install no ponto de uso — **não** reintroduzir a escada cega. Um único retry guardado por null-check é paliativo aceitável; escada não.
+
+## 7. Não confie cegamente na sua própria ferramenta de validação
+
+Na sessão de 11/06, um parser de chained-fixups com bug de offset relatou `MetaLocalExperiment`,
+`FamilyLocalExperiment` e `_TtC18IGNavConfiguration18IGNavConfiguration` como **ausentes** —
+na verdade elas existem no binário. O bug: offset errado em `dyld_chained_starts_in_segment`
+(`page_count`/`page_starts` lidos 2 bytes adiantado). O sintoma era sutil: o parser rodava sem
+erro e devolvia contagens de classe plausíveis, só que erradas para os slots que dependiam de
+fixups mal resolvidos.
+
+**Antes de declarar uma classe "ausente" e reescrever um hook em torno disso**: valide seu
+parser contra pelo menos 2 fatos de verdade-terreno já conhecidos (ex.: `isPrismAvatarRingEnabled`
+presente / `isLiquidGlassEnabled` ausente em `IGDSLauncherConfig`) antes de confiar no output pra
+qualquer classe nova. Se o parser falhar esse sanity-check, o bug está no parser, não no binário.
+
+## 8. Seletor existe na classe ≠ existe no *kind* certo (instance vs. class method)
+
+Bug real encontrado em `SCIIGPlusEligibilityHook.x`: o código chamava
+`forceYES(cls, sel, instance:YES)` pra 6 alvos, mas 5 deles só existiam como **método de
+classe** (metaclasse). `class_getInstanceMethod` retorna nil pra um seletor que só existe como
+método de classe — o hook nunca instalava, silenciosamente, **independente da versão do
+binário**.
+
+Ao validar um seletor, sempre confira os DOIS aspectos:
+1. **Existe** na classe (nome bate)?
+2. **Em qual *kind***: instance (`class_getInstanceMethod`) ou classe (`class_getClassMethod`,
+   hookado via `object_getClass(cls)`)?
+
+Uma extração de metadados ObjC correta relata os dois separadamente (`inst`/`cls` neste
+tweak's `objc_dump.py`). Se seu helper de hook só tenta um dos dois, teste explicitamente contra
+o outro antes de assumir "classe existe, seletor existe, deve estar tudo certo".

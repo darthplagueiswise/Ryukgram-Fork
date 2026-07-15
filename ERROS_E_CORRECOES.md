@@ -80,3 +80,42 @@ Tudo abaixo **não** foi validado em device porque não há Theos/iPhone neste a
    - Se algum toggle Swift voltar a “não pegar” após esta revisão, o conserto **certo** não é reintroduzir a escada cega: é instalar **no ponto de uso** (quando o usuário navega até a superfície) ou reagir a `add_image`.
    - Se preferir um paliativo rápido enquanto isso, dá pra reintroduzir **um único** retry (não escada) ~2s, guardado por null-check de classe — posso fazer sob pedido.
 4. **Seletores Prism ampliados** em `SCIIGDSLauncherConfigHook.x` (do diagnóstico antigo): confirmei que os nomes batem com o class-dump do 433, mas o efeito visual de cada um só se vê rodando.
+
+---
+
+## 6. Sessão 2026-07-11 — MobileConfig, EasyGating, LiquidGlass, IGWord, Stories Tray, IGPlus, Debug Menus
+
+Nova revisão dedicada, com toolchain de validação reconstruído do zero (parser de
+chained-fixups arm64 próprio — `objc_dump.py`/`sym_dump.py`/`q.py` — extrai classe→método
+real e import/export C dos dois binários). **Correção importante**: o parser da sessão
+anterior (11/06) tinha um bug no offset de `dyld_chained_starts_in_segment` que fazia
+`MetaLocalExperiment`, `FamilyLocalExperiment` e `_TtC18IGNavConfiguration18IGNavConfiguration`
+aparecerem como ausentes quando na verdade **estão presentes** no binário. Com o parser
+corrigido (validado contra a verdade-terreno conhecida: `isPrismAvatarRingEnabled`=presente,
+`isLiquidGlassEnabled`=ausente — bate com o class-dump manual), a tabela abaixo é a mais
+precisa até agora.
+
+| # | Sev | Arquivo | O que estava errado | Correção | Status |
+|---|---|---|---|---|---|
+| 16 | 🟠 | `src/Features/MobileConfig/SCIMobileConfigRuntimeHooks.x` | 4 slots (`c3`–`c6`) miravam `FBMobileConfigUserSessionContext`, `FBMobileConfigSessionlessContext`, `FBMobileConfigContext`, `FBMobileConfigAPI` — **nenhuma dessas classes existe** no 433. No-op silencioso. | Reapontados para as classes FB reais com os getters `getBool:`/`getInt64:`/`getDouble:`/`getString:` (validado): `FBMobileConfigContextManager` (16 getters), `FBMobileConfigContextObjcImpl` (16), `FBMobileConfigUserSessionContextManager` (8), `FBMobileConfigSessionlessContextManager` (8). | ✅ |
+| 17 | 🔴 | `SCIMobileConfigRuntimeHooks.x` | `dispatch_after` retry ladder de **1s/2s/5s** reinstalando os mesmos hooks — mesmo padrão de risco do crash original. | Removida; install único (os context managers são singletons realizados cedo; captura é sob demanda, acionada pela UI do MobileConfig browser). | ✅ |
+| 18 | 🟡 | `SCIEasyGatingHook.x` / `SCISessionedMCGateHook.x` / `SCIInternalUseGateHook.x` | Install do fishhook era **gated** em "alguma pref já ON no `%ctor`" — ligar em runtime só valia após relançar (ver item 5 acima). | Install passou a ser **incondicional** (rebind de GOT é barato/seguro; cache OFF ⇒ replacement só chama o original, comportamento idêntico a não ter hook). KVO agora reflete toggle na hora. Todos os 3 arquivos com os mesmos 4+3+3=10 símbolos C revalidados: **import no Instagram + export no FBSharedFramework, confirmado para todos**. | ✅ |
+| 19 | 🟠 | `src/Features/Experimental/HomecomingCompat.xm` | As 3 classes (`MetaLocalExperiment`, `FamilyLocalExperiment`, `IGNavConfiguration`) **existem**, mas os SELETORES hookados (`isInExperiment`, `isInExperiment`, `isHomecomingEnabled` — este último ok) em 2 delas **não existem nessas classes, em nenhuma versão observada** — não é uma questão de versão do binário, é seletor errado desde sempre. `MetaLocalExperiment` real: `groupName`/`peekGroupName` (retornam NSString). `FamilyLocalExperiment` real: só tem `initWithConfig:familyDeviceID:logger:` nesta imagem — sem getter de leitura. | Removidos os 2 hooks confirmadamente mortos (`isInExperiment` × 2). Mantido e é o único lever real: `IGNavConfiguration.isHomecomingEnabled` (confirmado `B16@0:8`, BOOL sem args). Comentário reescrito para não sugerir reintroduzir os hooks errados. | ✅ |
+| 20 | 🟡 | `src/Features/Experimental/ExperimentalRolloutCompat.xm` | Mesmos 3 seletores incorretos (`isInExperiment` × 2, `isExperimentEnabled:` em `LIDExperimentGenerator` — este também não existe; os reais são `createLocalExperiment:`/`initWithDeviceID:logger:`). Os hooks em `groupName`/`peekGroupName` **já estavam corretos**. | Removidos os 3 hooks mortos; mantidos `groupName`/`peekGroupName` (corretos). `dispatch_after +2s` (replay de overrides) trocado por `SCIInstallOnceOnActive` por consistência com o resto do tweak. | ✅ |
+| 21 | 🔴 | `src/Features/Dogfooding/SCIIGPlusEligibilityHook.x` | **Bug real, não relacionado a versão do binário**: `forceYES(cls, sel, instance:YES)` era chamado para **todos os 6 alvos**, mas 5 deles só existem como **método de CLASSE** (metaclasse) — `class_getInstanceMethod` retorna nil pra eles e o hook nunca instala. Só `SUBSBenefitDataProvider.isBenefitActiveWithBenefitType:` é de fato instance. | Corrigido `instance:NO` pros 5 alvos de classe (`IGConsumerSubsStoryPeekEligibility` ×3, `IGConsumerSubsDirectChatPeekEligibility`, `IGConsumerSubsCustomAppIconHelper`). Bônus: adicionados 2 seletores da mesma classe DirectChatPeek que cobrem a mesma superfície (`isUpsellEligibleWithLauncherSet:consumerSubsService:`, `isThreadEligibleForPreview:`), também confirmados como class methods. | ✅ |
+| 22 | 🟡 | `src/Features/Dogfooding/SCIIGEmployeeForceHook.x` | Alt name `_TtC16IGLaunchHorizon30LaunchHorizonViewControllerV2` — confirmado **inexistente** em qualquer forma observada. O nome plain `LaunchHorizonViewControllerV2` já resolve sozinho. | Alt removido (pedido explícito do usuário). | ✅ |
+| 23 | 🟡 | `src/Features/Gating/SCIRuntimeBoolForce.m`/`.h` | Mecanismo D — inferior ao C (descarta IMP original, não desliga sem relançar). Único consumidor: `SCIInternalMenusForce.x`. | **Deletado** (pedido explícito). `SCIInternalMenusForce.x` migrado pra `SCIGatingCatalog setRuntimeBoolOverride:class:selector:classMethod:` (Mecanismo C). Os 4 alvos revalidados: `IGFacebookUserInfo.isEmployee`, `IGAdPlatformLogger_objc.isEmployee`, `_TtC33AutofillInternalSettingsInstagram26IGAutofillInternalSettings.getDebugFooterEnabled`, `_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper.isFbAcquisitionEpDogfoodModeEnabled` — todos confirmados presentes como instance method. | ✅ |
+| 24 | 🟡 | `Makefile` | `-Wno-incompatible-pointer-types` mascarava bugs de tipo/ABI. | Removido (pedido explícito). Sem `-Werror` no projeto, então isso só faz avisos aparecerem — não quebra o build. | ✅ |
+| 25 | 🟡 | Disable-by-rename (`.txt`/`.xm_`/`.m_`/`.x_`) | 12 arquivos escondidos dentro de `src/` via extensão trocada — `git mv` acidental reativa. | Movidos pra `disabled/` (fora de `src/`, com README explicando cada um e como reativar com segurança). 2 confirmados obsoletos (`SCIIGDSLauncherConfigHook.txt` duplicava o `.x` ativo; `SCILaunchAutoForceHooks.removed.txt` era só uma nota) foram **deletados**. | ✅ |
+
+### Validado e SEM alteração (checado, correto)
+
+- `SCIIGDSLauncherConfigHook.x` — 46 getters, **todos** confirmados presentes em `IGDSLauncherConfig`. LiquidGlass (8/8) e Wordmark (4/4) com cobertura completa.
+- `LiquidGlassTabBarMode.x` — `IGLiquidGlassInteractiveTabBar.setScaleProgress:`/`scaleDownWithInteraction:` confirmados.
+- `SCIBulkGatingPresets.m applyLiquidGlass:` — todos os alvos (①IGDSLauncherConfig ObjC, ②③ Swift class methods, ④ Swift instance, ⑤ ObjC instance incl. `syncConfigWithBarAppearance` que É um BOOL getter real `B16@0:8`) confirmados corretos.
+- `SCIBulkGatingPresets.m applyStoryTray:` — `IGHomecomingConfiguration` (6 seletores) + `IGNavConfiguration` base (`enableStoriesTabHeaderButton`) todos confirmados presentes.
+- `SCIBulkGatingPresets.m applyWordmark:` — 4 seletores IGWordmark em `IGDSLauncherConfig` confirmados.
+- `SCIBulkGatingPresets.m applyStatusBarOldSchool:` — classe carregada dinamicamente, não presente nos binários estáticos; hook é nil-guarded corretamente (não é bug, é limitação documentada).
+- `SCIIGConsumerSubsHook.x` (IGPlus benefícios de cliente) — `_TtC21IGConsumerSubsService21IGConsumerSubsService` + 17 getters + `isBenefitActive:` + `IGConsumerSubsStoryPeekCoordinator.isPeekActive`, **todos** confirmados como instance method.
+- `SCIIGEmployeeForceHook.x` — os outros 6 alvos (fora do alt name removido) todos confirmados corretos, incluindo o class-method `IGStoryOpaqueDebugUnderlayViewFactory.shouldShowDebugUnderlay`.
+

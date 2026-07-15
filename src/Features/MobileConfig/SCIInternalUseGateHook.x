@@ -92,16 +92,19 @@ static void SCIInstallKVOObserver(void) {
 void SCIInstallMobileConfigInternalUseGateIfNeeded(void) {
     static BOOL done = NO;
 
-    // Read prefs before installing hooks. If every pref is OFF, do not touch GOT/fishhook.
+    // Read prefs into the C cache before installing. The hook itself reads ONLY
+    // the static BOOLs (never NSUserDefaults), so even though NSUserDefaults may
+    // internally call IGMobileConfigBooleanValueForInternalUse, there is no
+    // re-entrancy (see CRASH HISTORY above).
     SCIRefreshHookCache();
-    BOOL any = sCacheBool || sCacheInternalApp || sCacheMinos;
-    if (!any) {
-        SCILOG("skip install: all prefs disabled");
-        return;
-    }
 
     if (done) return;
     done = YES;
+
+    // SCI-FIX 2026-07-11: install incondicional. Antes pulava quando tudo OFF,
+    // o que impedia toggles em runtime de valerem sem relançar. Rebind de 3
+    // símbolos BOOL validados (import IG + export FB) é barato e seguro; cache
+    // OFF => replacement só chama orig (no-op).
 
     struct rebinding r[] = {
         {"IGMobileConfigBooleanValueForInternalUse",
