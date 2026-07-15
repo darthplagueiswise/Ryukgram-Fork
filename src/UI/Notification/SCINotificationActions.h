@@ -73,6 +73,7 @@ typedef NS_OPTIONS(NSUInteger, SCINotificationActionCaps) {
     SCINotificationActionCapsAllowOff = 1 << 0,  // user can mute the action
     SCINotificationActionCapsAllowIG  = 1 << 1,  // can route to IG-native toast
     SCINotificationActionCapsProgress = 1 << 2,  // emits progress (forces pill)
+    SCINotificationActionCapsMirrorOffByDefault = 1 << 3,  // mirror comeca desligado
 };
 
 @interface SCINotificationActionInfo : NSObject
