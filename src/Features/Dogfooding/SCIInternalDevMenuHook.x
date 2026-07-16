@@ -6,11 +6,26 @@ static BOOL sSCIDevMenuInstalled = NO;
 
 %group SCIInternalDevMenuGroup
 %hook RCTDevMenu
-- (BOOL)devMenuEnabled { return SCIDevMenuOn() ? YES : %orig; }
-- (BOOL)shakeToShow { return SCIDevMenuOn() ? YES : %orig; }
-- (BOOL)hotLoadingEnabled { return SCIDevMenuOn() ? YES : %orig; }
-- (BOOL)hotkeysEnabled { return SCIDevMenuOn() ? YES : %orig; }
-- (BOOL)keyboardShortcutsEnabled { return SCIDevMenuOn() ? YES : %orig; }
+- (BOOL)devMenuEnabled {
+	if (SCIDevMenuOn()) return YES;
+	return %orig;
+}
+- (BOOL)shakeToShow {
+	if (SCIDevMenuOn()) return YES;
+	return %orig;
+}
+- (BOOL)hotLoadingEnabled {
+	if (SCIDevMenuOn()) return YES;
+	return %orig;
+}
+- (BOOL)hotkeysEnabled {
+	if (SCIDevMenuOn()) return YES;
+	return %orig;
+}
+- (BOOL)keyboardShortcutsEnabled {
+	if (SCIDevMenuOn()) return YES;
+	return %orig;
+}
 %end
 %end
 
@@ -20,4 +35,8 @@ void SCIInstallInternalDevMenuHooksIfNeeded(void) {
 	%init(SCIInternalDevMenuGroup);
 }
 
-%ctor { @autoreleasepool { SCIInstallInternalDevMenuHooksIfNeeded(); } }
+%ctor {
+	@autoreleasepool {
+		SCIInstallInternalDevMenuHooksIfNeeded();
+	}
+}
