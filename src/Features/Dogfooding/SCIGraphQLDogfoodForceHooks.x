@@ -6,6 +6,8 @@
 
 #define DGFLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] GraphQLDogfoodForce " fmt, ##__VA_ARGS__)
 
+void SCIInstallGraphQLDogfoodQueryBridgeIfNeeded(void);
+
 static volatile BOOL sDGForceEnabled = NO;
 
 void SCIRefreshGraphQLDogfoodForceEnabled(void) {
@@ -93,6 +95,10 @@ void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void) {
 
     SCIRefreshGraphQLDogfoodForceEnabled();
     if (!DGForceOn()) return;
+
+    // Targeted class-method hook only. It performs no global scan at launch;
+    // the generated-model resolver runs later when IG builds the real query.
+    SCIInstallGraphQLDogfoodQueryBridgeIfNeeded();
 
     if (!objcGroupInstalled) {
         objcGroupInstalled = YES;
