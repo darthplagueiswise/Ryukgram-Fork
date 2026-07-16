@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
+#import <stdlib.h>
 
 #define DGLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGraphQLDogfood] " fmt, ##__VA_ARGS__)
 
@@ -18,7 +19,6 @@ static NSUInteger sDGWarningExpirationCount;
 static id sDGDebugProvider;
 
 static BOOL sDGBuilderHooked;
-static BOOL sDGEligibilityStatusHooked;
 static BOOL sDGEmployeeFragmentHooked;
 static BOOL sDGDogfooderFragmentHooked;
 static BOOL sDGShowIssueFragmentHooked;
@@ -33,6 +33,20 @@ static NSMutableArray<NSString *> *DGEvents(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ sDGEvents = [NSMutableArray array]; });
     return sDGEvents;
+}
+
+static NSMutableSet<NSString *> *DGRootAccessorHookKeys(void) {
+    static NSMutableSet<NSString *> *set;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ set = [NSMutableSet set]; });
+    return set;
+}
+
+static NSMutableSet<NSString *> *DGStatusHookKeys(void) {
+    static NSMutableSet<NSString *> *set;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ set = [NSMutableSet set]; });
+    return set;
 }
 
 static NSString *DGTimestamp(void) {
@@ -99,9 +113,8 @@ static NSString *DGNormalizedEncoding(const char *encoding) {
 
 static BOOL DGTypeMatches(Method method, const char *expected) {
     if (!method || !expected) return NO;
-    NSString *actual = DGNormalizedEncoding(method_getTypeEncoding(method));
-    NSString *wanted = DGNormalizedEncoding(expected);
-    return [actual isEqualToString:wanted];
+    return [DGNormalizedEncoding(method_getTypeEncoding(method))
+        isEqualToString:DGNormalizedEncoding(expected)];
 }
 
 static BOOL DGInstallInstanceHook(Class cls, SEL sel, IMP replacement, IMP *original, const char *encoding) {
@@ -128,18 +141,127 @@ static BOOL DGInstallClassHook(Class cls, SEL sel, IMP replacement, IMP *origina
 
 #pragma mark - Exact DogfoodingEligibilityQuery model
 
-static id (*orig_DGEligibilityStatus)(id, SEL) = NULL;
-static id DGEligibilityStatus(id self, SEL _cmd) {
-    id value = orig_DGEligibilityStatus ? orig_DGEligibilityStatus(self, _cmd) : nil;
+// The generated Pando response uses protocols/model-info references rather than
+// a guaranteed Objective-C class named "...ResponseImpl". Resolve the concrete
+// runtime class through the exact root accessor, then hook status only on the
+// object returned by that accessor. This avoids a global -status hook.
+typedef struct {
+    Class cls;
+    SEL sel;
+    IMP original;
+} DGDynamicGetterHook;
+
+static void DGRecordEligibilityValue(id value) {
     if ([value respondsToSelector:@selector(boolValue)]) {
         BOOL eligible = ((BOOL (*)(id, SEL))objc_msgSend)(value, @selector(boolValue));
         @synchronized (DGEvents()) { sDGLastEligibilityStatus = @(eligible); }
         DGRecord([NSString stringWithFormat:@"DogfoodingEligibilityQuery status=%@ (%@)",
-                  eligible ? @"YES / eligible path" : @"NO / show-issue path", DGClassName(value)]);
+                  eligible ? @"YES / eligible-normal path" : @"NO / show-issue path",
+                  DGClassName(value)]);
     } else {
-        DGRecord([NSString stringWithFormat:@"DogfoodingEligibilityQuery status object=%@ (no boolValue)", DGClassName(value)]);
+        DGRecord([NSString stringWithFormat:@"DogfoodingEligibilityQuery status object=%@ (no boolValue)",
+                  DGClassName(value)]);
     }
-    return value;
+}
+
+static BOOL DGInstallStatusHookForObject(id object) {
+    if (!object) return NO;
+    Class cls = object_getClass(object);
+    SEL sel = NSSelectorFromString(@"status");
+    Method method = class_getInstanceMethod(cls, sel);
+    if (!DGTypeMatches(method, "@16@0:8")) {
+        DGRecord([NSString stringWithFormat:@"eligibility nested model %@ has no compatible -status", NSStringFromClass(cls)]);
+        return NO;
+    }
+
+    NSString *key = [NSString stringWithFormat:@"%@#status", NSStringFromClass(cls)];
+    @synchronized (DGStatusHookKeys()) {
+        if ([DGStatusHookKeys() containsObject:key]) return YES;
+        [DGStatusHookKeys() addObject:key];
+    }
+
+    DGDynamicGetterHook *descriptor = calloc(1, sizeof(*descriptor));
+    descriptor->cls = cls;
+    descriptor->sel = sel;
+
+    id block = ^id(id receiver) {
+        id value = descriptor->original
+            ? ((id (*)(id, SEL))descriptor->original)(receiver, descriptor->sel)
+            : nil;
+        DGRecordEligibilityValue(value);
+        return value;
+    };
+    IMP replacement = imp_implementationWithBlock(block);
+    MSHookMessageEx(cls, sel, replacement, &descriptor->original);
+    if (!descriptor->original) {
+        @synchronized (DGStatusHookKeys()) { [DGStatusHookKeys() removeObject:key]; }
+        imp_removeBlock(replacement);
+        free(descriptor);
+        return NO;
+    }
+
+    DGRecord([NSString stringWithFormat:@"installed exact eligibility -status hook on %@", NSStringFromClass(cls)]);
+    return YES;
+}
+
+static BOOL DGInstallRootAccessorHook(Class cls, Method method) {
+    SEL sel = NSSelectorFromString(@"xdtApi_V1_Dogfooding_EligibilityStatus");
+    if (!cls || !method || method_getName(method) != sel || !DGTypeMatches(method, "@16@0:8")) return NO;
+
+    NSString *key = [NSString stringWithFormat:@"%@#%@", NSStringFromClass(cls), NSStringFromSelector(sel)];
+    @synchronized (DGRootAccessorHookKeys()) {
+        if ([DGRootAccessorHookKeys() containsObject:key]) return YES;
+        [DGRootAccessorHookKeys() addObject:key];
+    }
+
+    DGDynamicGetterHook *descriptor = calloc(1, sizeof(*descriptor));
+    descriptor->cls = cls;
+    descriptor->sel = sel;
+
+    id block = ^id(id receiver) {
+        id nested = descriptor->original
+            ? ((id (*)(id, SEL))descriptor->original)(receiver, descriptor->sel)
+            : nil;
+        if (nested) {
+            DGInstallStatusHookForObject(nested);
+            DGRecord([NSString stringWithFormat:@"eligibility nested response class=%@", DGClassName(nested)]);
+        }
+        return nested;
+    };
+    IMP replacement = imp_implementationWithBlock(block);
+    MSHookMessageEx(cls, sel, replacement, &descriptor->original);
+    if (!descriptor->original) {
+        @synchronized (DGRootAccessorHookKeys()) { [DGRootAccessorHookKeys() removeObject:key]; }
+        imp_removeBlock(replacement);
+        free(descriptor);
+        return NO;
+    }
+
+    DGRecord([NSString stringWithFormat:@"installed exact eligibility root accessor on %@", NSStringFromClass(cls)]);
+    return YES;
+}
+
+static NSUInteger DGInstallEligibilityRuntimeModelHooks(void) {
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return 0;
+
+    Class *classes = calloc((size_t)count, sizeof(Class));
+    count = objc_getClassList(classes, count);
+    NSUInteger installed = 0;
+    SEL target = NSSelectorFromString(@"xdtApi_V1_Dogfooding_EligibilityStatus");
+
+    for (int i = 0; i < count; i++) {
+        Class cls = classes[i];
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(cls, &methodCount);
+        for (unsigned int j = 0; j < methodCount; j++) {
+            if (method_getName(methods[j]) != target) continue;
+            if (DGInstallRootAccessorHook(cls, methods[j])) installed++;
+        }
+        free(methods);
+    }
+    free(classes);
+    return installed;
 }
 
 static id (*orig_DGEligibilityBuilder)(id, SEL, id) = NULL;
@@ -233,7 +355,7 @@ static void DGTriggerUpdate(id self, SEL _cmd, NSInteger mode, id completion) {
     if (orig_DGTriggerUpdate) orig_DGTriggerUpdate(self, _cmd, mode, completion);
 }
 
-#pragma mark - E2E observer only; never changes the result
+#pragma mark - E2E observer; preserves original result
 
 static BOOL (*orig_DGE2EBypass)(id, SEL, id) = NULL;
 static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
@@ -258,12 +380,13 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
         sDGBuilderHooked = YES; [installed addObject:@"eligibility query builder"];
     } else if (!sDGBuilderHooked) [missing addObject:@"eligibility query builder"];
 
-    Class statusClass = objc_getClass("DogfoodingEligibilityQuery_xdtApi_V1_Dogfooding_EligibilityStatusResponseImpl");
-    if (DGInstallInstanceHook(statusClass, NSSelectorFromString(@"status"),
-                              (IMP)DGEligibilityStatus, (IMP *)&orig_DGEligibilityStatus,
-                              "@16@0:8")) {
-        sDGEligibilityStatusHooked = YES; [installed addObject:@"exact eligibility status model"];
-    } else if (!sDGEligibilityStatusHooked) [missing addObject:@"eligibility status model"];
+    NSUInteger rootHooks = DGInstallEligibilityRuntimeModelHooks();
+    if (rootHooks || DGRootAccessorHookKeys().count) {
+        [installed addObject:[NSString stringWithFormat:@"eligibility runtime model (%lu classes)",
+                              (unsigned long)DGRootAccessorHookKeys().count]];
+    } else {
+        [missing addObject:@"eligibility runtime model (retry after response is loaded)"];
+    }
 
     Class baseUser = objc_getClass("IGBaseUser");
     if (DGInstallInstanceHook(baseUser, NSSelectorFromString(@"asIGUserIsEmployeeOrTestUserFragmentImmutableModel"),
@@ -327,7 +450,7 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
     DGRecord([NSString stringWithFormat:@"observer install pass: installed=%lu missing=%lu",
               (unsigned long)installed.count, (unsigned long)missing.count]);
 
-    return [NSString stringWithFormat:@"Installed/active: %@\n\nNot loaded or ABI-mismatched: %@\n\nTap again after login if a generated model was not loaded yet.",
+    return [NSString stringWithFormat:@"Installed/active: %@\n\nNot loaded or ABI-mismatched: %@\n\nTap again after login or after the dogfood query runs to resolve generated Pando model classes.",
             installed.count ? [installed componentsJoinedByString:@", "] : @"none",
             missing.count ? [missing componentsJoinedByString:@", "] : @"none"];
 }
@@ -354,9 +477,12 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
         : @"not observed";
 
     NSString *header = [NSString stringWithFormat:
-        @"Eligibility status: %@\nLast lookback_days: %@\nQuery builds: %lu\nSession starts: %lu\nAvailable-update checks: %lu\nBuild-status checks: %lu\nUpdate actions: %lu\nWarning expirations: %lu",
+        @"Eligibility status: %@\nLast lookback_days: %@\nQuery builds: %lu\nRuntime root hooks: %lu\nRuntime status hooks: %lu\nSession starts: %lu\nAvailable-update checks: %lu\nBuild-status checks: %lu\nUpdate actions: %lu\nWarning expirations: %lu",
         eligibility, lookback ?: @"not observed",
-        (unsigned long)queryCount, (unsigned long)sessionCount,
+        (unsigned long)queryCount,
+        (unsigned long)DGRootAccessorHookKeys().count,
+        (unsigned long)DGStatusHookKeys().count,
+        (unsigned long)sessionCount,
         (unsigned long)availableCount, (unsigned long)buildCount,
         (unsigned long)updateCount, (unsigned long)warningCount];
 
@@ -425,11 +551,24 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
     return objc_getClass("_TtC38IGDirectDeidentifiedRequestProviderKit35IGDirectDeidentifiedRequestProvider");
 }
 
++ (id)graphQLDebugProvider {
+    Class cls = [self graphQLDebugProviderClass];
+    if (!cls) return nil;
+    if (!sDGDebugProvider) sDGDebugProvider = [[cls alloc] init];
+    return sDGDebugProvider;
+}
+
+static void DGComplete(void (^completion)(NSString *), NSString *result) {
+    if (!completion) return;
+    dispatch_async(dispatch_get_main_queue(), ^{ completion(result ?: @""); });
+}
+
 + (NSString *)graphQLDebugCapabilities {
     Class cls = [self graphQLDebugProviderClass];
     if (!cls) return @"IGDirectDeidentifiedRequestProvider is not loaded.";
 
     NSArray<NSString *> *selectors = @[
+        @"getStoredOHAIConfig",
         @"warmupForGraphQLDebugWithCompletionHandler:",
         @"retrieveACSTokenForGraphQLDebugWithCompletionHandler:",
         @"retrieveACSTokenAndOHAIConfigForGraphQLDebugWithCompletionHandler:"
@@ -441,7 +580,7 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
         NSString *encoding = method ? [NSString stringWithUTF8String:method_getTypeEncoding(method)] : @"no ABI";
         [rows addObject:[NSString stringWithFormat:@"%@ — %@ — %@", name, method ? @"present" : @"absent", encoding]];
     }
-    [rows addObject:@"\nWarmup is callable below. ACS/OHAI token retrieval is intentionally not invoked or displayed."];
+    [rows addObject:@"\nCredential actions report only presence, runtime class and errors. Token/config contents are not logged or displayed."];
     return [rows componentsJoinedByString:@"\n"];
 }
 
@@ -449,27 +588,85 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
     Class cls = [self graphQLDebugProviderClass];
     SEL sel = NSSelectorFromString(@"warmupForGraphQLDebugWithCompletionHandler:");
     Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
-    if (!DGTypeMatches(method, "v24@0:8@?<v@?>16")) {
-        if (completion) completion(@"GraphQL Debug warmup unavailable or ABI changed.");
+    if (!DGTypeMatches(method, "v24@0:8@?16")) {
+        DGComplete(completion, @"GraphQL Debug warmup unavailable or ABI changed.");
         return;
     }
 
     @try {
-        sDGDebugProvider = [[cls alloc] init];
-        if (!sDGDebugProvider) {
-            if (completion) completion(@"GraphQL Debug provider init returned nil.");
+        id provider = [self graphQLDebugProvider];
+        if (!provider) {
+            DGComplete(completion, @"GraphQL Debug provider init returned nil.");
             return;
         }
         void (^handler)(void) = ^{
             DGRecord(@"GraphQL Debug provider warmup completed");
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (completion) completion(@"GraphQL Debug provider warmup completed. No ACS/OHAI token was requested or exposed.");
-            });
+            DGComplete(completion, @"GraphQL Debug provider warmup completed.");
         };
-        ((void (*)(id, SEL, id))objc_msgSend)(sDGDebugProvider, sel, handler);
+        ((void (*)(id, SEL, id))objc_msgSend)(provider, sel, handler);
         DGRecord(@"GraphQL Debug provider warmup started");
     } @catch (id exception) {
-        if (completion) completion([NSString stringWithFormat:@"GraphQL Debug warmup threw: %@", exception]);
+        DGComplete(completion, [NSString stringWithFormat:@"GraphQL Debug warmup threw: %@", exception]);
+    }
+}
+
++ (void)retrieveGraphQLDebugACSTokenStatusWithCompletion:(void (^)(NSString *result))completion {
+    Class cls = [self graphQLDebugProviderClass];
+    SEL sel = NSSelectorFromString(@"retrieveACSTokenForGraphQLDebugWithCompletionHandler:");
+    Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
+    if (!DGTypeMatches(method, "v24@0:8@?16")) {
+        DGComplete(completion, @"ACS token retrieval unavailable or ABI changed.");
+        return;
+    }
+
+    @try {
+        id provider = [self graphQLDebugProvider];
+        if (!provider) {
+            DGComplete(completion, @"GraphQL Debug provider init returned nil.");
+            return;
+        }
+        void (^handler)(id, id) = ^(id token, id error) {
+            NSString *result = [NSString stringWithFormat:
+                @"ACS token present: %@\nToken class: %@\nError: %@",
+                token ? @"YES" : @"NO", DGClassName(token), error ?: @"none"];
+            DGRecord([NSString stringWithFormat:@"GraphQL Debug ACS result token=%d error=%d", token != nil, error != nil]);
+            DGComplete(completion, result);
+        };
+        ((void (*)(id, SEL, id))objc_msgSend)(provider, sel, handler);
+        DGRecord(@"GraphQL Debug ACS retrieval started");
+    } @catch (id exception) {
+        DGComplete(completion, [NSString stringWithFormat:@"ACS retrieval threw: %@", exception]);
+    }
+}
+
++ (void)retrieveGraphQLDebugACSAndOHAIStatusWithCompletion:(void (^)(NSString *result))completion {
+    Class cls = [self graphQLDebugProviderClass];
+    SEL sel = NSSelectorFromString(@"retrieveACSTokenAndOHAIConfigForGraphQLDebugWithCompletionHandler:");
+    Method method = cls ? class_getInstanceMethod(cls, sel) : NULL;
+    if (!DGTypeMatches(method, "v24@0:8@?16")) {
+        DGComplete(completion, @"ACS/OHAI retrieval unavailable or ABI changed.");
+        return;
+    }
+
+    @try {
+        id provider = [self graphQLDebugProvider];
+        if (!provider) {
+            DGComplete(completion, @"GraphQL Debug provider init returned nil.");
+            return;
+        }
+        void (^handler)(id, id, id) = ^(id token, id config, id error) {
+            NSString *result = [NSString stringWithFormat:
+                @"ACS token present: %@\nToken class: %@\nOHAI config present: %@\nConfig class: %@\nError: %@",
+                token ? @"YES" : @"NO", DGClassName(token),
+                config ? @"YES" : @"NO", DGClassName(config), error ?: @"none"];
+            DGRecord([NSString stringWithFormat:@"GraphQL Debug ACS/OHAI result token=%d config=%d error=%d",
+                      token != nil, config != nil, error != nil]);
+            DGComplete(completion, result);
+        };
+        ((void (*)(id, SEL, id))objc_msgSend)(provider, sel, handler);
+        DGRecord(@"GraphQL Debug ACS/OHAI retrieval started");
+    } @catch (id exception) {
+        DGComplete(completion, [NSString stringWithFormat:@"ACS/OHAI retrieval threw: %@", exception]);
     }
 }
 
