@@ -10,160 +10,170 @@
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
 void SCIInstallEmployeeInternalHooksIfNeeded(void);
+void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void);
+void SCIRefreshGraphQLDogfoodForceEnabled(void);
 
 static UIViewController *SCIDevTop(void) {
-	UIWindow *w = nil;
-	for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-		if (![scene isKindOfClass:UIWindowScene.class]) continue;
-		for (UIWindow *candidate in ((UIWindowScene *)scene).windows) if (candidate.isKeyWindow) { w = candidate; break; }
-		if (w) break;
-	}
-	UIViewController *top = w.rootViewController;
-	while (top.presentedViewController) top = top.presentedViewController;
-	return top;
+    UIWindow *w = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *candidate in ((UIWindowScene *)scene).windows) if (candidate.isKeyWindow) { w = candidate; break; }
+        if (w) break;
+    }
+    UIViewController *top = w.rootViewController;
+    while (top.presentedViewController) top = top.presentedViewController;
+    return top;
 }
+
 static void SCIDevShow(NSString *title, NSString *message) {
-	UIViewController *top = SCIDevTop(); if (!top) return;
-	UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-	[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-	[top presentViewController:a animated:YES completion:nil];
+    UIViewController *top = SCIDevTop(); if (!top) return;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [top presentViewController:a animated:YES completion:nil];
 }
-static BOOL SCIDevResultWasHandled(NSString *result) {
-	return [result hasPrefix:@"opened"] || [result hasPrefix:@"presented"] || [result hasPrefix:@"scheduled"];
-}
+
 static void SCIDevPromptFOASandboxHostname(void) {
-	UIViewController *top = SCIDevTop(); if (!top) return;
-	UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"FOA Sandbox Hostname")
-		message:SCILocalized(@"Enter a DNS hostname only. This changes the client environment; it does not bypass authentication or server authorization.")
-		preferredStyle:UIAlertControllerStyleAlert];
-	[a addTextFieldWithConfigurationHandler:^(UITextField *field) {
-		field.placeholder = @"sandbox.example.internal";
-		field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-		field.autocorrectionType = UITextAutocorrectionTypeNo;
-		field.keyboardType = UIKeyboardTypeURL;
-	}];
-	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Set") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-		NSString *hostname = a.textFields.firstObject.text ?: @"";
-		SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics setFOASandboxHostname:hostname]);
-	}]];
-	[top presentViewController:a animated:YES completion:nil];
+    UIViewController *top = SCIDevTop(); if (!top) return;
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"FOA Sandbox Hostname")
+        message:SCILocalized(@"Enter a DNS hostname only. This changes the client environment; it does not bypass authentication or server authorization.")
+        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = @"sandbox.example.internal";
+        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        field.autocorrectionType = UITextAutocorrectionTypeNo;
+        field.keyboardType = UIKeyboardTypeURL;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Set") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        NSString *hostname = a.textFields.firstObject.text ?: @"";
+        SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics setFOASandboxHostname:hostname]);
+    }]];
+    [top presentViewController:a animated:YES completion:nil];
 }
+
 static SCISetting *SCIExperimentSwitch(NSString *title, NSString *subtitle, NSString *key, NSUInteger (^apply)(NSNumber *)) {
-	return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL { return [SCIUtils getBoolPref:key]; } action:^(BOOL on) {
-		[SCIUtils setPref:@(on) forKey:key];
-		dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-			NSUInteger count = apply(on ? @YES : nil);
-			dispatch_async(dispatch_get_main_queue(), ^{ [SCIUtils showToastForDuration:2.5 title:[NSString stringWithFormat:@"%@ — %lu methods", on ? @"Applied" : @"Cleared", (unsigned long)count] subtitle:nil]; });
-		});
-	}];
+    return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL { return [SCIUtils getBoolPref:key]; } action:^(BOOL on) {
+        [SCIUtils setPref:@(on) forKey:key];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSUInteger count = apply(on ? @YES : nil);
+            dispatch_async(dispatch_get_main_queue(), ^{ [SCIUtils showToastForDuration:2.5 title:[NSString stringWithFormat:@"%@ — %lu methods", on ? @"Applied" : @"Cleared", (unsigned long)count] subtitle:nil]; });
+        });
+    }];
 }
 
 static SCISetting *SCIEmployeeInternalSwitch(NSString *title, NSString *subtitle, NSString *key) {
-	return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL {
-		return [SCIUtils getBoolPref:key];
-	} action:^(BOOL on) {
-		[SCIUtils setPref:@(on) forKey:key];
-		// Idempotente: instala alvos disponíveis quando liga; replacements
-		// consultam as prefs ao vivo e voltam ao original quando desliga.
-		SCIInstallEmployeeInternalHooksIfNeeded();
-	}];
+    return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL {
+        return [SCIUtils getBoolPref:key];
+    } action:^(BOOL on) {
+        [SCIUtils setPref:@(on) forKey:key];
+        SCIRefreshGraphQLDogfoodForceEnabled();
+        SCIInstallEmployeeInternalHooksIfNeeded();
+        SCIInstallGraphQLDogfoodForceHooksIfNeeded();
+        if (on && [key isEqualToString:@"sci_employee_internal"]) {
+            NSString *result = [SCIGraphQLDogfoodDiagnostics installObservers];
+            [SCIUtils showToastForDuration:2.5 title:@"Employee / Internal applied" subtitle:result];
+        }
+    }];
 }
 
 @implementation SCITweakSettings (Section_Dev)
 + (SCISetting *)devNavCell {
-	// Retry pós-launch: módulos Swift/BugReporter podem ainda não existir no ctor.
-	if ([SCIUtils getBoolPref:@"sci_employee_internal"] ||
-		[SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
-		[SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
-		[SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
-		SCIInstallEmployeeInternalHooksIfNeeded();
-	}
+    if ([SCIUtils getBoolPref:@"sci_employee_internal"] ||
+        [SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
+        [SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
+        [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
+        SCIInstallEmployeeInternalHooksIfNeeded();
+        SCIInstallGraphQLDogfoodForceHooksIfNeeded();
+    }
 
-	return [SCISetting navigationCellWithTitle:SCILocalized(@"Dev") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"wrench" fallback:@"hammer"] navSections:@[
-		@{
-			@"header": SCILocalized(@"Unified experiment engines"),
-			@"footer": SCILocalized(@"Validated in Instagram(29): FBCCIGExperimentManager/FBCustomExperimentManager use BOOL isFeatureEnabled:(uint64_t). ExperimentConfig and helper sweeps enumerate only supported BOOL methods with zero or one ObjC/integer argument."),
-			@"rows": @[
-				[SCISetting switchCellWithTitle:SCILocalized(@"Force unified experiment managers") subtitle:SCILocalized(@"Forces isFeatureEnabled: and isFeatureEnabledWithoutLogging: on both managers") value:^BOOL { return [SCIUtils getBoolPref:@"sci_force_unified_experiment_managers"]; } action:^(BOOL on) { [SCIUtils setPref:@(on) forKey:@"sci_force_unified_experiment_managers"]; if (on) SCIInstallUnifiedExperimentManagerHooksIfNeeded(); }],
-				SCIExperimentSwitch(SCILocalized(@"Force ExperimentConfig / QE gates"), SCILocalized(@"isEnabled:, isBacktestEnabled:, shouldLogImmediately and equivalent config gates"), @"sci_force_experiment_configs", ^NSUInteger(NSNumber *v){ return [SCISymbolBrowserEngine setExperimentConfigsForced:v]; }),
-				SCIExperimentSwitch(SCILocalized(@"Force experiment helpers"), SCILocalized(@"IGMagicMod, IGStoriesTab, IGDirectNotes, IGLiquidGlass and experiment/gating helpers"), @"sci_force_experiment_helpers", ^NSUInteger(NSNumber *v){ return [SCISymbolBrowserEngine setExperimentHelpersForced:v]; }),
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Rescan current experiment surfaces") subtitle:SCILocalized(@"Discovers newly loaded ExperimentConfig/helper classes and reapplies enabled masters") icon:[SCISymbol symbolWithName:@"arrow.clockwise"] action:^{
-					dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ NSUInteger n=0; if([SCIUtils getBoolPref:@"sci_force_experiment_configs"]) n += [SCISymbolBrowserEngine setExperimentConfigsForced:@YES]; if([SCIUtils getBoolPref:@"sci_force_experiment_helpers"]) n += [SCISymbolBrowserEngine setExperimentHelpersForced:@YES]; dispatch_async(dispatch_get_main_queue(), ^{ [SCIUtils showToastForDuration:2.5 title:[NSString stringWithFormat:@"Experiment rescan: %lu methods",(unsigned long)n] subtitle:nil]; }); });
-				}],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"Employee, Internal Settings & Dev Menu"),
-			@"footer": SCILocalized(@"The master mirrors the Facebook strategy with Instagram-native equivalents: known employee getters/setters, IGBugReportMenu availability=0, Internal Settings visibility, logged-out entry and Dogfooding Assistant. _ig_is_employee symbols are DATA descriptors and are never fishhooked as functions."),
-			@"rows": @[
-				SCIEmployeeInternalSwitch(SCILocalized(@"Employee / Internal"), SCILocalized(@"Forces known employee identity paths plus the native Internal Settings gates"), @"sci_employee_internal"),
-				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings access allowed"), SCILocalized(@"Forces IGInternalSettingsAvailabilityStatus to the confirmed available value 0"), @"sci_force_internal_settings_availability"),
-				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings menu"), SCILocalized(@"Forces showInternalSettings and shake-to-report in both validated initializer ABIs"), @"sci_force_internal_settings_menu"),
-				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings while logged out"), SCILocalized(@"Forces showLoggedOutInternalSettings"), @"sci_force_internal_settings_loggedout"),
-				[SCISetting switchCellWithTitle:SCILocalized(@"React Native Dev Menu") subtitle:SCILocalized(@"Forces RCTDevMenu devMenuEnabled, shakeToShow, hot loading and keyboard shortcuts") value:^BOOL { return [SCIUtils getBoolPref:@"sci_force_rct_dev_menu"]; } action:^(BOOL on) { [SCIUtils setPref:@(on) forKey:@"sci_force_rct_dev_menu"]; if(on) SCIInstallInternalDevMenuHooksIfNeeded(); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Apply internal/debug now") subtitle:SCILocalized(@"Uses the live IGAutofillInternalSettings session object") icon:[SCISymbol symbolWithIGName:@"bcn_wrench_outline_24" fallback:@"wrench.and.screwdriver"] action:^{ SCIDevShow(SCILocalized(@"Internal/debug"), [SCIInternalSettingsApplier applyNow]); }],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Force Bloks experience") subtitle:@"" defaultsKey:@"sci_apply_force_bloks" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Bloks prefetch") subtitle:@"" defaultsKey:@"sci_apply_bloks_prefetch" requiresRestart:YES],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"Current C experiment gates"),
-			@"footer": SCILocalized(@"The removed IGMobileConfigBooleanValueForInternalUse reader is not exposed. Remaining rows map to imports/exports confirmed in Instagram(29) and FBSharedFramework(105); complex readers call the original first, then force YES."),
-			@"rows": @[
-				[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18" defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL readers") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"EasyGating Internal" subtitle:@"EasyGatingGetBoolean_Internal_DoNotUseOrMock" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"EasyGating Platform" subtitle:@"EasyGatingPlatformGetBoolean" defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"EasyGating AuthDataContext" subtitle:@"" defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"MCQ EasyGating" subtitle:@"" defaultsKey:@"sci_force_easy_gating_mcq" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Force Sessioned/MCI BOOL readers") subtitle:SCILocalized(@"MSGC + MCIExperiment + MCIExtension") defaultsKey:@"sci_force_sessioned_mc_all" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"MSGC Sessioned BOOL" subtitle:@"MSGCSessionedMobileConfigGetBoolean" defaultsKey:@"sci_force_msgc_sessioned_boolean" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"MCI Experiment BOOL" subtitle:@"MCIExperimentCacheGetMobileConfigBoolean" defaultsKey:@"sci_force_mci_experiment_boolean" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"MCI Extension BOOL" subtitle:@"MCIExtensionExperimentCacheGetMobileConfigBoolean" defaultsKey:@"sci_force_mci_extension_boolean" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:@"META Extensions experiments" subtitle:@"GetBoolean + WithoutExposure" defaultsKey:@"sci_force_meta_ext_experiment" requiresRestart:YES],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"Open native internal menus"),
-			@"rows": @[
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu") subtitle:SCILocalized(@"Dismisses RyukGram, restores IGWindow and calls showDebugMenuWithEntryPoint:0") icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"] action:^{ NSString *r=[SCIInternalMenusLauncher openInstagramDebugMenu]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Instagram Debug Menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingNotesSettings]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingSettingsVC]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL") subtitle:@"instagram://internal_settings" icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"] action:^{ NSString *r=[SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal URL",r); }],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"GraphQL, Dogfood & Sandbox"),
-			@"footer": SCILocalized(@"Revalidated in the uploaded executable: DogfoodingEligibilityQuery.status is read through boolValue. YES follows the normal/eligible path; NO enters the show-issue path. Warning/lockout is separate local policy. Observers preserve every original return value and completion."),
-			@"rows": @[
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Install GraphQL/Dogfood observers") subtitle:SCILocalized(@"Hooks the exact eligibility model, fragments, coordinator, build checks and original E2E result without forcing anything") icon:[SCISymbol symbolWithName:@"waveform.path.ecg"] action:^{ SCIDevShow(SCILocalized(@"GraphQL/Dogfood observers"), [SCIGraphQLDogfoodDiagnostics installObservers]); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Show GraphQL/Dogfood snapshot") subtitle:SCILocalized(@"Shows observed status, lookback_days and repeated backend-check calls") icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"] action:^{ SCIDevShow(SCILocalized(@"GraphQL/Dogfood snapshot"), [SCIGraphQLDogfoodDiagnostics snapshot]); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Current FOA Sandbox Override") subtitle:SCILocalized(@"Reads +currentOverride") icon:[SCISymbol symbolWithName:@"server.rack"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics currentFOASandboxOverride]); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Set FOA Sandbox Hostname") subtitle:SCILocalized(@"Calls +setSandboxOverrideWithHostname:reason: and requires restart") icon:[SCISymbol symbolWithName:@"network"] action:^{ SCIDevPromptFOASandboxHostname(); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Reset FOA Sandbox Override") subtitle:SCILocalized(@"Clears the override through the native setter") icon:[SCISymbol symbolWithName:@"arrow.counterclockwise"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics resetFOASandboxOverride]); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"GraphQL Debug capabilities") subtitle:SCILocalized(@"Validates warmup and ACS/OHAI selectors without requesting credentials") icon:[SCISymbol symbolWithName:@"checkmark.shield"] action:^{ SCIDevShow(SCILocalized(@"GraphQL Debug"), [SCIGraphQLDogfoodDiagnostics graphQLDebugCapabilities]); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Warm up GraphQL Debug provider") subtitle:SCILocalized(@"Runs the native warmup only; no ACS/OHAI token is requested or displayed") icon:[SCISymbol symbolWithName:@"bolt.horizontal"] action:^{ [SCIGraphQLDogfoodDiagnostics warmupGraphQLDebugWithCompletion:^(NSString *result) { SCIDevShow(SCILocalized(@"GraphQL Debug"), result); }]; }],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"Runtime"),
-			@"footer": SCILocalized(@"The ObjC index now includes supported BOOL methods with zero or one object/integer argument, so experiment managers and +isEnabled: QuickExperiment configs are visible and forceable."),
-			@"rows": @[
-				[SCISetting navigationCellWithTitle:SCILocalized(@"Unified Runtime Browser") subtitle:SCILocalized(@"Exec + FBShared: ObjC, C, DATA and Swift/xrefs") icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"] viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeObjCMethods]],
-				[SCISetting navigationCellWithTitle:@"IGDSLauncherConfig" subtitle:@"" icon:[SCISymbol symbolWithName:@"wand.and.stars"] viewController:[SCIIGDSLauncherConfigViewController new]],
-			]
-		},
-		@{
-			@"header": SCILocalized(@"Advanced experimental features"),
-			@"rows": @[
-				[self experimentalEntryCell],
-				({ SCISetting *s=[SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School") subtitle:@"" defaultsKey:@"sci_statusbar_oldschool" requiresRestart:NO]; s.icon=[SCISymbol symbolWithName:@"statusbar_oldschool" color:UIColor.labelColor]; s; }),
-				({ SCISetting *s=[SCISetting switchCellWithTitle:SCILocalized(@"Stories Tray") subtitle:@"" defaultsKey:@"sci_story_tray" requiresRestart:NO]; s.icon=[SCISymbol symbolWithName:@"story_tray" color:UIColor.labelColor]; s; }),
-				({ SCISetting *s=[SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header") subtitle:@"" menu:[self menus][@"ig_wordmark_variant"]]; s.icon=[SCISymbol symbolWithName:@"custom_feed_header" color:UIColor.labelColor]; s; }),
-			]
-		}
-	]];
+    return [SCISetting navigationCellWithTitle:SCILocalized(@"Dev") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"wrench" fallback:@"hammer"] navSections:@[
+        @{
+            @"header": SCILocalized(@"Unified experiment engines"),
+            @"footer": SCILocalized(@"Validated in Instagram(2): FBCCIGExperimentManager/FBCustomExperimentManager use BOOL isFeatureEnabled:(uint64_t). ExperimentConfig and helper sweeps enumerate only supported BOOL methods with zero or one ObjC/integer argument."),
+            @"rows": @[
+                [SCISetting switchCellWithTitle:SCILocalized(@"Force unified experiment managers") subtitle:SCILocalized(@"Forces isFeatureEnabled: and isFeatureEnabledWithoutLogging: on both managers") value:^BOOL { return [SCIUtils getBoolPref:@"sci_force_unified_experiment_managers"]; } action:^(BOOL on) { [SCIUtils setPref:@(on) forKey:@"sci_force_unified_experiment_managers"]; if (on) SCIInstallUnifiedExperimentManagerHooksIfNeeded(); }],
+                SCIExperimentSwitch(SCILocalized(@"Force ExperimentConfig / QE gates"), SCILocalized(@"isEnabled:, isBacktestEnabled:, shouldLogImmediately and equivalent config gates"), @"sci_force_experiment_configs", ^NSUInteger(NSNumber *v){ return [SCISymbolBrowserEngine setExperimentConfigsForced:v]; }),
+                SCIExperimentSwitch(SCILocalized(@"Force experiment helpers"), SCILocalized(@"IGMagicMod, IGStoriesTab, IGDirectNotes, IGLiquidGlass and experiment/gating helpers"), @"sci_force_experiment_helpers", ^NSUInteger(NSNumber *v){ return [SCISymbolBrowserEngine setExperimentHelpersForced:v]; }),
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Rescan current experiment surfaces") subtitle:SCILocalized(@"Discovers newly loaded ExperimentConfig/helper classes and reapplies enabled masters") icon:[SCISymbol symbolWithName:@"arrow.clockwise"] action:^{
+                    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ NSUInteger n=0; if([SCIUtils getBoolPref:@"sci_force_experiment_configs"]) n += [SCISymbolBrowserEngine setExperimentConfigsForced:@YES]; if([SCIUtils getBoolPref:@"sci_force_experiment_helpers"]) n += [SCISymbolBrowserEngine setExperimentHelpersForced:@YES]; dispatch_async(dispatch_get_main_queue(), ^{ [SCIUtils showToastForDuration:2.5 title:[NSString stringWithFormat:@"Experiment rescan: %lu methods",(unsigned long)n] subtitle:nil]; }); });
+                }],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
+            @"footer": SCILocalized(@"The master covers the validated local chain: employee getters, GraphQL eligibility status (YES = eligible/pass), show-issue fragment suppression, warning-expiration suppression, Internal Settings availability=0 and native menu visibility. Warning is a separate local state, not a third GraphQL status value."),
+            @"rows": @[
+                SCIEmployeeInternalSwitch(SCILocalized(@"Employee / Internal"), SCILocalized(@"Forces the validated client-side employee, GraphQL dogfood and Internal Settings paths"), @"sci_employee_internal"),
+                SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings access allowed"), SCILocalized(@"Forces IGInternalSettingsAvailabilityStatus to the confirmed available value 0"), @"sci_force_internal_settings_availability"),
+                SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings menu"), SCILocalized(@"Forces showInternalSettings and shake-to-report in both validated initializer ABIs"), @"sci_force_internal_settings_menu"),
+                SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings while logged out"), SCILocalized(@"Forces showLoggedOutInternalSettings"), @"sci_force_internal_settings_loggedout"),
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Refresh GraphQL dogfood hooks") subtitle:SCILocalized(@"Installs the exact eligibility, fragment, warning and backend-check observers") icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"arrow.clockwise"] action:^{
+                    SCIInstallGraphQLDogfoodForceHooksIfNeeded();
+                    SCIDevShow(SCILocalized(@"GraphQL dogfood"), [SCIGraphQLDogfoodDiagnostics installObservers]);
+                }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"GraphQL dogfood snapshot") subtitle:SCILocalized(@"Shows status, lookback_days, fragments and repeated backend-check calls") icon:[SCISymbol symbolWithIGName:@"bcn_info_outline_24" fallback:@"doc.text.magnifyingglass"] action:^{
+                    SCIDevShow(SCILocalized(@"GraphQL dogfood snapshot"), [SCIGraphQLDogfoodDiagnostics snapshot]);
+                }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Current FOA Sandbox Override") subtitle:SCILocalized(@"Reads +currentOverride") icon:[SCISymbol symbolWithName:@"server.rack"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics currentFOASandboxOverride]); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Set FOA Sandbox Hostname") subtitle:SCILocalized(@"Calls the validated native setter; restart required") icon:[SCISymbol symbolWithName:@"network"] action:^{ SCIDevPromptFOASandboxHostname(); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Reset FOA Sandbox Override") subtitle:SCILocalized(@"Clears the override through the native setter") icon:[SCISymbol symbolWithName:@"arrow.counterclockwise"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics resetFOASandboxOverride]); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"GraphQL Debug capabilities") subtitle:SCILocalized(@"Validates warmup and ACS/OHAI selectors without requesting credentials") icon:[SCISymbol symbolWithName:@"checkmark.shield"] action:^{ SCIDevShow(SCILocalized(@"GraphQL Debug"), [SCIGraphQLDogfoodDiagnostics graphQLDebugCapabilities]); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Warm up GraphQL Debug provider") subtitle:SCILocalized(@"Runs the native warmup only; no ACS/OHAI token is requested or displayed") icon:[SCISymbol symbolWithName:@"bolt.horizontal"] action:^{ [SCIGraphQLDogfoodDiagnostics warmupGraphQLDebugWithCompletion:^(NSString *result) { SCIDevShow(SCILocalized(@"GraphQL Debug"), result); }]; }],
+                [SCISetting switchCellWithTitle:SCILocalized(@"React Native Dev Menu") subtitle:SCILocalized(@"Forces RCTDevMenu devMenuEnabled, shakeToShow, hot loading and keyboard shortcuts") value:^BOOL { return [SCIUtils getBoolPref:@"sci_force_rct_dev_menu"]; } action:^(BOOL on) { [SCIUtils setPref:@(on) forKey:@"sci_force_rct_dev_menu"]; if(on) SCIInstallInternalDevMenuHooksIfNeeded(); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Apply internal/debug now") subtitle:SCILocalized(@"Uses the live IGAutofillInternalSettings session object") icon:[SCISymbol symbolWithIGName:@"bcn_wrench_outline_24" fallback:@"wrench.and.screwdriver"] action:^{ SCIDevShow(SCILocalized(@"Internal/debug"), [SCIInternalSettingsApplier applyNow]); }],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Force Bloks experience") subtitle:@"" defaultsKey:@"sci_apply_force_bloks" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Bloks prefetch") subtitle:@"" defaultsKey:@"sci_apply_bloks_prefetch" requiresRestart:YES],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Current C experiment gates"),
+            @"footer": SCILocalized(@"The removed IGMobileConfigBooleanValueForInternalUse reader is not exposed. Remaining rows map to imports/exports confirmed in Instagram(2) and FBSharedFramework(2); complex readers call the original first, then force YES."),
+            @"rows": @[
+                [SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18" defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL readers") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"EasyGating Internal" subtitle:@"EasyGatingGetBoolean_Internal_DoNotUseOrMock" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"EasyGating Platform" subtitle:@"EasyGatingPlatformGetBoolean" defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"EasyGating AuthDataContext" subtitle:@"" defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"MCQ EasyGating" subtitle:@"" defaultsKey:@"sci_force_easy_gating_mcq" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:SCILocalized(@"Force Sessioned/MCI BOOL readers") subtitle:SCILocalized(@"MSGC + MCIExperiment + MCIExtension") defaultsKey:@"sci_force_sessioned_mc_all" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"MSGC Sessioned BOOL" subtitle:@"MSGCSessionedMobileConfigGetBoolean" defaultsKey:@"sci_force_msgc_sessioned_boolean" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"MCI Experiment BOOL" subtitle:@"MCIExperimentCacheGetMobileConfigBoolean" defaultsKey:@"sci_force_mci_experiment_boolean" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"MCI Extension BOOL" subtitle:@"MCIExtensionExperimentCacheGetMobileConfigBoolean" defaultsKey:@"sci_force_mci_extension_boolean" requiresRestart:YES],
+                [SCISetting switchCellWithTitle:@"META Extensions experiments" subtitle:@"GetBoolean + WithoutExposure" defaultsKey:@"sci_force_meta_ext_experiment" requiresRestart:YES],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Open native internal menus"),
+            @"footer": SCILocalized(@"The Debug Menu opener dismisses RyukGram first, temporarily satisfies the native rageshake opt-in, uses the validated settings entry point 3 and reports when the build/account callback refuses to present."),
+            @"rows": @[
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu") subtitle:SCILocalized(@"Calls -[IGWindow showDebugMenuWithEntryPoint:3] after dismissing this sheet") icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"] action:^{
+                    [SCIInternalMenusLauncher openInstagramDebugMenuWithCompletion:^(NSString *result) {
+                        if (![result hasPrefix:@"presented"]) SCIDevShow(@"Instagram Debug Menu", result);
+                    }];
+                }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingNotesSettings]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingSettingsVC]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
+                [SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL") subtitle:@"instagram://internal_settings" icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"] action:^{ NSString *r=[SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal URL",r); }],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Runtime"),
+            @"footer": SCILocalized(@"The ObjC index includes supported BOOL methods with zero or one object/integer argument; GraphQL dogfood uses exact typed hooks instead of a global status hook."),
+            @"rows": @[
+                [SCISetting navigationCellWithTitle:SCILocalized(@"Unified Runtime Browser") subtitle:SCILocalized(@"Exec + FBShared: ObjC, C, DATA and Swift/xrefs") icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"] viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeObjCMethods]],
+                [SCISetting navigationCellWithTitle:@"IGDSLauncherConfig" subtitle:@"" icon:[SCISymbol symbolWithName:@"wand.and.stars"] viewController:[SCIIGDSLauncherConfigViewController new]],
+            ]
+        },
+        @{
+            @"header": SCILocalized(@"Advanced experimental features"),
+            @"rows": @[
+                [self experimentalEntryCell],
+                ({ SCISetting *s=[SCISetting switchCellWithTitle:SCILocalized(@"Status Bar Old School") subtitle:@"" defaultsKey:@"sci_statusbar_oldschool" requiresRestart:NO]; s.icon=[SCISymbol symbolWithName:@"statusbar_oldschool" color:UIColor.labelColor]; s; }),
+                ({ SCISetting *s=[SCISetting switchCellWithTitle:SCILocalized(@"Stories Tray") subtitle:@"" defaultsKey:@"sci_story_tray" requiresRestart:NO]; s.icon=[SCISymbol symbolWithName:@"story_tray" color:UIColor.labelColor]; s; }),
+                ({ SCISetting *s=[SCISetting menuCellWithTitle:SCILocalized(@"Custom Feed Header") subtitle:@"" menu:[self menus][@"ig_wordmark_variant"]]; s.icon=[SCISymbol symbolWithName:@"custom_feed_header" color:UIColor.labelColor]; s; }),
+            ]
+        }
+    ]];
 }
 @end
