@@ -136,6 +136,7 @@ static void SCIClearCrashMarker(void) {
 + (NSArray<NSString *> *)allGateKeys {
     return @[
         kSCIForceIGObjCMasterKey,
+        @"sci_employee_internal",
         @"sci_force_ig_is_employee",
         @"sci_force_employee_defaults_persist",
         @"sci_force_ig_featured_internal_badge",
