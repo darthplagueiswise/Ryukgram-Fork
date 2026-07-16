@@ -42,14 +42,22 @@ static SCISetting *SCIEmployeeInternalSwitch(NSString *title, NSString *subtitle
 		return [SCIUtils getBoolPref:key];
 	} action:^(BOOL on) {
 		[SCIUtils setPref:@(on) forKey:key];
-		// Idempotente: instala alvos ainda ausentes quando liga e atualiza os
-		// caches C quando desliga. Os replacements consultam as prefs ao vivo.
+		// Idempotente: instala alvos disponíveis quando liga; replacements
+		// consultam as prefs ao vivo e voltam ao original quando desliga.
 		SCIInstallEmployeeInternalHooksIfNeeded();
 	}];
 }
 
 @implementation SCITweakSettings (Section_Dev)
 + (SCISetting *)devNavCell {
+	// Retry pós-launch: módulos Swift/BugReporter podem ainda não existir no ctor.
+	if ([SCIUtils getBoolPref:@"sci_employee_internal"] ||
+		[SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
+		[SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
+		[SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
+		SCIInstallEmployeeInternalHooksIfNeeded();
+	}
+
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Dev") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"wrench" fallback:@"hammer"] navSections:@[
 		@{
 			@"header": SCILocalized(@"Unified experiment engines"),
@@ -65,7 +73,7 @@ static SCISetting *SCIEmployeeInternalSwitch(NSString *title, NSString *subtitle
 		},
 		@{
 			@"header": SCILocalized(@"Employee, Internal Settings & Dev Menu"),
-			@"footer": SCILocalized(@"The master now mirrors the Facebook strategy with Instagram-native equivalents: known employee getters/setters, identity defaults, IGBugReportMenu availability=0, Internal Settings visibility, logged-out entry and Dogfooding Assistant. _ig_is_employee symbols are DATA descriptors and are never fishhooked as functions."),
+			@"footer": SCILocalized(@"The master mirrors the Facebook strategy with Instagram-native equivalents: known employee getters/setters, IGBugReportMenu availability=0, Internal Settings visibility, logged-out entry and Dogfooding Assistant. _ig_is_employee symbols are DATA descriptors and are never fishhooked as functions."),
 			@"rows": @[
 				SCIEmployeeInternalSwitch(SCILocalized(@"Employee / Internal"), SCILocalized(@"Forces known employee identity paths plus the native Internal Settings gates"), @"sci_employee_internal"),
 				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings access allowed"), SCILocalized(@"Forces IGInternalSettingsAvailabilityStatus to the confirmed available value 0"), @"sci_force_internal_settings_availability"),
