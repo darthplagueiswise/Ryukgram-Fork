@@ -1,5 +1,6 @@
 #import "SCIInternalMenusLauncher.h"
 #import "SCIDogfoodObjectRuntime.h"
+#import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <os/log.h>
@@ -10,6 +11,47 @@
 
 + (UIViewController *)topVC { return [SCIDogfoodObjectRuntime topViewController]; }
 + (id)session               { return [SCIDogfoodObjectRuntime activeUserSession]; }
+
+// -[IGWindow showDebugMenu] / -showDebugMenuWithEntryPoint:
+// Confirmado no executable novo. Esse é o opener real do Bug Reporter Menu,
+// que por sua vez navega para IGInternalSettingsS2NavigationPlugin.
++ (NSString *)openInstagramDebugMenu {
+    Class igWindowClass = NSClassFromString(@"IGWindow");
+    SEL showSel = NSSelectorFromString(@"showDebugMenu");
+    if (!igWindowClass) return @"IGWindow not found in this build";
+
+    UIWindow *target = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        NSArray<UIWindow *> *windows = ((UIWindowScene *)scene).windows;
+        for (UIWindow *window in windows) {
+            if ([window isKindOfClass:igWindowClass] && window.isKeyWindow) {
+                target = window;
+                break;
+            }
+        }
+        if (!target) {
+            for (UIWindow *window in windows) {
+                if ([window isKindOfClass:igWindowClass]) {
+                    target = window;
+                    break;
+                }
+            }
+        }
+        if (target) break;
+    }
+
+    if (!target) return @"no active IGWindow";
+    if (![target respondsToSelector:showSel]) return @"IGWindow.showDebugMenu not found";
+
+    @try {
+        ((void(*)(id,SEL))objc_msgSend)(target, showSel);
+        MLOG("Instagram debug menu opened");
+        return @"opened Instagram Debug Menu";
+    } @catch (id e) {
+        return [NSString stringWithFormat:@"showDebugMenu threw: %@", e];
+    }
+}
 
 // Return a navigation controller we can push onto, or nil.
 + (UINavigationController *)navFor:(UIViewController *)vc {
