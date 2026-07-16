@@ -16,6 +16,10 @@ static inline BOOL DGForceOn(void) {
     return sDGForceEnabled;
 }
 
+BOOL SCIIsGraphQLDogfoodForceEnabled(void) {
+    return DGForceOn();
+}
+
 %group SCIGraphQLDogfoodLocalDecisionGroup
 
 %hook IGBaseUser
