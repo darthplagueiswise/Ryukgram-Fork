@@ -8,6 +8,9 @@
 
 #define MLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] Menus " fmt,##__VA_ARGS__)
 
+void SCIInstallEmployeeInternalHooksIfNeeded(void);
+void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void);
+
 static BOOL sDebugMenuRequestInFlight = NO;
 static NSString *const kSCIRageShakeOptInKey = @"user-opted-in-for-rageshake";
 
@@ -111,6 +114,12 @@ static NSString *const kSCIRageShakeOptInKey = @"user-opted-in-for-rageshake";
 				message:@"error: a native Instagram Debug Menu request is already running"];
 			return;
 		}
+
+		// Retry late-loaded Bug Reporter, Swift identity and generated Pando
+		// classes immediately before the native settings entry point is invoked.
+		// Both installers are idempotent and perform no global launch-time scan.
+		SCIInstallEmployeeInternalHooksIfNeeded();
+		SCIInstallGraphQLDogfoodForceHooksIfNeeded();
 
 		UIWindow *target = [self activeIGWindow];
 		if (!target) {
@@ -266,8 +275,7 @@ static NSString *const kSCIRageShakeOptInKey = @"user-opted-in-for-rageshake";
 				UINavigationController *nav =
 					[[UINavigationController alloc]
 						initWithRootViewController:vc];
-				nav.modalPresentationStyle =
-					UIModalPresentationPageSheet;
+				nav.modalPresentationStyle = UIModalPresentationPageSheet;
 
 				if (!vc.navigationItem.leftBarButtonItem &&
 					[vc respondsToSelector:
