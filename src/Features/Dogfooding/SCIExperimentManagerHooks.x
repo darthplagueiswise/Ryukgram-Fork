@@ -6,12 +6,25 @@ static BOOL sSCIUnifiedExperimentInstalled = NO;
 
 %group SCIUnifiedExperimentManagers
 %hook FBCCIGExperimentManager
-- (BOOL)isFeatureEnabled:(unsigned long long)featureID { return SCIUnifiedExperimentOn() ? YES : %orig; }
-- (BOOL)isFeatureEnabledWithoutLogging:(unsigned long long)featureID { return SCIUnifiedExperimentOn() ? YES : %orig; }
+- (BOOL)isFeatureEnabled:(unsigned long long)featureID {
+	if (SCIUnifiedExperimentOn()) return YES;
+	return %orig(featureID);
+}
+- (BOOL)isFeatureEnabledWithoutLogging:(unsigned long long)featureID {
+	if (SCIUnifiedExperimentOn()) return YES;
+	return %orig(featureID);
+}
 %end
+
 %hook FBCustomExperimentManager
-- (BOOL)isFeatureEnabled:(unsigned long long)featureID { return SCIUnifiedExperimentOn() ? YES : %orig; }
-- (BOOL)isFeatureEnabledWithoutLogging:(unsigned long long)featureID { return SCIUnifiedExperimentOn() ? YES : %orig; }
+- (BOOL)isFeatureEnabled:(unsigned long long)featureID {
+	if (SCIUnifiedExperimentOn()) return YES;
+	return %orig(featureID);
+}
+- (BOOL)isFeatureEnabledWithoutLogging:(unsigned long long)featureID {
+	if (SCIUnifiedExperimentOn()) return YES;
+	return %orig(featureID);
+}
 %end
 %end
 
@@ -21,4 +34,8 @@ void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void) {
 	%init(SCIUnifiedExperimentManagers);
 }
 
-%ctor { @autoreleasepool { SCIInstallUnifiedExperimentManagerHooksIfNeeded(); } }
+%ctor {
+	@autoreleasepool {
+		SCIInstallUnifiedExperimentManagerHooksIfNeeded();
+	}
+}
