@@ -8,6 +8,7 @@
 
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
+void SCIInstallEmployeeInternalHooksIfNeeded(void);
 
 static UIViewController *SCIDevTop(void) {
 	UIWindow *w = nil;
@@ -36,6 +37,17 @@ static SCISetting *SCIExperimentSwitch(NSString *title, NSString *subtitle, NSSt
 	}];
 }
 
+static SCISetting *SCIEmployeeInternalSwitch(NSString *title, NSString *subtitle, NSString *key) {
+	return [SCISetting switchCellWithTitle:title subtitle:subtitle value:^BOOL {
+		return [SCIUtils getBoolPref:key];
+	} action:^(BOOL on) {
+		[SCIUtils setPref:@(on) forKey:key];
+		// Idempotente: instala alvos ainda ausentes quando liga e atualiza os
+		// caches C quando desliga. Os replacements consultam as prefs ao vivo.
+		SCIInstallEmployeeInternalHooksIfNeeded();
+	}];
+}
+
 @implementation SCITweakSettings (Section_Dev)
 + (SCISetting *)devNavCell {
 	return [SCISetting navigationCellWithTitle:SCILocalized(@"Dev") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"wrench" fallback:@"hammer"] navSections:@[
@@ -53,11 +65,12 @@ static SCISetting *SCIExperimentSwitch(NSString *title, NSString *subtitle, NSSt
 		},
 		@{
 			@"header": SCILocalized(@"Employee, Internal Settings & Dev Menu"),
-			@"footer": SCILocalized(@"Bug reporter init signatures and RCTDevMenu getters were revalidated in the supplied executable. These are separate from experiment forcing."),
+			@"footer": SCILocalized(@"The master now mirrors the Facebook strategy with Instagram-native equivalents: known employee getters/setters, identity defaults, IGBugReportMenu availability=0, Internal Settings visibility, logged-out entry and Dogfooding Assistant. _ig_is_employee symbols are DATA descriptors and are never fishhooked as functions."),
 			@"rows": @[
-				[SCISetting switchCellWithTitle:SCILocalized(@"Employee / Internal") subtitle:SCILocalized(@"isEmployee + ig_is_employee gates + IGBugReportMenu internal settings") defaultsKey:@"sci_employee_internal" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Internal settings menu") subtitle:SCILocalized(@"Forces showInternalSettings and shake-to-report in the current IGBugReportMenu initializer") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Internal settings while logged out") subtitle:@"" defaultsKey:@"sci_force_internal_settings_loggedout" requiresRestart:YES],
+				SCIEmployeeInternalSwitch(SCILocalized(@"Employee / Internal"), SCILocalized(@"Forces known employee identity paths plus the native Internal Settings gates"), @"sci_employee_internal"),
+				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings access allowed"), SCILocalized(@"Forces IGInternalSettingsAvailabilityStatus to the confirmed available value 0"), @"sci_force_internal_settings_availability"),
+				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings menu"), SCILocalized(@"Forces showInternalSettings and shake-to-report in both validated initializer ABIs"), @"sci_force_internal_settings_menu"),
+				SCIEmployeeInternalSwitch(SCILocalized(@"Internal settings while logged out"), SCILocalized(@"Forces showLoggedOutInternalSettings"), @"sci_force_internal_settings_loggedout"),
 				[SCISetting switchCellWithTitle:SCILocalized(@"React Native Dev Menu") subtitle:SCILocalized(@"Forces RCTDevMenu devMenuEnabled, shakeToShow, hot loading and keyboard shortcuts") value:^BOOL { return [SCIUtils getBoolPref:@"sci_force_rct_dev_menu"]; } action:^(BOOL on) { [SCIUtils setPref:@(on) forKey:@"sci_force_rct_dev_menu"]; if(on) SCIInstallInternalDevMenuHooksIfNeeded(); }],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Apply internal/debug now") subtitle:SCILocalized(@"Uses the live IGAutofillInternalSettings session object") icon:[SCISymbol symbolWithIGName:@"bcn_wrench_outline_24" fallback:@"wrench.and.screwdriver"] action:^{ SCIDevShow(SCILocalized(@"Internal/debug"), [SCIInternalSettingsApplier applyNow]); }],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Force Bloks experience") subtitle:@"" defaultsKey:@"sci_apply_force_bloks" requiresRestart:YES],
@@ -85,6 +98,7 @@ static SCISetting *SCIExperimentSwitch(NSString *title, NSString *subtitle, NSSt
 		@{
 			@"header": SCILocalized(@"Open native internal menus"),
 			@"rows": @[
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu") subtitle:SCILocalized(@"Calls the validated -[IGWindow showDebugMenu] entry point") icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"] action:^{ NSString *r=[SCIInternalMenusLauncher openInstagramDebugMenu]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Instagram Debug Menu",r); }],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingNotesSettings]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingSettingsVC]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL") subtitle:@"instagram://internal_settings" icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"] action:^{ NSString *r=[SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal URL",r); }],
