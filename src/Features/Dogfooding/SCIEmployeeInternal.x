@@ -18,7 +18,6 @@
 // toggle faz o caminho voltar ao original sem tentar desinstalar IMPs.
 
 #import "../../Utils.h"
-#import "SCIEmployeeDefaults.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -260,10 +259,6 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 	static BOOL knownObjCInstalled = NO;
 	static BOOL swiftIdentityInstalled = NO;
 	static BOOL bugReporterInstalled = NO;
-
-	// Também atualiza o cache C dos hooks de NSUserDefaults. Quando o master
-	// desliga, esta chamada torna o cache falso e os hooks voltam ao original.
-	[SCIEmployeeDefaults installHooksIfNeeded];
 
 	if (!EIAnyOn()) return;
 
