@@ -245,7 +245,7 @@ static NSUInteger DGInstallEligibilityRuntimeModelHooks(void) {
     int count = objc_getClassList(NULL, 0);
     if (count <= 0) return 0;
 
-    Class *classes = calloc((size_t)count, sizeof(Class));
+    __unsafe_unretained Class *classes = (__unsafe_unretained Class *)calloc((size_t)count, sizeof(Class));
     count = objc_getClassList(classes, count);
     NSUInteger installed = 0;
     SEL target = NSSelectorFromString(@"xdtApi_V1_Dogfooding_EligibilityStatus");
