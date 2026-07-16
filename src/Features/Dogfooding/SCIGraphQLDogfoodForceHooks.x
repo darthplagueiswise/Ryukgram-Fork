@@ -37,6 +37,19 @@ BOOL SCIIsGraphQLDogfoodForceEnabled(void) {
 static id (*orig_DGExactEligibilityStatus)(id, SEL) = NULL;
 static void (*orig_DGWarningExpiration)(id, SEL, id) = NULL;
 
+// Revalidated in Instagram(4), SHA-256
+// a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa:
+//
+// DogfoodingEligibilityQueryResponse
+//   -> xdtApi_V1_Dogfooding_EligibilityStatus
+//   -> exact nested model -status
+//   -> -boolValue
+//   -> tbnz: YES skips the show-issue path; NO enters it.
+//
+// There is no third GraphQL warning status in this path. Warning expiration is
+// a separate local coordinator callback, hooked independently below. Returning
+// @YES here is therefore the exact local eligible/pass value, not a guessed
+// enum or a global -status override.
 static id DGExactEligibilityStatus(id self, SEL _cmd) {
     if (DGForceOn()) return @YES;
     return orig_DGExactEligibilityStatus
