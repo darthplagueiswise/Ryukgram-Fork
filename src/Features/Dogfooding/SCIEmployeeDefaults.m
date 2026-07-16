@@ -9,6 +9,7 @@
 
 #define EDLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] EmployeeDefaults " fmt, ##__VA_ARGS__)
 
+static NSString *const kSCIEmployeeInternalMasterKey = @"sci_employee_internal";
 static NSString *const kSCIForceEmployeeMasterKey = @"sci_force_ig_internal_employee";
 static NSString *const kSCIForceEmployeeGetterKey = @"sci_force_ig_is_employee";
 static NSString *const kSCIForceEmployeeDefaultsKey = @"sci_force_employee_defaults_persist";
@@ -24,6 +25,7 @@ static volatile BOOL sSCIEmployeeEnabledCache = NO;
 
 static void SCIUpdateEmployeeEnabledCache(void) {
     sSCIEmployeeEnabledCache =
+        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIEmployeeInternalMasterKey] ||
         [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeMasterKey] ||
         [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeGetterKey]  ||
         [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeDefaultsKey];
