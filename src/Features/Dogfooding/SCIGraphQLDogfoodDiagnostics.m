@@ -31,9 +31,7 @@ static BOOL sDGE2EObserverHooked;
 
 static NSMutableArray<NSString *> *DGEvents(void) {
     static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        sDGEvents = [NSMutableArray array];
-    });
+    dispatch_once(&onceToken, ^{ sDGEvents = [NSMutableArray array]; });
     return sDGEvents;
 }
 
@@ -63,17 +61,61 @@ static void DGRecord(NSString *message) {
     DGLOG("%{public}@", line);
 }
 
+// Runtime encodings may preserve quoted class/protocol names and detailed block
+// signatures. Strip those annotations while preserving the ABI shape.
+static NSString *DGNormalizedEncoding(const char *encoding) {
+    if (!encoding) return @"";
+    NSMutableString *out = [NSMutableString string];
+    const char *p = encoding;
+    while (*p) {
+        if (*p != '@') {
+            [out appendFormat:@"%c", *p++];
+            continue;
+        }
+
+        [out appendString:@"@"];
+        p++;
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') p++;
+            if (*p == '"') p++;
+            continue;
+        }
+        if (*p == '?') {
+            [out appendString:@"?"];
+            p++;
+            if (*p == '<') {
+                NSInteger depth = 0;
+                do {
+                    if (*p == '<') depth++;
+                    else if (*p == '>') depth--;
+                    p++;
+                } while (*p && depth > 0);
+            }
+        }
+    }
+    return out;
+}
+
 static BOOL DGTypeMatches(Method method, const char *expected) {
     if (!method || !expected) return NO;
-    const char *encoding = method_getTypeEncoding(method);
-    return encoding && strcmp(encoding, expected) == 0;
+    NSString *actual = DGNormalizedEncoding(method_getTypeEncoding(method));
+    NSString *wanted = DGNormalizedEncoding(expected);
+    return [actual isEqualToString:wanted];
 }
 
 static BOOL DGInstallInstanceHook(Class cls, SEL sel, IMP replacement, IMP *original, const char *encoding) {
-    if (!cls || !sel || !replacement || !original || *original) return *original != NULL;
+    if (!original) return NO;
+    if (*original) return YES;
+    if (!cls || !sel || !replacement) return NO;
+
     Method method = class_getInstanceMethod(cls, sel);
     if (!DGTypeMatches(method, encoding)) {
-        if (method) DGLOG("skip %{public}@ %{public}s ABI=%{public}s", NSStringFromClass(cls), sel_getName(sel), method_getTypeEncoding(method));
+        if (method) {
+            DGLOG("skip %{public}@ %{public}s ABI=%{public}s normalized=%{public}@",
+                  NSStringFromClass(cls), sel_getName(sel), method_getTypeEncoding(method),
+                  DGNormalizedEncoding(method_getTypeEncoding(method)));
+        }
         return NO;
     }
     MSHookMessageEx(cls, sel, replacement, original);
@@ -81,8 +123,7 @@ static BOOL DGInstallInstanceHook(Class cls, SEL sel, IMP replacement, IMP *orig
 }
 
 static BOOL DGInstallClassHook(Class cls, SEL sel, IMP replacement, IMP *original, const char *encoding) {
-    if (!cls) return NO;
-    return DGInstallInstanceHook(object_getClass(cls), sel, replacement, original, encoding);
+    return cls ? DGInstallInstanceHook(object_getClass(cls), sel, replacement, original, encoding) : NO;
 }
 
 #pragma mark - Exact DogfoodingEligibilityQuery model
@@ -94,8 +135,7 @@ static id DGEligibilityStatus(id self, SEL _cmd) {
         BOOL eligible = ((BOOL (*)(id, SEL))objc_msgSend)(value, @selector(boolValue));
         @synchronized (DGEvents()) { sDGLastEligibilityStatus = @(eligible); }
         DGRecord([NSString stringWithFormat:@"DogfoodingEligibilityQuery status=%@ (%@)",
-                  eligible ? @"YES / eligible path" : @"NO / show-issue path",
-                  DGClassName(value)]);
+                  eligible ? @"YES / eligible path" : @"NO / show-issue path", DGClassName(value)]);
     } else {
         DGRecord([NSString stringWithFormat:@"DogfoodingEligibilityQuery status object=%@ (no boolValue)", DGClassName(value)]);
     }
@@ -398,9 +438,8 @@ static BOOL DGE2EBypass(id self, SEL _cmd, id launcherSet) {
     for (NSString *name in selectors) {
         SEL sel = NSSelectorFromString(name);
         Method method = class_getInstanceMethod(cls, sel);
-        [rows addObject:[NSString stringWithFormat:@"%@ — %@ — %@",
-                         name, method ? @"present" : @"absent",
-                         method ? [NSString stringWithUTF8String:method_getTypeEncoding(method)] : @"no ABI"]];
+        NSString *encoding = method ? [NSString stringWithUTF8String:method_getTypeEncoding(method)] : @"no ABI";
+        [rows addObject:[NSString stringWithFormat:@"%@ — %@ — %@", name, method ? @"present" : @"absent", encoding]];
     }
     [rows addObject:@"\nWarmup is callable below. ACS/OHAI token retrieval is intentionally not invoked or displayed."];
     return [rows componentsJoinedByString:@"\n"];
