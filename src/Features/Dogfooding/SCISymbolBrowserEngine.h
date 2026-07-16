@@ -1,21 +1,5 @@
 // SCISymbolBrowserEngine.h
-//
-// Shared runtime engine for the two dynamic symbol browsers (Instagram exec and
-// FBSharedFramework). It enumerates ObjC classes belonging to one image, lists
-// their hookable BOOL getters, reports each getter's LIVE current value, and
-// lets the user persist a force override.
-//
-// Runtime-force timing model:
-//   • Persistence: one NSUserDefaults dict (sci_symbol_overrides) via SCIUtils,
-//     registered in SCIDefaults so backup/export includes it.
-//   • Hooking: persisted overrides are installed once from Logos bootstrap.
-//     A newly selected getter is saved and installed live immediately; the
-//     replacement reads the in-memory cache, not NSUserDefaults.
-//   • Replacement hot path never reads NSUserDefaults. It reads only a static
-//     immutable cache refreshed when the settings UI changes.
-//   • Enumeration remains on-demand when the browser opens; no class crawling at
-//     launch unless the user already saved overrides.
-
+// Runtime ObjC experiment/gating browser for Instagram + FBSharedFramework.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -25,11 +9,20 @@ typedef NS_ENUM(NSInteger, SCISymbolImage) {
 	SCISymbolImageFBShared  = 1,
 };
 
+typedef NS_ENUM(NSInteger, SCISymbolArgumentKind) {
+	SCISymbolArgumentNone = 0,
+	SCISymbolArgumentObject,
+	SCISymbolArgumentInteger,
+};
+
 @interface SCISymbolGetter : NSObject
 @property (nonatomic, copy) NSString *selectorName;
 @property (nonatomic, copy) NSString *ownerClassName;
+@property (nonatomic, copy) NSString *typeEncoding;
 @property (nonatomic, readonly) NSString *overrideKey;
 @property (nonatomic, assign) BOOL isClassMethod;
+@property (nonatomic, assign) SCISymbolArgumentKind argumentKind;
+@property (nonatomic, readonly) BOOL isParameterized;
 @property (nonatomic, readonly, nullable) NSNumber *liveValue;
 @property (nonatomic, readonly, nullable) NSNumber *override;
 @end
@@ -40,32 +33,19 @@ typedef NS_ENUM(NSInteger, SCISymbolImage) {
 @end
 
 @interface SCISymbolBrowserEngine : NSObject
-
 + (NSArray<SCISymbolClass *> *)classesForImage:(SCISymbolImage)image;
-
-+ (nullable NSNumber *)liveValueForClass:(NSString *)className
-								selector:(NSString *)selectorName
-						 isClassMethod:(BOOL)isClassMethod;
-
++ (nullable NSNumber *)liveValueForClass:(NSString *)className selector:(NSString *)selectorName isClassMethod:(BOOL)isClassMethod;
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
 + (BOOL)hookInstalledForKey:(NSString *)overrideKey;
 + (BOOL)installOverrideForKey:(NSString *)overrideKey;
-
-+ (void)setOverride:(nullable NSNumber *)value
-		   forClass:(NSString *)className
-		   selector:(NSString *)selectorName
-	  isClassMethod:(BOOL)isClassMethod;
-
++ (void)setOverride:(nullable NSNumber *)value forClass:(NSString *)className selector:(NSString *)selectorName isClassMethod:(BOOL)isClassMethod;
 + (void)reinstallPersistedHooks;
 
-// Sweep por palavra-chave: varre a runtime (ambas as imagens), casa classe+seletor
-// contra as needles e força YES em cada getter BOOL no-arg encontrado, reusando o
-// mesmo caminho de override persistido. Retorna quantos foram instalados.
-// Descoberta 100% runtime (classesForImage:), sem lista curada de seletores.
-+ (NSUInteger)sweepForceForClassNeedles:(NSArray<NSString *> *)classNeedles
-                        selectorNeedles:(NSArray<NSString *> *)selectorNeedles
-                             forcedValue:(BOOL)forcedValue;
-
+// Explicit, on-demand experiment surfaces. No broad runtime scan occurs in %ctor.
++ (NSUInteger)setExperimentManagersForced:(nullable NSNumber *)value;
++ (NSUInteger)setExperimentConfigsForced:(nullable NSNumber *)value;
++ (NSUInteger)setExperimentHelpersForced:(nullable NSNumber *)value;
++ (NSUInteger)sweepForceForClassNeedles:(NSArray<NSString *> *)classNeedles selectorNeedles:(NSArray<NSString *> *)selectorNeedles forcedValue:(BOOL)forcedValue;
 @end
 
 NS_ASSUME_NONNULL_END
