@@ -15,10 +15,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)setFOASandboxHostname:(NSString *)hostname;
 + (NSString *)resetFOASandboxOverride;
 
-// GraphQL Debug capability inspection. Warmup is exposed, but ACS/OHAI token
-// retrieval is intentionally not invoked or displayed.
+// GraphQL Debug provider actions. Credential checks report only presence,
+// runtime class and errors; token/config contents are never logged or shown.
 + (NSString *)graphQLDebugCapabilities;
 + (void)warmupGraphQLDebugWithCompletion:(void (^)(NSString *result))completion;
++ (void)retrieveGraphQLDebugACSTokenStatusWithCompletion:(void (^)(NSString *result))completion;
++ (void)retrieveGraphQLDebugACSAndOHAIStatusWithCompletion:(void (^)(NSString *result))completion;
 
 @end
 
