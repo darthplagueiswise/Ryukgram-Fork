@@ -182,7 +182,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"Validated in Instagram(4): the exact nested GraphQL status is boolean (YES skips show-issue; NO enters it). Warning expiration is a separate local coordinator state. The master also forces employee getters, Internal Settings availability=0 and native menu visibility; repeated update/build service checks remain observable in the snapshot."),
+			@"footer": SCILocalized(@"Validated in Instagram(30): Internal Settings opens through the local status=0 path; GraphQL/Pando only supplies upstream eligibility. Dogfooding Assistant uses a separate lazy menu-row socket, with a native Dogfooding/Notes fallback when that socket is unavailable. Internal-only content still requires Lighthouse/VPN."),
 			@"rows": @[
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Employee / Internal"),

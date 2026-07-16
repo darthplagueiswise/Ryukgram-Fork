@@ -20,6 +20,7 @@
 // toggle faz o caminho voltar ao original sem tentar desinstalar IMPs.
 
 #import "../../Utils.h"
+#import "SCIDogfoodObjectRuntime.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -183,6 +184,7 @@ static EIBugMenuLegacyIMP orig_EIBugMenuLegacy = NULL;
 static EIBugMenuCurrentIMP orig_EIBugMenuCurrent = NULL;
 static void (*orig_EIBugMenuViewDidLoad)(id, SEL) = NULL;
 static void (*orig_EIBugMenuViewDidAppear)(id, SEL, BOOL) = NULL;
+static void (*orig_EIBugMenuDidSelectRow)(id, SEL, UITableView *, NSIndexPath *) = NULL;
 
 static BOOL EIWriteIntegerIvar(id object, const char *name, NSInteger value) {
 	if (!object || !name) return NO;
@@ -209,6 +211,19 @@ static UITableView *EIBugMenuTableView(id controller) {
 	if (!ivar) return nil;
 	id value = object_getIvar(controller, ivar);
 	return [value isKindOfClass:UITableView.class] ? value : nil;
+}
+
+static NSString *EIBugMenuRowTitle(UIView *view) {
+	if (!view) return nil;
+	if ([view isKindOfClass:UILabel.class]) {
+		NSString *text = ((UILabel *)view).text;
+		if (text.length) return text;
+	}
+	for (UIView *child in view.subviews) {
+		NSString *text = EIBugMenuRowTitle(child);
+		if (text.length) return text;
+	}
+	return nil;
 }
 
 static void EIApplyBugMenuLiveState(id controller, BOOL reloadTable) {
@@ -312,6 +327,42 @@ static void EIBugMenuViewDidAppear(id self, SEL _cmd, BOOL animated) {
 	EIApplyBugMenuLiveState(self, YES);
 }
 
+static void EIBugMenuDidSelectRow(id self, SEL _cmd,
+	UITableView *tableView, NSIndexPath *indexPath) {
+	// Native didSelect reads the availability ivar again. Reapply immediately
+	// before the tap so a late server/session refresh cannot turn a visible row
+	// into the status!=0 no-op path decoded in Instagram(30).
+	EIApplyBugMenuLiveState(self, NO);
+
+	UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+	NSString *title = cell.textLabel.text ?: EIBugMenuRowTitle(cell.contentView);
+	BOOL dogfoodingAssistant =
+		[title caseInsensitiveCompare:@"Dogfooding Assistant"] == NSOrderedSame;
+	UIViewController *topBefore = dogfoodingAssistant
+		? [SCIDogfoodObjectRuntime topViewController]
+		: nil;
+
+	if (orig_EIBugMenuDidSelectRow) {
+		orig_EIBugMenuDidSelectRow(self, _cmd, tableView, indexPath);
+	}
+
+	if (!dogfoodingAssistant || !EIMasterOn()) return;
+
+	// The row's native handler is socket-driven. On non-employee/sideloaded
+	// sessions the menu Boolean can be forced while the lazy
+	// IGBugReportingDogfoodingAssistantMenuRowProviding socket resolves nil;
+	// the native handler then returns without navigation. Give it one main-loop
+	// turn, and only use the already-implemented native Dogfooding/Notes launcher
+	// when no controller was opened.
+	dispatch_async(dispatch_get_main_queue(), ^{
+		UIViewController *topAfter = [SCIDogfoodObjectRuntime topViewController];
+		if (topAfter != topBefore) return;
+		if ([self isKindOfClass:UIViewController.class] &&
+			((UIViewController *)self).presentedViewController) return;
+		[SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
+	});
+}
+
 static BOOL EIInstallBugReporterHooks(void) {
 	Class cls = objc_getClass("_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
 	if (!cls) cls = objc_getClass("IGBugReportMenuViewController");
@@ -369,10 +420,20 @@ static BOOL EIInstallBugReporterHooks(void) {
 	}
 	installed = installed || (orig_EIBugMenuViewDidAppear != NULL);
 
-	EILOG("Bug Reporter hooks legacy=%d current=%d load=%d appear=%d",
+	SEL didSelectSel = @selector(tableView:didSelectRowAtIndexPath:);
+	Method didSelectMethod = class_getInstanceMethod(cls, didSelectSel);
+	if (!orig_EIBugMenuDidSelectRow &&
+		EITypeEncodingMatches(didSelectMethod, "v32@0:8@16@24")) {
+		MSHookMessageEx(cls, didSelectSel, (IMP)EIBugMenuDidSelectRow,
+		                (IMP *)&orig_EIBugMenuDidSelectRow);
+	}
+	installed = installed || (orig_EIBugMenuDidSelectRow != NULL);
+
+	EILOG("Bug Reporter hooks legacy=%d current=%d load=%d appear=%d select=%d",
 	      orig_EIBugMenuLegacy != NULL, orig_EIBugMenuCurrent != NULL,
 	      orig_EIBugMenuViewDidLoad != NULL,
-	      orig_EIBugMenuViewDidAppear != NULL);
+	      orig_EIBugMenuViewDidAppear != NULL,
+	      orig_EIBugMenuDidSelectRow != NULL);
 	return installed;
 }
 
