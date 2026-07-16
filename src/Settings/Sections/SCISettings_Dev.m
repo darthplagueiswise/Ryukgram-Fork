@@ -16,6 +16,7 @@
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
+#import "../../Features/Dogfooding/SCISymbolBrowserEngine.h"
 
 
 @implementation SCITweakSettings (Section_Dev)
@@ -31,24 +32,31 @@
 												@"rows": @[
 													[SCISetting switchCellWithTitle:SCILocalized(@"★ Internal & Dogfood Menus") subtitle:SCILocalized(@"Persists ON/OFF. Applies only when switched ON inside Settings; never auto-runs during launch.") defaultsKey:@"sci_internal_menus" requiresRestart:NO],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Internal hook crash guard") subtitle:SCILocalized(@"Auto-disables active internal gates if the previous launch crashed before becoming stable") defaultsKey:@"sci_internal_gate_crash_guard_enabled" requiresRestart:YES],
-													[SCISetting switchCellWithTitle:SCILocalized(@"Force all IG-only/debug ObjC gates") subtitle:SCILocalized(@"Badges internos, launch debug info e story debug underlay (isEmployee agora fica no toggle Employee / Internal acima)") defaultsKey:@"sci_force_ig_internal_employee" requiresRestart:NO],
 												[SCISetting switchCellWithTitle:SCILocalized(@"★ Force ALL MobileConfig gates") subtitle:SCILocalized(@"Master legacy agora só cobre IGMobileConfig bool, iOS18 internal apps e Minos; EasyGating/MCI/MSGC usam seus próprios toggles para evitar crash em lote.") defaultsKey:@"sci_force_all_mc_gates" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Force all MobileConfig BOOL gates") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_all" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"MobileConfig internal-use BOOL") subtitle:@"" defaultsKey:@"sci_force_mc_internal_use_boolean" requiresRestart:YES],
 													[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:SCILocalized(@"Uses the exported installed-internal-apps symbol when available; requires restart.") defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK encryption") subtitle:@"" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"★ Employee / Internal") subtitle:SCILocalized(@"Um toggle (estilo FBTweak): força isEmployee (ObjC+Swift), os C gates ig_is_employee/ig_is_employee_or_test_user (fishhook) e o init do bug reporter — as entradas internal/dogfood aparecem naturalmente. Requer restart.") defaultsKey:@"sci_employee_internal" requiresRestart:YES],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Internal settings menu") subtitle:SCILocalized(@"Força showInternalSettings + showShake no init do bug reporter (caminho separado do Employee, pra isolar o comportamento em runtime). Requer restart.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:YES],
+												[SCISetting switchCellWithTitle:SCILocalized(@"★ Employee / Internal")
+							subtitle:SCILocalized(@"Toggle único (estilo FBTweak). Ao ligar: (1) força isEmployee ObjC+Swift e os C gates ig_is_employee/ig_is_employee_or_test_user (fishhook) e o init do bug reporter — instalados no próximo launch; (2) roda AGORA um sweep runtime que descobre e força a YES todo getter BOOL de employee/test-user, dogfood e internal-settings/debug-menu/developer nas DUAS imagens (Instagram exec + FBSharedFramework). Descoberta 100% runtime, sem alvos fixos que quebram por versão. Requer restart pros gates C/bug-reporter.")
+							value:^BOOL{ return [SCIUtils getBoolPref:@"sci_employee_internal"]; }
+							action:^(BOOL on) {
+								[SCIUtils setPref:@(on) forKey:@"sci_employee_internal"];
+								if (!on) return;
+								dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+									NSArray *clsNeedles = @[@"employee", @"dogfood", @"dogfooding", @"dogfooder", @"internalsettings", @"internaltool", @"rctdevmenu", @"rctdevsettings", @"debugmenu"];
+									NSArray *selNeedles = @[@"employee", @"vieweremployee", @"testuser", @"internaltestuser", @"employeeortest", @"dogfood", @"dogfooding", @"dogfooder", @"internalsettings", @"internaltool", @"debugmenu", @"debugcontroller", @"debugview", @"developer", @"devmenu", @"devsettings"];
+									NSUInteger n = [SCISymbolBrowserEngine sweepForceForClassNeedles:clsNeedles selectorNeedles:selNeedles forcedValue:YES];
+									dispatch_async(dispatch_get_main_queue(), ^{
+										[SCIUtils showToastForDuration:4.0 title:[NSString stringWithFormat:@"Employee sweep: %lu getters forçados. Reinicie pros gates C/bug-reporter.", (unsigned long)n]];
+									});
+								});
+							}],
+																								[SCISetting switchCellWithTitle:SCILocalized(@"Internal settings menu") subtitle:SCILocalized(@"Força showInternalSettings + showShake no init do bug reporter (caminho separado do Employee, pra isolar o comportamento em runtime). Requer restart.") defaultsKey:@"sci_force_internal_settings_menu" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Internal settings (logged out)") subtitle:SCILocalized(@"Também força o showLoggedOutInternalSettings no mesmo init. Requer restart.") defaultsKey:@"sci_force_internal_settings_loggedout" requiresRestart:YES],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Override availability status") subtitle:SCILocalized(@"Sobrescreve o internalSettingsAvailabilityStatus (enum Swift) com o valor abaixo. O valor exato não pôde ser provado estaticamente — teste 1/2/3 ao vivo. Sob crash guard. Requer restart.") defaultsKey:@"sci_force_internal_settings_availability" requiresRestart:YES],
 												[SCISetting stepperCellWithTitle:SCILocalized(@"Availability status value") subtitle:SCILocalized(@"internalSettingsAvailabilityStatus = %@%@") defaultsKey:@"sci_internal_settings_availability_value" min:0 max:5 step:1 label:@"" singularLabel:@""],
 												[SCISetting switchCellWithTitle:SCILocalized(@"Persist employee defaults") subtitle:@"" defaultsKey:@"sci_force_employee_defaults_persist" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Featured internal badge") subtitle:@"" defaultsKey:@"sci_force_ig_featured_internal_badge" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Inbox internal badge") subtitle:@"" defaultsKey:@"sci_force_ig_inbox_internal_badge" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Creation internal label") subtitle:@"" defaultsKey:@"sci_force_ig_creation_internal_label" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Launch debug info") subtitle:@"" defaultsKey:@"sci_force_ig_launch_debug_info" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Launch debug info V2") subtitle:@"" defaultsKey:@"sci_force_ig_launch_debug_info_v2" requiresRestart:NO],
-												[SCISetting switchCellWithTitle:SCILocalized(@"Story debug underlay") subtitle:@"" defaultsKey:@"sci_force_ig_story_debug_underlay" requiresRestart:NO],
 											]
 										},
 										@{

@@ -279,4 +279,40 @@ static BOOL sciInstallRuntimeOverrideForKey(NSString *key) {
 	}
 }
 
++ (NSUInteger)sweepForceForClassNeedles:(NSArray<NSString *> *)classNeedles
+                        selectorNeedles:(NSArray<NSString *> *)selectorNeedles
+                             forcedValue:(BOOL)forcedValue {
+	NSUInteger installed = 0;
+	// Ambas as imagens; classesForImage: já é varredura runtime real (objc_copyClassList
+	// filtrado por imagem) e só devolve getters BOOL no-arg hookáveis. Zero lista curada.
+	// Critério estilo FBTweak: casa se o NOME DA CLASSE contém um needle de classe OU
+	// o SELETOR contém um needle de seletor. Assim pega tanto RCTDevMenu.* (por classe)
+	// quanto IGFacebookUserInfo.isEmployee (por seletor, classe sem 'employee' no nome).
+	for (SCISymbolImage image = SCISymbolImageInstagram; image <= SCISymbolImageFBShared; image++) {
+		for (SCISymbolClass *cls in [self classesForImage:image] ?: @[]) {
+			NSString *cn = cls.className ?: @"";
+			NSString *cnLower = cn.lowercaseString;
+			BOOL classMatches = NO;
+			for (NSString *needle in classNeedles) {
+				if (needle.length && [cnLower containsString:needle.lowercaseString]) { classMatches = YES; break; }
+			}
+			for (SCISymbolGetter *g in cls.getters ?: @[]) {
+				NSString *sel = g.selectorName ?: @"";
+				NSString *selLower = sel.lowercaseString;
+				BOOL selMatches = NO;
+				for (NSString *needle in selectorNeedles) {
+					if (needle.length && [selLower containsString:needle.lowercaseString]) { selMatches = YES; break; }
+				}
+				if (!classMatches && !selMatches) continue;
+				[self setOverride:@(forcedValue)
+				         forClass:cn
+				         selector:sel
+				    isClassMethod:g.isClassMethod];
+				installed++;
+			}
+		}
+	}
+	return installed;
+}
+
 @end

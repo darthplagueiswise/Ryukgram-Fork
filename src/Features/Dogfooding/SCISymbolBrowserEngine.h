@@ -58,6 +58,14 @@ typedef NS_ENUM(NSInteger, SCISymbolImage) {
 
 + (void)reinstallPersistedHooks;
 
+// Sweep por palavra-chave: varre a runtime (ambas as imagens), casa classe+seletor
+// contra as needles e força YES em cada getter BOOL no-arg encontrado, reusando o
+// mesmo caminho de override persistido. Retorna quantos foram instalados.
+// Descoberta 100% runtime (classesForImage:), sem lista curada de seletores.
++ (NSUInteger)sweepForceForClassNeedles:(NSArray<NSString *> *)classNeedles
+                        selectorNeedles:(NSArray<NSString *> *)selectorNeedles
+                             forcedValue:(BOOL)forcedValue;
+
 @end
 
 NS_ASSUME_NONNULL_END

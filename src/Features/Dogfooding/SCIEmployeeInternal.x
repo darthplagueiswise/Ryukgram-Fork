@@ -2,13 +2,16 @@
 // =====================================================================
 // UM HOOK, UM TOGGLE — Employee / Internal (KEYSTONE)
 // =====================================================================
-// Espelha 1:1 o FBTEmployeeMode.x + FBTInternalImports.m do FBTweak, revalidado
-// no exec/framework NOVOS do Instagram (parser ObjC + chained-fixup + capstone).
-// Ligar `sci_employee_internal` força os getters/símbolos CONHECIDOS de
-// employee/internal a retornarem YES — entradas internal/dogfood aparecem
-// naturalmente, sem opener forçado.
+// Mesmo objetivo do FBTEmployeeMode.x do FBTweak (forçar employee/internal
+// globalmente), mas NÃO é espelho 1:1 — validado seletor a seletor contra o
+// binário 438 e vários alvos do FBTweak simplesmente não existem no Instagram
+// (são específicos do app Facebook): FBBugReportConfiguration (config por
+// setters), isInternalTestUser: (FBIdentitySwitcherGatingHelper),
+// FBProductTagCreationLogger, FB*ImageNetworkerConfiguration,
+// FBRichPushNotificationTypeTraits — nenhum tem equivalente na 438, confirmado
+// por busca exaustiva, não substituído por invenção.
 //
-// Alvos validados no binário novo (varredura completa de getters em exec + framework):
+// Alvos que EXISTEM e são hookados (revalidados contra 438):
 //   C imports (GOT, fishhook-safe; stub adrp/ldr/br + caller real confirmados):
 //       ig_is_employee
 //       ig_is_employee_or_test_user
@@ -17,11 +20,14 @@
 //       IGAdPlatformLogger_objc   (Instagram exec)
 //   Swift @objc -isEmployee:
 //       _TtC28IGAdInsertionLoggingKitSwift24IGAdPlatformLogger_swift
-//   Bug reporter menu (a entrada "Internal Settings" mora dentro dele):
-//       -[_TtC17IGBugReporterMenu29IGBugReportMenuViewController
-//         initWith...style:q64 internalSettingsAvailabilityStatus:q72
-//         showInternalSettings:B80 showLoggedOutInternalSettings:B84
-//         showShakeToReportPreferenceToggle:B88]
+//   Bug reporter menu (rageshake) — Instagram não usa config-por-setters como o
+//   FBTweak; usa INIT com BOOLs posicionais. Hookadas as 2 variantes de
+//   -[IGBugReportMenuViewController initWith...] confirmadas na 438 (a segunda,
+//   com showDogfoodingAssistant:/maisaUXVariantRawValue:, é nova nesta build):
+//       style:q64 internalSettingsAvailabilityStatus:q72
+//       showInternalSettings:B80 showLoggedOutInternalSettings:B84 (intocado)
+//       showShakeToReportPreferenceToggle:B88
+//       [variante 438] showDogfoodingAssistant:B92 maisaUXVariantRawValue:q96 (intocado)
 //
 // Sideload-safe: só MSHookMessageEx/%hook (ObjC/Swift @objc) + fishhook (GOT C import).
 // Nunca __TEXT inline. %ctor barato: lê 1 pref e instala só se ON.
@@ -65,6 +71,67 @@ static BOOL ei_ig_is_employee_or_test_user(void) { return YES; }
 %end
 %end
 
+// ── (4) Bug reporter menu (rageshake) init -> força Internal Settings visível ──
+// Instagram não tem um objeto de config por setters como o FBBugReportConfiguration
+// do FBTweak (confirmado: não existe classe equivalente nem os seletores
+// setEnableInternalSettingsOption:/setForceShowingInternalTools:/etc no binário).
+// O equivalente funcional aqui é via INIT: IGBugReportMenuViewController recebe
+// showInternalSettings/showShakeToReportPreferenceToggle (e, novo na 438,
+// showDogfoodingAssistant — o análogo do setShowTriageToDogfoodingAssistantSession:
+// do FBTweak) como BOOL posicionais. Hookamos as DUAS variantes de init confirmadas
+// no binário 438 e forçamos esses três flags a YES antes de repassar pro %orig.
+// internalSettingsAvailabilityStatus (enum) e showLoggedOutInternalSettings ficam
+// intocados — não há evidência de quais valores fazem o quê, não forço sem saber.
+%group SCIEmployeeBugReportGroup
+%hook IGBugReportMenuViewController
+
+- (id)initWithDeviceSession:(id)deviceSession
+                 userSession:(id)userSession
+         reliabilityLogging:(id)reliabilityLogging
+                    navChain:(id)navChain
+                    endpoint:(id)endpoint
+                  entryPoint:(id)entryPoint
+                       style:(NSInteger)style
+internalSettingsAvailabilityStatus:(NSInteger)internalSettingsAvailabilityStatus
+        showInternalSettings:(BOOL)showInternalSettings
+showLoggedOutInternalSettings:(BOOL)showLoggedOutInternalSettings
+showShakeToReportPreferenceToggle:(BOOL)showShakeToReportPreferenceToggle {
+	if (EIOn()) {
+		showInternalSettings = YES;
+		showShakeToReportPreferenceToggle = YES;
+	}
+	return %orig(deviceSession, userSession, reliabilityLogging, navChain, endpoint, entryPoint,
+	             style, internalSettingsAvailabilityStatus, showInternalSettings,
+	             showLoggedOutInternalSettings, showShakeToReportPreferenceToggle);
+}
+
+- (id)initWithDeviceSession:(id)deviceSession
+                 userSession:(id)userSession
+         reliabilityLogging:(id)reliabilityLogging
+                    navChain:(id)navChain
+                    endpoint:(id)endpoint
+                  entryPoint:(id)entryPoint
+                       style:(NSInteger)style
+internalSettingsAvailabilityStatus:(NSInteger)internalSettingsAvailabilityStatus
+        showInternalSettings:(BOOL)showInternalSettings
+showLoggedOutInternalSettings:(BOOL)showLoggedOutInternalSettings
+showShakeToReportPreferenceToggle:(BOOL)showShakeToReportPreferenceToggle
+    showDogfoodingAssistant:(BOOL)showDogfoodingAssistant
+     maisaUXVariantRawValue:(NSInteger)maisaUXVariantRawValue {
+	if (EIOn()) {
+		showInternalSettings = YES;
+		showShakeToReportPreferenceToggle = YES;
+		showDogfoodingAssistant = YES;
+	}
+	return %orig(deviceSession, userSession, reliabilityLogging, navChain, endpoint, entryPoint,
+	             style, internalSettingsAvailabilityStatus, showInternalSettings,
+	             showLoggedOutInternalSettings, showShakeToReportPreferenceToggle,
+	             showDogfoodingAssistant, maisaUXVariantRawValue);
+}
+
+%end
+%end
+
 // ── (4) Bug reporter menu init: força a entrada Internal Settings ──
 %ctor {
     @autoreleasepool {
@@ -83,6 +150,10 @@ static BOOL ei_ig_is_employee_or_test_user(void) { return YES; }
         // (3) Getter Swift (classe mangled via alias runtime)
         Class swCls = objc_getClass("_TtC28IGAdInsertionLoggingKitSwift24IGAdPlatformLogger_swift");
         if (swCls) %init(SCIEmployeeSwiftGroup, IGAdPlatformLogger_swift = swCls);
+
+        // (4) Bug reporter menu init — força Internal Settings/Shake-to-report/
+        // Dogfooding assistant visíveis (Logos pula a variante de init ausente).
+        %init(SCIEmployeeBugReportGroup);
 
         BOOL haveFB = objc_getClass("IGFacebookUserInfo") != nil;
         EILOG("installed rc=%d fbUserInfo=%d swift=%d", rc, haveFB, swCls!=nil);
