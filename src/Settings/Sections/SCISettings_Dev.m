@@ -5,6 +5,7 @@
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 #import "../../Features/Dogfooding/SCISymbolBrowserEngine.h"
+#import "../../Features/Dogfooding/SCIGraphQLDogfoodDiagnostics.h"
 
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
@@ -25,6 +26,27 @@ static void SCIDevShow(NSString *title, NSString *message) {
 	UIViewController *top = SCIDevTop(); if (!top) return;
 	UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
 	[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+	[top presentViewController:a animated:YES completion:nil];
+}
+static BOOL SCIDevResultWasHandled(NSString *result) {
+	return [result hasPrefix:@"opened"] || [result hasPrefix:@"presented"] || [result hasPrefix:@"scheduled"];
+}
+static void SCIDevPromptFOASandboxHostname(void) {
+	UIViewController *top = SCIDevTop(); if (!top) return;
+	UIAlertController *a = [UIAlertController alertControllerWithTitle:SCILocalized(@"FOA Sandbox Hostname")
+		message:SCILocalized(@"Enter a DNS hostname only. This changes the client environment; it does not bypass authentication or server authorization.")
+		preferredStyle:UIAlertControllerStyleAlert];
+	[a addTextFieldWithConfigurationHandler:^(UITextField *field) {
+		field.placeholder = @"sandbox.example.internal";
+		field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+		field.autocorrectionType = UITextAutocorrectionTypeNo;
+		field.keyboardType = UIKeyboardTypeURL;
+	}];
+	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+	[a addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Set") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+		NSString *hostname = a.textFields.firstObject.text ?: @"";
+		SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics setFOASandboxHostname:hostname]);
+	}]];
 	[top presentViewController:a animated:YES completion:nil];
 }
 static SCISetting *SCIExperimentSwitch(NSString *title, NSString *subtitle, NSString *key, NSUInteger (^apply)(NSNumber *)) {
@@ -106,10 +128,23 @@ static SCISetting *SCIEmployeeInternalSwitch(NSString *title, NSString *subtitle
 		@{
 			@"header": SCILocalized(@"Open native internal menus"),
 			@"rows": @[
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu") subtitle:SCILocalized(@"Calls the validated -[IGWindow showDebugMenu] entry point") icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"] action:^{ NSString *r=[SCIInternalMenusLauncher openInstagramDebugMenu]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Instagram Debug Menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingNotesSettings]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingSettingsVC]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal menu",r); }],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL") subtitle:@"instagram://internal_settings" icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"] action:^{ NSString *r=[SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"]; if(![r hasPrefix:@"opened"]&&![r hasPrefix:@"presented"]) SCIDevShow(@"Internal URL",r); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu") subtitle:SCILocalized(@"Dismisses RyukGram, restores IGWindow and calls showDebugMenuWithEntryPoint:0") icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"] action:^{ NSString *r=[SCIInternalMenusLauncher openInstagramDebugMenu]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Instagram Debug Menu",r); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding/Notes settings") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"gearshape"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingNotesSettings]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal menu",r); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Dogfooding Settings VC") subtitle:@"" icon:[SCISymbol symbolWithIGName:@"toolbox" fallback:@"wrench.and.screwdriver"] action:^{ NSString *r=[SCIInternalMenusLauncher openDogfoodingSettingsVC]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal menu",r); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open internal URL") subtitle:@"instagram://internal_settings" icon:[SCISymbol symbolWithIGName:@"bcn_link_outline_24" fallback:@"link"] action:^{ NSString *r=[SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"]; if(!SCIDevResultWasHandled(r)) SCIDevShow(@"Internal URL",r); }],
+			]
+		},
+		@{
+			@"header": SCILocalized(@"GraphQL, Dogfood & Sandbox"),
+			@"footer": SCILocalized(@"Revalidated in the uploaded executable: DogfoodingEligibilityQuery.status is read through boolValue. YES follows the normal/eligible path; NO enters the show-issue path. Warning/lockout is separate local policy. Observers preserve every original return value and completion."),
+			@"rows": @[
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Install GraphQL/Dogfood observers") subtitle:SCILocalized(@"Hooks the exact eligibility model, fragments, coordinator, build checks and original E2E result without forcing anything") icon:[SCISymbol symbolWithName:@"waveform.path.ecg"] action:^{ SCIDevShow(SCILocalized(@"GraphQL/Dogfood observers"), [SCIGraphQLDogfoodDiagnostics installObservers]); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Show GraphQL/Dogfood snapshot") subtitle:SCILocalized(@"Shows observed status, lookback_days and repeated backend-check calls") icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"] action:^{ SCIDevShow(SCILocalized(@"GraphQL/Dogfood snapshot"), [SCIGraphQLDogfoodDiagnostics snapshot]); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Current FOA Sandbox Override") subtitle:SCILocalized(@"Reads +currentOverride") icon:[SCISymbol symbolWithName:@"server.rack"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics currentFOASandboxOverride]); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Set FOA Sandbox Hostname") subtitle:SCILocalized(@"Calls +setSandboxOverrideWithHostname:reason: and requires restart") icon:[SCISymbol symbolWithName:@"network"] action:^{ SCIDevPromptFOASandboxHostname(); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Reset FOA Sandbox Override") subtitle:SCILocalized(@"Clears the override through the native setter") icon:[SCISymbol symbolWithName:@"arrow.counterclockwise"] action:^{ SCIDevShow(SCILocalized(@"FOA Sandbox"), [SCIGraphQLDogfoodDiagnostics resetFOASandboxOverride]); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"GraphQL Debug capabilities") subtitle:SCILocalized(@"Validates warmup and ACS/OHAI selectors without requesting credentials") icon:[SCISymbol symbolWithName:@"checkmark.shield"] action:^{ SCIDevShow(SCILocalized(@"GraphQL Debug"), [SCIGraphQLDogfoodDiagnostics graphQLDebugCapabilities]); }],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Warm up GraphQL Debug provider") subtitle:SCILocalized(@"Runs the native warmup only; no ACS/OHAI token is requested or displayed") icon:[SCISymbol symbolWithName:@"bolt.horizontal"] action:^{ [SCIGraphQLDogfoodDiagnostics warmupGraphQLDebugWithCompletion:^(NSString *result) { SCIDevShow(SCILocalized(@"GraphQL Debug"), result); }]; }],
 			]
 		},
 		@{
