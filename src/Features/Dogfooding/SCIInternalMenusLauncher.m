@@ -7,50 +7,84 @@
 
 #define MLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] Menus " fmt,##__VA_ARGS__)
 
+static UIWindow *SCIActiveInstagramWindow(void) {
+    Class igWindowClass = NSClassFromString(@"IGWindow");
+    if (!igWindowClass) return nil;
+
+    UIWindow *fallback = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        if (scene.activationState != UISceneActivationStateForegroundActive) continue;
+
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (![window isKindOfClass:igWindowClass]) continue;
+            if (!fallback) fallback = window;
+            if (window.isKeyWindow) return window;
+        }
+    }
+    return fallback;
+}
+
+static void SCIInvokeInstagramDebugMenu(UIWindow *target) {
+    if (!target) return;
+
+    [target makeKeyAndVisible];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SEL entrySel = NSSelectorFromString(@"showDebugMenuWithEntryPoint:");
+        SEL plainSel = NSSelectorFromString(@"showDebugMenu");
+        @try {
+            if ([target respondsToSelector:entrySel]) {
+                ((void (*)(id, SEL, NSInteger))objc_msgSend)(target, entrySel, 0);
+                MLOG("Instagram debug menu invoked with entryPoint=0");
+            } else if ([target respondsToSelector:plainSel]) {
+                ((void (*)(id, SEL))objc_msgSend)(target, plainSel);
+                MLOG("Instagram debug menu invoked through showDebugMenu");
+            } else {
+                MLOG("Instagram debug menu selector disappeared");
+            }
+        } @catch (id exception) {
+            MLOG("Instagram debug menu threw: %{public}@", exception);
+        }
+    });
+}
+
 @implementation SCIInternalMenusLauncher
 
 + (UIViewController *)topVC { return [SCIDogfoodObjectRuntime topViewController]; }
 + (id)session               { return [SCIDogfoodObjectRuntime activeUserSession]; }
 
-// -[IGWindow showDebugMenu] / -showDebugMenuWithEntryPoint:
-// Confirmado no executable novo. Esse é o opener real do Bug Reporter Menu,
-// que por sua vez navega para IGInternalSettingsS2NavigationPlugin.
+// -[IGWindow showDebugMenu] is a thin entryPoint=0 thunk. The old launcher
+// called it while RyukGram's settings sheet was still presented over IGWindow,
+// so Instagram attempted to present its menu behind/under the active sheet.
+// Dismiss the current modal first, restore IGWindow as key, then invoke on the
+// next main-loop turn. No timer/retry and no fake view controller.
 + (NSString *)openInstagramDebugMenu {
-    Class igWindowClass = NSClassFromString(@"IGWindow");
-    SEL showSel = NSSelectorFromString(@"showDebugMenu");
-    if (!igWindowClass) return @"IGWindow not found in this build";
-
-    UIWindow *target = nil;
-    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:UIWindowScene.class]) continue;
-        NSArray<UIWindow *> *windows = ((UIWindowScene *)scene).windows;
-        for (UIWindow *window in windows) {
-            if ([window isKindOfClass:igWindowClass] && window.isKeyWindow) {
-                target = window;
-                break;
-            }
-        }
-        if (!target) {
-            for (UIWindow *window in windows) {
-                if ([window isKindOfClass:igWindowClass]) {
-                    target = window;
-                    break;
-                }
-            }
-        }
-        if (target) break;
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [SCIInternalMenusLauncher openInstagramDebugMenu];
+        });
+        return @"scheduled Instagram Debug Menu on the main thread";
     }
 
-    if (!target) return @"no active IGWindow";
-    if (![target respondsToSelector:showSel]) return @"IGWindow.showDebugMenu not found";
+    UIWindow *target = SCIActiveInstagramWindow();
+    if (!target) return @"no foreground IGWindow";
 
-    @try {
-        ((void(*)(id,SEL))objc_msgSend)(target, showSel);
-        MLOG("Instagram debug menu opened");
-        return @"opened Instagram Debug Menu";
-    } @catch (id e) {
-        return [NSString stringWithFormat:@"showDebugMenu threw: %@", e];
+    SEL entrySel = NSSelectorFromString(@"showDebugMenuWithEntryPoint:");
+    SEL plainSel = NSSelectorFromString(@"showDebugMenu");
+    if (![target respondsToSelector:entrySel] && ![target respondsToSelector:plainSel]) {
+        return @"IGWindow debug-menu selectors not found";
     }
+
+    UIViewController *root = target.rootViewController;
+    if (root.presentedViewController) {
+        [root dismissViewControllerAnimated:YES completion:^{
+            SCIInvokeInstagramDebugMenu(target);
+        }];
+        return @"scheduled Instagram Debug Menu after dismissing RyukGram";
+    }
+
+    SCIInvokeInstagramDebugMenu(target);
+    return @"scheduled Instagram Debug Menu";
 }
 
 // Return a navigation controller we can push onto, or nil.
