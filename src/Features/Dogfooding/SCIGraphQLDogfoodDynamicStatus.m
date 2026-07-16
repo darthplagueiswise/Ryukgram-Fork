@@ -1,4 +1,4 @@
-#import "../../Utils.h"
+#import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -6,7 +6,8 @@
 
 #define DGDSLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] GraphQLDynamicStatus " fmt, ##__VA_ARGS__)
 
-static volatile BOOL sDGDynamicForceEnabled = NO;
+extern BOOL SCIIsGraphQLDogfoodForceEnabled(void);
+
 static const void *kDGEligibilityNestedMarker = &kDGEligibilityNestedMarker;
 static NSMutableSet<NSString *> *sDGRootHookedClasses;
 static NSMutableSet<NSString *> *sDGStatusHookedClasses;
@@ -16,12 +17,8 @@ typedef struct {
     IMP original;
 } DGDDescriptor;
 
-void SCIRefreshGraphQLDogfoodDynamicForceEnabled(void) {
-    sDGDynamicForceEnabled = [SCIUtils getBoolPref:@"sci_employee_internal"];
-}
-
 static inline BOOL DGDForceOn(void) {
-    return sDGDynamicForceEnabled;
+    return SCIIsGraphQLDogfoodForceEnabled();
 }
 
 static void DGDEnsureState(void) {
@@ -125,7 +122,6 @@ static BOOL DGDInstallRootHook(Class cls, SEL selector, Method method) {
 }
 
 NSUInteger SCIRefreshGraphQLDogfoodDynamicStatusHooks(void) {
-    SCIRefreshGraphQLDogfoodDynamicForceEnabled();
     DGDEnsureState();
 
     SEL rootSelector = NSSelectorFromString(@"xdtApi_V1_Dogfooding_EligibilityStatus");
