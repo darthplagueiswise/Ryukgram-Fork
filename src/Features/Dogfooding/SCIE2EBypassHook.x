@@ -1,5 +1,5 @@
 #import "../../Utils.h"
-#import "SCIGraphQLInternalTools.h"
+#import "SCIGraphQLDogfoodDiagnostics.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -23,7 +23,7 @@ static BOOL SCIE2EShouldBypass(id self, SEL _cmd, id launcherSet) {
 }
 
 void SCIInstallE2EBypassHookIfNeeded(void) {
-	SCIRegisterGraphQLInternalDefaults();
+	SCIRegisterGraphQLDogfoodDevDefaults();
 	if (sSCIE2EHookInstalled || !SCIE2EBypassEnabled()) return;
 
 	Class cls = objc_getClass("_TtC15IGE2EBypassUtil15IGE2EBypassUtil");
