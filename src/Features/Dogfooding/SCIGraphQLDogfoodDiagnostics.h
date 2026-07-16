@@ -2,6 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT void SCIRegisterGraphQLDogfoodDevDefaults(void);
+
 @interface SCIGraphQLDogfoodDiagnostics : NSObject
 
 // Installs read-only observers for the exact dogfood GraphQL models and
