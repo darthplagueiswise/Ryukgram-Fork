@@ -140,7 +140,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		navSections:@[
 		@{
 			@"header": SCILocalized(@"Unified experiment engines"),
-			@"footer": SCILocalized(@"Validated in Instagram(2): FBCCIGExperimentManager/FBCustomExperimentManager use BOOL isFeatureEnabled:(uint64_t). ExperimentConfig and helper sweeps enumerate only supported BOOL methods with zero or one ObjC/integer argument."),
+			@"footer": SCILocalized(@"Validated in Instagram(4): FBCCIGExperimentManager/FBCustomExperimentManager use BOOL isFeatureEnabled:(uint64_t). ExperimentConfig and helper sweeps enumerate only supported BOOL methods with zero or one ObjC/integer argument."),
 			@"rows": @[
 				[SCISetting switchCellWithTitle:SCILocalized(@"Force unified experiment managers")
 					subtitle:SCILocalized(@"Forces isFeatureEnabled: and isFeatureEnabledWithoutLogging: on both managers")
@@ -182,7 +182,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"The master covers the validated client chain: employee getters, GraphQL eligibility status (YES = eligible/pass), show-issue suppression, warning-expiration suppression, Internal Settings availability=0 and native menu visibility. Warning is a separate local state, not a third GraphQL status value."),
+			@"footer": SCILocalized(@"Validated in Instagram(4): the exact nested GraphQL status is boolean (YES skips show-issue; NO enters it). Warning expiration is a separate local coordinator state. The master also forces employee getters, Internal Settings availability=0 and native menu visibility; repeated update/build service checks remain observable in the snapshot."),
 			@"rows": @[
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Employee / Internal"),
@@ -213,7 +213,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 							[SCIGraphQLDogfoodDiagnostics installObservers]);
 					}],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"GraphQL dogfood snapshot")
-					subtitle:SCILocalized(@"Shows status, lookback_days, fragments and repeated backend-check calls")
+					subtitle:SCILocalized(@"Shows exact BOOL status, lookback_days, fragments and repeated update/build checks")
 					icon:[SCISymbol symbolWithIGName:@"bcn_info_outline_24" fallback:@"doc.text.magnifyingglass"]
 					action:^{
 						SCIDevShow(SCILocalized(@"GraphQL dogfood snapshot"),
@@ -289,7 +289,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Current C experiment gates"),
-			@"footer": SCILocalized(@"The removed IGMobileConfigBooleanValueForInternalUse reader is not exposed. Remaining rows map to imports/exports confirmed in Instagram(2) and FBSharedFramework(2); complex readers call the original first, then force YES."),
+			@"footer": SCILocalized(@"The removed IGMobileConfigBooleanValueForInternalUse reader is not exposed. Remaining rows map to imports/exports confirmed in Instagram(4) and FBSharedFramework(4); complex readers call the original first, then force YES."),
 			@"rows": @[
 				[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18" defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
@@ -307,10 +307,10 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Open native internal menus"),
-			@"footer": SCILocalized(@"The Debug Menu opener dismisses RyukGram, temporarily satisfies the native rageshake opt-in, calls the validated settings entry point 3 and reports when the account/build callback refuses to present."),
+			@"footer": SCILocalized(@"The Debug Menu opener fully dismisses RyukGram, invokes the validated native -showDebugMenu entry-point-0 thunk, keeps the temporary rageshake opt-in through the asynchronous account/build callback and verifies the presented controller before reporting success."),
 			@"rows": @[
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Open Instagram Debug Menu")
-					subtitle:SCILocalized(@"Calls -[IGWindow showDebugMenuWithEntryPoint:3] after dismissing this sheet")
+					subtitle:SCILocalized(@"Dismisses this sheet, calls -[IGWindow showDebugMenu] and reports a concrete presentation or gate failure")
 					icon:[SCISymbol symbolWithIGName:@"bcn_bug_outline_24" fallback:@"ladybug"]
 					action:^{
 						[SCIInternalMenusLauncher openInstagramDebugMenuWithCompletion:^(NSString *result) {
