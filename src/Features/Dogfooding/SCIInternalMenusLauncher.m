@@ -8,6 +8,8 @@
 
 #define MLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] Menus " fmt,##__VA_ARGS__)
 
+static BOOL sDebugMenuRequestInFlight = NO;
+
 @implementation SCIInternalMenusLauncher
 
 + (UIViewController *)topVC { return [SCIDogfoodObjectRuntime topViewController]; }
@@ -31,64 +33,154 @@
 	return fallback;
 }
 
-// Revalidated in Instagram(3):
++ (UIViewController *)deepestVisibleControllerFrom:(UIViewController *)controller {
+	UIViewController *top = controller;
+	while (top.presentedViewController) top = top.presentedViewController;
+
+	BOOL advanced = YES;
+	while (advanced && top) {
+		advanced = NO;
+		if ([top isKindOfClass:UINavigationController.class]) {
+			UIViewController *visible = ((UINavigationController *)top).visibleViewController;
+			if (visible && visible != top) { top = visible; advanced = YES; continue; }
+		}
+		if ([top isKindOfClass:UITabBarController.class]) {
+			UIViewController *selected = ((UITabBarController *)top).selectedViewController;
+			if (selected && selected != top) { top = selected; advanced = YES; continue; }
+		}
+	}
+	return top;
+}
+
++ (BOOL)isNativeDebugController:(UIViewController *)controller {
+	if (!controller) return NO;
+	NSString *name = NSStringFromClass([controller class]) ?: @"";
+	NSArray<NSString *> *needles = @[
+		@"BugReport", @"RageShake", @"InternalSettings", @"Dogfooding", @"DebugMenu"
+	];
+	for (NSString *needle in needles) {
+		if ([name rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound)
+			return YES;
+	}
+	return NO;
+}
+
++ (void)pollDebugMenuOnWindow:(UIWindow *)window
+	baseline:(UIViewController *)baseline
+	remaining:(NSUInteger)remaining
+	completion:(void (^)(BOOL presented, UIViewController *controller))completion {
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+		dispatch_get_main_queue(), ^{
+			UIViewController *after = [self deepestVisibleControllerFrom:window.rootViewController];
+			BOOL native = [self isNativeDebugController:after];
+			BOOL changed = after && baseline && after != baseline;
+			if (native || changed) {
+				if (completion) completion(YES, after);
+				return;
+			}
+			if (remaining > 1) {
+				[self pollDebugMenuOnWindow:window baseline:baseline
+					remaining:remaining - 1 completion:completion];
+				return;
+			}
+			if (completion) completion(NO, after);
+		});
+}
+
+// Revalidated in Instagram(4), SHA-256
+// a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa:
 //   -showDebugMenu                  v16@0:8
 //   -showDebugMenuWithEntryPoint:   v24@0:8q16
 //
-// -showDebugMenu is the entryPoint=0 thunk. The failure in the previous button
-// was presentation collision: RyukGram's sheet was still covering IGWindow.
-// Dismiss the sheet, restore IGWindow as key, and invoke entryPoint 0 on the
-// next main-loop turn. No synthetic controller, rageshake-default mutation or
-// timer-based retry.
+// -showDebugMenu is the native entryPoint=0 thunk. The opener must run only
+// after RyukGram's presented hierarchy is fully dismissed. The native method
+// continues through asynchronous build/account callbacks, so the temporary
+// rageshake opt-in remains active until presentation succeeds or the bounded
+// post-tap verification expires. This is UI sequencing, never launch-time work.
 + (void)openInstagramDebugMenuWithCompletion:(void (^)(NSString *result))completion {
-	void (^finish)(NSString *) = ^(NSString *result) {
-		if (!completion) return;
-		dispatch_async(dispatch_get_main_queue(), ^{
-			completion(result ?: @"unknown result");
-		});
-	};
-
 	dispatch_async(dispatch_get_main_queue(), ^{
+		if (sDebugMenuRequestInFlight) {
+			if (completion) completion(@"error: a native debug-menu request is already running");
+			return;
+		}
+
 		UIWindow *target = [self activeIGWindow];
 		if (!target) {
-			finish(@"error: no active IGWindow");
+			if (completion) completion(@"error: no active IGWindow");
 			return;
 		}
 
-		SEL selector = NSSelectorFromString(@"showDebugMenuWithEntryPoint:");
-		Method method = class_getInstanceMethod([target class], selector);
-		const char *encoding = method ? method_getTypeEncoding(method) : NULL;
-		if (!method || !encoding || strcmp(encoding, "v24@0:8q16") != 0) {
-			finish([NSString stringWithFormat:
-				@"error: IGWindow debug-menu ABI unavailable or changed: %s",
-				encoding ?: "missing"]);
+		SEL showSelector = NSSelectorFromString(@"showDebugMenu");
+		Method showMethod = class_getInstanceMethod([target class], showSelector);
+		const char *showEncoding = showMethod ? method_getTypeEncoding(showMethod) : NULL;
+		BOOL canShow = showMethod && showEncoding && strcmp(showEncoding, "v16@0:8") == 0;
+
+		SEL entrySelector = NSSelectorFromString(@"showDebugMenuWithEntryPoint:");
+		Method entryMethod = class_getInstanceMethod([target class], entrySelector);
+		const char *entryEncoding = entryMethod ? method_getTypeEncoding(entryMethod) : NULL;
+		BOOL canEntryZero = entryMethod && entryEncoding && strcmp(entryEncoding, "v24@0:8q16") == 0;
+
+		if (!canShow && !canEntryZero) {
+			if (completion) {
+				completion([NSString stringWithFormat:
+					@"error: IGWindow debug-menu ABI unavailable (show=%s entry=%s)",
+					showEncoding ?: "missing", entryEncoding ?: "missing"]);
+			}
 			return;
 		}
+
+		sDebugMenuRequestInFlight = YES;
+		NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+		NSString *optInKey = @"user-opted-in-for-rageshake";
+		id previousOptIn = [defaults objectForKey:optInKey];
+		BOOL hadPreviousOptIn = previousOptIn != nil;
+		[defaults setObject:@YES forKey:optInKey];
+
+		__block BOOL finished = NO;
+		void (^finishOnce)(NSString *) = ^(NSString *result) {
+			if (finished) return;
+			finished = YES;
+			sDebugMenuRequestInFlight = NO;
+			if (hadPreviousOptIn) [defaults setObject:previousOptIn forKey:optInKey];
+			else [defaults removeObjectForKey:optInKey];
+			if (completion) completion(result ?: @"unknown result");
+		};
 
 		void (^invokeNative)(void) = ^{
 			[target makeKeyAndVisible];
-			dispatch_async(dispatch_get_main_queue(), ^{
-				@try {
-					((void (*)(id, SEL, NSInteger))objc_msgSend)(
-						target, selector, 0
-					);
-					MLOG("Instagram debug menu requested with entryPoint=0");
-					finish(@"requested native Instagram Debug Menu");
-				} @catch (id exception) {
-					finish([NSString stringWithFormat:
-						@"error: showDebugMenuWithEntryPoint: threw: %@",
-						exception]);
+			UIViewController *baseline =
+				[self deepestVisibleControllerFrom:target.rootViewController];
+			@try {
+				if (canShow) {
+					((void (*)(id, SEL))objc_msgSend)(target, showSelector);
+					MLOG("Instagram debug menu invoked through -showDebugMenu");
+				} else {
+					((void (*)(id, SEL, NSInteger))objc_msgSend)(target, entrySelector, 0);
+					MLOG("Instagram debug menu invoked through entryPoint=0 fallback");
 				}
-			});
+			} @catch (id exception) {
+				finishOnce([NSString stringWithFormat:@"error: native debug-menu opener threw: %@", exception]);
+				return;
+			}
+
+			[self pollDebugMenuOnWindow:target baseline:baseline remaining:24
+				completion:^(BOOL presented, UIViewController *controller) {
+					if (presented) {
+						finishOnce([NSString stringWithFormat:@"presented %@",
+							NSStringFromClass([controller class]) ?: @"native debug controller"]);
+					} else {
+						finishOnce(@"error: native opener completed without presenting UI. The local call and ABI succeeded, but the asynchronous account/build gate returned without a controller. Open GraphQL dogfood snapshot to inspect eligibility and repeated build checks.");
+					}
+				}];
 		};
 
-		UIViewController *presented =
-			target.rootViewController.presentedViewController;
-		if (presented) {
-			[presented dismissViewControllerAnimated:YES
-				completion:invokeNative];
+		UIViewController *root = target.rootViewController;
+		if (root.presentedViewController) {
+			[root dismissViewControllerAnimated:YES completion:^{
+				dispatch_async(dispatch_get_main_queue(), invokeNative);
+			}];
 		} else {
-			invokeNative();
+			dispatch_async(dispatch_get_main_queue(), invokeNative);
 		}
 	});
 }
