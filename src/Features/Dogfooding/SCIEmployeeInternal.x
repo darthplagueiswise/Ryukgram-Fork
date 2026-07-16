@@ -118,15 +118,17 @@ static BOOL EITypeEncodingMatches(Method method, const char *expected) {
 	return encoding && strcmp(encoding, expected) == 0;
 }
 
-static void EIInstallSwiftIdentityHooks(void) {
+static BOOL EIInstallSwiftIdentityHooks(void) {
 	Class cls = objc_getClass("_TtC28IGAdInsertionLoggingKitSwift24IGAdPlatformLogger_swift");
-	if (!cls) return;
+	if (!cls) return NO;
+	BOOL installed = NO;
 
 	SEL getter = sel_registerName("isEmployee");
 	Method getterMethod = class_getInstanceMethod(cls, getter);
 	if (EITypeEncodingMatches(getterMethod, "B16@0:8")) {
 		MSHookMessageEx(cls, getter, (IMP)EIAdLoggerSwiftIsEmployee,
 		                (IMP *)&orig_EIAdLoggerSwiftIsEmployee);
+		installed = installed || (orig_EIAdLoggerSwiftIsEmployee != NULL);
 	} else if (getterMethod) {
 		EILOG("skip Swift isEmployee: ABI changed: %{public}s", method_getTypeEncoding(getterMethod));
 	}
@@ -136,9 +138,11 @@ static void EIInstallSwiftIdentityHooks(void) {
 	if (EITypeEncodingMatches(setterMethod, "v20@0:8B16")) {
 		MSHookMessageEx(cls, setter, (IMP)EIAdLoggerSwiftSetIsEmployee,
 		                (IMP *)&orig_EIAdLoggerSwiftSetIsEmployee);
+		installed = installed || (orig_EIAdLoggerSwiftSetIsEmployee != NULL);
 	} else if (setterMethod) {
 		EILOG("skip Swift setIsEmployee: ABI changed: %{public}s", method_getTypeEncoding(setterMethod));
 	}
+	return installed;
 }
 
 // ---------------------------------------------------------------------
@@ -219,13 +223,14 @@ static id EIBugMenuCurrent(
 		: nil;
 }
 
-static void EIInstallBugReporterHooks(void) {
+static BOOL EIInstallBugReporterHooks(void) {
 	Class cls = objc_getClass("_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
 	if (!cls) cls = objc_getClass("IGBugReportMenuViewController");
 	if (!cls) {
 		EILOG("IGBugReportMenuViewController absent");
-		return;
+		return NO;
 	}
+	BOOL installed = NO;
 
 	SEL legacySel = NSSelectorFromString(
 		@"initWithDeviceSession:userSession:reliabilityLogging:navChain:endpoint:entryPoint:style:internalSettingsAvailabilityStatus:showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:");
@@ -234,6 +239,7 @@ static void EIInstallBugReporterHooks(void) {
 		"@92@0:8@16@24@32@40@48@56q64q72B80B84B88")) {
 		MSHookMessageEx(cls, legacySel, (IMP)EIBugMenuLegacy,
 		                (IMP *)&orig_EIBugMenuLegacy);
+		installed = installed || (orig_EIBugMenuLegacy != NULL);
 	} else if (legacyMethod) {
 		EILOG("skip legacy bug menu init: ABI changed: %{public}s",
 		      method_getTypeEncoding(legacyMethod));
@@ -246,10 +252,12 @@ static void EIInstallBugReporterHooks(void) {
 		"@104@0:8@16@24@32@40@48@56q64q72B80B84B88B92q96")) {
 		MSHookMessageEx(cls, currentSel, (IMP)EIBugMenuCurrent,
 		                (IMP *)&orig_EIBugMenuCurrent);
+		installed = installed || (orig_EIBugMenuCurrent != NULL);
 	} else if (currentMethod) {
 		EILOG("skip current bug menu init: ABI changed: %{public}s",
 		      method_getTypeEncoding(currentMethod));
 	}
+	return installed;
 }
 
 // ---------------------------------------------------------------------
@@ -268,17 +276,16 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 	}
 
 	if (EIMasterOn() && !swiftIdentityInstalled) {
-		swiftIdentityInstalled = YES;
-		EIInstallSwiftIdentityHooks();
+		swiftIdentityInstalled = EIInstallSwiftIdentityHooks();
 	}
 
 	if (!bugReporterInstalled && (EIMenuOn() || EIAvailabilityOn() || EILoggedOutOn())) {
-		bugReporterInstalled = YES;
-		EIInstallBugReporterHooks();
+		bugReporterInstalled = EIInstallBugReporterHooks();
 	}
 
-	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d",
-	      EIMasterOn(), EIMenuOn(), EIAvailabilityOn(), EILoggedOutOn());
+	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d swift=%d bugMenu=%d",
+	      EIMasterOn(), EIMenuOn(), EIAvailabilityOn(), EILoggedOutOn(),
+	      swiftIdentityInstalled, bugReporterInstalled);
 }
 
 %ctor {
