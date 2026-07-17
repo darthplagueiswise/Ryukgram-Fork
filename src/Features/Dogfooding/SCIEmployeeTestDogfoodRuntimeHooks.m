@@ -1,7 +1,6 @@
 #import "SCIInternalGatePrefs.h"
 #import "../Gating/SCICSymbolStub.h"
 #import <Foundation/Foundation.h>
-#import <mach-o/dyld.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -13,7 +12,7 @@
 // Runtime-only extension for identity aliases that genuinely exist in the
 // loaded Instagram build. No method is added and no DATA symbol is treated as a
 // function. Every replacement reads the consolidated Employee / Internal master
-// live, so the hook can be installed before the preference is enabled.
+// live, so hooks remain inert while the master is off.
 
 static BOOL ETDMasterOn(void) {
     return [SCIInternalGatePrefs employeeInternalMasterEnabled];
@@ -185,6 +184,7 @@ static void ETDScanLoadedClasses(void) {
     if (count <= 0) return;
     __unsafe_unretained Class *classes =
         (__unsafe_unretained Class *)calloc((size_t)count, sizeof(Class));
+    if (!classes) return;
     count = objc_getClassList(classes, count);
     NSUInteger installed = 0;
     for (int i = 0; i < count; i++) {
@@ -194,20 +194,8 @@ static void ETDScanLoadedClasses(void) {
         for (NSString *name in setters) installed += ETDInstallSetter(cls, name);
     }
     free(classes);
-    ETDLOG("runtime aliases installed/active=%lu classes=%d",
+    ETDLOG("deferred aliases installed/active=%lu classes=%d",
         (unsigned long)installed, count);
-}
-
-static BOOL sETDScanScheduled = NO;
-static void ETDScheduleScan(void) {
-    @synchronized (ETDGetterOriginals()) {
-        if (sETDScanScheduled) return;
-        sETDScanScheduled = YES;
-    }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        @synchronized (ETDGetterOriginals()) { sETDScanScheduled = NO; }
-        ETDScanLoadedClasses();
-    });
 }
 
 #pragma mark - Pointer-filtered MobileConfig descriptor gates
@@ -268,23 +256,49 @@ static void ETDSyncDescriptorForces(void) {
     }
 }
 
-static void ETDImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
-    ETDScheduleScan();
+static dispatch_queue_t ETDWorkerQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.ryukgram.employee-test-dogfood",
+                                      DISPATCH_QUEUE_SERIAL);
+        dispatch_set_target_queue(queue,
+            dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+    });
+    return queue;
 }
 
-__attribute__((constructor))
-static void SCIEmployeeTestDogfoodRuntimeHooksCtor(void) {
-    @autoreleasepool {
-        ETDScanLoadedClasses();
-        ETDSyncDescriptorForces();
-        _dyld_register_func_for_add_image(ETDImageLoaded);
-        [NSNotificationCenter.defaultCenter
-            addObserverForName:NSUserDefaultsDidChangeNotification
-                        object:nil
-                         queue:NSOperationQueue.mainQueue
-                    usingBlock:^(__unused NSNotification *notification) {
-                        ETDSyncDescriptorForces();
-                    }];
+static BOOL sETDWorkScheduled = NO;
+static BOOL sETDObserverInstalled = NO;
+
+static void ETDScheduleWork(BOOL includeClassScan) {
+    @synchronized (ETDGetterOriginals()) {
+        if (sETDWorkScheduled) return;
+        sETDWorkScheduled = YES;
     }
+    dispatch_async(ETDWorkerQueue(), ^{
+        if (includeClassScan) ETDScanLoadedClasses();
+        ETDSyncDescriptorForces();
+        @synchronized (ETDGetterOriginals()) {
+            sETDWorkScheduled = NO;
+        }
+    });
+}
+
+void SCIInstallEmployeeTestDogfoodRuntimeHooks(void) {
+    // This broad class scan is intentionally post-launch and utility-QoS only.
+    // It runs once from the centralized bootstrap, never once per dyld image.
+    @synchronized (ETDGetterOriginals()) {
+        if (!sETDObserverInstalled) {
+            sETDObserverInstalled = YES;
+            [NSNotificationCenter.defaultCenter
+                addObserverForName:NSUserDefaultsDidChangeNotification
+                            object:nil
+                             queue:nil
+                        usingBlock:^(__unused NSNotification *notification) {
+                ETDScheduleWork(NO);
+            }];
+        }
+    }
+    ETDScheduleWork(YES);
 }
