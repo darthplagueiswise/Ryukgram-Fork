@@ -1,10 +1,10 @@
 #import "../../Utils.h"
+#import "SCIInternalGatePrefs.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
 static BOOL sciDevMaster(void) {
-	return [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"] ||
-	       [SCIUtils getBoolPref:@"sci_employee_internal"];
+	return [SCIInternalGatePrefs employeeInternalMasterEnabled];
 }
 static BOOL sciDevGate(NSString *key) { return sciDevMaster() || [SCIUtils getBoolPref:key]; }
 static BOOL sciDevAnyGateEnabled(void) {

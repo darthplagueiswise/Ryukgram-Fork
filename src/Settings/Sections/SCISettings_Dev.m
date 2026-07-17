@@ -6,6 +6,7 @@
 #import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 #import "../../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import "../../Features/Dogfooding/SCIGraphQLDogfoodDiagnostics.h"
+#import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
@@ -109,12 +110,14 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		SCIRefreshGraphQLDogfoodForceEnabled();
 		SCIInstallEmployeeInternalHooksIfNeeded();
 		SCIInstallGraphQLDogfoodForceHooksIfNeeded();
-
-		if (on && [key isEqualToString:@"sci_employee_internal"]) {
-			NSString *result = [SCIGraphQLDogfoodDiagnostics installObservers];
-			[SCIUtils showToastForDuration:2.5
-				title:@"Employee / Internal applied" subtitle:result];
-		}
+		BOOL identityMaster = [key isEqualToString:@"sci_employee_internal"];
+		[SCIUtils showToastForDuration:2.0
+			title:on
+				? (identityMaster ? @"Employee / Internal applied" : @"Internal preference applied")
+				: @"Preference disabled"
+			subtitle:(on && identityMaster)
+				? @"Force hooks installed; diagnostics remain explicit"
+				: nil];
 	}];
 }
 
@@ -123,7 +126,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 + (SCISetting *)devNavCell {
 	SCIRegisterGraphQLDogfoodDevDefaults();
 
-	if ([SCIUtils getBoolPref:@"sci_employee_internal"] ||
+	if ([SCIInternalGatePrefs employeeInternalMasterEnabled] ||
 		[SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
 		[SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
 		[SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
@@ -182,11 +185,11 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"Internal Settings and Dogfooding Assistant are separate native routes. Employee / Internal now unifies the legacy employee switches, hooks only existing BOOL identity getters with a validated ABI, and follows the exact employee/test-user and dogfooder fragments. Dogfooding Assistant uses only its live provider/config; DirectNotes is never used as a fallback. Internal-only content may still require Lighthouse/VPN."),
+			@"footer": SCILocalized(@"Internal Settings and Dogfooding Assistant are separate native routes. Employee / Internal unifies legacy masters, hooks only validated BOOL identity getters, and forces the exact local GraphQL eligibility decision. Pando fragments stay diagnostic; no isDogfooder/isEmployeeOrTestUser getter is invented. DirectNotes is never a fallback. Internal-only content may still require Lighthouse/VPN."),
 			@"rows": @[
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Employee / Internal"),
-					SCILocalized(@"Unifies isEmployee plus existing employee-or-test-user, test-user and dogfooder BOOL getters; also enables the exact GraphQL dogfood and Internal Settings paths"),
+					SCILocalized(@"Forces validated isEmployee getters and the exact local GraphQL eligibility path; Pando fragments are observed without inventing BOOL getters"),
 					@"sci_employee_internal"
 				),
 				SCIEmployeeInternalSwitch(
@@ -195,7 +198,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 					@"sci_force_internal_settings_availability"
 				),
 				[SCISetting stepperCellWithTitle:SCILocalized(@"Internal Settings availability raw value")
-					subtitle:SCILocalized(@"Runtime test value 0–2; takes effect on the next menu refresh or tap")
+					subtitle:SCILocalized(@"0 = available/open, 1 = unavailable/silent, 2 = access denied; applies on next refresh or tap")
 					defaultsKey:@"sci_internal_settings_availability_raw_value"
 					min:0 max:2 step:1 label:@"raw" singularLabel:@"raw"],
 				SCIEmployeeInternalSwitch(
@@ -205,9 +208,23 @@ static SCISetting *SCIEmployeeInternalSwitch(
 				),
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Internal settings while logged out"),
-					SCILocalized(@"Forces showLoggedOutInternalSettings"),
+					SCILocalized(@"Explicitly forces showLoggedOutInternalSettings; it is not implied by Employee / Internal"),
 					@"sci_force_internal_settings_loggedout"
 				),
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Sessionless MobileConfig state")
+					subtitle:SCILocalized(@"Validates the OEM singleton, manager, custom refresh handler and tryUpdateConfigs ABI without fetching")
+					icon:[SCISymbol symbolWithName:@"checkmark.shield"]
+					action:^{
+						SCIDevShow(SCILocalized(@"Sessionless MobileConfig"),
+							[SCIDogfoodObjectRuntime sessionlessMobileConfigState]);
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Fetch sessionless MobileConfig (OEM)")
+					subtitle:SCILocalized(@"Calls FBMobileConfigContextManager(UpdateConfigsExtension).tryUpdateConfigs; its native handler owns API client, queue and completion")
+					icon:[SCISymbol symbolWithName:@"arrow.triangle.2.circlepath"]
+					action:^{
+						SCIDevShow(SCILocalized(@"Sessionless MobileConfig"),
+							[SCIDogfoodObjectRuntime tryFetchSessionlessMobileConfig]);
+					}],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Refresh GraphQL dogfood hooks")
 					subtitle:SCILocalized(@"Installs exact eligibility, fragment, warning and backend-check observers")
 					icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"arrow.clockwise"]

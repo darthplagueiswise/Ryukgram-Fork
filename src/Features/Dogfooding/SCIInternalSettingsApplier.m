@@ -7,7 +7,7 @@
 #import <os/log.h>
 
 #define APLOG(fmt,...) os_log(OS_LOG_DEFAULT,"[SCIGate] Applier " fmt,##__VA_ARGS__)
-static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabledForKey:k]; }
+static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs individualGateEnabledForKey:k]; }
 
 @implementation SCIInternalSettingsApplier
 
@@ -76,10 +76,20 @@ static inline BOOL ON(NSString *k){ return [SCIInternalGatePrefs objCGateEnabled
     NSMutableString *out = [NSMutableString string];
     id session = [SCIDogfoodObjectRuntime activeUserSession];
     [SCIEmployeeDefaults installHooksIfNeeded];
-    [SCIEmployeeDefaults applyToStandardDefaults];
-    if (!session) { [out appendString:@"employeeDefaults=standard; no session — open after login"]; goto done; }
-    [SCIEmployeeDefaults applyToUserSession:session source:@"SCIInternalSettingsApplier.applyNow"];
-    [out appendString:@"employeeDefaults=ON; "];
+    BOOL employeeDefaultsEnabled = [SCIEmployeeDefaults enabled];
+    if (employeeDefaultsEnabled) {
+        [SCIEmployeeDefaults applyToStandardDefaults];
+        if (session) {
+            [SCIEmployeeDefaults applyToUserSession:session
+                source:@"SCIInternalSettingsApplier.applyNow"];
+            [out appendString:@"employeeDefaults=legacy explicit; "];
+        } else {
+            [out appendString:@"employeeDefaults=legacy standard only; "];
+        }
+    } else {
+        [out appendString:@"employeeDefaults=disabled; "];
+    }
+    if (!session) { [out appendString:@"no session — open after login"]; goto done; }
     {
         id ais = [self autofillInternalSettingsForSession:session];
         if (ais) {
@@ -101,11 +111,11 @@ done:
 
 + (void)scheduleAutoApplyIfEnabled {
     if (!ON(@"sci_apply_internal_native")) return;
-    double d[] = {4.0, 8.0, 16.0};
-    for (NSUInteger i = 0; i < 3; i++)
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(d[i]*NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            if ([SCIDogfoodObjectRuntime activeUserSession]) [SCIInternalSettingsApplier applyNow];
-        });
+    // One deterministic main-turn apply. No timer ladder and no repeated writes.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([SCIDogfoodObjectRuntime activeUserSession]) {
+            [SCIInternalSettingsApplier applyNow];
+        }
+    });
 }
 @end

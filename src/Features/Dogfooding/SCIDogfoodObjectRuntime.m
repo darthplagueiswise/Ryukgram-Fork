@@ -5,6 +5,7 @@
 #import "../../Utils.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <string.h>
 
 static NSMapTable<id, NSMutableDictionary *> *sSCIObjMeta;
 static NSMutableArray<NSDictionary *> *sSCIRecentActions;
@@ -13,6 +14,7 @@ static dispatch_queue_t sSCIQueue;
 static BOOL sSCIInstalled;
 static __weak id sSCICapturedUserSession;
 static __weak id sSCICapturedDogfoodSettingsConfig;
+static __weak id sSCICapturedSessionlessMobileConfigContext;
 static NSTimeInterval sSCILastUserSessionNote;
 
 static NSString *SCISafeString(id v) {
@@ -21,6 +23,166 @@ static NSString *SCISafeString(id v) {
 }
 
 static NSString *SCIAddr(id obj) { return obj ? [NSString stringWithFormat:@"%p", obj] : @""; }
+
+static BOOL SCIExactMethodEncoding(Method method, const char *expected) {
+    if (!method || !expected) return NO;
+    const char *encoding = method_getTypeEncoding(method);
+    return encoding && strcmp(encoding, expected) == 0;
+}
+
+static id SCICallValidatedClassFactory(Class cls, SEL selector,
+                                       NSString **failure) {
+    if (!cls) {
+        if (failure) *failure = @"class unavailable";
+        return nil;
+    }
+    Method method = class_getClassMethod(cls, selector);
+    if (!SCIExactMethodEncoding(method, "@16@0:8")) {
+        if (failure) {
+            const char *encoding = method ? method_getTypeEncoding(method) : NULL;
+            *failure = [NSString stringWithFormat:@"%@.%@ ABI=%s",
+                NSStringFromClass(cls), NSStringFromSelector(selector),
+                encoding ?: "missing"];
+        }
+        return nil;
+    }
+    @try {
+        return ((id (*)(id, SEL))objc_msgSend)(cls, selector);
+    } @catch (id exception) {
+        if (failure) *failure = [NSString stringWithFormat:@"%@ exception: %@",
+            NSStringFromClass(cls), exception];
+        return nil;
+    }
+}
+
+static id SCIResolveSessionlessMobileConfigContext(NSString **source,
+                                                   NSString **failure) {
+    SEL factory = NSSelectorFromString(@"sessionlessContextManager");
+    NSArray<NSString *> *classNames = @[
+        @"FBMobileConfigContextManager",
+        @"FBMobileConfigSessionlessContextManager"
+    ];
+    NSMutableArray<NSString *> *failures = [NSMutableArray array];
+    for (NSString *className in classNames) {
+        NSString *factoryFailure = nil;
+        Class cls = NSClassFromString(className);
+        id context = SCICallValidatedClassFactory(cls, factory, &factoryFailure);
+        if (context) {
+            if (source) *source = [NSString stringWithFormat:@"%@.%@",
+                className, NSStringFromSelector(factory)];
+            return context;
+        }
+        if (factoryFailure.length) {
+            [failures addObject:factoryFailure];
+        }
+    }
+
+    id captured = sSCICapturedSessionlessMobileConfigContext;
+    if (!captured) {
+        captured = [SCIDogfoodObjectRuntime
+            liveInstanceOfClassNameContaining:@"MobileConfigSessionlessContextManager"];
+    }
+    if (captured) {
+        if (source) *source = @"captured live sessionless context";
+        return captured;
+    }
+
+    if (failure) {
+        *failure = failures.count
+            ? [failures componentsJoinedByString:@"; "]
+            : @"sessionless context unavailable";
+    }
+    return nil;
+}
+
+static NSString *SCIInspectOrFetchSessionlessMobileConfig(BOOL fetch) {
+    NSString *source = nil;
+    NSString *failure = nil;
+    id context = SCIResolveSessionlessMobileConfigContext(&source, &failure);
+    if (!context) {
+        return [NSString stringWithFormat:@"context=nil; %@",
+            failure ?: @"no validated factory or captured instance"];
+    }
+
+    Class contextClass = object_getClass(context);
+    SEL validSelector = NSSelectorFromString(@"hasValidManager");
+    Method validMethod = class_getInstanceMethod(contextClass, validSelector);
+    if (!SCIExactMethodEncoding(validMethod, "B16@0:8") &&
+        !SCIExactMethodEncoding(validMethod, "c16@0:8")) {
+        const char *encoding = validMethod ? method_getTypeEncoding(validMethod) : NULL;
+        return [NSString stringWithFormat:
+            @"context=%@ (%@); hasValidManager ABI=%s",
+            NSStringFromClass(contextClass), source ?: @"unknown",
+            encoding ?: "missing"];
+    }
+
+    BOOL valid = NO;
+    @try {
+        valid = ((BOOL (*)(id, SEL))objc_msgSend)(context, validSelector);
+    } @catch (id exception) {
+        return [NSString stringWithFormat:@"context=%@; hasValidManager exception: %@",
+            NSStringFromClass(contextClass), exception];
+    }
+    if (!valid) {
+        return [NSString stringWithFormat:@"context=%@ (%@); manager=invalid",
+            NSStringFromClass(contextClass), source ?: @"unknown"];
+    }
+
+    SEL handlerSelector = NSSelectorFromString(@"customRefreshHandler");
+    Method handlerMethod = class_getInstanceMethod(contextClass, handlerSelector);
+    if (!SCIExactMethodEncoding(handlerMethod, "@16@0:8")) {
+        const char *encoding = handlerMethod ? method_getTypeEncoding(handlerMethod) : NULL;
+        return [NSString stringWithFormat:
+            @"context=%@; manager=valid; customRefreshHandler ABI=%s",
+            NSStringFromClass(contextClass), encoding ?: "missing"];
+    }
+
+    id handler = nil;
+    @try {
+        handler = ((id (*)(id, SEL))objc_msgSend)(context, handlerSelector);
+    } @catch (id exception) {
+        return [NSString stringWithFormat:@"context=%@; customRefreshHandler exception: %@",
+            NSStringFromClass(contextClass), exception];
+    }
+    if (!handler) {
+        return [NSString stringWithFormat:
+            @"context=%@ (%@); manager=valid; customRefreshHandler=nil",
+            NSStringFromClass(contextClass), source ?: @"unknown"];
+    }
+
+    SEL updateSelector = NSSelectorFromString(@"tryUpdateConfigs");
+    // UpdateConfigsExtension is a category on FBMobileConfigContextManager.
+    // The manager method owns the API client/queue/completion flow and reads
+    // customRefreshHandler internally. The handler is diagnostic state, not the
+    // receiver of this call.
+    Method updateMethod = class_getInstanceMethod(contextClass, updateSelector);
+    if (!SCIExactMethodEncoding(updateMethod, "v16@0:8")) {
+        const char *encoding = updateMethod ? method_getTypeEncoding(updateMethod) : NULL;
+        return [NSString stringWithFormat:
+            @"context=%@; manager=valid; handler=%@; context.tryUpdateConfigs ABI=%s",
+            NSStringFromClass(contextClass),
+            NSStringFromClass(object_getClass(handler)), encoding ?: "missing"];
+    }
+
+    if (!fetch) {
+        return [NSString stringWithFormat:
+            @"context=%@ (%@); manager=valid; handler=%@; context.tryUpdateConfigs=v16@0:8",
+            NSStringFromClass(contextClass), source ?: @"unknown",
+            NSStringFromClass(object_getClass(handler))];
+    }
+
+    @try {
+        ((void (*)(id, SEL))objc_msgSend)(context, updateSelector);
+    } @catch (id exception) {
+        return [NSString stringWithFormat:
+            @"context=%@; context.tryUpdateConfigs exception: %@",
+            NSStringFromClass(contextClass), exception];
+    }
+    return [NSString stringWithFormat:
+        @"fetch requested through OEM context manager %@; handler=%@; manager=valid",
+        NSStringFromClass(contextClass),
+        NSStringFromClass(object_getClass(handler))];
+}
 
 static BOOL SCIClassNameContains(id obj, NSString *needle) {
     if (!obj || !needle.length) return NO;
@@ -333,6 +495,9 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
     if (!object) return;
     SCIEnsureStore();
     if (SCIClassNameContains(object, @"IGDogfoodingSettingsConfig")) sSCICapturedDogfoodSettingsConfig = object;
+    if (SCIClassNameContains(object, @"MobileConfigSessionlessContextManager")) {
+        sSCICapturedSessionlessMobileConfigContext = object;
+    }
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     @synchronized (sSCIObjMeta) {
         NSMutableDictionary *m = [sSCIObjMeta objectForKey:object];
@@ -609,6 +774,23 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
 + (void)clear { SCIEnsureStore(); @synchronized (sSCIObjMeta) { [sSCIObjMeta removeAllObjects]; } @synchronized (sSCIRecentActions) { [sSCIRecentActions removeAllObjects]; } @synchronized (sSCIDogfoodingSettingChanges) { [sSCIDogfoodingSettingChanges removeAllObjects]; } [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"sci_dogfooding_setting_changes"]; }
 
 + (BOOL)tryOpenNotesDogfooding { [self noteAction:@"Open Notes Dogfooding" status:@"attempt" detail:[self runtimeState]]; @try { [SCIDogfooding presentNotesDogfoodingSettings]; [self noteAction:@"Open Notes Dogfooding" status:@"sent" detail:nil]; return YES; } @catch (id e) { [self noteAction:@"Open Notes Dogfooding" status:@"exception" detail:e]; return NO; } }
+
++ (NSString *)sessionlessMobileConfigState {
+    SCIInstallDogfoodObjectHooksIfNeeded();
+    NSString *result = SCIInspectOrFetchSessionlessMobileConfig(NO);
+    [self noteAction:@"Sessionless MobileConfig state"
+              status:@"inspected" detail:result];
+    return result;
+}
+
++ (NSString *)tryFetchSessionlessMobileConfig {
+    SCIInstallDogfoodObjectHooksIfNeeded();
+    NSString *result = SCIInspectOrFetchSessionlessMobileConfig(YES);
+    NSString *status = [result hasPrefix:@"fetch requested"] ? @"requested" : @"blocked";
+    [self noteAction:@"Sessionless MobileConfig OEM fetch"
+              status:status detail:result];
+    return result;
+}
 + (BOOL)tryOpenMetaLocalExperimentBrowser { [self noteAction:@"Open MetaLocalExperiment" status:@"attempt" detail:[self runtimeState]]; @try { [SCIDogfooding presentMetaLocalExperimentBrowser]; [self noteAction:@"Open MetaLocalExperiment" status:@"sent" detail:nil]; return YES; } @catch (id e) { [self noteAction:@"Open MetaLocalExperiment" status:@"exception" detail:e]; return NO; } }
 
 + (BOOL)tryOpenNativeDogfoodSettings {

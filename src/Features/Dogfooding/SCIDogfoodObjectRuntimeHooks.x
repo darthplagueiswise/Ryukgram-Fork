@@ -1,6 +1,7 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import <objc/runtime.h>
 #import <substrate.h>
+#import <string.h>
 
 static NSMutableSet<NSString *> *sSCIDFInstalled;
 static void SCIHookDF(Class cls, NSString *selName, IMP newImp, IMP *origOut) {
@@ -25,6 +26,12 @@ static void SCIHookDFClass(Class cls, NSString *selName, IMP newImp, IMP *origOu
     if ([sSCIDFInstalled containsObject:key]) return;
     [sSCIDFInstalled addObject:key];
     MSHookMessageEx(meta, sel, newImp, origOut);
+}
+
+static BOOL SCIDFMethodHasExactEncoding(Method method, const char *expected) {
+    if (!method || !expected) return NO;
+    const char *encoding = method_getTypeEncoding(method);
+    return encoding && strcmp(encoding, expected) == 0;
 }
 
 static BOOL SCIClassNameInterestingForDogfoodRuntime(NSString *cn) {
@@ -99,9 +106,12 @@ static void new_uivc_viewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (orig_uivc_viewDidAppear) orig_uivc_viewDidAppear(self, _cmd, animated);
 }
 
-static id (*orig_ctx_user_init)(id, SEL, id, id);
-static id new_ctx_user_init(id self, SEL _cmd, id sessionID, id manager) {
-    id obj = orig_ctx_user_init ? orig_ctx_user_init(self, _cmd, sessionID, manager) : self;
+// The manager parameter is a non-trivial C++ shared_ptr passed indirectly in
+// x3 for the sessioned initializer. Treat it as an opaque pointer and forward
+// it unchanged; it is not an Objective-C object.
+static id (*orig_ctx_user_init)(id, SEL, id, const void *);
+static id new_ctx_user_init(id self, SEL _cmd, id sessionID, const void *managerSharedPtr) {
+    id obj = orig_ctx_user_init ? orig_ctx_user_init(self, _cmd, sessionID, managerSharedPtr) : self;
     [SCIDogfoodObjectRuntime noteObject:obj role:@"IGMobileConfigUserSessionContextManager" source:NSStringFromSelector(_cmd)];
     return obj;
 }
@@ -137,14 +147,41 @@ static id new_df_settings_vc_init(id self, SEL _cmd, id config, id userSession) 
     return obj;
 }
 
-static id (*orig_ctx_sessionless_init)(id, SEL, id, id);
-static id new_ctx_sessionless_init(id self, SEL _cmd, id sessionID, id manager) {
-    id obj = orig_ctx_sessionless_init ? orig_ctx_sessionless_init(self, _cmd, sessionID, manager) : self;
+// FBSharedFramework(107), SHA-256 22aea16b...e5420dc:
+// -[IGMobileConfigSessionlessContextManager initWithManager:]
+// @32@0:8{shared_ptr<mobileconfig::FBMobileConfigManager>=...}16
+// Its first instruction loads both shared_ptr words from [x2], so x2 is an
+// ABI-indirect pointer. Never type or dereference it as id.
+static id (*orig_ctx_sessionless_init)(id, SEL, const void *);
+static id new_ctx_sessionless_init(id self, SEL _cmd, const void *managerSharedPtr) {
+    id obj = orig_ctx_sessionless_init ? orig_ctx_sessionless_init(self, _cmd, managerSharedPtr) : self;
     [SCIDogfoodObjectRuntime noteObject:obj role:@"IGMobileConfigSessionlessContextManager" source:NSStringFromSelector(_cmd)];
     return obj;
 }
 
-static void SCIInstallDogfoodObjectHooks(void) {
+static id (*orig_fb_context_sessionless_factory)(id, SEL);
+static id new_fb_context_sessionless_factory(id self, SEL _cmd) {
+    id obj = orig_fb_context_sessionless_factory
+        ? orig_fb_context_sessionless_factory(self, _cmd)
+        : nil;
+    [SCIDogfoodObjectRuntime noteObject:obj
+                                   role:@"FBMobileConfigSessionlessContextManager"
+                                 source:@"FBMobileConfigContextManager.sessionlessContextManager"];
+    return obj;
+}
+
+static id (*orig_fb_sessionless_factory)(id, SEL);
+static id new_fb_sessionless_factory(id self, SEL _cmd) {
+    id obj = orig_fb_sessionless_factory
+        ? orig_fb_sessionless_factory(self, _cmd)
+        : nil;
+    [SCIDogfoodObjectRuntime noteObject:obj
+                                   role:@"FBMobileConfigSessionlessContextManager"
+                                 source:@"FBMobileConfigSessionlessContextManager.sessionlessContextManager"];
+    return obj;
+}
+
+void SCIInstallDogfoodObjectHooksIfNeeded(void) {
     [SCIDogfoodObjectRuntime installIfNeeded];
     Class dog = NSClassFromString(@"IGDogfooderProd");
     SCIHookDF(dog, @"initWithLauncherSet:networker:logger:", (IMP)new_df_dog_init, (IMP *)&orig_df_dog_init);
@@ -156,8 +193,51 @@ static void SCIInstallDogfoodObjectHooks(void) {
     // polluted unrelated screens. Settings/VC discovery is now stub-first and
     // on-demand; named classes below still get captured safely.
 
-    SCIHookDF(NSClassFromString(@"IGMobileConfigUserSessionContextManager"), @"initWithSessionID:manager:", (IMP)new_ctx_user_init, (IMP *)&orig_ctx_user_init);
-    SCIHookDF(NSClassFromString(@"IGMobileConfigSessionlessContextManager"), @"initWithSessionID:manager:", (IMP)new_ctx_sessionless_init, (IMP *)&orig_ctx_sessionless_init);
+    static const char *kSharedPtr =
+        "{shared_ptr<mobileconfig::FBMobileConfigManager>="
+        "^{FBMobileConfigManager}^{__shared_weak_count}}";
+
+    Class userContext = NSClassFromString(@"IGMobileConfigUserSessionContextManager");
+    SEL userInit = NSSelectorFromString(@"initWithSessionID:manager:");
+    Method userInitMethod = userContext ? class_getInstanceMethod(userContext, userInit) : NULL;
+    NSString *expectedUserEncoding = [NSString stringWithFormat:@"@40@0:8@16%s24", kSharedPtr];
+    if (SCIDFMethodHasExactEncoding(userInitMethod, expectedUserEncoding.UTF8String)) {
+        SCIHookDF(userContext, NSStringFromSelector(userInit),
+                  (IMP)new_ctx_user_init, (IMP *)&orig_ctx_user_init);
+    }
+
+    Class sessionlessContext = NSClassFromString(@"IGMobileConfigSessionlessContextManager");
+    SEL sessionlessInit = NSSelectorFromString(@"initWithManager:");
+    Method sessionlessInitMethod = sessionlessContext
+        ? class_getInstanceMethod(sessionlessContext, sessionlessInit)
+        : NULL;
+    NSString *expectedSessionlessEncoding = [NSString stringWithFormat:@"@32@0:8%s16", kSharedPtr];
+    if (SCIDFMethodHasExactEncoding(sessionlessInitMethod,
+                                    expectedSessionlessEncoding.UTF8String)) {
+        SCIHookDF(sessionlessContext, NSStringFromSelector(sessionlessInit),
+                  (IMP)new_ctx_sessionless_init,
+                  (IMP *)&orig_ctx_sessionless_init);
+    }
+
+    Class baseContext = NSClassFromString(@"FBMobileConfigContextManager");
+    Method baseFactory = baseContext
+        ? class_getClassMethod(baseContext, @selector(sessionlessContextManager))
+        : NULL;
+    if (SCIDFMethodHasExactEncoding(baseFactory, "@16@0:8")) {
+        SCIHookDFClass(baseContext, @"sessionlessContextManager",
+                       (IMP)new_fb_context_sessionless_factory,
+                       (IMP *)&orig_fb_context_sessionless_factory);
+    }
+
+    Class fbSessionless = NSClassFromString(@"FBMobileConfigSessionlessContextManager");
+    Method subclassFactory = fbSessionless
+        ? class_getClassMethod(fbSessionless, @selector(sessionlessContextManager))
+        : NULL;
+    if (SCIDFMethodHasExactEncoding(subclassFactory, "@16@0:8")) {
+        SCIHookDFClass(fbSessionless, @"sessionlessContextManager",
+                       (IMP)new_fb_sessionless_factory,
+                       (IMP *)&orig_fb_sessionless_factory);
+    }
 
     Class dfc = NSClassFromString(@"IGDogfoodingFirst.DogfoodingFirstCoordinator") ?: NSClassFromString(@"_TtC18IGDogfoodingFirst27DogfoodingFirstCoordinator");
     SCIHookDF(dfc, @"didBeginSessionWithMainAppViewController:pandoGraphQLService:dogfooder:", (IMP)new_dogfirst_begin, (IMP *)&orig_dogfirst_begin);
@@ -184,7 +264,7 @@ static void SCIInstallDogfoodObjectHooks(void) {
                     usingBlock:^(__unused NSNotification *note) {
             if (_sciTok) { [[NSNotificationCenter defaultCenter] removeObserver:_sciTok]; _sciTok = nil; }
             // SCI-FIX 2026-06-11: single install; dropped redundant 2s/8s dispatch_after retries.
-            SCIInstallDogfoodObjectHooks();
+            SCIInstallDogfoodObjectHooksIfNeeded();
         }];
     }
 }

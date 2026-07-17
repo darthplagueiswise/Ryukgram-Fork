@@ -8,6 +8,10 @@
 
 static NSString *const kSCIForceEmployeeKey = @"sci_force_ig_internal_employee";
 
+void SCIInstallEmployeeInternalHooksIfNeeded(void);
+void SCIRefreshGraphQLDogfoodForceEnabled(void);
+void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void);
+
 static NSError *SCIErr(NSString *msg) {
     return [NSError errorWithDomain:@"SCIInternalActions"
                                code:-1
@@ -232,10 +236,10 @@ static BOOL SCICallVoidBool(id obj, SEL sel, BOOL value, NSError **error) {
 
 + (void)setForceInternalEmployeeEnabled:(BOOL)on {
     [SCIUtils setPref:@(on) forKey:kSCIForceEmployeeKey];
+    SCIRefreshGraphQLDogfoodForceEnabled();
     if (on) {
-        [SCIEmployeeDefaults installHooksIfNeeded];
-        [SCIEmployeeDefaults applyToStandardDefaults];
-        [SCIEmployeeDefaults applyToUserSession:[self liveUserSession] source:@"SCIInternalActions.setForceInternalEmployeeEnabled"];
+        SCIInstallEmployeeInternalHooksIfNeeded();
+        SCIInstallGraphQLDogfoodForceHooksIfNeeded();
     }
 }
 

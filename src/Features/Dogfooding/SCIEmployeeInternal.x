@@ -2,7 +2,8 @@
 // =====================================================================
 // Employee / Internal — equivalente cliente-side do primeiro toggle FBTweak
 // =====================================================================
-// Confirmado em Instagram(29) + FBSharedFramework(105):
+// Revalidado em Instagram(30) a562b362...a555aa e
+// FBSharedFramework(107) 22aea16b...e5420dc:
 //   • IGFacebookUserInfo -isEmployee (FBSharedFramework)
 //   • IGAdPlatformLogger_objc -isEmployee/-setIsEmployee:
 //   • Swift IGAdPlatformLogger_swift -isEmployee/-setIsEmployee:
@@ -21,6 +22,7 @@
 
 #import "../../Utils.h"
 #import "SCIDogfoodObjectRuntime.h"
+#import "SCIInternalGatePrefs.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -32,12 +34,7 @@
 #define EILOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] EmployeeInternal " fmt, ##__VA_ARGS__)
 
 static inline BOOL EIMasterOn(void) {
-	// One identity master, including the two legacy switches. Previously these
-	// paths disagreed: sci_force_ig_is_employee only changed an ads logger while
-	// sci_employee_internal changed the real user-info model.
-	return [SCIUtils getBoolPref:@"sci_employee_internal"] ||
-	       [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"] ||
-	       [SCIUtils getBoolPref:@"sci_force_ig_is_employee"];
+	return [SCIInternalGatePrefs employeeInternalMasterEnabled];
 }
 
 static inline BOOL EIMenuOn(void) {
@@ -50,7 +47,7 @@ static inline BOOL EIAvailabilityOn(void) {
 
 static inline NSInteger EIAvailabilityStatusValue(void) {
 	// This is a Swift enum raw value, never a BOOL. A dedicated key avoids the
-	// stale historical default attached to sci_internal_settings_availability_value.
+	// The historical availability key was removed; this is the sole raw-value key.
 	NSInteger value = (NSInteger)[SCIUtils getDoublePref:
 		@"sci_internal_settings_availability_raw_value"];
 	if (value < 0) return 0;
@@ -59,7 +56,9 @@ static inline NSInteger EIAvailabilityStatusValue(void) {
 }
 
 static inline BOOL EILoggedOutOn(void) {
-	return EIMasterOn() || [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"];
+	// Logged-out Internal Settings is a separate route. Employee identity must
+	// not make sessionless UI appear as an unrelated side effect.
+	return [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"];
 }
 
 static inline BOOL EIAnyOn(void) {
@@ -246,12 +245,10 @@ static BOOL EIInstallIdentitySelectorOnClass(Class cls, SEL selector) {
 
 static NSUInteger EIInstallIdentityHooksOnClass(Class cls, BOOL includeIsEmployee) {
 	if (!cls) return 0;
-	NSArray<NSString *> *names = @[
-		@"isEmployee",
-		@"isEmployeeOrTestUser",
-		@"isTestUser",
-		@"isDogfooder"
-	];
+	// In the audited build, isEmployee is the only validated zero-argument
+	// identity getter. Employee-or-test-user and dogfooder are Pando fragments,
+	// not ObjC BOOL getters with those names.
+	NSArray<NSString *> *names = @[@"isEmployee"];
 	NSUInteger installed = 0;
 	for (NSString *name in names) {
 		if (!includeIsEmployee && [name isEqualToString:@"isEmployee"]) continue;
@@ -286,54 +283,6 @@ static NSUInteger EIInstallKnownIdentityHooks(void) {
 		installed += EIInstallIdentityHooksOnClass(cls, includeIsEmployee);
 	}
 	return installed;
-}
-
-static id (*orig_EIEmployeeOrTestFragment)(id, SEL) = NULL;
-static id (*orig_EIDogfooderInformationFragment)(id, SEL) = NULL;
-
-static id EIEmployeeOrTestFragment(id self, SEL _cmd) {
-	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(self);
-	id model = orig_EIEmployeeOrTestFragment
-		? orig_EIEmployeeOrTestFragment(self, _cmd)
-		: nil;
-	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(model);
-	return model;
-}
-
-static id EIDogfooderInformationFragment(id self, SEL _cmd) {
-	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(self);
-	id model = orig_EIDogfooderInformationFragment
-		? orig_EIDogfooderInformationFragment(self, _cmd)
-		: nil;
-	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(model);
-	return model;
-}
-
-static BOOL EIInstallIdentityFragmentHooks(void) {
-	Class cls = objc_getClass("IGBaseUser");
-	if (!cls) return NO;
-
-	SEL employeeSel = NSSelectorFromString(
-		@"asIGUserIsEmployeeOrTestUserFragmentImmutableModel");
-	Method employeeMethod = class_getInstanceMethod(cls, employeeSel);
-	if (!orig_EIEmployeeOrTestFragment &&
-		EITypeEncodingMatches(employeeMethod, "@16@0:8")) {
-		MSHookMessageEx(cls, employeeSel, (IMP)EIEmployeeOrTestFragment,
-		                (IMP *)&orig_EIEmployeeOrTestFragment);
-	}
-
-	SEL dogfooderSel = NSSelectorFromString(
-		@"asIGDogfooderInformationFragmentImmutableModel");
-	Method dogfooderMethod = class_getInstanceMethod(cls, dogfooderSel);
-	if (!orig_EIDogfooderInformationFragment &&
-		EITypeEncodingMatches(dogfooderMethod, "@16@0:8")) {
-		MSHookMessageEx(cls, dogfooderSel,
-		                (IMP)EIDogfooderInformationFragment,
-		                (IMP *)&orig_EIDogfooderInformationFragment);
-	}
-
-	return orig_EIEmployeeOrTestFragment != NULL ||
-	       orig_EIDogfooderInformationFragment != NULL;
 }
 
 static BOOL EIInstallSwiftIdentityHooks(void) {
@@ -812,10 +761,8 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 	}
 
 	NSUInteger identityHooks = 0;
-	BOOL identityFragments = NO;
 	if (EIMasterOn()) {
 		identityHooks = EIInstallKnownIdentityHooks();
-		identityFragments = EIInstallIdentityFragmentHooks();
 	}
 
 	if (EIMasterOn() && !swiftIdentityInstalled) {
@@ -827,10 +774,10 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 		bugReporterInstalled = EIInstallBugReporterHooks();
 	}
 
-	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d identity=%lu fragments=%d swift=%d bugMenu=%d",
+	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d identity=%lu swift=%d bugMenu=%d",
 	      EIMasterOn(), EIMenuOn(), EIAvailabilityOn(), EILoggedOutOn(),
-	      (unsigned long)identityHooks, identityFragments,
-	      swiftIdentityInstalled, bugReporterInstalled);
+	      (unsigned long)identityHooks, swiftIdentityInstalled,
+	      bugReporterInstalled);
 }
 
 %ctor {

@@ -3,6 +3,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
+
 @interface SCIDogfoodObjectRuntime : NSObject
 
 + (void)installIfNeeded;
@@ -40,6 +42,13 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)tryOpenNativeDogfoodSettings;
 + (BOOL)tryOpenNotesDogfooding;
 + (BOOL)tryOpenMetaLocalExperimentBrowser;
+
+// OEM sessionless MobileConfig path:
+// FBMobileConfigContextManager(UpdateConfigsExtension) -> tryUpdateConfigs.
+// customRefreshHandler remains an internally-owned dependency of that method.
+// The private multi-argument C update functions are deliberately not invoked.
++ (NSString *)sessionlessMobileConfigState;
++ (NSString *)tryFetchSessionlessMobileConfig;
 
 + (void)injectRowsIntoSettingsIfPossibleFromViewController:(UIViewController *)vc;
 

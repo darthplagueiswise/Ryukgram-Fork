@@ -4,7 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SCIInternalGatePrefs : NSObject
 + (BOOL)boolForKey:(NSString *)key;
-+ (BOOL)objCGateEnabledForKey:(NSString *)key;
++ (BOOL)employeeInternalMasterEnabled;
 + (BOOL)mobileConfigBoolGateEnabledForKey:(NSString *)key;
 + (BOOL)individualGateEnabledForKey:(NSString *)key;
 + (NSDictionary *)mobileConfigCustomOverrides;

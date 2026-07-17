@@ -160,9 +160,6 @@ static void SCIClearCrashMarker(void) {
         @"sci_force_msgc_sessioned_boolean",
         @"sci_force_mci_experiment_boolean",
         @"sci_force_mci_extension_boolean",
-        @"sci_force_mobileconfig_overrides",
-        @"sci_force_mobileconfig_try_update",
-        @"sci_force_mobileconfig_force_update",
         @"sci_force_internal_settings_menu",
         @"sci_force_internal_settings_loggedout",
         @"sci_force_internal_settings_availability",
@@ -191,7 +188,11 @@ static void SCIClearCrashMarker(void) {
 }
 
 + (BOOL)boolForKey:(NSString *)key { return [SCIUtils getBoolPref:key]; }
-+ (BOOL)objCGateEnabledForKey:(NSString *)key { return [self boolForKey:kSCIForceIGObjCMasterKey] || (key.length && [self boolForKey:key]); }
++ (BOOL)employeeInternalMasterEnabled {
+    return [self boolForKey:@"sci_employee_internal"] ||
+           [self boolForKey:kSCIForceIGObjCMasterKey] ||
+           [self boolForKey:@"sci_force_ig_is_employee"];
+}
 + (BOOL)mobileConfigBoolGateEnabledForKey:(NSString *)key { return [self boolForKey:kSCIMobileConfigMasterKey] || (key.length && [self boolForKey:key]); }
 + (BOOL)individualGateEnabledForKey:(NSString *)key { return key.length && [self boolForKey:key]; }
 + (NSDictionary *)mobileConfigCustomOverrides { NSDictionary *d = [SCIUtils getDictPref:kSCIMobileConfigCustomOverridesKey]; return [d isKindOfClass:NSDictionary.class] ? d : @{}; }

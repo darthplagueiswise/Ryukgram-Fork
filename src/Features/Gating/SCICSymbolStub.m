@@ -31,7 +31,7 @@ typedef NS_ENUM(NSInteger, SCICStubProfile) {
     SCICStubProfileMSGCSessionedBoolean,
     SCICStubProfileNoArgBool,
     SCICStubProfileTALIdToName,
-    SCICStubProfileVoidAction,
+    SCICStubProfilePassthroughAction,
 };
 
 typedef NS_ENUM(NSInteger, SCICReturnKind) {
@@ -192,10 +192,10 @@ static SCICStubProfile SCIStubProfileForSymbol(NSString *name) {
     if ([name isEqualToString:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled"]) return SCICStubProfileNoArgBool;
     if ([name isEqualToString:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"]) return SCICStubProfileNoArgBool;
     if ([name isEqualToString:@"TALEventsGetIdToNameMappingForEventId"]) return SCICStubProfileTALIdToName;
-    if ([name isEqualToString:@"MCIDatabaseTableToProcedureNameMapRegisterMappings"]) return SCICStubProfileVoidAction;
-    if ([name isEqualToString:@"IGMobileConfigSetConfigOverrides"]) return SCICStubProfileVoidAction;
-    if ([name isEqualToString:@"IGMobileConfigForceUpdateConfigs"]) return SCICStubProfileVoidAction;
-    if ([name isEqualToString:@"IGMobileConfigTryUpdateConfigsWithCompletion"]) return SCICStubProfileVoidAction;
+    if ([name isEqualToString:@"MCIDatabaseTableToProcedureNameMapRegisterMappings"]) return SCICStubProfilePassthroughAction;
+    if ([name isEqualToString:@"IGMobileConfigSetConfigOverrides"]) return SCICStubProfilePassthroughAction;
+    if ([name isEqualToString:@"IGMobileConfigForceUpdateConfigs"]) return SCICStubProfilePassthroughAction;
+    if ([name isEqualToString:@"IGMobileConfigTryUpdateConfigsWithCompletion"]) return SCICStubProfilePassthroughAction;
     return SCICStubProfileUnknown;
 }
 
@@ -217,7 +217,7 @@ static SCICReturnKind SCIReturnKindForProfile(SCICStubProfile p) {
         case SCICStubProfileEasyGatingCopyString:
         case SCICStubProfileTALIdToName:
             return SCICReturnKindString;
-        case SCICStubProfileVoidAction:
+        case SCICStubProfilePassthroughAction:
             return SCICReturnKindAction;
         default:
             return SCICReturnKindUnknown;
@@ -409,7 +409,7 @@ static void SCIStubRefreshCache(void) {
 + (NSString *)returnKindForSymbol:(NSString *)name { return SCIReturnKindString(SCIReturnKindForProfile(SCIStubProfileForSymbol(name))); }
 + (NSString *)blacklistReasonForSymbol:(NSString *)name { return SCIStubBlacklistReason(name); }
 + (NSString *)notHookableReasonForSymbol:(NSString *)name { NSString *r = SCIStubBlacklistReason(name); if (r) return r; return [self isHookableSymbol:name] ? nil : @"ABI/profile not validated for C hook; list-only."; }
-+ (NSString *)notForceableReasonForSymbol:(NSString *)name { NSString *r = SCIStubBlacklistReason(name); if (r) return r; if ([self isForceableSymbol:name] || [self isTypedForceableSymbol:name]) return nil; if ([[self returnKindForSymbol:name] isEqualToString:@"action"]) return @"action/registration hook: observe/log only unless arguments are mounted by a dedicated button."; return @"not forceable as BOOL; use typed force if available or DATA/param browser."; }
++ (NSString *)notForceableReasonForSymbol:(NSString *)name { NSString *r = SCIStubBlacklistReason(name); if (r) return r; if ([self isForceableSymbol:name] || [self isTypedForceableSymbol:name]) return nil; if ([name isEqualToString:@"IGMobileConfigForceUpdateConfigs"] || [name isEqualToString:@"IGMobileConfigTryUpdateConfigsWithCompletion"]) return @"multi-argument MobileConfig ABI: passthrough observation only; use FBMobileConfigContextManager(UpdateConfigsExtension).tryUpdateConfigs for the OEM fetch."; if ([[self returnKindForSymbol:name] isEqualToString:@"action"]) return @"action/registration hook: passthrough observation only unless a dedicated caller mounts the validated arguments."; return @"not forceable as BOOL; use typed force if available or DATA/param browser."; }
 
 + (BOOL)observeForSymbol:(NSString *)name { return [SCIDictPref(kObserveOverrides)[name ?: @""] boolValue]; }
 + (BOOL)setObserve:(BOOL)value forSymbol:(NSString *)name { if (![name isKindOfClass:NSString.class] || !name.length) return NO; if (value && ![self isHookableSymbol:name]) return NO; NSMutableDictionary *d = [SCIDictPref(kObserveOverrides) mutableCopy] ?: [NSMutableDictionary dictionary]; if (value) d[name]=@YES; else [d removeObjectForKey:name]; [SCIUtils setPref:d forKey:kObserveOverrides]; if (value) [self installStubForSymbol:name]; return YES; }

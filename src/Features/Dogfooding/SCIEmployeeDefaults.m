@@ -9,8 +9,6 @@
 
 #define EDLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] EmployeeDefaults " fmt, ##__VA_ARGS__)
 
-static NSString *const kSCIForceEmployeeMasterKey = @"sci_force_ig_internal_employee";
-static NSString *const kSCIForceEmployeeGetterKey = @"sci_force_ig_is_employee";
 static NSString *const kSCIForceEmployeeDefaultsKey = @"sci_force_employee_defaults_persist";
 
 static BOOL sSCIEmployeeDefaultsNSHooksInstalled = NO;
@@ -23,9 +21,9 @@ static BOOL sSCIEmployeeDefaultsApplying = NO;
 static volatile BOOL sSCIEmployeeEnabledCache = NO;
 
 static void SCIUpdateEmployeeEnabledCache(void) {
+    // Legacy global-default rewriting is intentionally separate from the
+    // Employee/Internal identity master. It runs only when explicitly opted in.
     sSCIEmployeeEnabledCache =
-        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeMasterKey] ||
-        [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeGetterKey]  ||
         [SCIInternalGatePrefs individualGateEnabledForKey:kSCIForceEmployeeDefaultsKey];
 }
 

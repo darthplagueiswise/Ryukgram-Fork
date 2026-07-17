@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 //   IGLiquidGlassNavigationExperimentHelper.shared -> overrideIsEnabled: etc.
 // Returns a short human-readable summary of what was applied.
 + (NSString *)applyNow;
-// Auto-apply shortly after launch if sci_apply_internal_native is enabled.
+// Performs one deterministic main-turn apply if sci_apply_internal_native is enabled.
 + (void)scheduleAutoApplyIfEnabled;
 @end
 NS_ASSUME_NONNULL_END

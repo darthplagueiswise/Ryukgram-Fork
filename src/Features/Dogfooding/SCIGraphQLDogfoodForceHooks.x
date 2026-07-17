@@ -1,4 +1,5 @@
 #import "../../Utils.h"
+#import "SCIInternalGatePrefs.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -11,7 +12,7 @@ void SCIInstallGraphQLDogfoodQueryBridgeIfNeeded(void);
 static volatile BOOL sDGForceEnabled = NO;
 
 void SCIRefreshGraphQLDogfoodForceEnabled(void) {
-    sDGForceEnabled = [SCIUtils getBoolPref:@"sci_employee_internal"];
+    sDGForceEnabled = [SCIInternalGatePrefs employeeInternalMasterEnabled];
 }
 
 static inline BOOL DGForceOn(void) {
@@ -114,8 +115,18 @@ void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void) {
     SCIInstallGraphQLDogfoodQueryBridgeIfNeeded();
 
     if (!objcGroupInstalled) {
-        objcGroupInstalled = YES;
-        %init(SCIGraphQLDogfoodLocalDecisionGroup);
+        Class baseUser = objc_getClass("IGBaseUser");
+        Method showIssueMethod = baseUser
+            ? class_getInstanceMethod(baseUser,
+                NSSelectorFromString(@"asIGDogfoodingFirstShowIssueFragmentImmutableModel"))
+            : NULL;
+        if (DGMethodMatches(showIssueMethod, "@16@0:8")) {
+            %init(SCIGraphQLDogfoodLocalDecisionGroup);
+            objcGroupInstalled = YES;
+        } else if (showIssueMethod) {
+            DGFLOG("skip local show-issue fragment; ABI=%{public}s",
+                   method_getTypeEncoding(showIssueMethod));
+        }
     }
 
     if (!statusInstalled) {
