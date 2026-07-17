@@ -10,7 +10,7 @@
 //   • duas ABIs reais de IGBugReportMenuViewController initWith...
 //   • ivars escalares do menu: availability + showInternalSettings/loggedOut/
 //     shake/dogfoodingAssistant
-//   • IGInternalSettingsAvailabilityStatus: 0 abre, 2 mostra Access Denied
+//   • IGInternalSettingsAvailabilityStatus is an enum; raw 0...2 is selectable
 //
 // _ig_is_employee e _ig_is_employee_or_test_user NÃO são funções BOOL: são
 // descritores DATA de 16 bytes. Nunca usar fishhook/MSHookFunction neles.
@@ -46,6 +46,16 @@ static inline BOOL EIMenuOn(void) {
 
 static inline BOOL EIAvailabilityOn(void) {
 	return EIMenuOn() || [SCIUtils getBoolPref:@"sci_force_internal_settings_availability"];
+}
+
+static inline NSInteger EIAvailabilityStatusValue(void) {
+	// This is a Swift enum raw value, never a BOOL. A dedicated key avoids the
+	// stale historical default attached to sci_internal_settings_availability_value.
+	NSInteger value = (NSInteger)[SCIUtils getDoublePref:
+		@"sci_internal_settings_availability_raw_value"];
+	if (value < 0) return 0;
+	if (value > 2) return 2;
+	return value;
 }
 
 static inline BOOL EILoggedOutOn(void) {
@@ -366,7 +376,7 @@ static BOOL EIInstallSwiftIdentityHooks(void) {
 // ABI atual:
 // @104@0:8@16@24@32@40@48@56q64q72B80B84B88B92q96
 //
-// status=0 segue para Internal Settings; status=2 mostra Access Denied.
+// availability is an enum raw value selected in Settings (0...2), not a BOOL.
 //
 // O Instagram pode conservar/reusar uma instância do report menu criada antes
 // do tap no menu Dev. Só alterar os argumentos do initializer não cobre esse
@@ -553,7 +563,8 @@ static void EIApplyBugMenuLiveState(id controller, BOOL reloadTable) {
 	BOOL changed = NO;
 	if (EIAvailabilityOn()) {
 		changed |= EIWriteIntegerIvar(controller,
-			"internalSettingsAvailabilityStatus", 0);
+			"internalSettingsAvailabilityStatus",
+			EIAvailabilityStatusValue());
 	}
 	if (EIMenuOn()) {
 		changed |= EIWriteBoolIvar(controller, "showInternalSettings", YES);
@@ -585,7 +596,9 @@ static id EIBugMenuLegacy(
 	BOOL showLoggedOutInternalSettings,
 	BOOL showShakeToReportPreferenceToggle
 ) {
-	if (EIAvailabilityOn()) availabilityStatus = 0;
+	if (EIAvailabilityOn()) {
+		availabilityStatus = EIAvailabilityStatusValue();
+	}
 	if (EIMenuOn()) {
 		showInternalSettings = YES;
 		showShakeToReportPreferenceToggle = YES;
@@ -618,7 +631,9 @@ static id EIBugMenuCurrent(
 	BOOL showDogfoodingAssistant,
 	NSInteger maisaUXVariantRawValue
 ) {
-	if (EIAvailabilityOn()) availabilityStatus = 0;
+	if (EIAvailabilityOn()) {
+		availabilityStatus = EIAvailabilityStatusValue();
+	}
 	if (EIMenuOn()) {
 		showInternalSettings = YES;
 		showShakeToReportPreferenceToggle = YES;
