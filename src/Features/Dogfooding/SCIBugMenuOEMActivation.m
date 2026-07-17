@@ -2,7 +2,6 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import "../../Utils.h"
 #import <UIKit/UIKit.h>
-#import <mach-o/dyld.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -28,13 +27,10 @@
 //   maisaUXVariant                      byte   @ 0x84
 //   lazy dogfoodingAssistantSocket      byte   @ 0x85 (never an ObjC id)
 //
-// The Swift jump-table action tags are 6 (Dogfooding Assistant) and 7
-// (Internal Settings). They are NOT NSIndexPath.section values. The native
-// shouldHighlight implementation explicitly rejects both tags through mask
-// 0xe017, so merely setting show* ivars can render disabled-looking rows without
-// ever reaching didSelect. We identify the rendered cells by their exact current
-// binary titles, tag those cell objects, make only those cells interactive, and
-// still forward execution to Instagram's original Swift handler.
+// SCIEmployeeInternal.x owns initializer/lifecycle/table selection. The actual
+// button route belongs to SCIBugMenuActionCells.m. This file owns only rendered
+// cell tagging/highlight plus exact stored-state repair, so no selector is hooked
+// by two modules.
 
 static __weak id sBMDeviceSession;
 static __weak id sBMUserSession;
@@ -198,7 +194,7 @@ static void BMCaptureSessions(id controller) {
     }
 }
 
-static void BMApplyNativeState(id controller) {
+void SCIApplyBugMenuOEMActivationState(id controller) {
     if (!controller || !BMAnyOn()) return;
     BMCaptureSessions(controller);
 
@@ -309,7 +305,7 @@ static void BMEnableCell(UITableViewCell *cell, BMTargetKind target) {
 static id (*origCellForRow)(id, SEL, UITableView *, NSIndexPath *);
 static id newCellForRow(id self, SEL _cmd, UITableView *tableView,
                         NSIndexPath *indexPath) {
-    BMApplyNativeState(self);
+    SCIApplyBugMenuOEMActivationState(self);
     UITableViewCell *cell = origCellForRow
         ? origCellForRow(self, _cmd, tableView, indexPath)
         : nil;
@@ -321,7 +317,7 @@ static id newCellForRow(id self, SEL _cmd, UITableView *tableView,
 static BOOL (*origShouldHighlight)(id, SEL, UITableView *, NSIndexPath *);
 static BOOL newShouldHighlight(id self, SEL _cmd, UITableView *tableView,
                                NSIndexPath *indexPath) {
-    BMApplyNativeState(self);
+    SCIApplyBugMenuOEMActivationState(self);
     BOOL nativeValue = origShouldHighlight
         ? origShouldHighlight(self, _cmd, tableView, indexPath)
         : NO;
@@ -332,55 +328,6 @@ static BOOL newShouldHighlight(id self, SEL _cmd, UITableView *tableView,
         return YES;
     }
     return nativeValue;
-}
-
-static void BMPrepareExactTarget(id controller, BMTargetKind target) {
-    BMApplyNativeState(controller);
-    BMCaptureSessions(controller);
-
-    if (target == BMTargetKindDogfoodingAssistant && BMMasterOn()) {
-        BMWriteByte(controller, "showDogfoodingAssistant", 0x83, 1);
-        BMWriteByte(controller, "maisaUXVariant", 0x84, 1);
-        return;
-    }
-
-    if (target != BMTargetKindInternalSettings || !BMTargetEnabled(target)) return;
-
-    // didSelect action 7 is exact: raw 0 opens, raw 1/3 silently return and raw
-    // 2 presents access denied. A forced actionable tap must therefore use 0,
-    // regardless of the diagnostic stepper value used while inspecting rows.
-    BMWriteInteger(controller, "internalSettingsAvailabilityStatus", 0x78, 0);
-    BMWriteByte(controller, "showInternalSettings", 0x80, 1);
-    BMWriteByte(controller, "showShakeToReportPreferenceToggle", 0x82, 1);
-    BMWriteByte(controller, "maisaUXVariant", 0x84, 1);
-
-    id userSession = BMReadObject(controller, "userSession", 0x18) ?:
-        sBMUserSession;
-    if (userSession) {
-        BMWriteInteger(controller, "style", 0x20, 0);
-    } else {
-        BMWriteInteger(controller, "style", 0x20, 2);
-        BMWriteByte(controller, "showLoggedOutInternalSettings", 0x81, 1);
-    }
-}
-
-static void (*origDidSelect)(id, SEL, UITableView *, NSIndexPath *);
-static void newDidSelect(id self, SEL _cmd, UITableView *tableView,
-                         NSIndexPath *indexPath) {
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    BMTargetKind target = BMTargetForCell(cell);
-    if (BMTargetEnabled(target)) {
-        BMPrepareExactTarget(self, target);
-        [SCIDogfoodObjectRuntime noteAction:
-            target == BMTargetKindDogfoodingAssistant
-                ? @"Dogfooding Assistant native tap"
-                : @"Internal Settings native tap"
-                                      status:@"forwarded to original Swift handler"
-                                      detail:@{ @"title": BMCellTitle(cell) ?: @"",
-                                                @"section": @(indexPath.section),
-                                                @"row": @(indexPath.row) }];
-    }
-    if (origDidSelect) origDidSelect(self, _cmd, tableView, indexPath);
 }
 
 static void BMHook(Class cls, SEL selector, const char *encoding,
@@ -395,7 +342,7 @@ static void BMHook(Class cls, SEL selector, const char *encoding,
     MSHookMessageEx(cls, selector, replacement, original);
 }
 
-static void BMInstall(void) {
+void SCIInstallBugMenuOEMActivationHooks(void) {
     @synchronized (SCIDogfoodObjectRuntime.class) {
         Class cls = BMMenuClass();
         BMHook(cls, @selector(tableView:cellForRowAtIndexPath:),
@@ -403,20 +350,5 @@ static void BMInstall(void) {
         BMHook(cls, @selector(tableView:shouldHighlightRowAtIndexPath:),
             "B32@0:8@16@24", (IMP)newShouldHighlight,
             (IMP *)&origShouldHighlight);
-        BMHook(cls, @selector(tableView:didSelectRowAtIndexPath:),
-            "v32@0:8@16@24", (IMP)newDidSelect, (IMP *)&origDidSelect);
-    }
-}
-
-static void BMImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
-    BMInstall();
-}
-
-__attribute__((constructor))
-static void SCIBugMenuOEMActivationCtor(void) {
-    @autoreleasepool {
-        BMInstall();
-        _dyld_register_func_for_add_image(BMImageLoaded);
     }
 }
