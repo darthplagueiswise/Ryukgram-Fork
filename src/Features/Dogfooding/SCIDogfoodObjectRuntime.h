@@ -5,6 +5,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
 
+// Exact live objects captured from Instagram's native sessionless MobileConfig
+// dependency graph. These never synthesize a manager or reinterpret shared_ptr
+// storage as Objective-C.
+FOUNDATION_EXPORT nullable id SCIValidatedSessionlessMobileConfigContext(void);
+FOUNDATION_EXPORT NSString *SCIValidatedSessionlessMobileConfigCaptureState(void);
+
 @interface SCIDogfoodObjectRuntime : NSObject
 
 + (void)installIfNeeded;
