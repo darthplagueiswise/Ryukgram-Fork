@@ -190,10 +190,14 @@ static SCISetting *SCIEmployeeInternalSwitch(
 					@"sci_employee_internal"
 				),
 				SCIEmployeeInternalSwitch(
-					SCILocalized(@"Internal settings access allowed"),
-					SCILocalized(@"Forces IGInternalSettingsAvailabilityStatus to the confirmed available value 0"),
+					SCILocalized(@"Override Internal Settings availability"),
+					SCILocalized(@"Applies the selected IGInternalSettingsAvailabilityStatus raw value; this field is an enum, not a BOOL"),
 					@"sci_force_internal_settings_availability"
 				),
+				[SCISetting stepperCellWithTitle:SCILocalized(@"Internal Settings availability raw value")
+					subtitle:SCILocalized(@"Runtime test value 0–2; takes effect on the next menu refresh or tap")
+					defaultsKey:@"sci_internal_settings_availability_raw_value"
+					min:0 max:2 step:1 label:@"raw" singularLabel:@"raw"],
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Internal settings menu"),
 					SCILocalized(@"Forces showInternalSettings and shake-to-report in both validated initializer ABIs"),
