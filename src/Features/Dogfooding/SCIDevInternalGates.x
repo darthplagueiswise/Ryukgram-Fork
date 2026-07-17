@@ -2,11 +2,13 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 
-static BOOL sciDevMaster(void) { return [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"]; }
+static BOOL sciDevMaster(void) {
+	return [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"] ||
+	       [SCIUtils getBoolPref:@"sci_employee_internal"];
+}
 static BOOL sciDevGate(NSString *key) { return sciDevMaster() || [SCIUtils getBoolPref:key]; }
 static BOOL sciDevAnyGateEnabled(void) {
 	return sciDevMaster()
-		|| [SCIUtils getBoolPref:@"sci_force_ig_is_employee"]
 		|| [SCIUtils getBoolPref:@"sci_force_ig_featured_internal_badge"]
 		|| [SCIUtils getBoolPref:@"sci_force_ig_inbox_internal_badge"]
 		|| [SCIUtils getBoolPref:@"sci_force_ig_creation_internal_label"]
@@ -16,12 +18,6 @@ static BOOL sciDevAnyGateEnabled(void) {
 }
 
 %group SCIDevInternalObjCGatesGroup
-
-%hook IGAdPlatformLogger_objc
-- (BOOL)isEmployee {
-	return sciDevGate(@"sci_force_ig_is_employee") ? YES : %orig;
-}
-%end
 
 %hook IGFeaturedUserInfo
 - (BOOL)shouldShowInternalBadge {
