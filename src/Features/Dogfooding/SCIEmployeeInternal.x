@@ -23,6 +23,7 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 #import <os/log.h>
 #import <stdint.h>
@@ -31,7 +32,12 @@
 #define EILOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] EmployeeInternal " fmt, ##__VA_ARGS__)
 
 static inline BOOL EIMasterOn(void) {
-	return [SCIUtils getBoolPref:@"sci_employee_internal"];
+	// One identity master, including the two legacy switches. Previously these
+	// paths disagreed: sci_force_ig_is_employee only changed an ads logger while
+	// sci_employee_internal changed the real user-info model.
+	return [SCIUtils getBoolPref:@"sci_employee_internal"] ||
+	       [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"] ||
+	       [SCIUtils getBoolPref:@"sci_force_ig_is_employee"];
 }
 
 static inline BOOL EIMenuOn(void) {
@@ -121,6 +127,175 @@ static BOOL EITypeEncodingMatches(Method method, const char *expected) {
 	if (!method || !expected) return NO;
 	const char *encoding = method_getTypeEncoding(method);
 	return encoding && strcmp(encoding, expected) == 0;
+}
+
+// ---------------------------------------------------------------------
+// Identity gates — exact runtime methods only, with ABI validation.
+//
+// _ig_is_employee / _ig_is_employee_or_test_user are DATA descriptors,
+// not callable BOOL functions. The actual local identity surfaces are ObjC
+// getters and generated fragment models. We hook only selectors that really
+// exist and return BOOL; missing names are recorded as absent, never added.
+// ---------------------------------------------------------------------
+static NSMutableDictionary<NSString *, NSValue *> *EIIdentityOriginals(void) {
+	static NSMutableDictionary<NSString *, NSValue *> *store = nil;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{ store = [NSMutableDictionary dictionary]; });
+	return store;
+}
+
+static NSString *EIIdentityKey(Class cls, SEL selector) {
+	return [NSString stringWithFormat:@"%@#%@",
+		NSStringFromClass(cls) ?: @"<nil>",
+		NSStringFromSelector(selector) ?: @"<nil>"];
+}
+
+static BOOL EIIsZeroArgumentBoolGetter(Method method) {
+	if (!method) return NO;
+	const char *encoding = method_getTypeEncoding(method);
+	return encoding &&
+		(strcmp(encoding, "B16@0:8") == 0 ||
+		 strcmp(encoding, "c16@0:8") == 0);
+}
+
+static BOOL EIIdentityBoolGetter(id self, SEL _cmd) {
+	if (EIMasterOn()) return YES;
+
+	IMP original = NULL;
+	NSMutableDictionary<NSString *, NSValue *> *store = EIIdentityOriginals();
+	@synchronized (store) {
+		for (Class cls = object_getClass(self); cls; cls = class_getSuperclass(cls)) {
+			NSValue *value = store[EIIdentityKey(cls, _cmd)];
+			if (value) {
+				original = value.pointerValue;
+				break;
+			}
+		}
+	}
+	return original ? ((BOOL (*)(id, SEL))original)(self, _cmd) : NO;
+}
+
+static BOOL EIInstallIdentitySelectorOnClass(Class cls, SEL selector) {
+	if (!cls || !selector) return NO;
+	Method method = class_getInstanceMethod(cls, selector);
+	if (!method) return NO;
+
+	const char *encoding = method_getTypeEncoding(method);
+	if (!EIIsZeroArgumentBoolGetter(method)) {
+		EILOG("skip identity %{public}s.%{public}s ABI=%{public}s",
+		      class_getName(cls), sel_getName(selector),
+		      encoding ?: "<nil>");
+		return NO;
+	}
+
+	NSString *key = EIIdentityKey(cls, selector);
+	NSMutableDictionary<NSString *, NSValue *> *store = EIIdentityOriginals();
+	@synchronized (store) {
+		if (store[key]) return YES;
+	}
+
+	IMP original = NULL;
+	MSHookMessageEx(cls, selector, (IMP)EIIdentityBoolGetter, &original);
+	if (!original) return NO;
+
+	@synchronized (store) {
+		store[key] = [NSValue valueWithPointer:original];
+	}
+	EILOG("identity hook %{public}s.%{public}s",
+	      class_getName(cls), sel_getName(selector));
+	return YES;
+}
+
+static NSUInteger EIInstallIdentityHooksOnClass(Class cls, BOOL includeIsEmployee) {
+	if (!cls) return 0;
+	NSArray<NSString *> *names = @[
+		@"isEmployee",
+		@"isEmployeeOrTestUser",
+		@"isTestUser",
+		@"isDogfooder"
+	];
+	NSUInteger installed = 0;
+	for (NSString *name in names) {
+		if (!includeIsEmployee && [name isEqualToString:@"isEmployee"]) continue;
+		if (EIInstallIdentitySelectorOnClass(cls, NSSelectorFromString(name))) {
+			installed++;
+		}
+	}
+	return installed;
+}
+
+void SCIInstallEmployeeIdentityHooksForObject(id object) {
+	if (!EIMasterOn() || !object) return;
+	Class cls = object_getClass(object);
+	BOOL includeIsEmployee = (cls != objc_getClass("IGFacebookUserInfo"));
+	EIInstallIdentityHooksOnClass(cls, includeIsEmployee);
+}
+
+static NSUInteger EIInstallKnownIdentityHooks(void) {
+	NSArray<NSString *> *classNames = @[
+		@"IGFacebookUserInfo",
+		@"IGBaseUser",
+		@"IGUserSession",
+		@"IGSessionContext",
+		@"IGUserSessionContext",
+		@"IGDeviceSession",
+		@"IGDogfooderProd"
+	];
+	NSUInteger installed = 0;
+	for (NSString *className in classNames) {
+		Class cls = NSClassFromString(className);
+		BOOL includeIsEmployee = ![className isEqualToString:@"IGFacebookUserInfo"];
+		installed += EIInstallIdentityHooksOnClass(cls, includeIsEmployee);
+	}
+	return installed;
+}
+
+static id (*orig_EIEmployeeOrTestFragment)(id, SEL) = NULL;
+static id (*orig_EIDogfooderInformationFragment)(id, SEL) = NULL;
+
+static id EIEmployeeOrTestFragment(id self, SEL _cmd) {
+	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(self);
+	id model = orig_EIEmployeeOrTestFragment
+		? orig_EIEmployeeOrTestFragment(self, _cmd)
+		: nil;
+	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(model);
+	return model;
+}
+
+static id EIDogfooderInformationFragment(id self, SEL _cmd) {
+	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(self);
+	id model = orig_EIDogfooderInformationFragment
+		? orig_EIDogfooderInformationFragment(self, _cmd)
+		: nil;
+	if (EIMasterOn()) SCIInstallEmployeeIdentityHooksForObject(model);
+	return model;
+}
+
+static BOOL EIInstallIdentityFragmentHooks(void) {
+	Class cls = objc_getClass("IGBaseUser");
+	if (!cls) return NO;
+
+	SEL employeeSel = NSSelectorFromString(
+		@"asIGUserIsEmployeeOrTestUserFragmentImmutableModel");
+	Method employeeMethod = class_getInstanceMethod(cls, employeeSel);
+	if (!orig_EIEmployeeOrTestFragment &&
+		EITypeEncodingMatches(employeeMethod, "@16@0:8")) {
+		MSHookMessageEx(cls, employeeSel, (IMP)EIEmployeeOrTestFragment,
+		                (IMP *)&orig_EIEmployeeOrTestFragment);
+	}
+
+	SEL dogfooderSel = NSSelectorFromString(
+		@"asIGDogfooderInformationFragmentImmutableModel");
+	Method dogfooderMethod = class_getInstanceMethod(cls, dogfooderSel);
+	if (!orig_EIDogfooderInformationFragment &&
+		EITypeEncodingMatches(dogfooderMethod, "@16@0:8")) {
+		MSHookMessageEx(cls, dogfooderSel,
+		                (IMP)EIDogfooderInformationFragment,
+		                (IMP *)&orig_EIDogfooderInformationFragment);
+	}
+
+	return orig_EIEmployeeOrTestFragment != NULL ||
+	       orig_EIDogfooderInformationFragment != NULL;
 }
 
 static BOOL EIInstallSwiftIdentityHooks(void) {
@@ -226,6 +401,124 @@ static NSString *EIBugMenuRowTitle(UIView *view) {
 	return nil;
 }
 
+static NSString *EIBugMenuCellTitle(UITableViewCell *cell) {
+	if (!cell) return nil;
+	NSString *title = cell.textLabel.text;
+
+	if (!title.length) {
+		id configuration = cell.contentConfiguration;
+		SEL textSelector = sel_registerName("text");
+		if ([configuration respondsToSelector:textSelector]) {
+			@try {
+				id value = ((id (*)(id, SEL))objc_msgSend)(
+					configuration, textSelector);
+				if ([value isKindOfClass:NSString.class]) title = value;
+			} @catch (__unused id exception) {}
+		}
+	}
+	if (!title.length) title = EIBugMenuRowTitle(cell.contentView);
+	if (!title.length) title = cell.accessibilityLabel;
+	return [title stringByTrimmingCharactersInSet:
+		NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+static BOOL EIStringContainsDogfoodDependency(NSString *value) {
+	NSString *lower = value.lowercaseString ?: @"";
+	return [lower containsString:@"dogfood"] ||
+	       [lower containsString:@"assistant"] ||
+	       [lower containsString:@"provider"] ||
+	       [lower containsString:@"socket"] ||
+	       [lower containsString:@"config"] ||
+	       [lower containsString:@"usersession"];
+}
+
+static void EICollectDogfoodDependencies(
+	id object,
+	NSUInteger depth,
+	NSMutableSet<NSValue *> *visited,
+	NSMutableDictionary<NSString *, id> *found
+) {
+	if (!object || depth > 3) return;
+	NSValue *address = [NSValue valueWithPointer:(__bridge const void *)object];
+	if ([visited containsObject:address]) return;
+	[visited addObject:address];
+
+	Class cls = object_getClass(object);
+	NSString *className = NSStringFromClass(cls) ?: @"";
+	NSString *lowerClass = className.lowercaseString;
+
+	Protocol *providerProtocol = objc_getProtocol(
+		"IGBugReportingDogfoodingAssistantMenuRowProviding");
+	BOOL isProvider = providerProtocol &&
+		[object conformsToProtocol:providerProtocol];
+
+	if ([lowerClass containsString:@"dogfoodingsettingsconfig"]) {
+		found[@"config"] = object;
+		[SCIDogfoodObjectRuntime noteObject:object
+			role:@"IGDogfoodingSettingsConfig"
+			source:@"Bug Reporter live dependency"];
+	}
+	if ([className isEqualToString:@"IGUserSession"] ||
+		[lowerClass hasSuffix:@"usersession"]) {
+		found[@"session"] = object;
+	}
+	if (isProvider || [lowerClass containsString:@"dogfoodingassistant"]) {
+		found[@"provider"] = object;
+		[SCIDogfoodObjectRuntime noteObject:object
+			role:@"IGBugReportingDogfoodingAssistantMenuRowProviding"
+			source:@"Bug Reporter live dependency"];
+	}
+
+	if (depth == 3) return;
+	for (Class current = cls; current; current = class_getSuperclass(current)) {
+		unsigned int count = 0;
+		Ivar *ivars = class_copyIvarList(current, &count);
+		for (unsigned int i = 0; ivars && i < count; i++) {
+			Ivar ivar = ivars[i];
+			const char *encoding = ivar_getTypeEncoding(ivar);
+			if (!encoding || encoding[0] != '@') continue;
+
+			id child = nil;
+			@try { child = object_getIvar(object, ivar); }
+			@catch (__unused id exception) {}
+			if (!child) continue;
+
+			NSString *ivarName = ivar_getName(ivar)
+				? [NSString stringWithUTF8String:ivar_getName(ivar)]
+				: @"";
+			NSString *childClass = NSStringFromClass(object_getClass(child)) ?: @"";
+			BOOL relevant = depth == 0 ||
+				EIStringContainsDogfoodDependency(ivarName) ||
+				EIStringContainsDogfoodDependency(childClass);
+			if (relevant) {
+				EICollectDogfoodDependencies(
+					child, depth + 1, visited, found);
+			}
+		}
+		if (ivars) free(ivars);
+	}
+}
+
+static void EICaptureDogfoodDependencies(id controller) {
+	if (!controller || !EIMasterOn()) return;
+	NSMutableDictionary<NSString *, id> *found =
+		[NSMutableDictionary dictionary];
+	EICollectDogfoodDependencies(
+		controller, 0, [NSMutableSet set], found);
+
+	id session = found[@"session"] ?:
+		[SCIDogfoodObjectRuntime activeUserSession];
+	id config = found[@"config"];
+	if (config) {
+		[SCIDogfoodObjectRuntime noteDogfoodConfig:config
+			userSession:session
+			source:@"IGBugReportMenuViewController live dependency graph"];
+	} else if (session) {
+		[SCIDogfoodObjectRuntime noteLiveUserSession:session
+			source:@"IGBugReportMenuViewController live dependency graph"];
+	}
+}
+
 static void EIApplyBugMenuLiveState(id controller, BOOL reloadTable) {
 	if (!controller || !EIAnyOn()) return;
 
@@ -270,6 +563,10 @@ static id EIBugMenuLegacy(
 		showShakeToReportPreferenceToggle = YES;
 	}
 	if (EILoggedOutOn()) showLoggedOutInternalSettings = YES;
+	if (EIMasterOn()) {
+		SCIInstallEmployeeIdentityHooksForObject(deviceSession);
+		SCIInstallEmployeeIdentityHooksForObject(userSession);
+	}
 
 	id result = orig_EIBugMenuLegacy
 		? orig_EIBugMenuLegacy(
@@ -299,7 +596,11 @@ static id EIBugMenuCurrent(
 		showShakeToReportPreferenceToggle = YES;
 	}
 	if (EILoggedOutOn()) showLoggedOutInternalSettings = YES;
-	if (EIMasterOn()) showDogfoodingAssistant = YES;
+	if (EIMasterOn()) {
+		showDogfoodingAssistant = YES;
+		SCIInstallEmployeeIdentityHooksForObject(deviceSession);
+		SCIInstallEmployeeIdentityHooksForObject(userSession);
+	}
 
 	id result = orig_EIBugMenuCurrent
 		? orig_EIBugMenuCurrent(
@@ -317,6 +618,7 @@ static void EIBugMenuViewDidLoad(id self, SEL _cmd) {
 	EIApplyBugMenuLiveState(self, NO);
 	if (orig_EIBugMenuViewDidLoad) orig_EIBugMenuViewDidLoad(self, _cmd);
 	EIApplyBugMenuLiveState(self, YES);
+	EICaptureDogfoodDependencies(self);
 }
 
 static void EIBugMenuViewDidAppear(id self, SEL _cmd, BOOL animated) {
@@ -325,22 +627,26 @@ static void EIBugMenuViewDidAppear(id self, SEL _cmd, BOOL animated) {
 		orig_EIBugMenuViewDidAppear(self, _cmd, animated);
 	}
 	EIApplyBugMenuLiveState(self, YES);
+	EICaptureDogfoodDependencies(self);
 }
 
 static void EIBugMenuDidSelectRow(id self, SEL _cmd,
 	UITableView *tableView, NSIndexPath *indexPath) {
-	// Native didSelect reads the availability ivar again. Reapply immediately
-	// before the tap so a late server/session refresh cannot turn a visible row
-	// into the status!=0 no-op path decoded in Instagram(30).
+	// Keep the native handler authoritative. This hook only reapplies the live
+	// scalar state and, for a positively identified Assistant row, captures its
+	// real provider/config before giving the original implementation first try.
 	EIApplyBugMenuLiveState(self, NO);
 
 	UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-	NSString *title = cell.textLabel.text ?: EIBugMenuRowTitle(cell.contentView);
-	BOOL dogfoodingAssistant =
+	NSString *title = EIBugMenuCellTitle(cell);
+	BOOL dogfoodingAssistant = title.length > 0 &&
 		[title caseInsensitiveCompare:@"Dogfooding Assistant"] == NSOrderedSame;
-	UIViewController *topBefore = dogfoodingAssistant
-		? [SCIDogfoodObjectRuntime topViewController]
-		: nil;
+	UIViewController *topBefore = nil;
+
+	if (dogfoodingAssistant) {
+		EICaptureDogfoodDependencies(self);
+		topBefore = [SCIDogfoodObjectRuntime topViewController];
+	}
 
 	if (orig_EIBugMenuDidSelectRow) {
 		orig_EIBugMenuDidSelectRow(self, _cmd, tableView, indexPath);
@@ -348,21 +654,31 @@ static void EIBugMenuDidSelectRow(id self, SEL _cmd,
 
 	if (!dogfoodingAssistant || !EIMasterOn()) return;
 
-	// The row's native handler is socket-driven. On non-employee/sideloaded
-	// sessions the menu Boolean can be forced while the lazy
-	// IGBugReportingDogfoodingAssistantMenuRowProviding socket resolves nil;
-	// the native handler then returns without navigation. Give it one main-loop
-	// turn, and only use the already-implemented native Dogfooding/Notes launcher
-	// when no controller was opened.
+	// The previous implementation treated a nil title as NSOrderedSame (both
+	// are numeric zero) and could run this path for Internal Settings. It also
+	// substituted DirectNotes when native config was absent. Both behaviours
+	// are forbidden here: fallback is native Dogfooding Settings only, and only
+	// when the real config was captured from the live provider graph.
 	dispatch_async(dispatch_get_main_queue(), ^{
-		UIViewController *topAfter = [SCIDogfoodObjectRuntime topViewController];
+		UIViewController *topAfter =
+			[SCIDogfoodObjectRuntime topViewController];
 		if (topAfter != topBefore) return;
 		if ([self isKindOfClass:UIViewController.class] &&
 			((UIViewController *)self).presentedViewController) return;
-		[SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
+
+		if (![SCIDogfoodObjectRuntime bestDogfoodSettingsConfig]) {
+			[SCIDogfoodObjectRuntime noteAction:@"Dogfooding Assistant"
+				status:@"native provider/config unavailable; no unrelated fallback"
+				detail:title];
+			return;
+		}
+		if (![SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings]) {
+			[SCIDogfoodObjectRuntime noteAction:@"Dogfooding Assistant"
+				status:@"native Dogfooding Settings opener unavailable"
+				detail:title];
+		}
 	});
 }
-
 static BOOL EIInstallBugReporterHooks(void) {
 	Class cls = objc_getClass("_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
 	if (!cls) cls = objc_getClass("IGBugReportMenuViewController");
@@ -452,6 +768,13 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 		%init(SCIEmployeeKnownObjCGroup);
 	}
 
+	NSUInteger identityHooks = 0;
+	BOOL identityFragments = NO;
+	if (EIMasterOn()) {
+		identityHooks = EIInstallKnownIdentityHooks();
+		identityFragments = EIInstallIdentityFragmentHooks();
+	}
+
 	if (EIMasterOn() && !swiftIdentityInstalled) {
 		swiftIdentityInstalled = EIInstallSwiftIdentityHooks();
 	}
@@ -461,8 +784,9 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 		bugReporterInstalled = EIInstallBugReporterHooks();
 	}
 
-	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d swift=%d bugMenu=%d",
+	EILOG("installed master=%d menu=%d availability=%d loggedOut=%d identity=%lu fragments=%d swift=%d bugMenu=%d",
 	      EIMasterOn(), EIMenuOn(), EIAvailabilityOn(), EILoggedOutOn(),
+	      (unsigned long)identityHooks, identityFragments,
 	      swiftIdentityInstalled, bugReporterInstalled);
 }
 
