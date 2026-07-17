@@ -2,7 +2,6 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import "../../Utils.h"
 #import <UIKit/UIKit.h>
-#import <mach-o/dyld.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -343,15 +342,8 @@ static void ACInstall(void) {
     }
 }
 
-static void ACImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
+void SCIInstallBugMenuActionCellHooks(void) {
+    // Exact class/selector pass only. The centralized bootstrap retries once
+    // after launch; no callback runs for every loaded dyld image.
     ACInstall();
-}
-
-__attribute__((constructor))
-static void SCIBugMenuActionCellsCtor(void) {
-    @autoreleasepool {
-        ACInstall();
-        _dyld_register_func_for_add_image(ACImageLoaded);
-    }
 }
