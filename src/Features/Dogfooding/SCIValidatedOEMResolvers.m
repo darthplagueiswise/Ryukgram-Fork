@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -13,44 +12,43 @@
 
 #define RRFLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] ValidatedOEM " fmt, ##__VA_ARGS__)
 
-// Runtime bridge revalidated against:
-// Instagram         SHA-256 a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa
-// FBSharedFramework SHA-256 22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc
+// Revalidated with radare2 6.1.8 (Capstone 5 backend) and Python Capstone
+// 5.0.7 against:
+//   Instagram         a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa
+//   FBSharedFramework 22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc
 //
-// The sessionless startup path in -[IGAppJobsDefaultRunner startupAnalyzerDidEnd]
-// calls the exported FBSharedFramework function at three call sites. The
-// sessionless call at Instagram VA 0x102c5604c is exactly:
-//
-//   IGMobileConfigTryUpdateConfigsWithCompletion(
-//       [deviceSession mobileConfig],
-//       [deviceSession loggedOutNetworker],
-//       nil,
-//       completion /* receives BOOL in w1 */
-//   );
-//
-// The exported wrapper is at FBSharedFramework VA 0x72da74; it consumes x0-x3
-// and supplies its private fifth argument itself. This is the real OEM route.
-// The former FBTGlobalSessionManager holder chain is not the owner in this
-// runtime: the user's alert proved sessionlessContextManagerHolder=nil.
+// Instagram VA 0x102c5604c calls the FBShared export with:
+//   x0 = deviceSession.mobileConfig
+//   x1 = deviceSession.loggedOutNetworker
+//   x2 = nil custom hours
+//   x3 = completion block
+// The FBShared wrapper at VA 0x72da74 is exactly:
+//   mov w4, #0
+//   b   0x72fee4
+// Therefore the public wrapper is four arguments and supplies its private fifth
+// argument itself. No synthetic FBMobileConfig context and no manual
+// refreshStartupConfigs call are used here.
 
 id SCIEmployeeInternalCapturedDeviceSession(void);
 id SCIEmployeeInternalCapturedUserSession(void);
 
 #pragma mark - ABI helpers
 
-static NSString *SCIRRFNormalizedEncoding(const char *encoding) {
+static NSString *RRFNormalizedEncoding(const char *encoding) {
     if (!encoding) return @"";
-    NSMutableString *out = [NSMutableString string];
+    NSMutableString *result = [NSMutableString string];
     const char *p = encoding;
     while (*p) {
-        if (*p != '@') { [out appendFormat:@"%c", *p++]; continue; }
-        [out appendString:@"@"]; p++;
+        if (*p != '@') {
+            [result appendFormat:@"%c", *p++];
+            continue;
+        }
+        [result appendString:@"@"]; p++;
         if (*p == '"') {
-            p++;
-            while (*p && *p != '"') p++;
-            if (*p == '"') p++;
+            for (p++; *p && *p != '"'; p++) {}
+            if (*p) p++;
         } else if (*p == '?') {
-            [out appendString:@"?"]; p++;
+            [result appendString:@"?"]; p++;
             if (*p == '<') {
                 NSInteger depth = 0;
                 do {
@@ -61,46 +59,46 @@ static NSString *SCIRRFNormalizedEncoding(const char *encoding) {
             }
         }
     }
-    return out;
+    return result;
 }
 
-static BOOL SCIRRFTypeMatches(Method method, const char *expected) {
-    if (!method || !expected) return NO;
-    return [SCIRRFNormalizedEncoding(method_getTypeEncoding(method))
-        isEqualToString:SCIRRFNormalizedEncoding(expected)];
+static BOOL RRFTypeMatches(Method method, const char *expected) {
+    return method && expected &&
+        [RRFNormalizedEncoding(method_getTypeEncoding(method))
+            isEqualToString:RRFNormalizedEncoding(expected)];
 }
 
-static NSString *SCIRRFMethodEncoding(Method method) {
+static NSString *RRFMethodEncoding(Method method) {
     const char *encoding = method ? method_getTypeEncoding(method) : NULL;
     return encoding ? [NSString stringWithUTF8String:encoding] : @"missing";
 }
 
-static NSString *SCIRRFClassName(id object) {
-    return object ? (NSStringFromClass(object_getClass(object)) ?: @"<unknown>") : @"nil";
+static NSString *RRFClassName(id object) {
+    return object ? (NSStringFromClass([object class]) ?: @"<unknown>") : @"nil";
 }
 
-static id SCIRRFCallObjectGetter(id receiver, NSString *name, NSString **failure) {
+static id RRFObjectGetter(id receiver, NSString *name, NSString **failure) {
     if (!receiver) {
         if (failure) *failure = [NSString stringWithFormat:@"%@ receiver=nil", name];
         return nil;
     }
     SEL selector = NSSelectorFromString(name);
-    Method method = class_getInstanceMethod(object_getClass(receiver), selector);
-    if (!SCIRRFTypeMatches(method, "@16@0:8")) {
+    Method method = class_getInstanceMethod([receiver class], selector);
+    if (!RRFTypeMatches(method, "@16@0:8")) {
         if (failure) *failure = [NSString stringWithFormat:@"%@.%@ ABI=%@",
-            SCIRRFClassName(receiver), name, SCIRRFMethodEncoding(method)];
+            RRFClassName(receiver), name, RRFMethodEncoding(method)];
         return nil;
     }
     @try {
         return ((id (*)(id, SEL))objc_msgSend)(receiver, selector);
     } @catch (id exception) {
         if (failure) *failure = [NSString stringWithFormat:@"%@.%@ exception=%@",
-            SCIRRFClassName(receiver), name, exception];
+            RRFClassName(receiver), name, exception];
         return nil;
     }
 }
 
-static void *SCIRRFSymbol(NSString *name) {
+static void *RRFSymbol(NSString *name) {
     if (!name.length) return NULL;
     void *symbol = dlsym(RTLD_DEFAULT, name.UTF8String);
     if (!symbol) {
@@ -110,9 +108,9 @@ static void *SCIRRFSymbol(NSString *name) {
     return symbol;
 }
 
-#pragma mark - Device-session owned sessionless MobileConfig
+#pragma mark - Device-session-owned sessionless MobileConfig
 
-static id SCIRRFResolveDeviceSession(NSString **source, NSString **failure) {
+static id RRFResolveDeviceSession(NSString **source, NSString **failure) {
     id deviceSession = SCIEmployeeInternalCapturedDeviceSession();
     if (deviceSession &&
         [deviceSession respondsToSelector:NSSelectorFromString(@"mobileConfig")] &&
@@ -121,9 +119,10 @@ static id SCIRRFResolveDeviceSession(NSString **source, NSString **failure) {
         return deviceSession;
     }
 
-    id userSession = [SCIDogfoodObjectRuntime activeUserSession];
+    id userSession = SCIEmployeeInternalCapturedUserSession() ?:
+        [SCIDogfoodObjectRuntime activeUserSession];
     NSString *stepFailure = nil;
-    deviceSession = SCIRRFCallObjectGetter(userSession, @"deviceSession", &stepFailure);
+    deviceSession = RRFObjectGetter(userSession, @"deviceSession", &stepFailure);
     if (deviceSession &&
         [deviceSession respondsToSelector:NSSelectorFromString(@"mobileConfig")] &&
         [deviceSession respondsToSelector:NSSelectorFromString(@"loggedOutNetworker")]) {
@@ -155,23 +154,23 @@ typedef struct {
     __unsafe_unretained NSString *source;
     __unsafe_unretained NSString *failure;
     void *updateSymbol;
-} SCIRRFSessionlessInputs;
+} RRFSessionlessInputs;
 
-static SCIRRFSessionlessInputs SCIRRFResolveSessionlessInputs(void) {
-    SCIRRFSessionlessInputs result = {0};
+static RRFSessionlessInputs RRFResolveSessionlessInputs(void) {
+    RRFSessionlessInputs result = {0};
     NSString *source = nil;
     NSString *failure = nil;
-    id deviceSession = SCIRRFResolveDeviceSession(&source, &failure);
+    id deviceSession = RRFResolveDeviceSession(&source, &failure);
     if (!deviceSession) {
         result.failure = failure;
         return result;
     }
 
     NSString *mobileFailure = nil;
-    id mobileConfig = SCIRRFCallObjectGetter(deviceSession, @"mobileConfig", &mobileFailure);
+    id mobileConfig = RRFObjectGetter(deviceSession, @"mobileConfig", &mobileFailure);
     NSString *networkFailure = nil;
-    id networker = SCIRRFCallObjectGetter(deviceSession, @"loggedOutNetworker", &networkFailure);
-    void *symbol = SCIRRFSymbol(@"IGMobileConfigTryUpdateConfigsWithCompletion");
+    id networker = RRFObjectGetter(deviceSession, @"loggedOutNetworker", &networkFailure);
+    void *symbol = RRFSymbol(@"IGMobileConfigTryUpdateConfigsWithCompletion");
 
     result.deviceSession = deviceSession;
     result.mobileConfig = mobileConfig;
@@ -187,72 +186,63 @@ static SCIRRFSessionlessInputs SCIRRFResolveSessionlessInputs(void) {
     return result;
 }
 
-static NSString *sSCIRRFLastFetchCompletion;
+static NSString *sRRFLastFetchCompletion;
 
-static NSString *SCIRRFSessionlessStateString(SCIRRFSessionlessInputs inputs) {
+static NSString *RRFSessionlessStateString(RRFSessionlessInputs inputs) {
     NSMutableArray<NSString *> *rows = [NSMutableArray array];
     [rows addObject:[NSString stringWithFormat:@"source=%@", inputs.source ?: @"unresolved"]];
-    [rows addObject:[NSString stringWithFormat:@"deviceSession=%@", SCIRRFClassName(inputs.deviceSession)]];
-    [rows addObject:[NSString stringWithFormat:@"mobileConfig=%@", SCIRRFClassName(inputs.mobileConfig)]];
-    [rows addObject:[NSString stringWithFormat:@"loggedOutNetworker=%@", SCIRRFClassName(inputs.networker)]];
+    [rows addObject:[NSString stringWithFormat:@"deviceSession=%@", RRFClassName(inputs.deviceSession)]];
+    [rows addObject:[NSString stringWithFormat:@"mobileConfig=%@", RRFClassName(inputs.mobileConfig)]];
+    [rows addObject:[NSString stringWithFormat:@"loggedOutNetworker=%@", RRFClassName(inputs.networker)]];
     [rows addObject:[NSString stringWithFormat:@"IGMobileConfigTryUpdateConfigsWithCompletion=%@",
-        inputs.updateSymbol ? @"resolved (x0,x1,x2,x3; completion BOOL in w1)" : @"missing"]];
+        inputs.updateSymbol ? @"resolved (x0,x1,x2,x3; wrapper supplies w4=0)" : @"missing"]];
     if (inputs.failure.length) [rows addObject:[@"blocked=" stringByAppendingString:inputs.failure]];
     @synchronized (SCIDogfoodObjectRuntime.class) {
-        if (sSCIRRFLastFetchCompletion.length) {
-            [rows addObject:[@"last completion=" stringByAppendingString:sSCIRRFLastFetchCompletion]];
+        if (sRRFLastFetchCompletion.length) {
+            [rows addObject:[@"last completion=" stringByAppendingString:sRRFLastFetchCompletion]];
         }
     }
     return [rows componentsJoinedByString:@"\n"];
 }
 
-typedef void (*SCIRRFTryUpdateConfigsFn)(id mobileConfig,
-                                         id networker,
-                                         id customHours,
-                                         void (^completion)(BOOL success));
-typedef void (*SCIRRFRefreshStartupConfigsFn)(id mobileConfig,
-                                              id launcherSet,
-                                              id options);
+typedef void (*RRFTryUpdateConfigsFn)(id mobileConfig,
+                                      id loggedOutNetworker,
+                                      id customHours,
+                                      void (^completion)(BOOL success));
 
-static NSString *SCIRRFInspectOrFetchSessionless(BOOL fetch) {
-    SCIRRFSessionlessInputs inputs = SCIRRFResolveSessionlessInputs();
-    NSString *state = SCIRRFSessionlessStateString(inputs);
+static NSString *RRFInspectOrFetchSessionless(BOOL fetch) {
+    RRFSessionlessInputs inputs = RRFResolveSessionlessInputs();
+    NSString *state = RRFSessionlessStateString(inputs);
     if (!fetch || inputs.failure.length) return state;
 
-    union { void *raw; SCIRRFTryUpdateConfigsFn function; } update;
+    union { void *raw; RRFTryUpdateConfigsFn function; } update;
     update.raw = inputs.updateSymbol;
-    if (!update.function) return [state stringByAppendingString:@"\nfetch=blocked; invalid function pointer"];
+    if (!update.function) {
+        return [state stringByAppendingString:@"\nfetch=blocked; invalid function pointer"];
+    }
 
-    // Strong local captures intentionally keep the exact OEM dependencies alive
-    // until FBSharedFramework invokes completion.
     id mobileConfig = inputs.mobileConfig;
     id networker = inputs.networker;
     NSString *source = inputs.source ?: @"unknown";
-    void *refreshRaw = SCIRRFSymbol(@"refreshStartupConfigs");
 
     @try {
         update.function(mobileConfig, networker, nil, ^(BOOL success) {
-            if (refreshRaw) {
-                union { void *raw; SCIRRFRefreshStartupConfigsFn function; } refresh;
-                refresh.raw = refreshRaw;
-                // The audited shared completion refreshes startup configs after
-                // the update callbacks drain, regardless of the individual BOOL.
-                // For this single sessionless request launcherSet/options are nil.
-                refresh.function(mobileConfig, nil, nil);
-            }
             NSString *completion = [NSString stringWithFormat:@"success=%@ via %@",
                 success ? @"YES" : @"NO", source];
             @synchronized (SCIDogfoodObjectRuntime.class) {
-                sSCIRRFLastFetchCompletion = completion;
+                sRRFLastFetchCompletion = completion;
             }
             [SCIDogfoodObjectRuntime noteAction:@"Sessionless MobileConfig OEM completion"
                                           status:success ? @"success" : @"failed"
                                           detail:completion];
             dispatch_async(dispatch_get_main_queue(), ^{
                 [SCIUtils showToastForDuration:2.8
-                                         title:success ? @"MobileConfig fetched" : @"MobileConfig fetch failed"
+                                         title:success
+                                            ? @"MobileConfig fetched"
+                                            : @"MobileConfig fetch failed"
                                       subtitle:completion];
             });
+            (void)mobileConfig;
             (void)networker;
         });
     } @catch (id exception) {
@@ -267,34 +257,35 @@ static NSString *SCIRRFInspectOrFetchSessionless(BOOL fetch) {
 
 #pragma mark - GraphQL Debug provider from live IGUserSession
 
-static id SCIRRFLiveGraphQLDebugProvider(NSString **state) {
-    id session = [SCIDogfoodObjectRuntime activeUserSession];
+static id RRFLiveGraphQLDebugProvider(NSString **state) {
+    id session = SCIEmployeeInternalCapturedUserSession() ?:
+        [SCIDogfoodObjectRuntime activeUserSession];
     if (!session) {
         if (state) *state = @"session=nil; open after login";
         return nil;
     }
 
     NSString *failure = nil;
-    id provider = SCIRRFCallObjectGetter(session, @"deidentifiedRequestProvider", &failure);
+    id provider = RRFObjectGetter(session, @"deidentifiedRequestProvider", &failure);
     if (!provider) {
         if (state) *state = failure ?: @"deidentifiedRequestProvider=nil";
         return nil;
     }
 
-    NSString *providerClass = SCIRRFClassName(provider);
+    NSString *providerClass = RRFClassName(provider);
     if (![providerClass containsString:@"IGDirectDeidentifiedRequestProvider"]) {
         if (state) *state = [NSString stringWithFormat:@"provider=%@ (unexpected class)", providerClass];
         return nil;
     }
 
     if (state) *state = [NSString stringWithFormat:@"session=%@; provider=%@ (live)",
-        SCIRRFClassName(session), providerClass];
+        RRFClassName(session), providerClass];
     return provider;
 }
 
-static NSString *SCIRRFGraphQLCapabilities(void) {
+static NSString *RRFGraphQLCapabilities(void) {
     NSString *providerState = nil;
-    id provider = SCIRRFLiveGraphQLDebugProvider(&providerState);
+    id provider = RRFLiveGraphQLDebugProvider(&providerState);
     NSMutableArray<NSString *> *rows = [NSMutableArray arrayWithObjects:
         providerState ?: @"provider state unavailable",
         @"provider construction=disabled; Swift -init is never called", nil];
@@ -303,7 +294,7 @@ static NSString *SCIRRFGraphQLCapabilities(void) {
         return [rows componentsJoinedByString:@"\n"];
     }
 
-    Class cls = object_getClass(provider);
+    Class cls = [provider class];
     NSArray<NSDictionary *> *methods = @[
         @{ @"name": @"getStoredOHAIConfig", @"abi": @"@16@0:8" },
         @{ @"name": @"warmupForGraphQLDebugWithCompletionHandler:", @"abi": @"v24@0:8@?16" },
@@ -314,118 +305,80 @@ static NSString *SCIRRFGraphQLCapabilities(void) {
     for (NSDictionary *entry in methods) {
         NSString *name = entry[@"name"];
         Method method = class_getInstanceMethod(cls, NSSelectorFromString(name));
-        BOOL match = SCIRRFTypeMatches(method, [entry[@"abi"] UTF8String]);
-        compatible &= match;
+        BOOL match = RRFTypeMatches(method, [entry[@"abi"] UTF8String]);
+        compatible = compatible && match;
         [rows addObject:[NSString stringWithFormat:@"%@ — %@ — %@", name,
             match ? @"live/compatible" : @"missing or ABI mismatch",
-            SCIRRFMethodEncoding(method)]];
+            RRFMethodEncoding(method)]];
     }
-    [rows addObject:[NSString stringWithFormat:@"runtime usable=%@", compatible ? @"YES" : @"NO"]];
+    [rows addObject:[NSString stringWithFormat:@"runtime usable=%@",
+        compatible ? @"YES" : @"NO"]];
     [rows addObject:@"Token/config contents are never displayed."];
     return [rows componentsJoinedByString:@"\n"];
 }
 
 #pragma mark - Tweak method replacements
 
-static id (*orig_SCIRRFSessionlessState)(id, SEL) = NULL;
-static id new_SCIRRFSessionlessState(id self, SEL _cmd) {
+static id (*origRRFSessionlessState)(id, SEL) = NULL;
+static id newRRFSessionlessState(id self, SEL _cmd) {
     (void)self; (void)_cmd;
-    return SCIRRFInspectOrFetchSessionless(NO);
+    return RRFInspectOrFetchSessionless(NO);
 }
 
-static id (*orig_SCIRRFFetchSessionless)(id, SEL) = NULL;
-static id new_SCIRRFFetchSessionless(id self, SEL _cmd) {
+static id (*origRRFFetchSessionless)(id, SEL) = NULL;
+static id newRRFFetchSessionless(id self, SEL _cmd) {
     (void)self; (void)_cmd;
-    return SCIRRFInspectOrFetchSessionless(YES);
+    return RRFInspectOrFetchSessionless(YES);
 }
 
-static id (*orig_SCIRRFGraphQLProvider)(id, SEL) = NULL;
-static id new_SCIRRFGraphQLProvider(id self, SEL _cmd) {
+static id (*origRRFGraphQLProvider)(id, SEL) = NULL;
+static id newRRFGraphQLProvider(id self, SEL _cmd) {
     (void)self; (void)_cmd;
-    return SCIRRFLiveGraphQLDebugProvider(NULL);
+    return RRFLiveGraphQLDebugProvider(NULL);
 }
 
-static id (*orig_SCIRRFGraphQLCapabilities)(id, SEL) = NULL;
-static id new_SCIRRFGraphQLCapabilities(id self, SEL _cmd) {
+static id (*origRRFGraphQLCapabilities)(id, SEL) = NULL;
+static id newRRFGraphQLCapabilities(id self, SEL _cmd) {
     (void)self; (void)_cmd;
-    return SCIRRFGraphQLCapabilities();
+    return RRFGraphQLCapabilities();
 }
 
-#pragma mark - Replace only the native logged-out Force Fetch action
-
-typedef id (*SCIRRFUIAlertActionFactoryIMP)(id, SEL, NSString *, NSInteger, id);
-static SCIRRFUIAlertActionFactoryIMP orig_SCIRRFUIAlertActionFactory = NULL;
-
-static BOOL SCIRRFIsForceFetchTitle(NSString *title) {
-    NSString *lower = title.lowercaseString ?: @"";
-    return [lower containsString:@"mobileconfig"] &&
-           [lower containsString:@"fetch"] &&
-           ([lower containsString:@"force"] || [lower containsString:@"re-fetch"]);
-}
-
-static id new_SCIRRFUIAlertActionFactory(id cls, SEL _cmd,
-                                         NSString *title,
-                                         NSInteger style,
-                                         id handler) {
-    if (!SCIRRFIsForceFetchTitle(title)) {
-        return orig_SCIRRFUIAlertActionFactory
-            ? orig_SCIRRFUIAlertActionFactory(cls, _cmd, title, style, handler)
-            : nil;
-    }
-
-    void (^replacement)(UIAlertAction *) = ^(__unused UIAlertAction *action) {
-        NSString *result = SCIRRFInspectOrFetchSessionless(YES);
-        BOOL requested = [result containsString:@"fetch=requested"];
-        [SCIUtils showToastForDuration:3.0
-                                 title:requested ? @"MobileConfig fetch requested" : @"MobileConfig fetch blocked"
-                              subtitle:result];
-    };
-    RRFLOG("replaced native logged-out Force MobileConfig re-fetch handler");
-    return orig_SCIRRFUIAlertActionFactory
-        ? orig_SCIRRFUIAlertActionFactory(cls, _cmd, title, style, replacement)
-        : nil;
-}
-
-static BOOL SCIRRFHookClassMethod(Class cls, SEL selector,
-                                  const char *expected,
-                                  IMP replacement,
-                                  IMP *original) {
+static BOOL RRFHookClassMethod(Class cls, SEL selector,
+                               const char *expected,
+                               IMP replacement,
+                               IMP *original) {
     if (!cls || !selector || !expected || !replacement || !original) return NO;
     Method method = class_getClassMethod(cls, selector);
-    if (!SCIRRFTypeMatches(method, expected)) {
+    if (!RRFTypeMatches(method, expected)) {
         RRFLOG("skip +%{public}@.%{public}s ABI=%{public}@",
-            NSStringFromClass(cls), sel_getName(selector), SCIRRFMethodEncoding(method));
+            NSStringFromClass(cls), sel_getName(selector), RRFMethodEncoding(method));
         return NO;
     }
     MSHookMessageEx(object_getClass(cls), selector, replacement, original);
     return *original != NULL;
 }
 
-static void SCIRRFInstall(void) {
+static void RRFInstall(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        BOOL state = SCIRRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
+        BOOL state = RRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
             NSSelectorFromString(@"sessionlessMobileConfigState"), "@16@0:8",
-            (IMP)new_SCIRRFSessionlessState, (IMP *)&orig_SCIRRFSessionlessState);
-        BOOL fetch = SCIRRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
+            (IMP)newRRFSessionlessState, (IMP *)&origRRFSessionlessState);
+        BOOL fetch = RRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
             NSSelectorFromString(@"tryFetchSessionlessMobileConfig"), "@16@0:8",
-            (IMP)new_SCIRRFFetchSessionless, (IMP *)&orig_SCIRRFFetchSessionless);
-        BOOL provider = SCIRRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
+            (IMP)newRRFFetchSessionless, (IMP *)&origRRFFetchSessionless);
+        BOOL provider = RRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
             NSSelectorFromString(@"graphQLDebugProvider"), "@16@0:8",
-            (IMP)new_SCIRRFGraphQLProvider, (IMP *)&orig_SCIRRFGraphQLProvider);
-        BOOL capabilities = SCIRRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
+            (IMP)newRRFGraphQLProvider, (IMP *)&origRRFGraphQLProvider);
+        BOOL capabilities = RRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
             NSSelectorFromString(@"graphQLDebugCapabilities"), "@16@0:8",
-            (IMP)new_SCIRRFGraphQLCapabilities, (IMP *)&orig_SCIRRFGraphQLCapabilities);
-        BOOL alert = SCIRRFHookClassMethod(UIAlertAction.class,
-            @selector(actionWithTitle:style:handler:), "@40@0:8@16q24@?32",
-            (IMP)new_SCIRRFUIAlertActionFactory,
-            (IMP *)&orig_SCIRRFUIAlertActionFactory);
-        RRFLOG("installed state=%d fetch=%d provider=%d capabilities=%d alert=%d",
-            state, fetch, provider, capabilities, alert);
+            (IMP)newRRFGraphQLCapabilities, (IMP *)&origRRFGraphQLCapabilities);
+        RRFLOG("installed state=%d fetch=%d provider=%d capabilities=%d",
+            state, fetch, provider, capabilities);
     });
 }
 
 __attribute__((constructor))
-static void SCIRRFValidatedResolversCtor(void) {
-    @autoreleasepool { SCIRRFInstall(); }
+static void SCIValidatedOEMResolversCtor(void) {
+    @autoreleasepool { RRFInstall(); }
 }
