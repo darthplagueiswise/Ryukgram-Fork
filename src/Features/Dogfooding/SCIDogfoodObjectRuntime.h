@@ -8,7 +8,7 @@ FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
 // Exact live objects captured from Instagram's native sessionless MobileConfig
 // dependency graph. These never synthesize a manager or reinterpret shared_ptr
 // storage as Objective-C.
-FOUNDATION_EXPORT nullable id SCIValidatedSessionlessMobileConfigContext(void);
+FOUNDATION_EXPORT id _Nullable SCIValidatedSessionlessMobileConfigContext(void);
 FOUNDATION_EXPORT NSString *SCIValidatedSessionlessMobileConfigCaptureState(void);
 
 @interface SCIDogfoodObjectRuntime : NSObject
@@ -21,9 +21,9 @@ FOUNDATION_EXPORT NSString *SCIValidatedSessionlessMobileConfigCaptureState(void
 + (void)noteDogfoodConfig:(nullable id)config userSession:(nullable id)session source:(nullable NSString *)source;
 
 + (void)noteDogfoodingSettingChangeWithItem:(nullable id)item
-                                  options:(nullable id)options
-                              toggleValue:(nullable id)toggleValue
-                                   source:(nullable NSString *)source;
+                                   options:(nullable id)options
+                               toggleValue:(nullable id)toggleValue
+                                    source:(nullable NSString *)source;
 + (NSArray<NSDictionary *> *)dogfoodingSettingChanges;
 
 + (UIViewController *)topViewController;
