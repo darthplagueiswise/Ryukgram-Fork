@@ -1,340 +1,507 @@
-#import "SCIDogfoodObjectRuntime.h"
-#import "SCIGraphQLDogfoodDiagnostics.h"
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <substrate.h>
+#import <string.h>
 
-// Validated runtime resolvers for Instagram 434 / FBSharedFramework 107.
-// Binary hashes used for the ABI audit:
-// Instagram         a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa
-// FBSharedFramework 22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc
+#import "SCIDogfoodObjectRuntime.h"
+#import "SCIGraphQLDogfoodDiagnostics.h"
+#import "SCIInternalMenusLauncher.h"
+
+// Runtime-only correction layer for the IG/FBSharedFramework build identified by:
+// Instagram SHA-256 a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa
+// FBSharedFramework SHA-256 22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc
 //
-// This file deliberately replaces the two unsafe assumptions that existed in
-// the previous implementation:
-//   1. +sessionlessContextManager is a usable Instagram context.
-//   2. IGDirectDeidentifiedRequestProvider may be created with -init.
-//
-// The real objects are resolved from Instagram's live dependency graph.
+// The previous resolver stopped at the first non-nil sessionless factory result.
+// In this build that object is the base singleton and can legitimately have no
+// injected FBMobileConfigManager. The live Instagram-owned context is reached
+// through the FBT global dependency graph instead.
 
-static BOOL SCIObjectNoArgMethod(Method method) {
-    if (!method || method_getNumberOfArguments(method) != 2) return NO;
-    char returnType[32] = {0};
-    method_getReturnType(method, returnType, sizeof(returnType));
-    return returnType[0] == '@';
+static BOOL SCIRRFExactEncoding(Method method, const char *expected) {
+    if (!method || !expected) return NO;
+    const char *actual = method_getTypeEncoding(method);
+    return actual && strcmp(actual, expected) == 0;
 }
 
-static BOOL SCIBoolNoArgMethod(Method method) {
-    if (!method || method_getNumberOfArguments(method) != 2) return NO;
-    char returnType[32] = {0};
-    method_getReturnType(method, returnType, sizeof(returnType));
-    return returnType[0] == 'B' || returnType[0] == 'c';
-}
-
-static BOOL SCIVoidNoArgMethod(Method method) {
-    if (!method || method_getNumberOfArguments(method) != 2) return NO;
-    char returnType[32] = {0};
-    method_getReturnType(method, returnType, sizeof(returnType));
-    return returnType[0] == 'v';
-}
-
-static Method SCIDispatchMethod(id receiver, SEL selector) {
-    if (!receiver || !selector) return NULL;
-    return class_getInstanceMethod(object_getClass(receiver), selector);
-}
-
-static NSString *SCIEncoding(Method method) {
+static NSString *SCIRRFMethodEncoding(Method method) {
     const char *encoding = method ? method_getTypeEncoding(method) : NULL;
     return encoding ? [NSString stringWithUTF8String:encoding] : @"missing";
 }
 
-static id SCICallObjectGetter(id receiver, NSString *selectorName,
-                              NSMutableArray<NSString *> *trace) {
-    if (!receiver || !selectorName.length) return nil;
-    SEL selector = NSSelectorFromString(selectorName);
-    Method method = SCIDispatchMethod(receiver, selector);
-    if (!SCIObjectNoArgMethod(method)) {
-        [trace addObject:[NSString stringWithFormat:@"%@.%@ ABI=%@",
-                          NSStringFromClass(object_getClass(receiver)),
-                          selectorName, SCIEncoding(method)]];
+// Runtime encodings can preserve quoted Objective-C names and expanded block
+// signatures. Normalize those annotations while retaining the ABI shape.
+static NSString *SCIRRFNormalizedEncoding(const char *encoding) {
+    if (!encoding) return @"";
+    NSMutableString *out = [NSMutableString string];
+    const char *p = encoding;
+    while (*p) {
+        if (*p != '@') {
+            [out appendFormat:@"%c", *p++];
+            continue;
+        }
+
+        [out appendString:@"@"]; 
+        p++;
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') p++;
+            if (*p == '"') p++;
+            continue;
+        }
+        if (*p == '?') {
+            [out appendString:@"?"];
+            p++;
+            if (*p == '<') {
+                NSInteger depth = 0;
+                do {
+                    if (*p == '<') depth++;
+                    else if (*p == '>') depth--;
+                    p++;
+                } while (*p && depth > 0);
+            }
+        }
+    }
+    return out;
+}
+
+static BOOL SCIRRFTypeMatches(Method method, const char *expected) {
+    if (!method || !expected) return NO;
+    return [SCIRRFNormalizedEncoding(method_getTypeEncoding(method))
+        isEqualToString:SCIRRFNormalizedEncoding(expected)];
+}
+
+static id SCIRRFCallObjectGetter(id receiver, SEL selector, NSString **failure) {
+    if (!receiver) {
+        if (failure) *failure = @"receiver=nil";
+        return nil;
+    }
+
+    Class cls = object_getClass(receiver);
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!SCIRRFExactEncoding(method, "@16@0:8")) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.%@ ABI=%@",
+                        NSStringFromClass(cls), NSStringFromSelector(selector),
+                        SCIRRFMethodEncoding(method)];
+        }
         return nil;
     }
 
     @try {
-        id value = ((id (*)(id, SEL))objc_msgSend)(receiver, selector);
-        [trace addObject:[NSString stringWithFormat:@"%@.%@ -> %@(%p)",
-                          NSStringFromClass(object_getClass(receiver)),
-                          selectorName,
-                          value ? NSStringFromClass(object_getClass(value)) : @"nil",
-                          value]];
-        return value;
+        return ((id (*)(id, SEL))objc_msgSend)(receiver, selector);
     } @catch (id exception) {
-        [trace addObject:[NSString stringWithFormat:@"%@.%@ exception=%@",
-                          NSStringFromClass(object_getClass(receiver)),
-                          selectorName, exception]];
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.%@ exception=%@",
+                        NSStringFromClass(cls), NSStringFromSelector(selector), exception];
+        }
         return nil;
     }
 }
 
-static BOOL SCIContextHasValidManager(id context,
-                                      NSMutableArray<NSString *> *trace) {
+static id SCIRRFCallObjectClassGetter(Class cls, SEL selector, NSString **failure) {
+    if (!cls) {
+        if (failure) *failure = @"class unavailable";
+        return nil;
+    }
+
+    Method method = class_getClassMethod(cls, selector);
+    if (!SCIRRFExactEncoding(method, "@16@0:8")) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.%@ ABI=%@",
+                        NSStringFromClass(cls), NSStringFromSelector(selector),
+                        SCIRRFMethodEncoding(method)];
+        }
+        return nil;
+    }
+
+    @try {
+        return ((id (*)(id, SEL))objc_msgSend)(cls, selector);
+    } @catch (id exception) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.%@ exception=%@",
+                        NSStringFromClass(cls), NSStringFromSelector(selector), exception];
+        }
+        return nil;
+    }
+}
+
+static BOOL SCIRRFReadValidManager(id context, BOOL *validOut, NSString **failure) {
+    if (validOut) *validOut = NO;
+    if (!context) {
+        if (failure) *failure = @"context=nil";
+        return NO;
+    }
+
+    Class cls = object_getClass(context);
     SEL selector = NSSelectorFromString(@"hasValidManager");
-    Method method = SCIDispatchMethod(context, selector);
-    if (!SCIBoolNoArgMethod(method)) {
-        [trace addObject:[NSString stringWithFormat:@"%@.hasValidManager ABI=%@",
-                          context ? NSStringFromClass(object_getClass(context)) : @"nil",
-                          SCIEncoding(method)]];
+    Method method = class_getInstanceMethod(cls, selector);
+    if (!SCIRRFExactEncoding(method, "B16@0:8") &&
+        !SCIRRFExactEncoding(method, "c16@0:8")) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.hasValidManager ABI=%@",
+                        NSStringFromClass(cls), SCIRRFMethodEncoding(method)];
+        }
         return NO;
     }
 
     @try {
         BOOL valid = ((BOOL (*)(id, SEL))objc_msgSend)(context, selector);
-        [trace addObject:[NSString stringWithFormat:@"hasValidManager=%@",
-                          valid ? @"YES" : @"NO"]];
-        return valid;
+        if (validOut) *validOut = valid;
+        return YES;
     } @catch (id exception) {
-        [trace addObject:[NSString stringWithFormat:@"hasValidManager exception=%@",
-                          exception]];
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"%@.hasValidManager exception=%@",
+                        NSStringFromClass(cls), exception];
+        }
         return NO;
     }
 }
 
-static id SCIContextRefreshHandler(id context,
-                                   NSMutableArray<NSString *> *trace) {
-    id handler = SCICallObjectGetter(context, @"customRefreshHandler", trace);
-    [trace addObject:[NSString stringWithFormat:@"customRefreshHandler=%@",
-                      handler ? NSStringFromClass(object_getClass(handler)) : @"nil"]];
-    return handler;
-}
-
-static BOOL SCIContextCanTryUpdate(id context,
-                                   NSMutableArray<NSString *> *trace) {
-    SEL selector = NSSelectorFromString(@"tryUpdateConfigs");
-    Method method = SCIDispatchMethod(context, selector);
-    BOOL valid = SCIVoidNoArgMethod(method);
-    [trace addObject:[NSString stringWithFormat:@"tryUpdateConfigs ABI=%@ valid=%@",
-                      SCIEncoding(method), valid ? @"YES" : @"NO"]];
-    return valid;
-}
-
-static id SCIResolveOEMSessionlessContext(NSMutableArray<NSString *> *trace) {
-    // Native Instagram graph proven in the executable:
-    // FBMobileConfigFBTGlobalSessionManager.sharedInstance
-    //   -> sessionlessContextManagerHolder
-    //   -> mcFbtManager
-    //   -> mobileconfig
+static id SCIRRFOEMSessionlessContext(NSMutableArray<NSString *> *trace,
+                                      NSString **source,
+                                      NSString **failure) {
     Class globalClass = NSClassFromString(@"FBMobileConfigFBTGlobalSessionManager");
-    if (!globalClass) {
-        [trace addObject:@"FBMobileConfigFBTGlobalSessionManager unavailable"];
+    NSString *stepFailure = nil;
+    id global = SCIRRFCallObjectClassGetter(globalClass,
+                                            NSSelectorFromString(@"sharedInstance"),
+                                            &stepFailure);
+    if (!global) {
+        if (failure) *failure = stepFailure ?: @"FBT global session manager unavailable";
+        return nil;
+    }
+    [trace addObject:[NSString stringWithFormat:@"global=%@", NSStringFromClass(object_getClass(global))]];
+
+    id holder = SCIRRFCallObjectGetter(global,
+                                       NSSelectorFromString(@"sessionlessContextManagerHolder"),
+                                       &stepFailure);
+    if (!holder) {
+        if (failure) *failure = stepFailure ?: @"sessionlessContextManagerHolder=nil";
+        return nil;
+    }
+    [trace addObject:[NSString stringWithFormat:@"holder=%@", NSStringFromClass(object_getClass(holder))]];
+
+    id fbtManager = SCIRRFCallObjectGetter(holder,
+                                           NSSelectorFromString(@"mcFbtManager"),
+                                           &stepFailure);
+    if (!fbtManager) {
+        if (failure) *failure = stepFailure ?: @"mcFbtManager=nil";
+        return nil;
+    }
+    [trace addObject:[NSString stringWithFormat:@"fbtManager=%@", NSStringFromClass(object_getClass(fbtManager))]];
+
+    id context = SCIRRFCallObjectGetter(fbtManager,
+                                        NSSelectorFromString(@"mobileconfig"),
+                                        &stepFailure);
+    if (!context) {
+        if (failure) *failure = stepFailure ?: @"mobileconfig=nil";
         return nil;
     }
 
-    id global = SCICallObjectGetter(globalClass, @"sharedInstance", trace);
-    id holder = SCICallObjectGetter(global, @"sessionlessContextManagerHolder", trace);
-    id fbtManager = SCICallObjectGetter(holder, @"mcFbtManager", trace);
-    id mobileconfig = SCICallObjectGetter(fbtManager, @"mobileconfig", trace);
-
-    if (mobileconfig && SCIContextHasValidManager(mobileconfig, trace)) {
-        [trace addObject:@"source=OEM FBT global graph"];
-        return mobileconfig;
+    BOOL valid = NO;
+    if (!SCIRRFReadValidManager(context, &valid, &stepFailure)) {
+        if (failure) *failure = stepFailure;
+        return nil;
+    }
+    if (!valid) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"OEM mobileconfig=%@ but manager=invalid",
+                        NSStringFromClass(object_getClass(context))];
+        }
+        return nil;
     }
 
-    // The initializer hook is only a fallback for a context already constructed
-    // by Instagram. It is never used to manufacture one and the empty framework
-    // singleton is intentionally not considered a usable candidate.
-    id captured = [SCIDogfoodObjectRuntime
-        liveInstanceOfClassNameContaining:@"IGMobileConfigSessionlessContextManager"];
-    if (captured && captured != mobileconfig &&
-        SCIContextHasValidManager(captured, trace)) {
-        [trace addObject:@"source=captured Instagram sessionless context"];
-        return captured;
+    [trace addObject:[NSString stringWithFormat:@"mobileconfig=%@; manager=valid",
+                      NSStringFromClass(object_getClass(context))]];
+    if (source) {
+        *source = @"FBMobileConfigFBTGlobalSessionManager.sharedInstance → sessionlessContextManagerHolder → mcFbtManager → mobileconfig";
     }
-
-    [trace addObject:@"framework +sessionlessContextManager intentionally ignored: it is the empty base singleton in this build"];
-    return nil;
+    return context;
 }
 
-static NSString *SCIValidatedSessionlessResult(BOOL fetch) {
-    NSMutableArray<NSString *> *trace = [NSMutableArray array];
-    id context = SCIResolveOEMSessionlessContext(trace);
+static id SCIRRFLiveCapturedSessionlessContext(NSMutableArray<NSString *> *trace,
+                                               NSString **source,
+                                               NSString **failure) {
+    id context = [SCIDogfoodObjectRuntime
+        liveInstanceOfClassNameContaining:@"IGMobileConfigSessionlessContextManager"];
     if (!context) {
-        [trace insertObject:@"BLOCKED: no live sessionless context with a valid manager" atIndex:0];
-        return [trace componentsJoinedByString:@"\n"];
+        if (failure) *failure = @"no captured IGMobileConfigSessionlessContextManager";
+        return nil;
     }
 
-    id handler = SCIContextRefreshHandler(context, trace);
+    BOOL valid = NO;
+    NSString *validFailure = nil;
+    if (!SCIRRFReadValidManager(context, &valid, &validFailure)) {
+        if (failure) *failure = validFailure;
+        return nil;
+    }
+    if (!valid) {
+        if (failure) {
+            *failure = [NSString stringWithFormat:@"captured %@ manager=invalid",
+                        NSStringFromClass(object_getClass(context))];
+        }
+        return nil;
+    }
+
+    [trace addObject:[NSString stringWithFormat:@"captured=%@; manager=valid",
+                      NSStringFromClass(object_getClass(context))]];
+    if (source) *source = @"captured live IGMobileConfigSessionlessContextManager";
+    return context;
+}
+
+static NSString *SCIRRFInspectOrFetchSessionless(BOOL fetch) {
+    NSMutableArray<NSString *> *trace = [NSMutableArray array];
+    NSMutableArray<NSString *> *failures = [NSMutableArray array];
+    NSString *source = nil;
+    NSString *failure = nil;
+
+    id context = SCIRRFOEMSessionlessContext(trace, &source, &failure);
+    if (!context && failure.length) [failures addObject:[@"OEM chain: " stringByAppendingString:failure]];
+
+    if (!context) {
+        failure = nil;
+        context = SCIRRFLiveCapturedSessionlessContext(trace, &source, &failure);
+        if (!context && failure.length) [failures addObject:[@"captured fallback: " stringByAppendingString:failure]];
+    }
+
+    if (!context) {
+        // Deliberately do not call +sessionlessContextManager here. In this build
+        // that factory can return a non-nil base singleton with manager=invalid,
+        // which was the false-positive shown by the runtime alert.
+        [failures addObject:@"base +sessionlessContextManager factory skipped (known empty singleton candidate)"];
+        return [NSString stringWithFormat:@"No usable sessionless MobileConfig context.\n%@",
+                [failures componentsJoinedByString:@"\n"]];
+    }
+
+    Class contextClass = object_getClass(context);
+    SEL handlerSelector = NSSelectorFromString(@"customRefreshHandler");
+    Method handlerMethod = class_getInstanceMethod(contextClass, handlerSelector);
+    if (!SCIRRFExactEncoding(handlerMethod, "@16@0:8")) {
+        return [NSString stringWithFormat:@"source=%@\ncontext=%@\ncustomRefreshHandler ABI=%@",
+                source ?: @"unknown", NSStringFromClass(contextClass),
+                SCIRRFMethodEncoding(handlerMethod)];
+    }
+
+    id handler = nil;
+    @try {
+        handler = ((id (*)(id, SEL))objc_msgSend)(context, handlerSelector);
+    } @catch (id exception) {
+        return [NSString stringWithFormat:@"source=%@\ncontext=%@\ncustomRefreshHandler exception=%@",
+                source ?: @"unknown", NSStringFromClass(contextClass), exception];
+    }
     if (!handler) {
-        [trace insertObject:@"BLOCKED: OEM context has no custom refresh handler" atIndex:0];
-        return [trace componentsJoinedByString:@"\n"];
-    }
-    if (!SCIContextCanTryUpdate(context, trace)) {
-        [trace insertObject:@"BLOCKED: tryUpdateConfigs ABI changed" atIndex:0];
-        return [trace componentsJoinedByString:@"\n"];
+        return [NSString stringWithFormat:@"source=%@\ncontext=%@\nmanager=valid\ncustomRefreshHandler=nil",
+                source ?: @"unknown", NSStringFromClass(contextClass)];
     }
 
-    if (!fetch) {
-        [trace insertObject:[NSString stringWithFormat:
-            @"READY: %@(%p), manager valid, handler %@(%p)",
-            NSStringFromClass(object_getClass(context)), context,
-            NSStringFromClass(object_getClass(handler)), handler]
-                    atIndex:0];
-        return [trace componentsJoinedByString:@"\n"];
+    SEL updateSelector = NSSelectorFromString(@"tryUpdateConfigs");
+    Method updateMethod = class_getInstanceMethod(contextClass, updateSelector);
+    if (!SCIRRFExactEncoding(updateMethod, "v16@0:8")) {
+        return [NSString stringWithFormat:@"source=%@\ncontext=%@\nmanager=valid\nhandler=%@\ntryUpdateConfigs ABI=%@",
+                source ?: @"unknown", NSStringFromClass(contextClass),
+                NSStringFromClass(object_getClass(handler)),
+                SCIRRFMethodEncoding(updateMethod)];
     }
+
+    NSString *state = [NSString stringWithFormat:
+        @"source=%@\ncontext=%@\nmanager=valid\nhandler=%@\ntryUpdateConfigs=v16@0:8\ntrace=%@",
+        source ?: @"unknown", NSStringFromClass(contextClass),
+        NSStringFromClass(object_getClass(handler)),
+        [trace componentsJoinedByString:@" → "]];
+
+    if (!fetch) return state;
 
     @try {
-        ((void (*)(id, SEL))objc_msgSend)(context,
-            NSSelectorFromString(@"tryUpdateConfigs"));
-        [trace insertObject:[NSString stringWithFormat:
-            @"REQUESTED: OEM tryUpdateConfigs on %@(%p)",
-            NSStringFromClass(object_getClass(context)), context]
-                    atIndex:0];
+        ((void (*)(id, SEL))objc_msgSend)(context, updateSelector);
     } @catch (id exception) {
-        [trace insertObject:[NSString stringWithFormat:
-            @"FAILED: tryUpdateConfigs exception=%@", exception]
-                    atIndex:0];
+        return [NSString stringWithFormat:@"%@\nfetch exception=%@", state, exception];
     }
-    return [trace componentsJoinedByString:@"\n"];
+    return [NSString stringWithFormat:@"%@\nfetch=requested through OEM context manager", state];
 }
 
-static NSString *SCIValidatedSessionlessState(id self, SEL _cmd) {
-    (void)self; (void)_cmd;
-    NSString *result = SCIValidatedSessionlessResult(NO);
-    [SCIDogfoodObjectRuntime noteAction:@"Sessionless MobileConfig state"
-                                  status:[result hasPrefix:@"READY:"] ? @"ready" : @"blocked"
-                                  detail:result];
-    return result;
-}
+#pragma mark - GraphQL Debug provider from live IGUserSession
 
-static NSString *SCIValidatedSessionlessFetch(id self, SEL _cmd) {
-    (void)self; (void)_cmd;
-    NSString *result = SCIValidatedSessionlessResult(YES);
-    [SCIDogfoodObjectRuntime noteAction:@"Sessionless MobileConfig OEM fetch"
-                                  status:[result hasPrefix:@"REQUESTED:"] ? @"requested" : @"blocked"
-                                  detail:result];
-    return result;
-}
-
-static id SCIResolveLiveGraphQLDebugProvider(NSMutableArray<NSString *> *trace) {
+static id SCIRRFLiveGraphQLDebugProvider(NSString **state) {
     id session = [SCIDogfoodObjectRuntime activeUserSession];
     if (!session) {
-        [trace addObject:@"activeUserSession=nil"];
+        if (state) *state = @"session=nil; open after login";
         return nil;
     }
-    [trace addObject:[NSString stringWithFormat:@"userSession=%@(%p)",
-                      NSStringFromClass(object_getClass(session)), session]];
 
-    id provider = SCICallObjectGetter(session, @"deidentifiedRequestProvider", trace);
-    if (!provider) return nil;
-
-    Class expected = objc_getClass(
-        "_TtC38IGDirectDeidentifiedRequestProviderKit35IGDirectDeidentifiedRequestProvider");
-    if (expected && ![provider isKindOfClass:expected]) {
-        [trace addObject:[NSString stringWithFormat:
-            @"provider class mismatch: expected %@, got %@",
-            NSStringFromClass(expected), NSStringFromClass(object_getClass(provider))]];
+    Class sessionClass = object_getClass(session);
+    SEL getter = NSSelectorFromString(@"deidentifiedRequestProvider");
+    Method getterMethod = class_getInstanceMethod(sessionClass, getter);
+    if (!SCIRRFExactEncoding(getterMethod, "@16@0:8")) {
+        if (state) {
+            *state = [NSString stringWithFormat:@"session=%@; deidentifiedRequestProvider ABI=%@",
+                      NSStringFromClass(sessionClass), SCIRRFMethodEncoding(getterMethod)];
+        }
         return nil;
     }
-    [trace addObject:@"source=IGUserSession.deidentifiedRequestProvider"];
+
+    id provider = nil;
+    @try {
+        provider = ((id (*)(id, SEL))objc_msgSend)(session, getter);
+    } @catch (id exception) {
+        if (state) {
+            *state = [NSString stringWithFormat:@"session=%@; deidentifiedRequestProvider exception=%@",
+                      NSStringFromClass(sessionClass), exception];
+        }
+        return nil;
+    }
+
+    if (!provider) {
+        if (state) {
+            *state = [NSString stringWithFormat:@"session=%@; deidentifiedRequestProvider=nil",
+                      NSStringFromClass(sessionClass)];
+        }
+        return nil;
+    }
+
+    NSString *providerClass = NSStringFromClass(object_getClass(provider));
+    if (![providerClass containsString:@"IGDirectDeidentifiedRequestProvider"]) {
+        if (state) {
+            *state = [NSString stringWithFormat:@"session=%@; provider=%@ (unexpected class)",
+                      NSStringFromClass(sessionClass), providerClass];
+        }
+        return nil;
+    }
+
+    if (state) {
+        *state = [NSString stringWithFormat:@"session=%@; getter=@16@0:8; provider=%@ (live)",
+                  NSStringFromClass(sessionClass), providerClass];
+    }
     return provider;
 }
 
-static id SCIValidatedGraphQLDebugProvider(id self, SEL _cmd) {
-    (void)self; (void)_cmd;
-    NSMutableArray<NSString *> *trace = [NSMutableArray array];
-    return SCIResolveLiveGraphQLDebugProvider(trace);
-}
-
-static NSString *SCIValidatedGraphQLCapabilities(id self, SEL _cmd) {
-    (void)self; (void)_cmd;
+static NSString *SCIRRFGraphQLCapabilities(void) {
+    NSString *providerState = nil;
+    id provider = SCIRRFLiveGraphQLDebugProvider(&providerState);
     NSMutableArray<NSString *> *rows = [NSMutableArray array];
-    id provider = SCIResolveLiveGraphQLDebugProvider(rows);
+    [rows addObject:providerState ?: @"provider state unavailable"];
+    [rows addObject:@"provider construction=disabled; Swift -init is not called"];
+
     if (!provider) {
-        [rows insertObject:@"BLOCKED: no live GraphQL Debug provider. No object was allocated manually."
-                   atIndex:0];
+        [rows addObject:@"runtime usable=NO"];
         return [rows componentsJoinedByString:@"\n"];
     }
 
-    [rows insertObject:[NSString stringWithFormat:@"READY: provider=%@(%p)",
-                        NSStringFromClass(object_getClass(provider)), provider]
-                 atIndex:0];
-
-    NSArray<NSString *> *selectors = @[
-        @"getStoredOHAIConfig",
-        @"warmupForGraphQLDebugWithCompletionHandler:",
-        @"retrieveACSTokenForGraphQLDebugWithCompletionHandler:",
-        @"retrieveACSTokenAndOHAIConfigForGraphQLDebugWithCompletionHandler:"
+    Class cls = object_getClass(provider);
+    NSArray<NSDictionary *> *methods = @[
+        @{ @"name": @"getStoredOHAIConfig", @"abi": @"@16@0:8" },
+        @{ @"name": @"warmupForGraphQLDebugWithCompletionHandler:", @"abi": @"v24@0:8@?16" },
+        @{ @"name": @"retrieveACSTokenForGraphQLDebugWithCompletionHandler:", @"abi": @"v24@0:8@?16" },
+        @{ @"name": @"retrieveACSTokenAndOHAIConfigForGraphQLDebugWithCompletionHandler:", @"abi": @"v24@0:8@?16" }
     ];
-    for (NSString *name in selectors) {
-        SEL selector = NSSelectorFromString(name);
-        Method method = class_getInstanceMethod(object_getClass(provider), selector);
-        [rows addObject:[NSString stringWithFormat:@"%@ — %@ — ABI %@",
-                         name, method ? @"present" : @"absent",
-                         SCIEncoding(method)]];
+
+    BOOL allCompatible = YES;
+    for (NSDictionary *entry in methods) {
+        NSString *name = entry[@"name"];
+        NSString *expectedString = entry[@"abi"];
+        const char *expected = expectedString.UTF8String;
+        Method method = class_getInstanceMethod(cls, NSSelectorFromString(name));
+        BOOL compatible = SCIRRFTypeMatches(method, expected);
+        allCompatible = allCompatible && compatible;
+        [rows addObject:[NSString stringWithFormat:@"%@ — %@ — %@",
+                         name, compatible ? @"live/compatible" : @"missing or ABI mismatch",
+                         SCIRRFMethodEncoding(method)]];
     }
 
     SEL storedSelector = NSSelectorFromString(@"getStoredOHAIConfig");
-    Method storedMethod = class_getInstanceMethod(object_getClass(provider), storedSelector);
-    if (SCIObjectNoArgMethod(storedMethod)) {
+    Method storedMethod = class_getInstanceMethod(cls, storedSelector);
+    if (SCIRRFExactEncoding(storedMethod, "@16@0:8")) {
         @try {
             id config = ((id (*)(id, SEL))objc_msgSend)(provider, storedSelector);
-            [rows addObject:[NSString stringWithFormat:
-                @"Stored OHAI config: %@; class=%@",
-                config ? @"present" : @"absent",
-                config ? NSStringFromClass(object_getClass(config)) : @"nil"]];
+            [rows addObject:[NSString stringWithFormat:@"stored OHAI config=%@; class=%@",
+                             config ? @"present" : @"nil",
+                             config ? NSStringFromClass(object_getClass(config)) : @"nil"]];
         } @catch (id exception) {
-            [rows addObject:[NSString stringWithFormat:
-                @"Stored OHAI config getter exception=%@", exception]];
+            [rows addObject:[NSString stringWithFormat:@"stored OHAI getter exception=%@", exception]];
+            allCompatible = NO;
         }
     }
 
-    [rows addObject:@"ACS/OHAI contents are never printed; actions report only presence, runtime class and errors."];
+    [rows addObject:[NSString stringWithFormat:@"runtime usable=%@", allCompatible ? @"YES" : @"NO"]];
+    [rows addObject:@"Token/config contents are never displayed."];
     return [rows componentsJoinedByString:@"\n"];
 }
 
-static void SCIInstallValidatedOEMResolvers(void) {
-    Class runtimeClass = NSClassFromString(@"SCIDogfoodObjectRuntime");
-    Class diagnosticsClass = NSClassFromString(@"SCIGraphQLDogfoodDiagnostics");
+#pragma mark - Explicit method replacements
 
-    if (runtimeClass) {
-        Class meta = object_getClass(runtimeClass);
-        Method state = class_getInstanceMethod(meta,
-            NSSelectorFromString(@"sessionlessMobileConfigState"));
-        Method fetch = class_getInstanceMethod(meta,
-            NSSelectorFromString(@"tryFetchSessionlessMobileConfig"));
-        if (SCIObjectNoArgMethod(state)) {
-            MSHookMessageEx(meta,
-                NSSelectorFromString(@"sessionlessMobileConfigState"),
-                (IMP)SCIValidatedSessionlessState, NULL);
-        }
-        if (SCIObjectNoArgMethod(fetch)) {
-            MSHookMessageEx(meta,
-                NSSelectorFromString(@"tryFetchSessionlessMobileConfig"),
-                (IMP)SCIValidatedSessionlessFetch, NULL);
-        }
-    }
+static id (*orig_SCIRRFSessionlessState)(id, SEL) = NULL;
+static id new_SCIRRFSessionlessState(id self, SEL _cmd) {
+    (void)self; (void)_cmd;
+    return SCIRRFInspectOrFetchSessionless(NO);
+}
 
-    if (diagnosticsClass) {
-        Class meta = object_getClass(diagnosticsClass);
-        Method provider = class_getInstanceMethod(meta,
-            NSSelectorFromString(@"graphQLDebugProvider"));
-        Method capabilities = class_getInstanceMethod(meta,
-            NSSelectorFromString(@"graphQLDebugCapabilities"));
-        if (SCIObjectNoArgMethod(provider)) {
-            MSHookMessageEx(meta,
-                NSSelectorFromString(@"graphQLDebugProvider"),
-                (IMP)SCIValidatedGraphQLDebugProvider, NULL);
-        }
-        if (SCIObjectNoArgMethod(capabilities)) {
-            MSHookMessageEx(meta,
-                NSSelectorFromString(@"graphQLDebugCapabilities"),
-                (IMP)SCIValidatedGraphQLCapabilities, NULL);
-        }
-    }
+static id (*orig_SCIRRFFetchSessionless)(id, SEL) = NULL;
+static id new_SCIRRFFetchSessionless(id self, SEL _cmd) {
+    (void)self; (void)_cmd;
+    return SCIRRFInspectOrFetchSessionless(YES);
+}
+
+static id (*orig_SCIRRFGraphQLProvider)(id, SEL) = NULL;
+static id new_SCIRRFGraphQLProvider(id self, SEL _cmd) {
+    (void)self; (void)_cmd;
+    return SCIRRFLiveGraphQLDebugProvider(NULL);
+}
+
+static id (*orig_SCIRRFGraphQLCapabilities)(id, SEL) = NULL;
+static id new_SCIRRFGraphQLCapabilities(id self, SEL _cmd) {
+    (void)self; (void)_cmd;
+    return SCIRRFGraphQLCapabilities();
+}
+
+static id (*orig_SCIRRFOpenDogfoodingSettings)(id, SEL) = NULL;
+static id new_SCIRRFOpenDogfoodingSettings(id self, SEL _cmd) {
+    (void)self; (void)_cmd;
+    BOOL opened = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
+    if (opened) return @"opened native Dogfooding Settings with live provider/config";
+
+    NSDictionary *state = [SCIDogfoodObjectRuntime dogfoodNativeState];
+    return [NSString stringWithFormat:
+        @"native Dogfooding Assistant config unavailable; synthetic Swift init, socket-as-id scan and DirectNotes fallback are disabled\n%@",
+        state ?: @{}];
+}
+
+static void SCIRRFHookClassMethod(Class cls, SEL selector, IMP replacement, IMP *original) {
+    if (!cls || !selector || !replacement || !original) return;
+    Method method = class_getClassMethod(cls, selector);
+    if (!SCIRRFExactEncoding(method, "@16@0:8")) return;
+    MSHookMessageEx(object_getClass(cls), selector, replacement, original);
+}
+
+static void SCIRRFInstall(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        SCIRRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
+                             NSSelectorFromString(@"sessionlessMobileConfigState"),
+                             (IMP)new_SCIRRFSessionlessState,
+                             (IMP *)&orig_SCIRRFSessionlessState);
+        SCIRRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
+                             NSSelectorFromString(@"tryFetchSessionlessMobileConfig"),
+                             (IMP)new_SCIRRFFetchSessionless,
+                             (IMP *)&orig_SCIRRFFetchSessionless);
+        SCIRRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
+                             NSSelectorFromString(@"graphQLDebugProvider"),
+                             (IMP)new_SCIRRFGraphQLProvider,
+                             (IMP *)&orig_SCIRRFGraphQLProvider);
+        SCIRRFHookClassMethod(NSClassFromString(@"SCIGraphQLDogfoodDiagnostics"),
+                             NSSelectorFromString(@"graphQLDebugCapabilities"),
+                             (IMP)new_SCIRRFGraphQLCapabilities,
+                             (IMP *)&orig_SCIRRFGraphQLCapabilities);
+        SCIRRFHookClassMethod(NSClassFromString(@"SCIInternalMenusLauncher"),
+                             NSSelectorFromString(@"openDogfoodingSettingsVC"),
+                             (IMP)new_SCIRRFOpenDogfoodingSettings,
+                             (IMP *)&orig_SCIRRFOpenDogfoodingSettings);
+    });
 }
 
 __attribute__((constructor))
-static void SCIValidatedOEMResolversCtor(void) {
+static void SCIRRFValidatedResolversCtor(void) {
     @autoreleasepool {
-        SCIInstallValidatedOEMResolvers();
+        // These are methods on RyukGram's own classes, so replacement is safe at
+        // dylib load. Instagram/FBShared objects are resolved only when the user
+        // taps a diagnostic/action row; no global scan, timer or launch-time fetch.
+        SCIRRFInstall();
     }
 }
