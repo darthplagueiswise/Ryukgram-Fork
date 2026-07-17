@@ -11,14 +11,14 @@
 
 // radare2 6.1.8 and Capstone 5.0.7 independently identify the thick Swift
 // closure installed for the exact native "Force MobileConfig re-fetch" action:
-//   action construction: Instagram VA 0x104aaf748 (closure passed in x3)
+//   action construction: Instagram VA 0x104aaf748 (function passed in x3)
+//   closure context:     supplied as the Swift thick-context register x20
 //   closure entry:       Instagram VA 0x105824584
 //
-// This hook is deliberately hash/version scoped by a 16-byte instruction
-// signature. It does not scan titles, hook UIAlertAction globally, or guess a
-// Bloks action. The replacement invokes RyukGram's already validated OEM C
-// bridge. When that bridge cannot resolve live inputs, the original Swift closure
-// remains the fallback.
+// The function body overwrites x0 immediately and saves/restores x19-x28 through
+// the common prologue/epilogue, confirming a zero-explicit-argument thick Swift
+// closure. This hook is hash/version scoped by a 16-byte instruction signature.
+// It does not scan titles, hook UIAlertAction globally, or guess a Bloks action.
 
 static const uintptr_t kLOMCInstagramPreferredBase = 0x100000000ULL;
 static const uintptr_t kLOMCForceFetchClosureVA = 0x105824584ULL;
@@ -39,7 +39,17 @@ static BOOL LOMCResultRequested(NSString *result) {
            [lower containsString:@"requested through oem"];
 }
 
+__attribute__((noinline))
 static void newLOMCForceFetchClosure(void) {
+#if defined(__arm64__)
+    // Swift thick closures carry their captured context in x20. A normal C call
+    // is allowed to use callee-saved registers internally, so preserve the exact
+    // incoming value explicitly before doing Objective-C work and restore it
+    // before tailing into the original closure fallback.
+    register void *incomingSwiftContext __asm__("x20");
+    void *savedSwiftContext = incomingSwiftContext;
+#endif
+
     NSString *result = [SCIDogfoodObjectRuntime tryFetchSessionlessMobileConfig];
     BOOL requested = LOMCResultRequested(result);
 
@@ -57,6 +67,10 @@ static void newLOMCForceFetchClosure(void) {
     // The old closure re-enters the remote placeholder path. Preserve it only as
     // a fallback when the concrete native inputs were unavailable.
     if (!requested && origLOMCForceFetchClosure) {
+#if defined(__arm64__)
+        register void *restoredSwiftContext __asm__("x20") = savedSwiftContext;
+        __asm__ volatile("" : : "r"(restoredSwiftContext) : "memory");
+#endif
         origLOMCForceFetchClosure();
     }
 }
