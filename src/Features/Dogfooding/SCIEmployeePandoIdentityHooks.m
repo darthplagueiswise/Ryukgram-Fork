@@ -1,7 +1,6 @@
 #import "SCIInternalGatePrefs.h"
 #import "SCIDogfoodObjectRuntime.h"
 #import <Foundation/Foundation.h>
-#import <mach-o/dyld.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -207,16 +206,8 @@ static void EIPInstall(void) {
     }
 }
 
-static void EIPImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header;
-    (void)slide;
+void SCIInstallEmployeePandoIdentityHooks(void) {
+    // One exact installation pass; the centralized startup bootstrap retries once
+    // after launch instead of scanning on every dyld image notification.
     EIPInstall();
-}
-
-__attribute__((constructor))
-static void SCIEmployeePandoIdentityHooksCtor(void) {
-    @autoreleasepool {
-        EIPInstall();
-        _dyld_register_func_for_add_image(EIPImageLoaded);
-    }
 }
