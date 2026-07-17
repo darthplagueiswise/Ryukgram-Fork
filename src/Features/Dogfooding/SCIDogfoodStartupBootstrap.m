@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <dispatch/dispatch.h>
 #import <os/log.h>
 
 #define BOOTLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] DogfoodBootstrap " fmt, ##__VA_ARGS__)
@@ -14,6 +15,8 @@ FOUNDATION_EXPORT void SCIInstallEmployeeMobileConfigDescriptorHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeTestDogfoodRuntimeHooks(void);
 FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
 
+static id sSCIDogfoodLaunchObserver;
+
 static dispatch_queue_t SCIDogfoodBootstrapWorker(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
@@ -27,8 +30,8 @@ static dispatch_queue_t SCIDogfoodBootstrapWorker(void) {
 }
 
 static void SCIInstallExactDogfoodHooks(void) {
-    // Each installer is idempotent and performs only direct class/selector
-    // lookups. No full Objective-C class scan is allowed in this phase.
+    // Fixed class/selector lookups only. No Objective-C class-list scan is
+    // allowed in the constructor phase.
     SCIInstallSessionlessMobileConfigEarlyCaptureHooks();
     SCIInstallBugMenuOEMActivationHooks();
     SCIInstallBugMenuActionCellHooks();
@@ -37,31 +40,24 @@ static void SCIInstallExactDogfoodHooks(void) {
     SCIInstallEmployeePandoIdentityHooks();
 }
 
-static void SCIInstallDeferredDogfoodHooks(void) {
-    dispatch_async(SCIDogfoodBootstrapWorker(), ^{
-        // These are the only broad runtime scans. They run once after launch at
-        // utility QoS, never in a constructor, on the main queue, or per image.
-        SCIInstallEmployeeMobileConfigDescriptorHooks();
-        SCIInstallEmployeeTestDogfoodRuntimeHooks();
-        BOOTLOG("deferred utility hooks installed");
-    });
-}
-
 static void SCIDogfoodPostLaunchBootstrap(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // Retry direct lookups once because some Swift metadata is registered
-        // after the tweak constructor. This remains O(fixed selectors), not an
-        // image callback or class-list scan.
+        // One bounded retry catches Swift classes registered after the tweak
+        // constructor. Every installer is idempotent.
         SCIInstallExactDogfoodHooks();
         SCIInstallDogfoodObjectHooksIfNeeded();
 
+        // The only broad class scans run once, off the main thread, after the
+        // launch-critical window has passed.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)(1.0 * NSEC_PER_SEC)),
+                                     (int64_t)(2.0 * NSEC_PER_SEC)),
                        SCIDogfoodBootstrapWorker(), ^{
-            SCIInstallDeferredDogfoodHooks();
+            SCIInstallEmployeeMobileConfigDescriptorHooks();
+            SCIInstallEmployeeTestDogfoodRuntimeHooks();
+            BOOTLOG("deferred utility hooks installed");
         });
-        BOOTLOG("post-launch exact hooks installed; deferred phase scheduled");
+        BOOTLOG("post-launch exact hooks installed; utility phase scheduled");
     });
 }
 
@@ -71,15 +67,15 @@ static void SCIDogfoodStartupBootstrapCtor(void) {
         // One lightweight constructor owns this feature family's startup.
         SCIInstallExactDogfoodHooks();
 
-        __block id token = nil;
-        token = [NSNotificationCenter.defaultCenter
+        sSCIDogfoodLaunchObserver = [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidFinishLaunchingNotification
                         object:nil
                          queue:NSOperationQueue.mainQueue
                     usingBlock:^(__unused NSNotification *notification) {
-            if (token) {
-                [NSNotificationCenter.defaultCenter removeObserver:token];
-                token = nil;
+            id observer = sSCIDogfoodLaunchObserver;
+            sSCIDogfoodLaunchObserver = nil;
+            if (observer) {
+                [NSNotificationCenter.defaultCenter removeObserver:observer];
             }
             SCIDogfoodPostLaunchBootstrap();
         }];
