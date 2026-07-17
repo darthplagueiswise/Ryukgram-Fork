@@ -1,6 +1,5 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import <Foundation/Foundation.h>
-#import <mach-o/dyld.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -231,7 +230,7 @@ static id newSubclassSessionlessFactory(id self, SEL _cmd) {
     return original;
 }
 
-#pragma mark - Early installation and image-load retries
+#pragma mark - Early installation
 
 static void SMCHookInstance(Class cls, NSString *name, const char *encoding,
                             IMP replacement, IMP *original) {
@@ -292,17 +291,9 @@ static void SMCInstallCaptureHooks(void) {
     }
 }
 
-static void SMCImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
+void SCIInstallSessionlessMobileConfigEarlyCaptureHooks(void) {
+    // Must be called once in the light constructor phase and once after launch.
+    // No per-image dyld callback: repeated image notifications were stalling app
+    // startup and chaining duplicate hooks with SCIDogfoodObjectRuntimeHooks.x.
     SMCInstallCaptureHooks();
-}
-
-__attribute__((constructor))
-static void SCISessionlessMobileConfigEarlyCaptureCtor(void) {
-    @autoreleasepool {
-        // Install before UIApplicationDidBecomeActive. The previous deferred hook
-        // missed initWithManager: and setupFBTSessionlessContextManagerHolder:.
-        SMCInstallCaptureHooks();
-        _dyld_register_func_for_add_image(SMCImageLoaded);
-    }
 }
