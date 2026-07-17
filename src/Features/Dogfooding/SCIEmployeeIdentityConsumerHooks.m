@@ -68,6 +68,7 @@ static id newLeadGenInit(id self, SEL _cmd, id analyticsLogger,
         : nil;
 }
 
+// This selector is a class method on the Swift helper metaclass.
 static void (*origBloksLabProcess)(id, SEL, id, id, BOOL, BOOL, BOOL, id, id) = NULL;
 static void newBloksLabProcess(id self, SEL _cmd,
                                id deeplink,
@@ -92,7 +93,7 @@ static void newMarkInternalEnabled(id self, SEL _cmd, BOOL enabled) {
     }
 }
 
-#pragma mark - Real dogfood feature getters (not fabricated identity selectors)
+#pragma mark - Real employee and dogfood feature getters
 
 static BOOL (*origIdentitySwitcherDogfood)(id, SEL) = NULL;
 static BOOL newIdentitySwitcherDogfood(id self, SEL _cmd) {
@@ -110,6 +111,7 @@ static BOOL newSearchDogfoodFeedback(id self, SEL _cmd) {
         : NO;
 }
 
+// This selector is also a class method on the Swift helper metaclass.
 static BOOL (*origSmartSuggestionsDogfood)(id, SEL, id) = NULL;
 static BOOL newSmartSuggestionsDogfood(id self, SEL _cmd, id context) {
     if (EICMasterOn()) return YES;
@@ -118,16 +120,33 @@ static BOOL newSmartSuggestionsDogfood(id self, SEL _cmd, id context) {
         : NO;
 }
 
+static BOOL (*origForceRestoreRecentsForEmployee)(id, SEL) = NULL;
+static BOOL newForceRestoreRecentsForEmployee(id self, SEL _cmd) {
+    if (EICMasterOn()) return YES;
+    return origForceRestoreRecentsForEmployee
+        ? origForceRestoreRecentsForEmployee(self, _cmd)
+        : NO;
+}
+
+static void (*origSetForceRestoreRecentsForEmployee)(id, SEL, BOOL) = NULL;
+static void newSetForceRestoreRecentsForEmployee(id self, SEL _cmd, BOOL value) {
+    if (origSetForceRestoreRecentsForEmployee) {
+        origSetForceRestoreRecentsForEmployee(self, _cmd,
+            EICMasterOn() ? YES : value);
+    }
+}
+
 #pragma mark - Installation
 
-static void EICHook(Class cls, NSString *selectorName, const char *encoding,
-                    IMP replacement, IMP *original) {
+static void EICHookInstance(Class cls, NSString *selectorName,
+                            const char *encoding,
+                            IMP replacement, IMP *original) {
     if (!cls || !selectorName.length || !replacement || !original || *original) return;
     SEL selector = NSSelectorFromString(selectorName);
     Method method = class_getInstanceMethod(cls, selector);
     if (!EICMethodMatches(method, encoding)) {
         if (method) {
-            EICLOG("skip %{public}@.%{public}@ ABI=%{public}s",
+            EICLOG("skip instance %{public}@.%{public}@ ABI=%{public}s",
                    NSStringFromClass(cls), selectorName,
                    method_getTypeEncoding(method));
         }
@@ -136,60 +155,92 @@ static void EICHook(Class cls, NSString *selectorName, const char *encoding,
     MSHookMessageEx(cls, selector, replacement, original);
 }
 
+static void EICHookClass(Class cls, NSString *selectorName,
+                         const char *encoding,
+                         IMP replacement, IMP *original) {
+    if (!cls || !selectorName.length || !replacement || !original || *original) return;
+    SEL selector = NSSelectorFromString(selectorName);
+    Method method = class_getClassMethod(cls, selector);
+    if (!EICMethodMatches(method, encoding)) {
+        if (method) {
+            EICLOG("skip class %{public}@.%{public}@ ABI=%{public}s",
+                   NSStringFromClass(cls), selectorName,
+                   method_getTypeEncoding(method));
+        }
+        return;
+    }
+    Class meta = object_getClass(cls);
+    if (!meta) return;
+    MSHookMessageEx(meta, selector, replacement, original);
+}
+
 static void EICInstall(void) {
     @synchronized (SCIInternalGatePrefs.class) {
-        EICHook(NSClassFromString(@"IGFeedRequestQPLogger"),
+        EICHookInstance(NSClassFromString(@"IGFeedRequestQPLogger"),
             @"initWithShouldIncludeRequestId:instancesManager:persistentFailureTracker:isDeferredNppTapEnabled:isCacheLoadEnabled:isEmployee:isTestUser:",
             "@52@0:8B16@20@28B36B40B44B48",
             (IMP)newFeedQPInit, (IMP *)&origFeedQPInit);
 
-        EICHook(NSClassFromString(@"IGSeenStateLogger"),
+        EICHookInstance(NSClassFromString(@"IGSeenStateLogger"),
             @"initWithIsEmployee:analyticsLogger:",
             "@28@0:8B16@20",
             (IMP)newSeenLoggerInit, (IMP *)&origSeenLoggerInit);
 
-        EICHook(NSClassFromString(@"IGSeenStateStore"),
+        EICHookInstance(NSClassFromString(@"IGSeenStateStore"),
             @"initWithDependencies:isEmployee:",
             "@28@0:8@16B24",
             (IMP)newSeenStoreInit, (IMP *)&origSeenStoreInit);
 
-        EICHook(NSClassFromString(@"IGLeadGenAnalyticsLogger"),
+        EICHookInstance(NSClassFromString(@"IGLeadGenAnalyticsLogger"),
             @"initWithAnalyticsLogger:userFbidV2:isEmployee:",
             "@36@0:8@16q24B32",
             (IMP)newLeadGenInit, (IMP *)&origLeadGenInit);
 
-        EICHook(NSClassFromString(
+        EICHookClass(NSClassFromString(
             @"_TtC24BKBloksLabDeeplinkHelper24BKBloksLabDeeplinkHelper"),
             @"processDeeplinkWith:foaObjectSet:passPrototypeShortcode:useInternalNetworkCheck:isEmployee:session:containerConfigProvider:",
             "v60@0:8@16@24B32B36B40@44@?52",
             (IMP)newBloksLabProcess, (IMP *)&origBloksLabProcess);
 
-        EICHook(NSClassFromString(
+        EICHookInstance(NSClassFromString(
             @"_TtC17IGBugReportingKit32IGBugReportMenuReliabilityLogger"),
             @"markInternalSettingsEnabled:",
             "v20@0:8B16",
             (IMP)newMarkInternalEnabled, (IMP *)&origMarkInternalEnabled);
 
-        EICHook(NSClassFromString(
+        EICHookInstance(NSClassFromString(
             @"_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper"),
             @"isFbAcquisitionEpDogfoodModeEnabled",
             "B16@0:8",
             (IMP)newIdentitySwitcherDogfood,
             (IMP *)&origIdentitySwitcherDogfood);
 
-        EICHook(NSClassFromString(
+        EICHookInstance(NSClassFromString(
             @"_TtC21IGSearchSerpMediaGrid41IGSearchSerpMediaGridRowSectionController"),
             @"showDogfoodFeedback",
             "B16@0:8",
             (IMP)newSearchDogfoodFeedback,
             (IMP *)&origSearchDogfoodFeedback);
 
-        EICHook(NSClassFromString(
+        EICHookClass(NSClassFromString(
             @"_TtC46IGDirectSmartSuggestionsSuggestedActionHelpers46IGDirectSmartSuggestionsSuggestedActionHelpers"),
             @"directSmartSuggestionsIsForceBannerForDogfoodingEnabled:",
             "B24@0:8@16",
             (IMP)newSmartSuggestionsDogfood,
             (IMP *)&origSmartSuggestionsDogfood);
+
+        Class recentStore = NSClassFromString(
+            @"_TtC20IGRecentSearchStores36IGBlendedSearchRecentItemsOrderStore");
+        EICHookInstance(recentStore,
+            @"shouldAttemptToForceRestoreRecentsForEmployee",
+            "B16@0:8",
+            (IMP)newForceRestoreRecentsForEmployee,
+            (IMP *)&origForceRestoreRecentsForEmployee);
+        EICHookInstance(recentStore,
+            @"setShouldAttemptToForceRestoreRecentsForEmployee:",
+            "v20@0:8B16",
+            (IMP)newSetForceRestoreRecentsForEmployee,
+            (IMP *)&origSetForceRestoreRecentsForEmployee);
     }
 }
 
@@ -201,8 +252,9 @@ static void EICImageLoaded(const struct mach_header *header, intptr_t slide) {
 __attribute__((constructor))
 static void SCIEmployeeIdentityConsumerHooksCtor(void) {
     @autoreleasepool {
-        // Hooks are installed regardless of the initial preference and read the
-        // master live. This covers objects constructed before the Dev menu opens.
+        // Install regardless of the initial preference. Every replacement reads
+        // the consolidated master live, so objects created before the Dev screen
+        // opens are covered without repeatedly installing hooks.
         EICInstall();
         _dyld_register_func_for_add_image(EICImageLoaded);
     }
