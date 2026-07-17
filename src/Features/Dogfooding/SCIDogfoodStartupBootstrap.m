@@ -29,24 +29,30 @@ static dispatch_queue_t SCIDogfoodBootstrapWorker(void) {
     return queue;
 }
 
-static void SCIInstallExactDogfoodHooks(void) {
-    // Fixed class/selector lookups only. No Objective-C class-list scan is
-    // allowed in the constructor phase.
+static void SCIInstallPreMainDogfoodHooks(void) {
+    // Only hooks that must exist before Instagram constructs early session and
+    // MobileConfig objects belong here. Both installers perform a fixed number
+    // of exact class/selector lookups; neither enumerates images or classes.
     SCIInstallSessionlessMobileConfigEarlyCaptureHooks();
+    SCIInstallEmployeeIdentityConsumerHooks();
+}
+
+static void SCIInstallPostLaunchExactHooks(void) {
+    // Debug-menu/action hooks are not needed in the launch-critical window.
+    // Install them once after UIApplication has finished launching.
+    SCIInstallSessionlessMobileConfigEarlyCaptureHooks();
+    SCIInstallEmployeeIdentityConsumerHooks();
     SCIInstallBugMenuOEMActivationHooks();
     SCIInstallBugMenuActionCellHooks();
     SCIInstallLoggedOutMobileConfigActionHook();
-    SCIInstallEmployeeIdentityConsumerHooks();
     SCIInstallEmployeePandoIdentityHooks();
+    SCIInstallDogfoodObjectHooksIfNeeded();
 }
 
 static void SCIDogfoodPostLaunchBootstrap(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // One bounded retry catches Swift classes registered after the tweak
-        // constructor. Every installer is idempotent.
-        SCIInstallExactDogfoodHooks();
-        SCIInstallDogfoodObjectHooksIfNeeded();
+        SCIInstallPostLaunchExactHooks();
 
         // The only broad class scans run once, off the main thread, after the
         // launch-critical window has passed.
@@ -65,7 +71,7 @@ __attribute__((constructor))
 static void SCIDogfoodStartupBootstrapCtor(void) {
     @autoreleasepool {
         // One lightweight constructor owns this feature family's startup.
-        SCIInstallExactDogfoodHooks();
+        SCIInstallPreMainDogfoodHooks();
 
         sSCIDogfoodLaunchObserver = [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidFinishLaunchingNotification
