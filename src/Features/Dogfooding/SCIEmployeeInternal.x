@@ -175,8 +175,36 @@ static BOOL EIIdentityBoolGetter(id self, SEL _cmd) {
 	return original ? ((BOOL (*)(id, SEL))original)(self, _cmd) : NO;
 }
 
+static Class EIIdentityDeclaringClass(Class cls, SEL selector) {
+	for (Class current = cls; current; current = class_getSuperclass(current)) {
+		unsigned int count = 0;
+		Method *methods = class_copyMethodList(current, &count);
+		BOOL declares = NO;
+		for (unsigned int i = 0; methods && i < count; i++) {
+			if (method_getName(methods[i]) == selector) {
+				declares = YES;
+				break;
+			}
+		}
+		if (methods) free(methods);
+		if (declares) return current;
+	}
+	return Nil;
+}
+
 static BOOL EIInstallIdentitySelectorOnClass(Class cls, SEL selector) {
 	if (!cls || !selector) return NO;
+
+	// Hook the implementation owner, not every subclass that inherits it.
+	// Otherwise MSHookMessageEx can return this replacement as the subclass
+	// original, causing recursion when the live preference is turned off.
+	cls = EIIdentityDeclaringClass(cls, selector);
+	if (!cls) return NO;
+	if (cls == objc_getClass("IGFacebookUserInfo") &&
+		selector == sel_registerName("isEmployee")) {
+		return YES; // Covered by SCIEmployeeKnownObjCGroup.
+	}
+
 	Method method = class_getInstanceMethod(cls, selector);
 	if (!method) return NO;
 
