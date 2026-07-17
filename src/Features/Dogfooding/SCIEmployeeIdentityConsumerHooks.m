@@ -1,6 +1,5 @@
 #import "SCIInternalGatePrefs.h"
 #import <Foundation/Foundation.h>
-#import <mach-o/dyld.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -244,18 +243,8 @@ static void EICInstall(void) {
     }
 }
 
-static void EICImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
+void SCIInstallEmployeeIdentityConsumerHooks(void) {
+    // One exact installation pass. The centralized bootstrap performs one
+    // post-launch retry instead of registering a callback for every dyld image.
     EICInstall();
-}
-
-__attribute__((constructor))
-static void SCIEmployeeIdentityConsumerHooksCtor(void) {
-    @autoreleasepool {
-        // Install regardless of the initial preference. Every replacement reads
-        // the consolidated master live, so objects created before the Dev screen
-        // opens are covered without repeatedly installing hooks.
-        EICInstall();
-        _dyld_register_func_for_add_image(EICImageLoaded);
-    }
 }
