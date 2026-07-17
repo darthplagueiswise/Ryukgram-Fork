@@ -2,7 +2,6 @@
 #import "SCIDogfoodObjectRuntime.h"
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
-#import <mach-o/dyld.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -16,11 +15,9 @@
 // Instagram         a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa
 // FBSharedFramework 22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc
 //
-// These names DO exist. They are exported MobileConfig descriptor objects in
-// FBSharedFramework __TEXT,__const and imported by Instagram through chained
-// fixups. They are not callable BOOL functions and their bytes must not be
-// patched. Instagram reads their uint64 parameter fields through the typed
-// getBool:/getBool:withOptions:/getBool:withDefault: consumers hooked below.
+// These names are exported MobileConfig descriptor objects in __TEXT,__const and
+// imported through chained fixups. They are never patched as bytes. Their uint64
+// parameter fields are matched at typed getBool consumers.
 
 typedef uint64_t SCIMCBoolParam;
 
@@ -31,22 +28,11 @@ typedef struct {
 } SCIMCDescriptorSpec;
 
 static const SCIMCDescriptorSpec kSCIMCDescriptorSpecs[] = {
-    // _ig_is_employee occupies 0x10 bytes; both fields are mc_bool_param_t.
     { "ig_is_employee", { 0x00, 0x08 }, 2 },
-
-    // _ig_is_employee_or_test_user occupies one uint64 field.
     { "ig_is_employee_or_test_user", { 0x00 }, 1 },
-
-    // _ig_dogfooding_assistant has a non-BOOL field at +0 and its BOOL field
-    // at +8. The native caller at Instagram 0x103eca9a4 loads [descriptor,#8].
     { "ig_dogfooding_assistant", { 0x08 }, 1 },
-
-    // _ig_dogfooding_first_client is a 0x40-byte generated group. Offsets with
-    // the 0x81 bool tag are included; the 0x82 fields at +0x18/+0x20 are not.
     { "ig_dogfooding_first_client",
       { 0x00, 0x08, 0x10, 0x28, 0x30, 0x38 }, 6 },
-
-    // This XAV descriptor is consumed by -getBool: at Instagram 0x1090ce714.
     { "xav_switcher_ig_ios_test_user_check_fdid", { 0x00 }, 1 },
 };
 
@@ -54,6 +40,8 @@ static NSMutableDictionary<NSNumber *, NSString *> *sSCIMCForcedParamNames;
 static NSMutableDictionary<NSString *, NSValue *> *sSCIMCGetBoolOriginals;
 static NSMutableDictionary<NSString *, NSValue *> *sSCIMCGetBoolOptionsOriginals;
 static NSMutableDictionary<NSString *, NSValue *> *sSCIMCGetBoolDefaultOriginals;
+static BOOL sSCIMCDescriptorIDsResolved;
+static BOOL sSCIMCScanCompleted;
 
 static BOOL SCIMCMasterOn(void) {
     return [SCIInternalGatePrefs employeeInternalMasterEnabled];
@@ -100,14 +88,18 @@ static void SCIMCRefreshDescriptorIDs(void) {
                 sSCIMCForcedParamNames[@(parameter)] = name;
             }
         }
+        sSCIMCDescriptorIDsResolved = YES;
     }
 }
 
 static NSString *SCIMCForcedName(SCIMCBoolParam parameter) {
     if (!SCIMCMasterOn()) return nil;
-    SCIMCRefreshDescriptorIDs();
     @synchronized (SCIDogfoodObjectRuntime.class) {
-        return sSCIMCForcedParamNames[@(parameter)];
+        // Never dlsym/parse descriptor objects from the hot getBool path. The
+        // centralized bootstrap resolves the table before installing readers.
+        return sSCIMCDescriptorIDsResolved
+            ? sSCIMCForcedParamNames[@(parameter)]
+            : nil;
     }
 }
 
@@ -124,13 +116,7 @@ static IMP SCIMCOriginalForObject(id object, SEL selector,
 }
 
 static BOOL newSCIMCGetBool(id self, SEL _cmd, SCIMCBoolParam parameter) {
-    NSString *forced = SCIMCForcedName(parameter);
-    if (forced) {
-        MCGLOG("force getBool %{public}@ receiver=%{public}@",
-               forced, NSStringFromClass(object_getClass(self)));
-        return YES;
-    }
-
+    if (SCIMCForcedName(parameter)) return YES;
     IMP original = SCIMCOriginalForObject(self, _cmd, sSCIMCGetBoolOriginals);
     return original
         ? ((BOOL (*)(id, SEL, SCIMCBoolParam))original)(self, _cmd, parameter)
@@ -139,13 +125,7 @@ static BOOL newSCIMCGetBool(id self, SEL _cmd, SCIMCBoolParam parameter) {
 
 static BOOL newSCIMCGetBoolWithOptions(id self, SEL _cmd,
                                        SCIMCBoolParam parameter, id options) {
-    NSString *forced = SCIMCForcedName(parameter);
-    if (forced) {
-        MCGLOG("force getBool:withOptions: %{public}@ receiver=%{public}@",
-               forced, NSStringFromClass(object_getClass(self)));
-        return YES;
-    }
-
+    if (SCIMCForcedName(parameter)) return YES;
     IMP original = SCIMCOriginalForObject(self, _cmd,
                                           sSCIMCGetBoolOptionsOriginals);
     return original
@@ -156,13 +136,7 @@ static BOOL newSCIMCGetBoolWithOptions(id self, SEL _cmd,
 
 static BOOL newSCIMCGetBoolWithDefault(id self, SEL _cmd,
                                        SCIMCBoolParam parameter, BOOL defaultValue) {
-    NSString *forced = SCIMCForcedName(parameter);
-    if (forced) {
-        MCGLOG("force getBool:withDefault: %{public}@ receiver=%{public}@",
-               forced, NSStringFromClass(object_getClass(self)));
-        return YES;
-    }
-
+    if (SCIMCForcedName(parameter)) return YES;
     IMP original = SCIMCOriginalForObject(self, _cmd,
                                           sSCIMCGetBoolDefaultOriginals);
     return original
@@ -228,6 +202,7 @@ static void SCIMCHookDeclaredMethod(Class cls, SEL selector, Method method,
 
 static void SCIMCInstallDescriptorReaderHooks(void) {
     @synchronized (SCIDogfoodObjectRuntime.class) {
+        if (sSCIMCScanCompleted) return;
         if (!sSCIMCGetBoolOriginals) {
             sSCIMCGetBoolOriginals = [NSMutableDictionary dictionary];
             sSCIMCGetBoolOptionsOriginals = [NSMutableDictionary dictionary];
@@ -278,24 +253,15 @@ static void SCIMCInstallDescriptorReaderHooks(void) {
             }
         }
         free(classes);
+        sSCIMCScanCompleted = YES;
 
-        MCGLOG("resolved %lu descriptor parameter IDs",
+        MCGLOG("one-shot scan complete: %lu descriptor IDs",
                (unsigned long)sSCIMCForcedParamNames.count);
     }
 }
 
-static void SCIMCImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header;
-    (void)slide;
+void SCIInstallEmployeeMobileConfigDescriptorHooks(void) {
+    // Heavy one-shot class scan. SCIDogfoodStartupBootstrap invokes this only in
+    // its deferred utility phase after the app has finished launching.
     SCIMCInstallDescriptorReaderHooks();
-}
-
-__attribute__((constructor))
-static void SCIEmployeeMobileConfigDescriptorHooksCtor(void) {
-    @autoreleasepool {
-        // Install regardless of the current preference. Replacements consult the
-        // consolidated Employee / Internal master live on every read.
-        SCIMCInstallDescriptorReaderHooks();
-        _dyld_register_func_for_add_image(SCIMCImageLoaded);
-    }
 }
