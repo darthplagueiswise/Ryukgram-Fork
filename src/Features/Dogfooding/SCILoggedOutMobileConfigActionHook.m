@@ -108,15 +108,8 @@ static void LOMCInstall(void) {
     }
 }
 
-static void LOMCImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header; (void)slide;
+void SCIInstallLoggedOutMobileConfigActionHook(void) {
+    // One bounded image-list pass. The centralized bootstrap retries once after
+    // launch; this module no longer rescans the entire image list per dyld event.
     LOMCInstall();
-}
-
-__attribute__((constructor))
-static void SCILoggedOutMobileConfigActionHookCtor(void) {
-    @autoreleasepool {
-        LOMCInstall();
-        _dyld_register_func_for_add_image(LOMCImageLoaded);
-    }
 }
