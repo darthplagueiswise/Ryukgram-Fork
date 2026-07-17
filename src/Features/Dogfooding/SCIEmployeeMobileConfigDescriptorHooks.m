@@ -7,6 +7,7 @@
 #import <substrate.h>
 #import <os/log.h>
 #import <stdint.h>
+#import <stdlib.h>
 #import <string.h>
 
 #define MCGLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] MCIdentityDescriptors " fmt, ##__VA_ARGS__)
