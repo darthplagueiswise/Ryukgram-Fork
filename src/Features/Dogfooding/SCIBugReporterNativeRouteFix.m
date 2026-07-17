@@ -51,22 +51,22 @@ static BOOL BRMethodMatches(Method method, const char *expected) {
             isEqualToString:BRNormalizedEncoding(expected)];
 }
 
-static Ivar BRExactIvar(id object, const char *name, ptrdiff_t expectedOffset,
-                        NSUInteger expectedSize) {
+// LIEF/ObjC metadata for the audited binary gives exact offsets. Swift emits an
+// empty type encoding for these stored properties, so validate class, name and
+// offset instead of guessing from an unavailable ivar-size API.
+static Ivar BRExactIvar(id object, const char *name, ptrdiff_t expectedOffset) {
     if (!object || !name) return NULL;
     Class cls = [object class];
     NSString *className = NSStringFromClass(cls) ?: @"";
     if (![className containsString:@"IGBugReportMenuViewController"]) return NULL;
     Ivar ivar = class_getInstanceVariable(cls, name);
     if (!ivar || ivar_getOffset(ivar) != expectedOffset) return NULL;
-    if (expectedSize && ivar_getSize(ivar) != expectedSize) return NULL;
     return ivar;
 }
 
 static NSInteger BRReadInteger(id object, const char *name,
                                ptrdiff_t offset, NSInteger fallback) {
-    Ivar ivar = BRExactIvar(object, name, offset, sizeof(NSInteger));
-    if (!ivar) return fallback;
+    if (!BRExactIvar(object, name, offset)) return fallback;
     NSInteger value = fallback;
     uint8_t *base = (__bridge void *)object;
     memcpy(&value, base + offset, sizeof(value));
@@ -75,8 +75,7 @@ static NSInteger BRReadInteger(id object, const char *name,
 
 static BOOL BRWriteInteger(id object, const char *name,
                            ptrdiff_t offset, NSInteger value) {
-    Ivar ivar = BRExactIvar(object, name, offset, sizeof(NSInteger));
-    if (!ivar) return NO;
+    if (!BRExactIvar(object, name, offset)) return NO;
     uint8_t *base = (__bridge void *)object;
     memcpy(base + offset, &value, sizeof(value));
     return YES;
@@ -84,8 +83,7 @@ static BOOL BRWriteInteger(id object, const char *name,
 
 static BOOL BRWriteBool(id object, const char *name,
                         ptrdiff_t offset, BOOL value) {
-    Ivar ivar = BRExactIvar(object, name, offset, sizeof(BOOL));
-    if (!ivar) return NO;
+    if (!BRExactIvar(object, name, offset)) return NO;
     uint8_t *base = (__bridge void *)object;
     BOOL normalized = value ? YES : NO;
     memcpy(base + offset, &normalized, sizeof(normalized));
@@ -93,7 +91,7 @@ static BOOL BRWriteBool(id object, const char *name,
 }
 
 static id BRReadObject(id object, const char *name, ptrdiff_t offset) {
-    Ivar ivar = BRExactIvar(object, name, offset, sizeof(id));
+    Ivar ivar = BRExactIvar(object, name, offset);
     if (!ivar) return nil;
     @try { return object_getIvar(object, ivar); }
     @catch (__unused id exception) { return nil; }
@@ -101,7 +99,7 @@ static id BRReadObject(id object, const char *name, ptrdiff_t offset) {
 
 static BOOL BRWriteObject(id object, const char *name,
                           ptrdiff_t offset, id value) {
-    Ivar ivar = BRExactIvar(object, name, offset, sizeof(id));
+    Ivar ivar = BRExactIvar(object, name, offset);
     if (!ivar) return NO;
     @try {
         object_setIvar(object, ivar, value);
@@ -120,13 +118,9 @@ static id BRDeviceSessionForUserSession(id userSession) {
     @catch (__unused id exception) { return nil; }
 }
 
-static id BRResolveDeviceSession(id deviceSession, id userSession) {
-    return deviceSession ?: BRDeviceSessionForUserSession(userSession);
-}
-
 static NSInteger BRSupportedInternalStyle(NSInteger style) {
-    // r2/Capstone: section 7 branches style==2 to one native route, style==0
-    // to the alternate route, while nonzero/non-2 reaches the exact no-op.
+    // r2/Capstone at 0x104aaf69c/0x104aafbec: style 2 and style 0 reach
+    // native handlers; any other nonzero style reaches the exact no-op branch.
     return (style == 0 || style == 2) ? style : 0;
 }
 
@@ -134,41 +128,33 @@ static void BRApplyLiveDependencies(id controller) {
     if (!controller || !BRInternalOn()) return;
 
     NSInteger style = BRReadInteger(controller, "style", 32, 0);
-    NSInteger normalizedStyle = BRSupportedInternalStyle(style);
-    if (style != normalizedStyle &&
-        BRWriteInteger(controller, "style", 32, normalizedStyle)) {
+    NSInteger normalized = BRSupportedInternalStyle(style);
+    if (style != normalized && BRWriteInteger(controller, "style", 32, normalized)) {
         [SCIDogfoodObjectRuntime noteAction:@"Internal Settings route"
-                                      status:@"normalized unsupported menu style to native style 0"
+                                      status:@"normalized unsupported style to native style 0"
                                       detail:@(style)];
-        BRLOG("normalized style %ld -> %ld", (long)style, (long)normalizedStyle);
+        BRLOG("normalized style %ld -> %ld", (long)style, (long)normalized);
     }
 
     id deviceSession = BRReadObject(controller, "deviceSession", 16);
-    id userSession = BRReadObject(controller, "userSession", 24);
-    if (!userSession) userSession = [SCIDogfoodObjectRuntime activeUserSession];
+    id userSession = BRReadObject(controller, "userSession", 24) ?:
+        [SCIDogfoodObjectRuntime activeUserSession];
     if (!deviceSession) {
         deviceSession = BRDeviceSessionForUserSession(userSession);
         if (deviceSession && BRWriteObject(controller, "deviceSession", 16, deviceSession)) {
             [SCIDogfoodObjectRuntime noteObject:deviceSession
                                            role:@"IGDeviceSession"
-                                         source:@"IGBugReportMenuViewController.userSession.deviceSession"];
-            BRLOG("filled missing deviceSession from live userSession");
+                                         source:@"IGBugReportMenu.userSession.deviceSession"];
         }
     }
 
-    if (BRInternalOn()) {
-        BRWriteBool(controller, "showInternalSettings", 128, YES);
-        BRWriteBool(controller, "showShakeToReportPreferenceToggle", 130, YES);
-    }
+    BRWriteBool(controller, "showInternalSettings", 128, YES);
+    BRWriteBool(controller, "showShakeToReportPreferenceToggle", 130, YES);
     if ([SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
         BRWriteBool(controller, "showLoggedOutInternalSettings", 129, YES);
     }
-    if (BRMasterOn()) {
-        BRWriteBool(controller, "showDogfoodingAssistant", 131, YES);
-    }
+    if (BRMasterOn()) BRWriteBool(controller, "showDogfoodingAssistant", 131, YES);
 }
-
-#pragma mark - Exact initializers
 
 typedef id (*BRLegacyInitIMP)(id, SEL, id, id, id, id, id, id,
                               NSInteger, NSInteger, BOOL, BOOL, BOOL);
@@ -176,16 +162,14 @@ typedef id (*BRCurrentInitIMP)(id, SEL, id, id, id, id, id, id,
                                NSInteger, NSInteger, BOOL, BOOL, BOOL, BOOL,
                                NSInteger);
 
-static BRLegacyInitIMP origLegacyInit = NULL;
-static id newLegacyInit(id self, SEL _cmd,
-                        id deviceSession, id userSession, id reliabilityLogging,
-                        id navChain, id endpoint, id entryPoint,
-                        NSInteger style, NSInteger availabilityStatus,
-                        BOOL showInternalSettings,
-                        BOOL showLoggedOutInternalSettings,
-                        BOOL showShakeToggle) {
+static BRLegacyInitIMP origLegacyInit;
+static id newLegacyInit(id self, SEL _cmd, id deviceSession, id userSession,
+                        id reliabilityLogging, id navChain, id endpoint,
+                        id entryPoint, NSInteger style,
+                        NSInteger availabilityStatus, BOOL showInternalSettings,
+                        BOOL showLoggedOutInternalSettings, BOOL showShakeToggle) {
     if (BRInternalOn()) {
-        deviceSession = BRResolveDeviceSession(deviceSession, userSession);
+        deviceSession = deviceSession ?: BRDeviceSessionForUserSession(userSession);
         style = BRSupportedInternalStyle(style);
         showInternalSettings = YES;
         showShakeToggle = YES;
@@ -193,28 +177,24 @@ static id newLegacyInit(id self, SEL _cmd,
     if ([SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
         showLoggedOutInternalSettings = YES;
     }
-    id result = origLegacyInit
-        ? origLegacyInit(self, _cmd, deviceSession, userSession,
-            reliabilityLogging, navChain, endpoint, entryPoint, style,
-            availabilityStatus, showInternalSettings,
-            showLoggedOutInternalSettings, showShakeToggle)
-        : nil;
+    id result = origLegacyInit ? origLegacyInit(self, _cmd, deviceSession,
+        userSession, reliabilityLogging, navChain, endpoint, entryPoint, style,
+        availabilityStatus, showInternalSettings,
+        showLoggedOutInternalSettings, showShakeToggle) : nil;
     BRApplyLiveDependencies(result);
     return result;
 }
 
-static BRCurrentInitIMP origCurrentInit = NULL;
-static id newCurrentInit(id self, SEL _cmd,
-                         id deviceSession, id userSession, id reliabilityLogging,
-                         id navChain, id endpoint, id entryPoint,
-                         NSInteger style, NSInteger availabilityStatus,
-                         BOOL showInternalSettings,
-                         BOOL showLoggedOutInternalSettings,
-                         BOOL showShakeToggle,
+static BRCurrentInitIMP origCurrentInit;
+static id newCurrentInit(id self, SEL _cmd, id deviceSession, id userSession,
+                         id reliabilityLogging, id navChain, id endpoint,
+                         id entryPoint, NSInteger style,
+                         NSInteger availabilityStatus, BOOL showInternalSettings,
+                         BOOL showLoggedOutInternalSettings, BOOL showShakeToggle,
                          BOOL showDogfoodingAssistant,
                          NSInteger maisaUXVariantRawValue) {
     if (BRInternalOn()) {
-        deviceSession = BRResolveDeviceSession(deviceSession, userSession);
+        deviceSession = deviceSession ?: BRDeviceSessionForUserSession(userSession);
         style = BRSupportedInternalStyle(style);
         showInternalSettings = YES;
         showShakeToggle = YES;
@@ -223,51 +203,44 @@ static id newCurrentInit(id self, SEL _cmd,
         showLoggedOutInternalSettings = YES;
     }
     if (BRMasterOn()) showDogfoodingAssistant = YES;
-
-    id result = origCurrentInit
-        ? origCurrentInit(self, _cmd, deviceSession, userSession,
-            reliabilityLogging, navChain, endpoint, entryPoint, style,
-            availabilityStatus, showInternalSettings,
-            showLoggedOutInternalSettings, showShakeToggle,
-            showDogfoodingAssistant, maisaUXVariantRawValue)
-        : nil;
+    id result = origCurrentInit ? origCurrentInit(self, _cmd, deviceSession,
+        userSession, reliabilityLogging, navChain, endpoint, entryPoint, style,
+        availabilityStatus, showInternalSettings,
+        showLoggedOutInternalSettings, showShakeToggle,
+        showDogfoodingAssistant, maisaUXVariantRawValue) : nil;
     BRApplyLiveDependencies(result);
     return result;
 }
 
-#pragma mark - Existing-controller and tap-time repair
-
-static void (*origViewDidLoad)(id, SEL) = NULL;
+static void (*origViewDidLoad)(id, SEL);
 static void newViewDidLoad(id self, SEL _cmd) {
     BRApplyLiveDependencies(self);
     if (origViewDidLoad) origViewDidLoad(self, _cmd);
     BRApplyLiveDependencies(self);
 }
 
-static void (*origViewDidAppear)(id, SEL, BOOL) = NULL;
+static void (*origViewDidAppear)(id, SEL, BOOL);
 static void newViewDidAppear(id self, SEL _cmd, BOOL animated) {
     BRApplyLiveDependencies(self);
     if (origViewDidAppear) origViewDidAppear(self, _cmd, animated);
     BRApplyLiveDependencies(self);
 }
 
-static void (*origDidSelect)(id, SEL, UITableView *, NSIndexPath *) = NULL;
+static void (*origDidSelect)(id, SEL, UITableView *, NSIndexPath *);
 static void newDidSelect(id self, SEL _cmd, UITableView *tableView,
                          NSIndexPath *indexPath) {
-    // Current binary jump table: section 6 is Dogfooding Assistant and section 7
-    // is Internal Settings. Repair dependencies immediately before the native
-    // Swift handler; do not substitute DirectNotes or synthesize a socket.
+    // Current jump table: section 6 = Dogfooding Assistant, section 7 =
+    // Internal Settings. Keep the original Swift route authoritative.
     if (indexPath.section == 6 || indexPath.section == 7) {
         BRApplyLiveDependencies(self);
         [SCIDogfoodObjectRuntime noteAction:
-            indexPath.section == 6 ? @"Dogfooding Assistant native tap" : @"Internal Settings native tap"
+            indexPath.section == 6 ? @"Dogfooding Assistant native tap" :
+                                     @"Internal Settings native tap"
                                       status:@"forwarded to original Swift route"
                                       detail:@(indexPath.section)];
     }
     if (origDidSelect) origDidSelect(self, _cmd, tableView, indexPath);
 }
-
-#pragma mark - Early install
 
 static Class BRMenuClass(void) {
     return NSClassFromString(@"_TtC17IGBugReporterMenu29IGBugReportMenuViewController") ?:
