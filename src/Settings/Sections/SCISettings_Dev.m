@@ -182,11 +182,11 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		},
 		@{
 			@"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"Validated in Instagram(30): Internal Settings opens through the local status=0 path; GraphQL/Pando only supplies upstream eligibility. Dogfooding Assistant uses a separate lazy menu-row socket, with a native Dogfooding/Notes fallback when that socket is unavailable. Internal-only content still requires Lighthouse/VPN."),
+			@"footer": SCILocalized(@"Internal Settings and Dogfooding Assistant are separate native routes. Employee / Internal now unifies the legacy employee switches, hooks only existing BOOL identity getters with a validated ABI, and follows the exact employee/test-user and dogfooder fragments. Dogfooding Assistant uses only its live provider/config; DirectNotes is never used as a fallback. Internal-only content may still require Lighthouse/VPN."),
 			@"rows": @[
 				SCIEmployeeInternalSwitch(
 					SCILocalized(@"Employee / Internal"),
-					SCILocalized(@"Forces the validated client-side employee, GraphQL dogfood and Internal Settings paths"),
+					SCILocalized(@"Unifies isEmployee plus existing employee-or-test-user, test-user and dogfooder BOOL getters; also enables the exact GraphQL dogfood and Internal Settings paths"),
 					@"sci_employee_internal"
 				),
 				SCIEmployeeInternalSwitch(
