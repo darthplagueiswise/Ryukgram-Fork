@@ -46,7 +46,12 @@ static NSArray<NSString *> *SCIInterestingIvarNames(void) {
               @"_options", @"options", @"_overrideOptions", @"overrideOptions", @"_item", @"item", @"_dataModel", @"dataModel",
               @"_viewModel", @"viewModel", @"_screen", @"screen", @"_screenView", @"screenView", @"_collectionView",
               @"collectionView", @"_session", @"session", @"_scopedNetworker", @"scopedNetworker", @"_mobileConfig", @"mobileConfig",
-              @"_settings", @"settings", @"permissionsMessagingControlCache", @"permissionsFeatureControlCache"];
+              @"_settings", @"settings",
+              @"_dogfoodingAssistantMenuRowProvider", @"dogfoodingAssistantMenuRowProvider",
+              @"_dogfoodingAssistantMenuRowProviding", @"dogfoodingAssistantMenuRowProviding",
+              @"_dogfoodingAssistantProvider", @"dogfoodingAssistantProvider",
+              @"_dogfoodingAssistantSocket", @"dogfoodingAssistantSocket",
+              @"permissionsMessagingControlCache", @"permissionsFeatureControlCache"];
     }); return a;
 }
 
@@ -616,15 +621,12 @@ static NSDictionary *SCILightSnapshot(id obj, NSDictionary *meta) {
         return NO;
     }
     if (!cfg) {
-        // The native Dogfooding Settings VC requires an IGDogfoodingSettingsConfig,
-        // which is Swift-opaque (no constructible ObjC init) and is only built by IG
-        // once the employee/internal gate is on. We cannot fabricate it. Until IG
-        // builds one (and our capture observer stores it), fall back to the
-        // config-free Notes dogfooding opener so the launcher still lands the user in
-        // a real dogfood surface instead of failing.
-        [self noteAction:@"Open Native Dogfood Settings" status:@"no captured config; falling back to Notes dogfooding" detail:[self dogfoodNativeState]];
-        if ([self tryOpenNotesDogfooding]) return YES;
-        [self noteAction:@"Open Native Dogfood Settings" status:@"missing native config" detail:[self dogfoodNativeState]];
+        // IGDogfoodingSettingsConfig is Swift-opaque and must come from the real
+        // provider/socket graph. DirectNotes is a different feature and must never
+        // be substituted for Dogfooding Assistant or Internal Settings.
+        [self noteAction:@"Open Native Dogfood Settings"
+                  status:@"missing native config; unrelated fallback disabled"
+                  detail:[self dogfoodNativeState]];
         return NO;
     }
 
