@@ -43,11 +43,10 @@ __attribute__((noinline))
 static void newLOMCForceFetchClosure(void) {
 #if defined(__arm64__)
     // Swift thick closures carry their captured context in x20. A normal C call
-    // is allowed to use callee-saved registers internally, so preserve the exact
-    // incoming value explicitly before doing Objective-C work and restore it
-    // before tailing into the original closure fallback.
-    register void *incomingSwiftContext __asm__("x20");
-    void *savedSwiftContext = incomingSwiftContext;
+    // may reuse callee-saved registers internally, so snapshot the exact incoming
+    // value before Objective-C work and restore it before the native fallback.
+    void *savedSwiftContext = NULL;
+    __asm__ volatile("mov %0, x20" : "=r"(savedSwiftContext));
 #endif
 
     NSString *result = [SCIDogfoodObjectRuntime tryFetchSessionlessMobileConfig];
@@ -68,8 +67,8 @@ static void newLOMCForceFetchClosure(void) {
     // a fallback when the concrete native inputs were unavailable.
     if (!requested && origLOMCForceFetchClosure) {
 #if defined(__arm64__)
-        register void *restoredSwiftContext __asm__("x20") = savedSwiftContext;
-        __asm__ volatile("" : : "r"(restoredSwiftContext) : "memory");
+        __asm__ volatile("mov x20, %0" : : "r"(savedSwiftContext)
+                         : "x20", "memory");
 #endif
         origLOMCForceFetchClosure();
     }
