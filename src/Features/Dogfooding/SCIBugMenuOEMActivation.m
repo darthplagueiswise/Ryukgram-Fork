@@ -199,18 +199,32 @@ static NSString *BMTextInView(UIView *view) {
 }
 
 static NSString *BMCellTitle(UITableViewCell *cell) {
+    if (!cell) return nil;
     NSString *title = cell.textLabel.text;
+    if (!title.length) {
+        id configuration = cell.contentConfiguration;
+        SEL textSelector = NSSelectorFromString(@"text");
+        if ([configuration respondsToSelector:textSelector]) {
+            @try {
+                id value = ((id (*)(id, SEL))objc_msgSend)(configuration, textSelector);
+                if ([value isKindOfClass:NSString.class]) title = value;
+            } @catch (__unused id exception) {}
+        }
+    }
     if (!title.length) title = BMTextInView(cell.contentView);
     if (!title.length) title = cell.accessibilityLabel;
     return [title stringByTrimmingCharactersInSet:
         NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
-static BOOL BMIsTargetCell(UITableViewCell *cell, NSIndexPath *indexPath) {
-    if (indexPath.section == 6 || indexPath.section == 7) return YES;
+static BOOL BMIsTargetCell(UITableViewCell *cell,
+                           __unused NSIndexPath *indexPath) {
+    // r2/Capstone proved that action tags 6 and 7 in didSelect are Swift row
+    // discriminators, not NSIndexPath.section values. Never enable arbitrary
+    // table sections by numeric position; identify only the exact native rows.
     NSString *title = BMCellTitle(cell);
-    return [title isEqualToString:@"Internal Settings"] ||
-        [title isEqualToString:@"Dogfooding Assistant"];
+    return [title caseInsensitiveCompare:@"Internal Settings"] == NSOrderedSame ||
+        [title caseInsensitiveCompare:@"Dogfooding Assistant"] == NSOrderedSame;
 }
 
 static void BMEnsureActionCellInteractive(UITableViewCell *cell,
