@@ -11,8 +11,7 @@
 
 #define BMACTLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] BugMenuActivation " fmt, ##__VA_ARGS__)
 
-// Revalidated with radare2 5.9.8 and independently with Capstone 5.0.7
-// against Instagram SHA-256
+// Revalidated with LIEF + Capstone against Instagram SHA-256
 // a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa.
 //
 // Exact Swift stored-property offsets:
@@ -27,24 +26,16 @@
 //   maisaUXVariant                      byte   @ 0x84
 //   lazy dogfoodingAssistantSocket      byte   @ 0x85 (never an ObjC id)
 //
-// SCIEmployeeInternal.x owns initializer/lifecycle/table selection. The actual
-// button route belongs to SCIBugMenuActionCells.m. This file owns only rendered
-// cell tagging/highlight plus exact stored-state repair, so no selector is hooked
-// by two modules.
+// This module owns only cell enablement/highlight and captured sessions. The
+// existing SCIEmployeeInternal layer remains the sole owner of lifecycle and
+// didSelect hooks, avoiding a second hook chain on the Swift route.
 
 static __weak id sBMDeviceSession;
 static __weak id sBMUserSession;
+static BOOL sBMInstalled;
 
 id SCIEmployeeInternalCapturedDeviceSession(void) { return sBMDeviceSession; }
 id SCIEmployeeInternalCapturedUserSession(void) { return sBMUserSession; }
-
-typedef NS_ENUM(NSInteger, BMTargetKind) {
-    BMTargetKindNone = 0,
-    BMTargetKindDogfoodingAssistant = 1,
-    BMTargetKindInternalSettings = 2,
-};
-
-static const void *kBMTargetKindKey = &kBMTargetKindKey;
 
 static BOOL BMMasterOn(void) {
     return [SCIInternalGatePrefs employeeInternalMasterEnabled];
@@ -132,35 +123,9 @@ static BOOL BMWriteByte(id object, const char *name,
     return YES;
 }
 
-static NSString *BMNormalizedEncoding(const char *encoding) {
-    if (!encoding) return @"";
-    NSMutableString *out = [NSMutableString string];
-    const char *p = encoding;
-    while (*p) {
-        if (*p != '@') { [out appendFormat:@"%c", *p++]; continue; }
-        [out appendString:@"@"]; p++;
-        if (*p == '"') {
-            for (p++; *p && *p != '"'; p++) {}
-            if (*p) p++;
-        } else if (*p == '?') {
-            [out appendString:@"?"]; p++;
-            if (*p == '<') {
-                NSInteger depth = 0;
-                do {
-                    if (*p == '<') depth++;
-                    else if (*p == '>') depth--;
-                    p++;
-                } while (*p && depth > 0);
-            }
-        }
-    }
-    return out;
-}
-
 static BOOL BMEncodingMatches(Method method, const char *expected) {
-    return method && expected &&
-        [BMNormalizedEncoding(method_getTypeEncoding(method))
-            isEqualToString:BMNormalizedEncoding(expected)];
+    const char *encoding = method ? method_getTypeEncoding(method) : NULL;
+    return encoding && expected && strcmp(encoding, expected) == 0;
 }
 
 static id BMDeviceSessionFromUserSession(id userSession) {
@@ -173,60 +138,52 @@ static id BMDeviceSessionFromUserSession(id userSession) {
 }
 
 static void BMCaptureSessions(id controller) {
-    id userSession = BMReadObject(controller, "userSession", 0x18) ?:
+    id userSession = BMReadObject(controller, "userSession", 24) ?:
         [SCIDogfoodObjectRuntime activeUserSession];
-    id deviceSession = BMReadObject(controller, "deviceSession", 0x10);
+    id deviceSession = BMReadObject(controller, "deviceSession", 16);
     if (!deviceSession) {
         deviceSession = BMDeviceSessionFromUserSession(userSession);
-        if (deviceSession) BMWriteObject(controller, "deviceSession", 0x10, deviceSession);
+        if (deviceSession) BMWriteObject(controller, "deviceSession", 16, deviceSession);
     }
 
     if (deviceSession && deviceSession != sBMDeviceSession) {
         sBMDeviceSession = deviceSession;
         [SCIDogfoodObjectRuntime noteObject:deviceSession
                                        role:@"IGDeviceSession"
-                                     source:@"IGBugReportMenu exact Swift slots"];
+                                     source:@"IGBugReportMenu native dependencies"];
     }
     if (userSession && userSession != sBMUserSession) {
         sBMUserSession = userSession;
         [SCIDogfoodObjectRuntime noteLiveUserSession:userSession
-                                              source:@"IGBugReportMenu exact Swift slots"];
+                                              source:@"IGBugReportMenu native dependencies"];
     }
 }
 
-void SCIApplyBugMenuOEMActivationState(id controller) {
+static void BMApplyNativeState(id controller) {
     if (!controller || !BMAnyOn()) return;
     BMCaptureSessions(controller);
 
-    id userSession = BMReadObject(controller, "userSession", 0x18) ?:
-        sBMUserSession;
+    id userSession = BMReadObject(controller, "userSession", 24) ?: sBMUserSession;
     if (BMAvailabilityOn()) {
-        BMWriteInteger(controller, "internalSettingsAvailabilityStatus", 0x78,
+        BMWriteInteger(controller, "internalSettingsAvailabilityStatus", 120,
                        BMAvailabilityRaw());
     }
     if (BMMenuOn()) {
-        BMWriteByte(controller, "showInternalSettings", 0x80, 1);
-        BMWriteByte(controller, "showShakeToReportPreferenceToggle", 0x82, 1);
+        BMWriteByte(controller, "showInternalSettings", 128, 1);
+        BMWriteByte(controller, "showShakeToReportPreferenceToggle", 130, 1);
     }
-    if (BMLoggedOutOn()) {
-        BMWriteByte(controller, "showLoggedOutInternalSettings", 0x81, 1);
-    }
-    if (BMMasterOn()) {
-        BMWriteByte(controller, "showDogfoodingAssistant", 0x83, 1);
-    }
+    if (BMLoggedOutOn()) BMWriteByte(controller, "showLoggedOutInternalSettings", 129, 1);
+    if (BMMasterOn()) BMWriteByte(controller, "showDogfoodingAssistant", 131, 1);
 
-    // rowsGrouped(1) satisfies both native action-cell enabled predicates.
-    BMWriteByte(controller, "maisaUXVariant", 0x84, 1);
+    BMWriteByte(controller, "maisaUXVariant", 132, 1);
 
-    NSInteger oldStyle = BMReadInteger(controller, "style", 0x20, 0);
+    NSInteger oldStyle = BMReadInteger(controller, "style", 32, 0);
     NSInteger newStyle = oldStyle;
-    if (userSession && BMMenuOn()) newStyle = 0;
-    else if (!userSession && (BMLoggedOutOn() || BMMenuOn())) newStyle = 2;
-    else if (oldStyle != 0 && oldStyle != 2) newStyle = userSession ? 0 : 2;
-    if (newStyle != oldStyle && BMWriteInteger(controller, "style", 0x20, newStyle)) {
-        [SCIDogfoodObjectRuntime noteAction:@"Internal Settings route"
-                                      status:@"normalized native style"
-                                      detail:@{ @"from": @(oldStyle), @"to": @(newStyle) }];
+    if (BMMenuOn() && userSession) newStyle = 0;
+    else if (BMLoggedOutOn() && !userSession) newStyle = 2;
+    else if (oldStyle != 0 && oldStyle != 2) newStyle = 0;
+    if (newStyle != oldStyle && BMWriteInteger(controller, "style", 32, newStyle)) {
+        BMACTLOG("normalized style %ld -> %ld", (long)oldStyle, (long)newStyle);
     }
 }
 
@@ -242,60 +199,23 @@ static NSString *BMTextInView(UIView *view) {
 }
 
 static NSString *BMCellTitle(UITableViewCell *cell) {
-    if (!cell) return nil;
     NSString *title = cell.textLabel.text;
-    if (!title.length) {
-        id configuration = cell.contentConfiguration;
-        SEL textSelector = NSSelectorFromString(@"text");
-        if ([configuration respondsToSelector:textSelector]) {
-            @try {
-                id value = ((id (*)(id, SEL))objc_msgSend)(configuration, textSelector);
-                if ([value isKindOfClass:NSString.class]) title = value;
-            } @catch (__unused id exception) {}
-        }
-    }
     if (!title.length) title = BMTextInView(cell.contentView);
     if (!title.length) title = cell.accessibilityLabel;
     return [title stringByTrimmingCharactersInSet:
         NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
-static BMTargetKind BMTargetFromTitle(NSString *title) {
-    if (!title.length) return BMTargetKindNone;
-    if ([title caseInsensitiveCompare:@"Dogfooding Assistant"] == NSOrderedSame) {
-        return BMTargetKindDogfoodingAssistant;
-    }
-    if ([title caseInsensitiveCompare:@"Internal Settings"] == NSOrderedSame) {
-        return BMTargetKindInternalSettings;
-    }
-    return BMTargetKindNone;
+static BOOL BMIsTargetCell(UITableViewCell *cell, NSIndexPath *indexPath) {
+    if (indexPath.section == 6 || indexPath.section == 7) return YES;
+    NSString *title = BMCellTitle(cell);
+    return [title isEqualToString:@"Internal Settings"] ||
+        [title isEqualToString:@"Dogfooding Assistant"];
 }
 
-static BMTargetKind BMTagCell(UITableViewCell *cell) {
-    if (!cell) return BMTargetKindNone;
-    BMTargetKind target = BMTargetFromTitle(BMCellTitle(cell));
-    objc_setAssociatedObject(cell, kBMTargetKindKey, @(target),
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return target;
-}
-
-static BMTargetKind BMTargetForCell(UITableViewCell *cell) {
-    NSNumber *tag = objc_getAssociatedObject(cell, kBMTargetKindKey);
-    BMTargetKind target = tag ? (BMTargetKind)tag.integerValue : BMTargetKindNone;
-    return target != BMTargetKindNone ? target : BMTagCell(cell);
-}
-
-static BOOL BMTargetEnabled(BMTargetKind target) {
-    switch (target) {
-        case BMTargetKindDogfoodingAssistant: return BMMasterOn();
-        case BMTargetKindInternalSettings:
-            return BMMenuOn() || BMAvailabilityOn() || BMLoggedOutOn();
-        default: return NO;
-    }
-}
-
-static void BMEnableCell(UITableViewCell *cell, BMTargetKind target) {
-    if (!cell || !BMTargetEnabled(target)) return;
+static void BMEnsureActionCellInteractive(UITableViewCell *cell,
+                                          NSIndexPath *indexPath) {
+    if (!cell || !BMIsTargetCell(cell, indexPath)) return;
     cell.userInteractionEnabled = YES;
     cell.contentView.userInteractionEnabled = YES;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -305,29 +225,23 @@ static void BMEnableCell(UITableViewCell *cell, BMTargetKind target) {
 static id (*origCellForRow)(id, SEL, UITableView *, NSIndexPath *);
 static id newCellForRow(id self, SEL _cmd, UITableView *tableView,
                         NSIndexPath *indexPath) {
-    SCIApplyBugMenuOEMActivationState(self);
+    BMApplyNativeState(self);
     UITableViewCell *cell = origCellForRow
         ? origCellForRow(self, _cmd, tableView, indexPath)
         : nil;
-    BMTargetKind target = BMTagCell(cell);
-    BMEnableCell(cell, target);
+    BMEnsureActionCellInteractive(cell, indexPath);
     return cell;
 }
 
 static BOOL (*origShouldHighlight)(id, SEL, UITableView *, NSIndexPath *);
 static BOOL newShouldHighlight(id self, SEL _cmd, UITableView *tableView,
                                NSIndexPath *indexPath) {
-    SCIApplyBugMenuOEMActivationState(self);
+    BMApplyNativeState(self);
     BOOL nativeValue = origShouldHighlight
         ? origShouldHighlight(self, _cmd, tableView, indexPath)
         : NO;
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    BMTargetKind target = BMTargetForCell(cell);
-    if (BMTargetEnabled(target)) {
-        BMEnableCell(cell, target);
-        return YES;
-    }
-    return nativeValue;
+    return BMIsTargetCell(cell, indexPath) ? YES : nativeValue;
 }
 
 static void BMHook(Class cls, SEL selector, const char *encoding,
@@ -342,13 +256,18 @@ static void BMHook(Class cls, SEL selector, const char *encoding,
     MSHookMessageEx(cls, selector, replacement, original);
 }
 
-void SCIInstallBugMenuOEMActivationHooks(void) {
+void SCIBugMenuOEMActivationInstall(void) {
     @synchronized (SCIDogfoodObjectRuntime.class) {
+        if (sBMInstalled) return;
         Class cls = BMMenuClass();
+        if (!cls) return;
         BMHook(cls, @selector(tableView:cellForRowAtIndexPath:),
             "@32@0:8@16@24", (IMP)newCellForRow, (IMP *)&origCellForRow);
         BMHook(cls, @selector(tableView:shouldHighlightRowAtIndexPath:),
             "B32@0:8@16@24", (IMP)newShouldHighlight,
             (IMP *)&origShouldHighlight);
+        sBMInstalled = origCellForRow != NULL;
+        BMACTLOG("one-shot installed cell=%d highlight=%d",
+            origCellForRow != NULL, origShouldHighlight != NULL);
     }
 }
