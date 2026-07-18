@@ -21,18 +21,22 @@ A regressão estava no bootstrap da tweak, não no fetch de MobileConfig:
 
 1. O constructor apenas lê as preferências e registra um observer one-shot quando a família está habilitada.
 2. O callback de `UIApplicationDidBecomeActiveNotification` apenas agenda o trabalho.
-3. Após 350 ms, uma fila serial `QOS_CLASS_UTILITY` executa uma passagem limitada de classes e seletores exatos.
-4. Após quatro segundos, e somente com Employee / Internal ligado, a mesma fila executa as duas varreduras amplas:
+3. Após 500 ms, uma fila serial `QOS_CLASS_UTILITY` executa uma passagem limitada de classes e seletores exatos.
+4. Após cinco segundos, e somente com Employee / Internal ainda ligado, a mesma fila executa as duas varreduras amplas:
    - readers tipados de descritores MobileConfig;
    - aliases runtime employee/test/dogfood.
 5. Não há callback por imagem nos módulos desta correção.
 6. `SCIDogfoodDeferredBootstrap.m`, o segundo observer concorrente, foi removido.
-7. O módulo antigo `SCIEmployeeInternal.x` continua sendo o único dono de initializers, lifecycle e `tableView:didSelectRowAtIndexPath:`; seu instalador é idempotente.
+7. `SCIValidatedOEMResolvers.m` não possui mais constructor próprio; seus quatro hooks exatos são instalados pelo bootstrap central depois da ativação.
+8. `SCIEmployeeIdentityConsumerHooks.m` não usa mais um flag global que impedia a passagem pós-ativação: cada IMP original é o guard idempotente, permitindo uma repetição exata limitada para classes Swift tardias.
 
-Os logs agora medem separadamente:
+O módulo legado `SCIEmployeeInternal.x` continua sendo o único dono dos initializers, lifecycle e `tableView:didSelectRowAtIndexPath:` do Bug Reporter. Seu pequeno `%ctor` restante faz apenas lookups exatos e idempotentes; não enumera classes, não enumera imagens e não registra callback dyld. Ele foi mantido para preservar os getters de identidade que podem ser consultados antes da primeira ativação.
+
+Os logs medem separadamente:
 
 - tempo da passagem exata pós-ativação;
-- tempo das varreduras utilitárias adiadas.
+- tempo das varreduras utilitárias adiadas;
+- quantidade dos nove consumers exatos de identidade realmente instalados.
 
 ## Ownership dos hooks
 
