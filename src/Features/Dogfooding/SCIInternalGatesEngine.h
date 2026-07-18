@@ -20,6 +20,7 @@ void SCIInternalGatesInstall(void);
 + (NSInteger)gateCount;
 // Per gate: @{ @"name": NSString, @"resolved": @(BOOL), @"forced": @(NSInteger) }
 + (NSArray<NSDictionary *> *)gateStatuses;
++ (NSInteger)evaluatorCallsSeen;
 + (NSInteger)totalForcedHits;
 @end
 

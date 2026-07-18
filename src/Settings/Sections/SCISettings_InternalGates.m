@@ -35,11 +35,12 @@ static UIViewController *SCIGatesTopVC(void) {
 
 + (void)sci_showGateStatus {
 	NSMutableString *s = [NSMutableString string];
-	[s appendFormat:@"EasyGating evaluators hooked: %ld/3\nInternal-apps: %@\nForce EG: %@ · Force apps: %@\nTotal forces: %ld\n\n",
+	[s appendFormat:@"EasyGating evaluators hooked: %ld/3\nInternal-apps: %@\nForce EG: %@ · Force apps: %@\nEvaluator calls: %ld\nTotal forces: %ld\n\n",
 		(long)[SCIInternalGatesEngine easyGatingEvaluatorsHooked],
 		[SCIInternalGatesEngine internalAppsHooked] ? @"hooked" : @"off",
 		[SCIInternalGatesEngine easyGatingForceActive] ? @"on" : @"off",
 		[SCIInternalGatesEngine internalAppsForceActive] ? @"on" : @"off",
+		(long)[SCIInternalGatesEngine evaluatorCallsSeen],
 		(long)[SCIInternalGatesEngine totalForcedHits]];
 	for (NSDictionary *g in [SCIInternalGatesEngine gateStatuses]) {
 		[s appendFormat:@"%@ %@ · %ld×\n",
@@ -93,8 +94,9 @@ static UIViewController *SCIGatesTopVC(void) {
 		subtitle:@"" icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
 		action:^{ [self sci_showGateStatus]; }]];
 
-	NSString *summary = [NSString stringWithFormat:SCILocalized(@"Hooked %ld/3 evaluators · internal-apps %@ · %ld forces this session"),
+	NSString *summary = [NSString stringWithFormat:SCILocalized(@"Hooked %ld/3 · %ld calls · internal-apps %@ · %ld forces"),
 		(long)[SCIInternalGatesEngine easyGatingEvaluatorsHooked],
+		(long)[SCIInternalGatesEngine evaluatorCallsSeen],
 		[SCIInternalGatesEngine internalAppsHooked] ? SCILocalized(@"on") : SCILocalized(@"off"),
 		(long)[SCIInternalGatesEngine totalForcedHits]];
 
