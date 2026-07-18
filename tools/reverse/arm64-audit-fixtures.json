@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "arch": "arm64",
+  "inputs": {
+    "Instagram": {
+      "sha256": "a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa",
+      "regions": {
+        "startup_mc_call": {"va":"0x102c55ff0","size":256,"sha256":"07e5a79df4f4b021e2c188e070ddbc41cb180d2bf7d482575522fe3a4ce8d332","base64":"78Tpl5S755cc9MeVEu7HlfMDAKqptAWQKeEYkUgqALAIITCR6mMBkSnF55fo4wGR6iMEqfsXAPlMJumXyWrnl/obAPm0a+eX9x8A+d7E6ZfgxOmX4yMAkeUl6ZcQ9MeVL1Hnl5Jl55eB8QTwIUAskaCzAdEiAIBSYwIAlNfE6ZfXb+eX2W7nl+BjAZEkceeX1MTpl9bE6ZcKAAAUgvEE8EKAK5F3JeiXr8Tpl4HxBPAhQCyRoLMB0QIAgNJSAgCUqGrnl5Rr55c3EgC0PuDnl/QDAKoK7seV3+3HlfMDAKqVngXwtRJE+aICQPk8EsmVC1Hnl25l55cz4OeX9AMAqg=="},
+        "action_button_delegate": {"va":"0x1084c3a94","size":256,"sha256":"69e7c5e71cdb74d89dea52376b2ae3f325c1b407cf11e5b4af412e1387ac3bc2","base64":"/wMC0fZXBan0Twap/XsHqf3DAZH0AwKq8wMAquADAqqXN2aU4AMTqpU3ZpRIeQOwCLFH+YBqaPjInAPQASlG+QIAgFJYN2aUSHkD0AgFQPloamj4HwkA8SENAFRIeQPQCA1A+WBqaPiIngOQARVC+U03ZpRIeQPQCAFA+XVqaPj1AQC04pIA0ELQOZHgAxWqrfRnlEc3ZpSUN2aU/QMdqk03ZpTAAAC09gMAqkEAgFL0rWWU4AMWqko3ZpRIeQOwFuFH+WACFovh4wCRAgCA0gMAgNKBPmaUYAIWi3w+ZpQAAQC0KJ0D0AExQvn2AwCq4gMTqiw3ZpTgAxaqpD5mlA=="},
+        "link_button_delegate": {"va":"0x10851549c","size":256,"sha256":"6ac88ebc398e514084b8f6fdd77f147925eb25a62b69f5fef16ecafb9f20dd4f","base64":"/0MB0fZXAqn0TwOp/XsEqf0DAZH0AwKq8wMAquADAqoV8WSU4AMTqhPxZJQoggOwCFVD+YBqaPhImgOQASlG+QIAgFLW8GSUyHYDkAgFQPloamj4HwkA8SEFAFSodgPwFeFH+WACFYvhIwCRAgCA0gMAgNIX+GSUYAIVixL4ZJQAAQC06JsD0AEBQvn1AwCq4gMTqsLwZJTgAxWqOvhklMh2A5AIDUD5YGpo+OibA9ABBUL5uvBklMh2A5AIAUD5YGpo+MABALRikACQQtA5kRuuZpS18GSUAvFklP0DHaq78GSUwAAAtPUDAKphAIBSYmdklOADFaq48GSU4AMUqg=="},
+        "action_cell_setEnabled": {"va":"0x10970f808","size":128,"sha256":"d3886d14cc385b2c5c8b44815e4d6207c949c882e8eed1f889bdc2f32c78c559","base64":"9le9qfRPAan9ewKp/YMAkfMDAqr0AwCq6OYCsAixR/kVaGj4aAoD0BYpRvk3CB2U4AMVquEDFqriAxOq/QcdlOADFKr9e0Kp9E9BqfZXw6gHCB0U9le9qfRPAan9ewKp/YMAkfMDAqr0AwCqSPIC8AhVQ/kVaGj4aAoD0BYpRvk="},
+        "link_cell_setEnabled": {"va":"0x10970f85c","size":128,"sha256":"f6b08d5d084f23988877c6da8db9e3578ba5a25e98f95815a33f2a1c88f6811e","base64":"9le9qfRPAan9ewKp/YMAkfMDAqr0AwCqSPIC8AhVQ/kVaGj4aAoD0BYpRvkiCB2U4AMVquEDFqriAxOq6AcdlOADFKr9e0Kp9E9BqfZXw6jyBx0U9le9qfRPAan9ewKp/YMAkfMDAqr0AwCqaOcCkAi9QfkVaGj4aAoD0BYpRvk="},
+        "loggedout_action_builder": {"va":"0x104aaf728","size":128,"sha256":"554a5348077b79231204c0ded9324b60a6ef090b58a8f8d87d22e6e215a6c268","base64":"AKAIkcQObpfXwHCXuOOelOcDAKqoGgTwCIE8kQiBANGjawCwYxAWkWAXAJEBAUGyYgCAUm5Jbpf0Aweq0G7rlvcDAKrI4n2STQ1vl0MBAFQ/BQDxw0kF0GNgGJHkRwXQhIA+keCXnxqzD26XaKaplFBKb5cXDG+XneOelPQDAKo="},
+        "loggedout_force_fetch_closure": {"va":"0x105824584","size":256,"sha256":"9ab599e89f69142ceae8e4f9f3a8964857c2eee49efc238b77c69859265f4529","base64":"4AMeqhAYOJf+AwCq/XsFqf1DAZH/AwHRCS84l4NFOJdlRDmXU4k4lyAIALT5AwCqClA9lxpoaPiaBwC0ZDE4l36QOJf9Ax2qp7QYlfMDAKqAAAC1rbQYlVsvOZcDkziXYS04lx8FGZXIFziX/y44l0+lOJdRpTiXWzk4l9A/OJdXMjiXUbwYlX5FOZcgLziX+AMAqnPJLpRqLziX9gMAqnJoOZd0aDmXHwQAcYAAAFR7RTiXYTk4lwIAABQXgINS0wAAtMV+OJdIpTiXHlM5l31FOZcCAAAUAmg4l0BoBPAAoBiRmC84l+QDAKrLZnSUeUU5l2gAALR6RTmXAgAAFA=="}
+      }
+    },
+    "FBSharedFramework": {
+      "sha256": "22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc",
+      "regions": {
+        "try_update_wrapper": {"va":"0x72da74","size":128,"sha256":"de71deaab3b5ef9a73175093b867c18bf30300b69e741079c15ed716cfc8f003","base64":"BACAUhsJABTmAx6qHF7jl/4DBqr9ewSp/QMBkfYDBar3AwSq+gMDqvgDAqr5AwGqz3jjl5Jw45esY+OXoWPjl6AyQLlch+OXQAAAtdz9S5Q4Y+OXUofjl6gyQLkIAAC5Yofjl+IDGqrjAxeq5AMWqiABP9b1AwCqdAIAuQld45c="},
+        "try_update_private": {"va":"0x72fee4","size":256,"sha256":"a16a4c4fbe0f28eb592139d950112cc8c79bf71e4ffc65e53110d64fdd239808","base64":"5QMeqjRa45f+AwWq/XsHqf3DAZHzAwSqP1Tjlwtp45eMWuOXjVrjlxtY45fgJO2XgAEAtD3T5JcIMEC56DMAueADAJFjAgASqIXjl+QDFarlAxSq0fb/l/MDAKoCAAAUEwCAUu5T45ffU+OX8VPjl7VZ45fgAxOq/XtHqSpa4xfjAx6qC3zjl/4DA6r9exKp/YMEkeIHAPn6AwGqicLjlyqoQDkoNEC5HwEAcenXnxrqJwApHwUAccsAAFQAR0D5Zl7jlwABP9b7AwCqAgAAFBsAgFIIp0D5CDEAtEivQDnIMAA2/38DqeijAZHgAxiq5GftlwmjQanpowSpiAAAtA=="}
+      }
+    }
+  }
+}
