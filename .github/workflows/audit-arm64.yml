@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/audit-arm64.yml'
       - 'tools/reverse/**'
+  pull_request:
+    branches: [experimental3]
+    paths:
+      - '.github/workflows/audit-arm64.yml'
+      - 'tools/reverse/**'
   workflow_dispatch:
 
 permissions:
