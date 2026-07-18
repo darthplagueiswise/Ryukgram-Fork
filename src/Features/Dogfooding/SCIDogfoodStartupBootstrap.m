@@ -11,6 +11,7 @@ FOUNDATION_EXPORT void SCIInstallEmployeeInternalHooksIfNeeded(void);
 FOUNDATION_EXPORT void SCIBugMenuOEMActivationInstall(void);
 FOUNDATION_EXPORT void SCIInstallBugMenuActionCellHooks(void);
 FOUNDATION_EXPORT void SCIInstallLoggedOutMobileConfigActionHook(void);
+FOUNDATION_EXPORT void SCIInstallValidatedOEMResolvers(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeIdentityConsumerHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeePandoIdentityHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeMobileConfigDescriptorHooks(void);
@@ -60,6 +61,7 @@ static void SCIInstallPostActivationExactHooks(void) {
             SCIBugMenuOEMActivationInstall();
             SCIInstallBugMenuActionCellHooks();
             SCIInstallLoggedOutMobileConfigActionHook();
+            SCIInstallValidatedOEMResolvers();
         }
 
         if (masterEnabled) {
@@ -77,7 +79,7 @@ static void SCIInstallPostActivationExactHooks(void) {
         // utility queue, so neither can contend with the launch main thread.
         if (masterEnabled) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                         (int64_t)(4.0 * NSEC_PER_SEC)),
+                                         (int64_t)(5.0 * NSEC_PER_SEC)),
                            SCIDogfoodBootstrapWorker(), ^{
                 if (!SCIDogfoodMasterEnabled()) {
                     BOOTLOG("deferred utility scans cancelled: master disabled");
@@ -97,7 +99,7 @@ static void SCIDogfoodApplicationBecameActive(void) {
     // The notification callback itself only schedules work. Exact runtime probes
     // and hook installation run on the serial utility queue after first frame.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                 (int64_t)(0.35 * NSEC_PER_SEC)),
+                                 (int64_t)(0.50 * NSEC_PER_SEC)),
                    SCIDogfoodBootstrapWorker(), ^{
         SCIInstallPostActivationExactHooks();
     });
@@ -125,7 +127,7 @@ static void SCIDogfoodStartupBootstrapCtor(void) {
             SCIDogfoodApplicationBecameActive();
         }];
 
-        BOOTLOG("constructor armed only; master=%d menu=%d",
+        BOOTLOG("single staged bootstrap armed; master=%d menu=%d",
                 masterEnabled, menuEnabled);
     }
 }
