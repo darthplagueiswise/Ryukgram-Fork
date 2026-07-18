@@ -17,7 +17,7 @@ A regressão estava no bootstrap da tweak, não no fetch de MobileConfig:
 
 ## Arquitetura corrigida
 
-`SCIDogfoodStartupBootstrap.m` é o bootstrap central dos módulos novos:
+`SCIDogfoodStartupBootstrap.m` é agora o único bootstrap desta família:
 
 1. O constructor apenas lê as preferências e registra um observer one-shot quando a família está habilitada.
 2. O callback de `UIApplicationDidBecomeActiveNotification` apenas agenda o trabalho.
@@ -27,29 +27,28 @@ A regressão estava no bootstrap da tweak, não no fetch de MobileConfig:
    - aliases runtime employee/test/dogfood.
 5. Não há callback por imagem nos módulos desta correção.
 6. `SCIDogfoodDeferredBootstrap.m`, o segundo observer concorrente, foi removido.
-7. `SCIValidatedOEMResolvers.m` não possui mais constructor próprio; seus quatro hooks exatos são instalados pelo bootstrap central depois da ativação.
-8. `SCIEmployeeIdentityConsumerHooks.m` não usa mais um flag global que impedia a passagem pós-ativação: cada IMP original é o guard idempotente, permitindo uma repetição exata limitada para classes Swift tardias.
-
-O módulo legado `SCIEmployeeInternal.x` continua sendo o único dono dos initializers, lifecycle e `tableView:didSelectRowAtIndexPath:` do Bug Reporter. Seu pequeno `%ctor` restante faz apenas lookups exatos e idempotentes; não enumera classes, não enumera imagens e não registra callback dyld. Ele foi mantido para preservar os getters de identidade que podem ser consultados antes da primeira ativação.
+7. `SCISessionlessMobileConfigEarlyCapture.m`, que duplicava factories e insistia na cadeia FBT vazia, foi removido.
+8. `SCIValidatedOEMResolvers.m` não possui constructor próprio; seus quatro hooks exatos são instalados pelo bootstrap central depois da ativação.
+9. `SCIEmployeeIdentityConsumerHooks.m` usa cada IMP original como guard idempotente, permitindo uma repetição exata limitada para classes Swift tardias sem callback dyld.
+10. O `%ctor` legado de `SCIEmployeeInternal.x` foi removido. O módulo conserva a propriedade exclusiva dos initializers, lifecycle e `tableView:didSelectRowAtIndexPath:`, mas só é instalado pelo bootstrap central.
 
 Os logs medem separadamente:
 
 - tempo da passagem exata pós-ativação;
 - tempo das varreduras utilitárias adiadas;
-- quantidade dos nove consumers exatos de identidade realmente instalados.
+- quantidade dos consumers exatos de identidade realmente instalados.
 
 ## Ownership dos hooks
 
 Cada rota crítica tem um dono:
 
+- bootstrap e agendamento: `SCIDogfoodStartupBootstrap.m`;
 - initializers, lifecycle e `tableView:didSelectRowAtIndexPath:` do Bug Reporter: `SCIEmployeeInternal.x`;
 - `cellForRow` e `shouldHighlight`: `SCIBugMenuOEMActivation.m`;
 - `IGBugReportActionCell` / `IGBugReportLinkActionCell`, botão interno e callbacks `bugReporting*CellButtonTapped:`: `SCIBugMenuActionCells.m`;
 - captura de Dogfooder/settings/user-session: `SCIDogfoodObjectRuntimeHooks.x`;
 - closure exata de `Force MobileConfig re-fetch`: `SCILoggedOutMobileConfigActionHook.m`;
 - bridge sessionless: `SCIValidatedOEMResolvers.m`, usando `IGDeviceSession.mobileConfig`, `IGDeviceSession.loggedOutNetworker` e o wrapper público `IGMobileConfigTryUpdateConfigsWithCompletion`.
-
-A camada antiga `SCISessionlessMobileConfigEarlyCapture.m` foi removida porque mantinha referências fortes, substituía factories e insistia numa cadeia FBT cujo holder apareceu `nil` no runtime do aparelho.
 
 ## Hot paths removidos
 
@@ -69,14 +68,20 @@ A camada antiga `SCISessionlessMobileConfigEarlyCapture.m` foi removida porque m
 - executa o scan uma vez na fila utilitária;
 - mudanças de defaults sincronizam apenas os descritores, sem repetir a lista completa de classes.
 
-## Revalidação local dos binários
+## Correção adicional encontrada na auditoria do menu
+
+A desmontagem mostra que os valores `6` e `7` no jump table Swift são discriminadores internos de action, e não `NSIndexPath.section`.
+
+O código anterior tratava qualquer célula nas seções 6 ou 7 como Internal Settings/Dogfooding Assistant. Isso podia alterar highlight e interação de linhas não relacionadas. `SCIBugMenuOEMActivation.m` agora identifica somente os títulos nativos exatos, usando também `contentConfiguration.text` quando o `textLabel` está vazio.
+
+## Revalidação dos binários
 
 Binários usados:
 
 - `Instagram`: `a562b3626c663eec47b41ed1bca7a7af6aa00cc30bada3293046f7cce1a555aa`
 - `FBSharedFramework`: `22aea16b8485a1f62cde3ae4136b90d0c89504dc0faca366c2c9bf7c9e5420dc`
 
-A decodificação independente feita novamente com LIEF `1.0.0-d05b3499b` e Python Capstone `5.0.7` confirmou:
+O relatório `docs/instagram-fbshared-r2-capstone-lief-analysis-2026-07-17.md` contém a passagem de radare2 `6.1.8`, backend Capstone 5, sobre exatamente esses hashes. A reprodução independente com LIEF `1.0.0-d05b3499b` e Python Capstone `5.0.7` confirmou os mesmos blocos:
 
 - `IGBugReportActionCell -setEnabled:` em `0x10970f808` preserva o BOOL recebido em `x2` e o encaminha ao botão interno;
 - `IGBugReportLinkActionCell -setEnabled:` em `0x10970f85c` faz o mesmo;
@@ -85,11 +90,12 @@ A decodificação independente feita novamente com LIEF `1.0.0-d05b3499b` e Pyth
 - `_IGMobileConfigTryUpdateConfigsWithCompletion` em `FBSharedFramework+0x72da74` executa `mov w4, #0` e salta para `0x72fee4`, confirmando o wrapper público de quatro argumentos que fornece o quinto internamente;
 - o call site `Instagram+0x2c5604c` chama o stub importado depois de preparar o completion em `x3`.
 
-O executável `r2` não pôde ser reinstalado neste container isolado porque ele não possui saída de rede; por isso nenhuma nova saída de r2 foi atribuída a esta reprodução. O relatório histórico de r2 permanece separado e não é usado como substituto para os bytes confirmados acima.
+As slices ARM64 usadas na reprodução foram gravadas em `tools/reverse/arm64-audit-fixtures.json`, vinculadas aos hashes completos dos dois Mach-O. Isso permite repetir a decodificação dos blocos críticos sem depender de offsets ou arquivos de outra versão.
 
 ## Arquivos da correção de performance
 
 - `src/Features/Dogfooding/SCIDogfoodStartupBootstrap.m`
+- `src/Features/Dogfooding/SCIEmployeeInternal.x`
 - `src/Features/Dogfooding/SCIBugMenuActionCells.m`
 - `src/Features/Dogfooding/SCIBugMenuOEMActivation.m`
 - `src/Features/Dogfooding/SCIDogfoodObjectRuntimeHooks.x`
