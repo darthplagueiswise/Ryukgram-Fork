@@ -7,17 +7,17 @@
 
 #define BOOTLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] DogfoodBootstrap " fmt, ##__VA_ARGS__)
 
-FOUNDATION_EXPORT void SCIInstallSessionlessMobileConfigEarlyCaptureHooks(void);
+FOUNDATION_EXPORT void SCIInstallEmployeeInternalHooksIfNeeded(void);
 FOUNDATION_EXPORT void SCIBugMenuOEMActivationInstall(void);
 FOUNDATION_EXPORT void SCIInstallBugMenuActionCellHooks(void);
 FOUNDATION_EXPORT void SCIInstallLoggedOutMobileConfigActionHook(void);
-FOUNDATION_EXPORT void SCIInstallEmployeeIdentityConsumerHooks(void);
+FOUNDATION_EXPORT void SCIEmployeeIdentityConsumerHooksInstall(void);
 FOUNDATION_EXPORT void SCIInstallEmployeePandoIdentityHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeMobileConfigDescriptorHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeTestDogfoodRuntimeHooks(void);
 FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
 
-static id sSCIDogfoodLaunchObserver;
+static id sSCIDogfoodActivationObserver;
 
 static BOOL SCIDogfoodMasterEnabled(void) {
     return [SCIInternalGatePrefs employeeInternalMasterEnabled];
@@ -27,12 +27,6 @@ static BOOL SCIInternalMenuFeatureEnabled(void) {
     return SCIDogfoodMasterEnabled() ||
         [SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
         [SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
-        [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"];
-}
-
-static BOOL SCISessionlessCaptureEnabled(void) {
-    return SCIDogfoodMasterEnabled() ||
-        [SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
         [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"];
 }
 
@@ -48,62 +42,58 @@ static dispatch_queue_t SCIDogfoodBootstrapWorker(void) {
     return queue;
 }
 
-static void SCIInstallPreMainDogfoodHooks(void) {
-    // Pre-main is deliberately restricted to exact hooks that must observe
-    // objects constructed during launch. Nothing runs when the associated
-    // feature family is disabled, and no class/image enumeration occurs here.
-    if (SCISessionlessCaptureEnabled()) {
-        SCIInstallSessionlessMobileConfigEarlyCaptureHooks();
-    }
-    if (SCIDogfoodMasterEnabled()) {
-        SCIInstallEmployeeIdentityConsumerHooks();
-    }
-}
-
-static void SCIInstallPostLaunchExactHooks(void) {
-    BOOL masterEnabled = SCIDogfoodMasterEnabled();
-    BOOL menuEnabled = SCIInternalMenuFeatureEnabled();
-
-    // Retry the two exact pre-main installers once because some Swift classes
-    // are registered only after the initial image set has finished loading.
-    if (SCISessionlessCaptureEnabled()) {
-        SCIInstallSessionlessMobileConfigEarlyCaptureHooks();
-    }
-    if (masterEnabled) {
-        SCIInstallEmployeeIdentityConsumerHooks();
-    }
-
-    if (menuEnabled) {
-        SCIBugMenuOEMActivationInstall();
-        SCIInstallBugMenuActionCellHooks();
-        SCIInstallLoggedOutMobileConfigActionHook();
-    }
-
-    if (masterEnabled) {
-        SCIInstallEmployeePandoIdentityHooks();
-        SCIInstallDogfoodObjectHooksIfNeeded();
-    }
-}
-
-static void SCIDogfoodPostLaunchBootstrap(void) {
+static void SCIInstallPostActivationExactHooks(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
         BOOL masterEnabled = SCIDogfoodMasterEnabled();
-        SCIInstallPostLaunchExactHooks();
+        BOOL menuEnabled = SCIInternalMenuFeatureEnabled();
 
-        // The only broad class scans are employee/test-user utilities. Do not
-        // even schedule their queue when the master is disabled.
+        // The legacy employee/internal installer owns the initializers,
+        // lifecycle state and the single table didSelect hook.
+        SCIInstallEmployeeInternalHooksIfNeeded();
+
+        if (menuEnabled) {
+            // Cell presentation/highlight and exact IGBugReportActionCell button
+            // routes only. No duplicate lifecycle or didSelect chain.
+            SCIBugMenuOEMActivationInstall();
+            SCIInstallBugMenuActionCellHooks();
+            SCIInstallLoggedOutMobileConfigActionHook();
+        }
+
+        if (masterEnabled) {
+            SCIEmployeeIdentityConsumerHooksInstall();
+            SCIInstallEmployeePandoIdentityHooks();
+            SCIInstallDogfoodObjectHooksIfNeeded();
+        }
+
+        CFAbsoluteTime elapsed = CFAbsoluteTimeGetCurrent() - start;
+        BOOTLOG("post-activation exact install %.3f ms master=%d menu=%d",
+                elapsed * 1000.0, masterEnabled, menuEnabled);
+
+        // The only full objc_getClassList passes run well after first frame and
+        // only while Employee / Internal was already enabled at launch.
         if (masterEnabled) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                         (int64_t)(2.0 * NSEC_PER_SEC)),
+                                         (int64_t)(4.0 * NSEC_PER_SEC)),
                            SCIDogfoodBootstrapWorker(), ^{
+                CFAbsoluteTime scanStart = CFAbsoluteTimeGetCurrent();
                 SCIInstallEmployeeMobileConfigDescriptorHooks();
                 SCIInstallEmployeeTestDogfoodRuntimeHooks();
-                BOOTLOG("deferred employee utility hooks installed");
+                BOOTLOG("deferred utility scans %.3f ms",
+                        (CFAbsoluteTimeGetCurrent() - scanStart) * 1000.0);
             });
         }
-        BOOTLOG("post-launch exact hooks installed; master=%d menu=%d",
-                masterEnabled, SCIInternalMenuFeatureEnabled());
+    });
+}
+
+static void SCIDogfoodApplicationBecameActive(void) {
+    // Do not perform runtime probing in the notification callback itself. Give
+    // the first active frame a short head start, then run one exact pass.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        SCIInstallPostActivationExactHooks();
     });
 }
 
@@ -112,31 +102,24 @@ static void SCIDogfoodStartupBootstrapCtor(void) {
     @autoreleasepool {
         BOOL masterEnabled = SCIDogfoodMasterEnabled();
         BOOL menuEnabled = SCIInternalMenuFeatureEnabled();
-        BOOL sessionlessEnabled = SCISessionlessCaptureEnabled();
 
-        // Zero bootstrap work for this feature family when every relevant
-        // preference is off. A restart is already required after enabling the
-        // internal feature group, so no always-on observer is necessary.
-        if (!masterEnabled && !menuEnabled && !sessionlessEnabled) {
-            return;
-        }
+        // Zero work and no observer when the feature family is entirely off.
+        if (!masterEnabled && !menuEnabled) return;
 
-        SCIInstallPreMainDogfoodHooks();
-
-        sSCIDogfoodLaunchObserver = [NSNotificationCenter.defaultCenter
-            addObserverForName:UIApplicationDidFinishLaunchingNotification
+        sSCIDogfoodActivationObserver = [NSNotificationCenter.defaultCenter
+            addObserverForName:UIApplicationDidBecomeActiveNotification
                         object:nil
                          queue:NSOperationQueue.mainQueue
                     usingBlock:^(__unused NSNotification *notification) {
-            id observer = sSCIDogfoodLaunchObserver;
-            sSCIDogfoodLaunchObserver = nil;
+            id observer = sSCIDogfoodActivationObserver;
+            sSCIDogfoodActivationObserver = nil;
             if (observer) {
                 [NSNotificationCenter.defaultCenter removeObserver:observer];
             }
-            SCIDogfoodPostLaunchBootstrap();
+            SCIDogfoodApplicationBecameActive();
         }];
 
-        BOOTLOG("constructor armed; master=%d menu=%d sessionless=%d",
-                masterEnabled, menuEnabled, sessionlessEnabled);
+        BOOTLOG("constructor armed only; master=%d menu=%d",
+                masterEnabled, menuEnabled);
     }
 }
