@@ -5,12 +5,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT void SCIInstallDogfoodObjectHooksIfNeeded(void);
 
-// Exact live objects captured from Instagram's native sessionless MobileConfig
-// dependency graph. These never synthesize a manager or reinterpret shared_ptr
-// storage as Objective-C.
-FOUNDATION_EXPORT id _Nullable SCIValidatedSessionlessMobileConfigContext(void);
-FOUNDATION_EXPORT NSString *SCIValidatedSessionlessMobileConfigCaptureState(void);
-
 @interface SCIDogfoodObjectRuntime : NSObject
 
 + (void)installIfNeeded;
@@ -49,10 +43,10 @@ FOUNDATION_EXPORT NSString *SCIValidatedSessionlessMobileConfigCaptureState(void
 + (BOOL)tryOpenNotesDogfooding;
 + (BOOL)tryOpenMetaLocalExperimentBrowser;
 
-// OEM sessionless MobileConfig path:
-// FBMobileConfigContextManager(UpdateConfigsExtension) -> tryUpdateConfigs.
-// customRefreshHandler remains an internally-owned dependency of that method.
-// The private multi-argument C update functions are deliberately not invoked.
+// OEM sessionless MobileConfig path audited in this Instagram build:
+// IGDeviceSession.mobileConfig + IGDeviceSession.loggedOutNetworker are passed
+// to IGMobileConfigTryUpdateConfigsWithCompletion. No synthetic manager, FBT
+// holder substitution or private five-argument function is used.
 + (NSString *)sessionlessMobileConfigState;
 + (NSString *)tryFetchSessionlessMobileConfig;
 
