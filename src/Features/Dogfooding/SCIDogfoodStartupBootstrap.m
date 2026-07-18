@@ -32,6 +32,7 @@ static BOOL SCIInternalMenuFeatureEnabled(void) {
 
 static BOOL SCISessionlessCaptureEnabled(void) {
     return SCIDogfoodMasterEnabled() ||
+        [SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
         [SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"];
 }
 
