@@ -24,16 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install radare2 6.1.4 and Capstone 5
+      - name: Install radare2 6.1.8 and Capstone 5
         shell: bash
         run: |
           set -euxo pipefail
-          release=https://github.com/radareorg/radare2/releases/download/6.1.4
+          release=https://github.com/radareorg/radare2/releases/download/6.1.8
           curl -fL --retry 4 --retry-delay 2 -o /tmp/radare2.deb \
-            "$release/radare2_6.1.4_amd64.deb"
+            "$release/radare2_6.1.8_amd64.deb"
           curl -fL --retry 4 --retry-delay 2 -o /tmp/checksums.txt \
             "$release/checksums.txt"
-          expected="$(awk '$2 == "radare2_6.1.4_amd64.deb" { print $1; exit }' /tmp/checksums.txt)"
+          expected="$(awk '$2 == "radare2_6.1.8_amd64.deb" { print $1; exit }' /tmp/checksums.txt)"
           test -n "$expected"
           echo "$expected  /tmp/radare2.deb" | sha256sum -c -
           sudo apt-get update
