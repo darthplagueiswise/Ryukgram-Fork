@@ -23,10 +23,14 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          curl -fL --retry 4 --retry-delay 2 \
-            -o /tmp/radare2.deb \
-            https://github.com/radareorg/radare2/releases/download/6.1.8/radare2_6.1.8_amd64.deb
-          echo '1849eac17f542571c4f4bb333ec05d36f52c6b698548fb522e9f3794583b3880  /tmp/radare2.deb' | sha256sum -c -
+          release=https://github.com/radareorg/radare2/releases/download/6.1.8
+          curl -fL --retry 4 --retry-delay 2 -o /tmp/radare2.deb \
+            "$release/radare2_6.1.8_amd64.deb"
+          curl -fL --retry 4 --retry-delay 2 -o /tmp/checksums.txt \
+            "$release/checksums.txt"
+          expected="$(awk '$2 == "radare2_6.1.8_amd64.deb" { print $1; exit }' /tmp/checksums.txt)"
+          test -n "$expected"
+          echo "$expected  /tmp/radare2.deb" | sha256sum -c -
           sudo apt-get update
           sudo apt-get install -y /tmp/radare2.deb
           python3 -m pip install --disable-pip-version-check --no-cache-dir 'capstone==5.0.7'
