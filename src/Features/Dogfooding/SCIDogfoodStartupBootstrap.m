@@ -11,7 +11,7 @@ FOUNDATION_EXPORT void SCIInstallEmployeeInternalHooksIfNeeded(void);
 FOUNDATION_EXPORT void SCIBugMenuOEMActivationInstall(void);
 FOUNDATION_EXPORT void SCIInstallBugMenuActionCellHooks(void);
 FOUNDATION_EXPORT void SCIInstallLoggedOutMobileConfigActionHook(void);
-FOUNDATION_EXPORT void SCIEmployeeIdentityConsumerHooksInstall(void);
+FOUNDATION_EXPORT void SCIInstallEmployeeIdentityConsumerHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeePandoIdentityHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeMobileConfigDescriptorHooks(void);
 FOUNDATION_EXPORT void SCIInstallEmployeeTestDogfoodRuntimeHooks(void);
@@ -50,7 +50,8 @@ static void SCIInstallPostActivationExactHooks(void) {
         BOOL menuEnabled = SCIInternalMenuFeatureEnabled();
 
         // The legacy employee/internal installer owns the initializers,
-        // lifecycle state and the single table didSelect hook.
+        // lifecycle state and the single table didSelect hook. This bounded pass
+        // now runs off the main thread after the first foreground-active frame.
         SCIInstallEmployeeInternalHooksIfNeeded();
 
         if (menuEnabled) {
@@ -62,7 +63,7 @@ static void SCIInstallPostActivationExactHooks(void) {
         }
 
         if (masterEnabled) {
-            SCIEmployeeIdentityConsumerHooksInstall();
+            SCIInstallEmployeeIdentityConsumerHooks();
             SCIInstallEmployeePandoIdentityHooks();
             SCIInstallDogfoodObjectHooksIfNeeded();
         }
@@ -72,11 +73,16 @@ static void SCIInstallPostActivationExactHooks(void) {
                 elapsed * 1000.0, masterEnabled, menuEnabled);
 
         // The only full objc_getClassList passes run well after first frame and
-        // only while Employee / Internal was already enabled at launch.
+        // only while Employee / Internal is enabled. They share the same serial
+        // utility queue, so neither can contend with the launch main thread.
         if (masterEnabled) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                          (int64_t)(4.0 * NSEC_PER_SEC)),
                            SCIDogfoodBootstrapWorker(), ^{
+                if (!SCIDogfoodMasterEnabled()) {
+                    BOOTLOG("deferred utility scans cancelled: master disabled");
+                    return;
+                }
                 CFAbsoluteTime scanStart = CFAbsoluteTimeGetCurrent();
                 SCIInstallEmployeeMobileConfigDescriptorHooks();
                 SCIInstallEmployeeTestDogfoodRuntimeHooks();
@@ -88,11 +94,11 @@ static void SCIInstallPostActivationExactHooks(void) {
 }
 
 static void SCIDogfoodApplicationBecameActive(void) {
-    // Do not perform runtime probing in the notification callback itself. Give
-    // the first active frame a short head start, then run one exact pass.
+    // The notification callback itself only schedules work. Exact runtime probes
+    // and hook installation run on the serial utility queue after first frame.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                  (int64_t)(0.35 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
+                   SCIDogfoodBootstrapWorker(), ^{
         SCIInstallPostActivationExactHooks();
     });
 }
