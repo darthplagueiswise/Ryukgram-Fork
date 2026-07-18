@@ -223,6 +223,7 @@ static BOOL BMIsTargetCell(UITableViewCell *cell,
     // discriminators, not NSIndexPath.section values. Never enable arbitrary
     // table sections by numeric position; identify only the exact native rows.
     NSString *title = BMCellTitle(cell);
+    if (!title.length) return NO;
     return [title caseInsensitiveCompare:@"Internal Settings"] == NSOrderedSame ||
         [title caseInsensitiveCompare:@"Dogfooding Assistant"] == NSOrderedSame;
 }
