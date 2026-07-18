@@ -671,6 +671,7 @@ static void EIBugMenuDidSelectRow(id self, SEL _cmd,
 		}
 	});
 }
+
 static BOOL EIInstallBugReporterHooks(void) {
 	Class cls = objc_getClass("_TtC17IGBugReporterMenu29IGBugReportMenuViewController");
 	if (!cls) cls = objc_getClass("IGBugReportMenuViewController");
@@ -746,7 +747,7 @@ static BOOL EIInstallBugReporterHooks(void) {
 }
 
 // ---------------------------------------------------------------------
-// Instalador idempotente, usado pelo ctor e pelo menu Dev.
+// Instalador idempotente. SCIDogfoodStartupBootstrap.m é o único bootstrap.
 // ---------------------------------------------------------------------
 void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 	static BOOL knownObjCInstalled = NO;
@@ -778,11 +779,4 @@ void SCIInstallEmployeeInternalHooksIfNeeded(void) {
 	      EIMasterOn(), EIMenuOn(), EIAvailabilityOn(), EILoggedOutOn(),
 	      (unsigned long)identityHooks, swiftIdentityInstalled,
 	      bugReporterInstalled);
-}
-
-%ctor {
-	@autoreleasepool {
-		if (!EIAnyOn()) return;
-		SCIInstallEmployeeInternalHooksIfNeeded();
-	}
 }
