@@ -79,6 +79,7 @@ static inline UIViewController * _Nullable sciTopVC(void) {
 + (SCISetting *)advancedNavCell;
 + (SCISetting *)debugNavCell;
 + (SCISetting *)devNavCell;
++ (SCISetting *)internalGatesNavCell;
 + (SCISetting *)aboutNavCell;
 + (SCISetting *)instaPlusNavCell;
 @end

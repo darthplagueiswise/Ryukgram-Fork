@@ -6,6 +6,8 @@
 NSDictionary *SCIDefaultsDictionary(void) {
 	return @{
 		@"hide_ads": @(YES),
+		@"sci_force_easygating_internal": @(NO),
+		@"sci_force_internal_apps_gate": @(NO),
 		@"suppress_surveys": @(NO),
 		@"hide_ads_feed": @(YES),
 		@"hide_ads_stories": @(YES),
