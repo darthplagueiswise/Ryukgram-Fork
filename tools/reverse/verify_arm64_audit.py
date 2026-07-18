@@ -89,7 +89,7 @@ def run_r2(path: pathlib.Path, va: int,
     # allows comparison by exact address, mnemonic and normalized operands.
     command = [
         "r2", "-q", "-n", "-a", "arm", "-b", "64", "-m", hex(va),
-        "-c", f"e asm.bytes=false; e asm.lines=false; pdj {instruction_count}; q",
+        "-c", f"e scr.color=0; e asm.bytes=false; e asm.lines=false; pdj {instruction_count}; q",
         str(path),
     ]
     completed = subprocess.run(
@@ -109,11 +109,16 @@ def run_r2(path: pathlib.Path, va: int,
 
     rows: List[Instruction] = []
     for item in payload:
-        if "offset" not in item:
+        # radare2 6.1.x emits `addr` in pdj. Some older builds used `offset`.
+        if "addr" in item:
+            address = item["addr"]
+        elif "offset" in item:
+            address = item["offset"]
+        else:
             continue
         opcode = item.get("opcode") or item.get("disasm") or ""
         mnemonic, operands = split_opcode(opcode)
-        rows.append((int(item["offset"]), mnemonic, operands))
+        rows.append((int(address), mnemonic, operands))
     diagnostic = completed.stderr.strip()
     return rows, diagnostic
 
