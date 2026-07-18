@@ -8,8 +8,6 @@
 
 #define EICLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] IdentityConsumers " fmt, ##__VA_ARGS__)
 
-static BOOL sEICInstalled;
-
 static BOOL EICMasterOn(void) {
     return [SCIInternalGatePrefs employeeInternalMasterEnabled];
 }
@@ -119,11 +117,13 @@ static BOOL newSmartSuggestionsDogfood(id self, SEL _cmd, id context) {
         : NO;
 }
 
-#pragma mark - One-shot installation
+#pragma mark - Bounded exact installation
 
-static void EICHook(Class cls, NSString *selectorName, const char *encoding,
+static BOOL EICHook(Class cls, NSString *selectorName, const char *encoding,
                     IMP replacement, IMP *original) {
-    if (!cls || !selectorName.length || !replacement || !original || *original) return;
+    if (!cls || !selectorName.length || !replacement || !original) return NO;
+    if (*original) return YES;
+
     SEL selector = NSSelectorFromString(selectorName);
     Method method = class_getInstanceMethod(cls, selector);
     if (!EICMethodMatches(method, encoding)) {
@@ -132,69 +132,81 @@ static void EICHook(Class cls, NSString *selectorName, const char *encoding,
                    NSStringFromClass(cls), selectorName,
                    method_getTypeEncoding(method));
         }
-        return;
+        return NO;
     }
+
     MSHookMessageEx(cls, selector, replacement, original);
+    return *original != NULL;
 }
 
-void SCIEmployeeIdentityConsumerHooksInstall(void) {
+void SCIInstallEmployeeIdentityConsumerHooks(void) {
+    // No global completed flag here. The centralized bootstrap performs at most
+    // two bounded exact passes: pre-main and once after first foreground-active.
+    // Each original pointer is the idempotence guard, so classes registered late
+    // can be picked up without any dyld callback or class-list scan.
     @synchronized (SCIInternalGatePrefs.class) {
-        if (sEICInstalled) return;
+        NSUInteger active = 0;
 
-        EICHook(NSClassFromString(@"IGFeedRequestQPLogger"),
+        active += EICHook(NSClassFromString(@"IGFeedRequestQPLogger"),
             @"initWithShouldIncludeRequestId:instancesManager:persistentFailureTracker:isDeferredNppTapEnabled:isCacheLoadEnabled:isEmployee:isTestUser:",
             "@52@0:8B16@20@28B36B40B44B48",
             (IMP)newFeedQPInit, (IMP *)&origFeedQPInit);
 
-        EICHook(NSClassFromString(@"IGSeenStateLogger"),
+        active += EICHook(NSClassFromString(@"IGSeenStateLogger"),
             @"initWithIsEmployee:analyticsLogger:",
             "@28@0:8B16@20",
             (IMP)newSeenLoggerInit, (IMP *)&origSeenLoggerInit);
 
-        EICHook(NSClassFromString(@"IGSeenStateStore"),
+        active += EICHook(NSClassFromString(@"IGSeenStateStore"),
             @"initWithDependencies:isEmployee:",
             "@28@0:8@16B24",
             (IMP)newSeenStoreInit, (IMP *)&origSeenStoreInit);
 
-        EICHook(NSClassFromString(@"IGLeadGenAnalyticsLogger"),
+        active += EICHook(NSClassFromString(@"IGLeadGenAnalyticsLogger"),
             @"initWithAnalyticsLogger:userFbidV2:isEmployee:",
             "@36@0:8@16q24B32",
             (IMP)newLeadGenInit, (IMP *)&origLeadGenInit);
 
-        EICHook(NSClassFromString(
+        active += EICHook(NSClassFromString(
             @"_TtC24BKBloksLabDeeplinkHelper24BKBloksLabDeeplinkHelper"),
             @"processDeeplinkWith:foaObjectSet:passPrototypeShortcode:useInternalNetworkCheck:isEmployee:session:containerConfigProvider:",
             "v60@0:8@16@24B32B36B40@44@?52",
             (IMP)newBloksLabProcess, (IMP *)&origBloksLabProcess);
 
-        EICHook(NSClassFromString(
+        active += EICHook(NSClassFromString(
             @"_TtC17IGBugReportingKit32IGBugReportMenuReliabilityLogger"),
             @"markInternalSettingsEnabled:",
             "v20@0:8B16",
             (IMP)newMarkInternalEnabled, (IMP *)&origMarkInternalEnabled);
 
-        EICHook(NSClassFromString(
+        active += EICHook(NSClassFromString(
             @"_TtC24IGIdentitySwitcherGating30IGIdentitySwitcherGatingHelper"),
             @"isFbAcquisitionEpDogfoodModeEnabled",
             "B16@0:8",
             (IMP)newIdentitySwitcherDogfood,
             (IMP *)&origIdentitySwitcherDogfood);
 
-        EICHook(NSClassFromString(
+        active += EICHook(NSClassFromString(
             @"_TtC21IGSearchSerpMediaGrid41IGSearchSerpMediaGridRowSectionController"),
             @"showDogfoodFeedback",
             "B16@0:8",
             (IMP)newSearchDogfoodFeedback,
             (IMP *)&origSearchDogfoodFeedback);
 
-        EICHook(NSClassFromString(
+        active += EICHook(NSClassFromString(
             @"_TtC46IGDirectSmartSuggestionsSuggestedActionHelpers46IGDirectSmartSuggestionsSuggestedActionHelpers"),
             @"directSmartSuggestionsIsForceBannerForDogfoodingEnabled:",
             "B24@0:8@16",
             (IMP)newSmartSuggestionsDogfood,
             (IMP *)&origSmartSuggestionsDogfood);
 
-        sEICInstalled = YES;
-        EICLOG("one-shot installer completed");
+        EICLOG("bounded exact pass complete active=%lu/9",
+               (unsigned long)active);
     }
+}
+
+// Compatibility entry point retained for builds that referenced the temporary
+// name while the launch architecture was being consolidated.
+void SCIEmployeeIdentityConsumerHooksInstall(void) {
+    SCIInstallEmployeeIdentityConsumerHooks();
 }
