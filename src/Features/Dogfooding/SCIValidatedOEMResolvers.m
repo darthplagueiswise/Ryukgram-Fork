@@ -358,7 +358,7 @@ static BOOL RRFHookClassMethod(Class cls, SEL selector,
     return *original != NULL;
 }
 
-static void RRFInstall(void) {
+void SCIInstallValidatedOEMResolvers(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         BOOL state = RRFHookClassMethod(NSClassFromString(@"SCIDogfoodObjectRuntime"),
@@ -376,9 +376,4 @@ static void RRFInstall(void) {
         RRFLOG("installed state=%d fetch=%d provider=%d capabilities=%d",
             state, fetch, provider, capabilities);
     });
-}
-
-__attribute__((constructor))
-static void SCIValidatedOEMResolversCtor(void) {
-    @autoreleasepool { RRFInstall(); }
 }
