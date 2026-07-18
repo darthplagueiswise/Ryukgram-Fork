@@ -3,24 +3,23 @@
 // Força os gates EasyGating de employee/test-user/dogfooder + o sinal de
 // internal-apps, e expõe estado ao vivo pra tela Internal Gates.
 // =====================================================================
-// Base (LIEF chained-fixups + Capstone; Instagram 4C4C4424..., FBShared 4C4C446A...):
-//   ig_*/xav_* = DATA descriptors ({field0=config, field1}) em FBSharedFramework
-//   __TEXT,__const, importados pelo Instagram. Avaliados por
-//   EasyGatingGetBoolean...Internal_DoNotUseOrMock (FBSharedFramework).
+// *** SIDELOAD-SAFE: usa fishhook (rebind_symbols) — reescreve GOT em __DATA,
+//     NUNCA faz patch em __TEXT. ***
 //
-// POR QUE MUDOU DE fishhook PARA MSHookFunction:
-//   O diagnóstico anterior mostrou 3/3 avaliadores "hooked" mas 0 forces. Causa:
-//   fishhook reescreve o GOT do Instagram -> só intercepta chamadas Instagram->FB.
-//   A avaliação desses gates acontece DENTRO do FBSharedFramework (FB->FB), que
-//   NÃO passa pelo GOT do Instagram. MSHookFunction no símbolo real (via dlsym)
-//   substitui a implementação -> pega TODOS os callers (Instagram + FB-internos).
+// HISTÓRICO IMPORTANTE (não repetir): uma versão anterior usou MSHookFunction
+// pra tentar pegar chamadas FB-internas. Isso faz inline patch em __TEXT do
+// FBSharedFramework e, em sideload (sem jailbreak), invalida a página assinada
+// -> KERN_PROTECTION_FAILURE / "Invalid Page" -> SIGKILL (crash confirmado:
+// falha em IGUserAccountTypeIsMediaCreator, vizinho de IGAppIs na mesma página).
+// REGRA: em sideload, só fishhook (GOT/__DATA) ou MSHookMessageEx (ObjC runtime).
+// Nada de MSHookFunction em código de framework.
 //
-// Replacement: C puro, passthrough de 6 args (preserva registradores exatos).
-// Conta toda chamada (sEGCalls), força YES quando um arg é o ponteiro de um
-// descriptor-alvo OU seu field0 (dlsym), e loga args crus deduplicados (se o file
-// log estiver ligado) pra revelar o índice caso o caminho seja por índice.
+// Consequência conhecida: fishhook só intercepta chamadas Instagram->FB (via GOT
+// do Instagram). Se um gate for avaliado FB-internamente (FB->FB direto), o
+// contador sEGCalls fica 0 -> esse caminho NÃO é hookável em sideload, e o certo
+// é achar um método ObjC equivalente (MSHookMessageEx), não forçar por aqui.
 
-#import <substrate.h>
+#include "../../../modules/fishhook/fishhook.h"
 #import "SCIInternalGatesEngine.h"
 #import "SCIInternalGatePrefs.h"
 #import "../../Utils.h"
@@ -45,7 +44,6 @@ static volatile int  sForced[kGateN];
 static volatile int  sLoggedMask = 0;
 static volatile long sEGCalls = 0;
 
-// raw-arg dedup log (reveals index-based paths)
 static uint64_t      sSeenA0[48];
 static volatile int  sSeenN = 0;
 
@@ -107,13 +105,6 @@ static int sci_igAppis(void) {
 	return orig_igAppis ? orig_igAppis() : 0;
 }
 
-static BOOL sci_hook(const char *sym, void *repl, void **orig) {
-	void *p = dlsym(RTLD_DEFAULT, sym);
-	if (!p) return NO;
-	MSHookFunction(p, repl, orig);
-	return (*orig != NULL);
-}
-
 void SCIInternalGatesInstall(void) {
 	if (sInstalled) return;
 	sInstalled = YES;
@@ -128,16 +119,28 @@ void SCIInternalGatesInstall(void) {
 			if (!d) continue;
 			sDesc[i] = d; sField0[i] = *(void **)d; sResolved[i] = YES;
 		}
-		sEGHooked  = sci_hook("EasyGatingGetBoolean_Internal_DoNotUseOrMock", (void *)sci_egBool, (void **)&orig_egBool) ? 1 : 0;
-		sEGHooked += sci_hook("EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock", (void *)sci_egAuth, (void **)&orig_egAuth) ? 1 : 0;
-		sEGHooked += sci_hook("MCQEasyGatingGetBooleanInternalDoNotUseOrMock", (void *)sci_egMCQ, (void **)&orig_egMCQ) ? 1 : 0;
+		struct rebinding rb[] = {
+			{ "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+			  (void *)sci_egBool, (void **)&orig_egBool },
+			{ "EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock",
+			  (void *)sci_egAuth, (void **)&orig_egAuth },
+			{ "MCQEasyGatingGetBooleanInternalDoNotUseOrMock",
+			  (void *)sci_egMCQ, (void **)&orig_egMCQ },
+		};
+		rebind_symbols(rb, sizeof(rb) / sizeof(rb[0]));
+		sEGHooked = (orig_egBool != NULL) + (orig_egAuth != NULL) + (orig_egMCQ != NULL);
 	}
 	if (sIAActive) {
-		sIAHooked = sci_hook("IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18", (void *)sci_igAppis, (void **)&orig_igAppis);
+		struct rebinding rb2[] = {
+			{ "IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18",
+			  (void *)sci_igAppis, (void **)&orig_igAppis },
+		};
+		rebind_symbols(rb2, sizeof(rb2) / sizeof(rb2[0]));
+		sIAHooked = (orig_igAppis != NULL);
 	}
 
 	if (SCIFileLogIsEnabled())
-		SCIFLog(@"SCIGate", @"install(MSHook): eg=%d(hooked %d) apps=%d(hooked %d)",
+		SCIFLog(@"SCIGate", @"install(fishhook): eg=%d(hooked %d) apps=%d(hooked %d)",
 		        sEGActive, sEGHooked, sIAActive, sIAHooked);
 }
 
