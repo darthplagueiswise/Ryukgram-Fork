@@ -135,9 +135,9 @@ void SCIInstallDogfoodObjectHooksIfNeeded(void) {
                       (IMP)new_ctx_user_init, (IMP *)&orig_ctx_user_init);
         }
 
-        // Sessionless init/factory hooks are intentionally absent here. They have
-        // one owner: SCISessionlessMobileConfigEarlyCapture.m. The old duplicate
-        // chain installed a second MSHookMessageEx layer after app activation.
+        // Sessionless init/factory interception is intentionally absent. The
+        // audited fetch path is device-session-owned and lives in
+        // SCIValidatedOEMResolvers.m; no FBT holder or factory substitution is used.
 
         Class dfc = NSClassFromString(@"IGDogfoodingFirst.DogfoodingFirstCoordinator") ?:
             NSClassFromString(@"_TtC18IGDogfoodingFirst27DogfoodingFirstCoordinator");
@@ -165,5 +165,5 @@ void SCIInstallDogfoodObjectHooksIfNeeded(void) {
     }
 }
 
-// No Logos constructor here. SCIDogfoodStartupBootstrap.m owns the one staged
-// startup observer and invokes this installer after UIApplication did finish.
+// No Logos constructor here. SCIDogfoodStartupBootstrap.m owns the single
+// staged post-activation bootstrap and invokes this bounded installer once.
