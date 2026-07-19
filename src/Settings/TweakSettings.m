@@ -143,7 +143,6 @@
 				({ SCISetting *s = [self backupNavCell]; s.whatsNewID = @"ui_backup"; s; }),
 				[self advancedNavCell],
 				[self debugNavCell],
-				[self internalGatesNavCell],
 				[self devNavCell]
 			]
 		},

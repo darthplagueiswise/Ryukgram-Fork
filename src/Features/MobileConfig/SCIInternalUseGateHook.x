@@ -5,6 +5,7 @@
 #import <Foundation/Foundation.h>
 #import "../../../modules/fishhook/fishhook.h"
 #import <os/log.h>
+#import "../../SCIFileLog.h"
 #import "../../Utils.h"
 #import "../Dogfooding/SCIInternalGatePrefs.h"
 
@@ -32,10 +33,45 @@ static Bool8 oMSGC, oMCIExp, oMCIExt, oMetaExt, oMetaExtNoExposure;
 static Bool0 oInternalApps, oMinos;
 
 #define REPL8(name,orig) static bool name(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){ if(orig) (void)orig(a0,a1,a2,a3,a4,a5,a6,a7); return true; }
-REPL8(rEasyInternal,oEasyInternal)
-REPL8(rEasyAuth,oEasyAuth)
-REPL8(rEasyMCQ,oEasyMCQ)
-REPL8(rEasyPlatform,oEasyPlatform)
+// --- EasyGating: SELETIVO por gate-ID (a1), nunca cego ---
+// O avaliador EasyGating e compartilhado por milhares de gates (a1 = ID).
+// Forcar TODOS (return true cego) habilita gates sem dependencia -> crash
+// (confirmado: EXC_BAD_ACCESS + o log runtime "eg call a1=0x181/0x87/0x32").
+// Aqui forcamos true SO para os IDs na allowlist abaixo; o resto cai em %orig.
+// Allowlist VAZIA = observe-only (nao crasha). Preencher com os IDs dos gates
+// de employee/test-user/dogfooder capturados no log [SCIGate] ao tocar Internal
+// Settings.
+static const uint64_t kSCIEasyForceIDs[] = {
+	// TODO: preencher com IDs de employee/test-user/dogfooder capturados no log.
+	// Sentinela impossivel (a1 real e um ID pequeno) -> allowlist efetivamente vazia.
+	0xFFFFFFFFFFFFFFFFULL,
+};
+enum { kSCIEasyForceN = (int)(sizeof(kSCIEasyForceIDs)/sizeof(kSCIEasyForceIDs[0])) };
+static inline bool sciEasyForce(uint64_t gid) {
+	for (int i = 0; i < kSCIEasyForceN; i++) if (kSCIEasyForceIDs[i] == gid) return true;
+	return false;
+}
+static uint64_t sciEasySeen[128];
+static volatile int sciEasySeenN = 0;
+static inline void sciEasyLog(const char *tag, void *a1, void *a2, bool orig) {
+	if (!SCIFileLogIsEnabled()) return;
+	uint64_t g = (uint64_t)a1;
+	int n = sciEasySeenN;
+	for (int i = 0; i < n && i < 128; i++) if (sciEasySeen[i] == g) return;
+	if (n < 128) { sciEasySeen[n] = g; sciEasySeenN = n + 1; }
+	SCIFLog(@"SCIGate", @"%s a1=0x%llx a2=0x%llx orig=%d", tag,
+	        (unsigned long long)g, (unsigned long long)(uint64_t)a2, orig);
+}
+#define REPL_EASY(name,orig,tag) static bool name(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){ \
+	bool r = orig ? orig(a0,a1,a2,a3,a4,a5,a6,a7) : false; \
+	sciEasyLog(tag,a1,a2,r); \
+	if (sciEasyForce((uint64_t)a1) || sciEasyForce((uint64_t)a2)) return true; \
+	return r; \
+}
+REPL_EASY(rEasyInternal,oEasyInternal,"egInternal")
+REPL_EASY(rEasyAuth,oEasyAuth,"egAuth")
+REPL_EASY(rEasyMCQ,oEasyMCQ,"egMCQ")
+REPL_EASY(rEasyPlatform,oEasyPlatform,"egPlatform")
 REPL8(rMSGC,oMSGC)
 REPL8(rMCIExp,oMCIExp)
 REPL8(rMCIExt,oMCIExt)
