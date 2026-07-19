@@ -1,5 +1,8 @@
 #import "SCISettingsSections.h"
 #import "../../SCIFileLog.h"
+// EasyGating capture controls (definidas em SCIInternalUseGateHook.x)
+extern void SCIGateSetCapture(BOOL on);
+extern BOOL SCIGateIsCapturing(void);
 
 @implementation SCITweakSettings (Section_Debug)
 
@@ -38,6 +41,10 @@
 																		  value:^BOOL{ return SCIFileLogIsEnabled(); }
 																		 action:^(BOOL on){ SCIFileLogSetEnabled(on); }];
 																   s.whatsNewID = @"ui_filelogging"; s; }),
+										[SCISetting switchCellWithTitle:SCILocalized(@"Capture EasyGating gates")
+															   subtitle:SCILocalized(@"No dedup. Turn ON, tap Internal Settings, turn OFF, then share the log.")
+																  value:^BOOL{ return SCIGateIsCapturing(); }
+																 action:^(BOOL on){ SCIGateSetCapture(on); }],
 												[SCISetting buttonCellWithTitle:SCILocalized(@"Share log file")
 																	   subtitle:@""
 																		   icon:[SCISymbol symbolWithName:@"square.and.arrow.up"]

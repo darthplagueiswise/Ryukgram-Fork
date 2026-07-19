@@ -62,9 +62,22 @@ static inline void sciEasyLog(const char *tag, void *a1, void *a2, bool orig) {
 	SCIFLog(@"SCIGate", @"%s a1=0x%llx a2=0x%llx orig=%d", tag,
 	        (unsigned long long)g, (unsigned long long)(uint64_t)a2, orig);
 }
+// ---- captura manual (liga/desliga pela UI; hot-path le so um bool) ----
+static volatile bool sGateCapture = false;
+static volatile int  sGateCapCount = 0;
+void SCIGateSetCapture(BOOL on){
+	if(on){ sGateCapCount=0; sGateCapture=true; if(SCIFileLogIsEnabled()) SCIFLog(@"SCIGate",@"=== CAPTURE START ==="); }
+	else { sGateCapture=false; if(SCIFileLogIsEnabled()) SCIFLog(@"SCIGate",@"=== CAPTURE STOP (%d gates) ===", sGateCapCount); }
+}
+BOOL SCIGateIsCapturing(void){ return sGateCapture; }
+static inline void sciGateCapLog(const char*tag,void*a1,void*a2,bool orig){
+	if(sGateCapCount>=5000) return;
+	sGateCapCount++;
+	SCIFLog(@"SCIGate",@"CAP %s a1=0x%llx a2=0x%llx orig=%d",tag,(unsigned long long)(uint64_t)a1,(unsigned long long)(uint64_t)a2,orig);
+}
 #define REPL_EASY(name,orig,tag) static bool name(void*a0,void*a1,void*a2,void*a3,void*a4,void*a5,void*a6,void*a7){ \
 	bool r = orig ? orig(a0,a1,a2,a3,a4,a5,a6,a7) : false; \
-	sciEasyLog(tag,a1,a2,r); \
+	if(sGateCapture&&SCIFileLogIsEnabled()) sciGateCapLog(tag,a1,a2,r); else sciEasyLog(tag,a1,a2,r); \
 	if (sciEasyForce((uint64_t)a1) || sciEasyForce((uint64_t)a2)) return true; \
 	return r; \
 }
