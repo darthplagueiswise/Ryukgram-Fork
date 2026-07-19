@@ -516,6 +516,7 @@ NSDictionary *SCIDefaultsDictionary(void) {
 		@"sci_force_easy_gating_all": @(NO),
 		@"sci_force_easy_gating_auth": @(NO),
 		@"sci_force_easy_gating_internal": @(NO),
+		@"sci_dogfooding_socket_bypass": @(NO),
 		@"sci_force_mc_session_employee_gate": @(NO),
 		@"sci_force_easy_gating_mcq": @(NO),
 		@"sci_force_easy_gating_platform": @(NO),

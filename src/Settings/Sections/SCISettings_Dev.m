@@ -316,6 +316,7 @@ static SCISetting *SCIEmployeeInternalSwitch(
 				[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL readers") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Session employee gate (getBool:)") subtitle:@"IG/FBMobileConfigUserSessionContextManager -getBool: -> employee/test-user/dogfooding" defaultsKey:@"sci_force_mc_session_employee_gate" requiresRestart:YES],
+				[SCISetting switchCellWithTitle:SCILocalized(@"Dogfooding Assistant: socket bypass") subtitle:SCILocalized(@"Intercept tap and present IGSundialYourAlgoDogfoodingAssistantViewController directly") defaultsKey:@"sci_dogfooding_socket_bypass" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:@"EasyGating Internal" subtitle:@"EasyGatingGetBoolean_Internal_DoNotUseOrMock" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:@"EasyGating Platform" subtitle:@"EasyGatingPlatformGetBoolean" defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:@"EasyGating AuthDataContext" subtitle:@"" defaultsKey:@"sci_force_easy_gating_auth" requiresRestart:YES],
