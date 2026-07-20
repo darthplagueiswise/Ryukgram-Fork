@@ -33,6 +33,29 @@
 			@[@"igt_ip_customlists", SCILocalized(@"Custom story lists"), SCILocalized(@"Make lists to pick exactly who sees a story.")],
 			@[@"igt_ip_pinnedposts", SCILocalized(@"More pinned posts"), SCILocalized(@"Pin more posts to the top of your profile.")],
 		]},
+		@{@"header": SCILocalized(@"More benefits"),
+		  @"rows": @[
+			@[@"igt_ip_storyviewnotify", SCILocalized(@"Story view notify"), SCILocalized(@"Turn on the subscriber option to notify people when they view your story.")],
+			@[@"igt_ip_linksmedia", SCILocalized(@"Links in media"), SCILocalized(@"Unlock the subscriber option to add links to posts.")],
+		]},
+		@{@"header": SCILocalized(@"Ads-incentive text"),
+		  @"rows": @[
+			@[@"igt_ip_ads_incentive_feed", SCILocalized(@"Feed"), SCILocalized(@"Force the \"subscribe for an ad-free experience\" text on feed ads.")],
+			@[@"igt_ip_ads_incentive_story", SCILocalized(@"Stories"), SCILocalized(@"Force the ad-free incentive text on story ads.")],
+			@[@"igt_ip_ads_incentive_storycaptain", SCILocalized(@"Stories (captain)"), SCILocalized(@"Force the ad-free incentive text on the story captain surface.")],
+			@[@"igt_ip_ads_incentive_reels", SCILocalized(@"Reels"), SCILocalized(@"Force the ad-free incentive text on reels ads.")],
+			@[@"igt_ip_ads_incentive_promo", SCILocalized(@"Promo sheet"), SCILocalized(@"Force the ad-free promo sheet.")],
+		]},
+		@{@"header": SCILocalized(@"Subscription state"),
+		  @"rows": @[
+			@[@"igt_ip_freetrial", SCILocalized(@"Free trial offer"), SCILocalized(@"Treat the offered subscription as a free trial.")],
+			@[@"igt_ip_bypass_expired", SCILocalized(@"Bypass \"subscription expired\""), SCILocalized(@"Force the client to ignore expired-subscription errors.")],
+		]},
+		@{@"header": SCILocalized(@"Upsell noise"),
+		  @"rows": @[
+			@[@"igt_ip_up_prefetch", SCILocalized(@"Silence upsell prefetch"), SCILocalized(@"Skip the Bloks upsell prefetch for peek, custom lists, app icon, story/chat fonts, DM peek, story view notify, pin limit, links in media, quota comms.")],
+			@[@"igt_ip_up_block_dest", SCILocalized(@"Block upsell purchase screens"), SCILocalized(@"Prevent taps that would open the Instagram Plus purchase destination screens.")],
+		]},
 	];
 }
 
