@@ -297,6 +297,10 @@ static SCISetting *SCIEmployeeInternalSwitch(
 						[SCIUtils setPref:@(on) forKey:@"sci_force_rct_dev_menu"];
 						if (on) SCIInstallInternalDevMenuHooksIfNeeded();
 					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Open MetaLocalExperiment browser")
+										   subtitle:SCILocalized(@"Native experiment list VC — needs internal build to be effective.")
+											   icon:[SCISymbol symbolWithIGName:@"grid" fallback:@"square.grid.3x3.square"]
+										 action:^{ [SCIDogfoodObjectRuntime tryOpenMetaLocalExperimentBrowser]; }],
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Apply internal/debug now")
 					subtitle:SCILocalized(@"Uses the live IGAutofillInternalSettings session object")
 					icon:[SCISymbol symbolWithIGName:@"bcn_wrench_outline_24" fallback:@"wrench.and.screwdriver"]
