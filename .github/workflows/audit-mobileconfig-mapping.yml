@@ -2,6 +2,12 @@ name: Audit MobileConfig mapping
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - experimental3
+    paths:
+      - .github/workflows/audit-mobileconfig-mapping.yml
+      - tools/reverse/audit_mapping.py
   push:
     branches:
       - agent/ios-mapping-force-download-audit
@@ -10,13 +16,15 @@ on:
       - tools/reverse/audit_mapping.py
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -26,4 +34,16 @@ jobs:
             -o /tmp/435.0.0.37.76.json \
             https://raw.githubusercontent.com/crimera/piko/dev/docs/mappings/435.0.0.37.76.json
       - name: Audit relevant entries
-        run: python3 tools/reverse/audit_mapping.py /tmp/435.0.0.37.76.json
+        run: |
+          mkdir -p docs/mobileconfig-tests/android/435.0.0.37.76
+          python3 tools/reverse/audit_mapping.py /tmp/435.0.0.37.76.json \
+            | tee docs/mobileconfig-tests/android/435.0.0.37.76/relevant_mapping_entries.txt
+      - name: Persist audit output on audit branch
+        if: github.event_name == 'push'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/mobileconfig-tests/android/435.0.0.37.76/relevant_mapping_entries.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "Record Android 435 mapping audit"
+          git push
