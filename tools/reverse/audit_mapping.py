@@ -4,7 +4,11 @@ import re
 import sys
 from pathlib import Path
 
-TERMS = re.compile(r"employee|dogfood|internal|test[_ -]?user|quick[_ -]?experiment|developer[_ -]?option|dev[_ -]?option|sandbox|debug", re.I)
+TERMS = re.compile(
+    r"employee|dogfood|internal|test[_ -]?user|quick[_ -]?experiment|"
+    r"developer[_ -]?option|dev[_ -]?option|sandbox|debug",
+    re.I,
+)
 
 path = Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
