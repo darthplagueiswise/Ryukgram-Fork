@@ -88,11 +88,19 @@ def parse_mapping(rows: Iterable[str]) -> list[Param]:
     return parsed
 
 
+def contains_non_boolean_token(name: str) -> bool:
+    # Match semantic underscore-delimited tokens, not arbitrary substrings.
+    # In particular, "count" must not reject "account" in
+    # is_employee_or_employee_test_account.
+    tokens = set(name.lower().split("_"))
+    return any(token in tokens for token in NON_BOOLEAN_TOKENS)
+
+
 def looks_boolean(name: str) -> bool:
     lowered = name.lower()
     if lowered in TRUTHY_EXACT:
         return True
-    if any(token in lowered for token in NON_BOOLEAN_TOKENS):
+    if contains_non_boolean_token(lowered):
         return False
     return lowered.startswith(TRUTHY_PREFIXES) or lowered.endswith(("_enabled", "_only"))
 
