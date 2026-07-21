@@ -8,6 +8,13 @@ on:
       - .github/workflows/generate-mobileconfig-employee-overrides.yml
       - tools/reverse/mobileconfig_mapping_overrides.py
       - tools/reverse/fixtures/mc_overrides_user_base.json
+  pull_request:
+    branches:
+      - experimental3
+    paths:
+      - .github/workflows/generate-mobileconfig-employee-overrides.yml
+      - tools/reverse/mobileconfig_mapping_overrides.py
+      - tools/reverse/fixtures/mc_overrides_user_base.json
   workflow_dispatch:
 
 permissions:
@@ -51,7 +58,8 @@ jobs:
           python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.json" >/dev/null
           python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.report.json" >/dev/null
 
-      - name: Commit generated fixtures
+      - name: Commit generated fixtures on direct branch runs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
