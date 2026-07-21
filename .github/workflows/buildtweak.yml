@@ -7,7 +7,6 @@ on:
             - 'experimental'
             - 'experimental2'
             - 'experimental3'
-            - 'agent/fix-employee-gate-mapping'
     workflow_dispatch:
 
 concurrency:
