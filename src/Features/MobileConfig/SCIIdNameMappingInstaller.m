@@ -53,7 +53,9 @@ static NSArray<NSString *> *SCIParseMappingData(NSData *data, NSError **error) {
 
 static NSData *SCIBundledMappingData(NSError **error, NSUInteger *count) {
 	NSBundle *bundle = SCILocalizationBundle();
-	NSURL *url = [bundle URLForResource:kSCIMappingResourceName withExtension:@"json"];
+	// build.sh already packages generic .bin assets into RyukGram.bundle. The
+	// bytes are JSON; the extension only keeps every packaging path consistent.
+	NSURL *url = [bundle URLForResource:kSCIMappingResourceName withExtension:@"bin"];
 	if (!url) {
 		if (error) *error = [NSError errorWithDomain:@"SCIIdNameMapping" code:6
 			userInfo:@{NSLocalizedDescriptionKey: @"RyukGram.bundle does not contain the verified IG439 mapping"}];
