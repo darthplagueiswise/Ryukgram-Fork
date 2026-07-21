@@ -8,3 +8,15 @@ void SCIInstallMobileConfigInternalUseGateIfNeeded(void);
 void SCIInstallMobileConfigEmployeeGateIfNeeded(void) {
 	SCIInstallMobileConfigInternalUseGateIfNeeded();
 }
+
+__attribute__((constructor)) static void SCIObserveEmployeeGatePreferences(void) {
+	@autoreleasepool {
+		[[NSNotificationCenter defaultCenter]
+			addObserverForName:NSUserDefaultsDidChangeNotification
+			object:nil
+			queue:nil
+			usingBlock:^(__unused NSNotification *note) {
+				SCIInstallMobileConfigInternalUseGateIfNeeded();
+			}];
+	}
+}
