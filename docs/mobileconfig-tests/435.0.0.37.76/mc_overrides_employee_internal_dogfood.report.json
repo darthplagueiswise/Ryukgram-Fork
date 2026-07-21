@@ -1,0 +1,807 @@
+{
+  "profile": "employee-internal-dogfood",
+  "selected_count": 89,
+  "selected": [
+    {
+      "config_id": 28538,
+      "config_name": "ig_android_employee_options",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "employee config master",
+      "changed_base": true
+    },
+    {
+      "config_id": 36377,
+      "config_name": "ig_digital_fan_club",
+      "param_id": 13,
+      "param_name": "is_internal_testing",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 39521,
+      "config_name": "igns_ig4a_internal_notification_inspector",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 39590,
+      "config_name": "profilo_params",
+      "param_id": 0,
+      "param_name": "internal_logging_b4b_on",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 39590,
+      "config_name": "profilo_params",
+      "param_id": 3,
+      "param_name": "internal_default_init",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 39683,
+      "config_name": "ig_vc_rsys_overlayconfig_audiodroppingheaderv2config",
+      "param_id": 2,
+      "param_name": "use_internal_cng",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 48770,
+      "config_name": "ig_e2e_meta_config_override_test",
+      "param_id": 4,
+      "param_name": "is_passing_employee_check",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 48770,
+      "config_name": "ig_e2e_meta_config_override_test",
+      "param_id": 5,
+      "param_name": "is_passing_django_qe_employee_check",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 49223,
+      "config_name": "igd_labyrinth_ui",
+      "param_id": 39,
+      "param_name": "is_internal_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 49726,
+      "config_name": "ig_android_analytics_logging",
+      "param_id": 0,
+      "param_name": "check_for_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 50769,
+      "config_name": "fx_ig_android_switcher_wave_2_3_fdid",
+      "param_id": 41,
+      "param_name": "is_in_dogfooding_experiment",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 52065,
+      "config_name": "ig_dogfood_version_viewer",
+      "param_id": 1,
+      "param_name": "fetch_build_info_from_server_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 56474,
+      "config_name": "ig_is_employee",
+      "param_id": 0,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 56859,
+      "config_name": "ig_story_interactions_hype",
+      "param_id": 11,
+      "param_name": "internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 57176,
+      "config_name": "ig_android_dogfooding_icon",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 58377,
+      "config_name": "ig_android_clips_content_lanes",
+      "param_id": 14,
+      "param_name": "enable_friendly_viewer_dogfood_lane",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 58792,
+      "config_name": "ig_dogfooding_first_client",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 58792,
+      "config_name": "ig_dogfooding_first_client",
+      "param_id": 2,
+      "param_name": "snooze_lockout_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 58792,
+      "config_name": "ig_dogfooding_first_client",
+      "param_id": 7,
+      "param_name": "corp_device_is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 58792,
+      "config_name": "ig_dogfooding_first_client",
+      "param_id": 9,
+      "param_name": "check_corp_eligibility_before_device_check",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 59738,
+      "config_name": "ig_vc_rsys_overlayconfig_rsysaudioconfig",
+      "param_id": 1,
+      "param_name": "allow_internal_polling",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 59738,
+      "config_name": "ig_vc_rsys_overlayconfig_rsysaudioconfig",
+      "param_id": 4,
+      "param_name": "force_external_adm_for_internal_audio",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 59739,
+      "config_name": "ig_vc_rsys_overlayconfig_ex3config",
+      "param_id": 5,
+      "param_name": "use_connection_tslog_for_internal_adm",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 61303,
+      "config_name": "ig_android_genai_magic_mod",
+      "param_id": 39,
+      "param_name": "is_restyle_story_post_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62179,
+      "config_name": "ig_hallpass",
+      "param_id": 36,
+      "param_name": "add_internal_text_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 4,
+      "param_name": "enable_ebpaap_employee_tag",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 6,
+      "param_name": "enable_ebpaap_employee_tag_fb4a",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 7,
+      "param_name": "enable_ebpaap_employee_tag_ig4a",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 64600,
+      "config_name": "ig_lacrima_health_report",
+      "param_id": 0,
+      "param_name": "enable_lacrima_internal_instrumentation",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 67118,
+      "config_name": "ig_subscriptions_dogfooding_entitlement",
+      "param_id": 0,
+      "param_name": "enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 67737,
+      "config_name": "ig_android_clips_translated_audio_dubbing",
+      "param_id": 58,
+      "param_name": "enable_expanded_language_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 70070,
+      "config_name": "ig_android_hipo_internal_badge",
+      "param_id": 2,
+      "param_name": "internal_only_hip_badge_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 72311,
+      "config_name": "igd_cdau_android_reply_reminder",
+      "param_id": 2,
+      "param_name": "is_debugging_internal_use_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": false
+    },
+    {
+      "config_id": 74642,
+      "config_name": "buy_with_integration_iab_config",
+      "param_id": 8,
+      "param_name": "is_test_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 75335,
+      "config_name": "ig_shoppable_everything",
+      "param_id": 6,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 75335,
+      "config_name": "ig_shoppable_everything",
+      "param_id": 9,
+      "param_name": "enable_debug_menu",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 75518,
+      "config_name": "ig_android_lumen_signals_dogfooding",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 75726,
+      "config_name": "ig_android_crosspost_stories_to_whatsapp_fbidv2",
+      "param_id": 6,
+      "param_name": "is_internal_story_sharing_allowed",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 77305,
+      "config_name": "ig4a_renux_launcher",
+      "param_id": 6,
+      "param_name": "dogfooding_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 77493,
+      "config_name": "ig_zero_rewrites",
+      "param_id": 3,
+      "param_name": "enable_logged_out_dogfooding_on_startup",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 80734,
+      "config_name": "ig_tiru_design_updates_v2",
+      "param_id": 23,
+      "param_name": "enable_internal_padding_update",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 80778,
+      "config_name": "ig_android_publish_screen_in_compose",
+      "param_id": 22,
+      "param_name": "enable_compose_is_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 81907,
+      "config_name": "ig_android_stories_ai_edit",
+      "param_id": 1,
+      "param_name": "is_ai_edit_story_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 81907,
+      "config_name": "ig_android_stories_ai_edit",
+      "param_id": 28,
+      "param_name": "is_v2v_restyle_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 81907,
+      "config_name": "ig_android_stories_ai_edit",
+      "param_id": 33,
+      "param_name": "is_mimicry_sticker_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82151,
+      "config_name": "ig_android_mcp_pending_media_reuse",
+      "param_id": 5,
+      "param_name": "use_internal_temp_directory",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82560,
+      "config_name": "igd_android_opus_voice_messages",
+      "param_id": 14,
+      "param_name": "enable_internal_recorder_logging",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82708,
+      "config_name": "ig_feed_high_intent_discovery",
+      "param_id": 21,
+      "param_name": "is_dogfooding_enabled_for_triggers",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82708,
+      "config_name": "ig_feed_high_intent_discovery",
+      "param_id": 22,
+      "param_name": "enabled_dogfooding_triggers",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82840,
+      "config_name": "ig_profile_android_grid_reordering",
+      "param_id": 4,
+      "param_name": "show_internal_error_message",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 82950,
+      "config_name": "ig4a_metaverse_quicksilver",
+      "param_id": 78,
+      "param_name": "is_internal_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 84046,
+      "config_name": "ig_android_browser_lite_v2",
+      "param_id": 5,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 85292,
+      "config_name": "igd_chat_bot",
+      "param_id": 2,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 85453,
+      "config_name": "igd_chat_pilot",
+      "param_id": 2,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 87318,
+      "config_name": "ig4a_dogfooding_assistant",
+      "param_id": 0,
+      "param_name": "enable_detailed_success_message",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 87480,
+      "config_name": "ig_android_reels_pip",
+      "param_id": 4,
+      "param_name": "enable_internal_ads",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": false
+    },
+    {
+      "config_id": 87707,
+      "config_name": "ig_pandroid",
+      "param_id": 30,
+      "param_name": "user_id_dogfooding_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 88084,
+      "config_name": "ig_android_music_picker_transparency",
+      "param_id": 11,
+      "param_name": "force_override_ccp_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 88084,
+      "config_name": "ig_android_music_picker_transparency",
+      "param_id": 12,
+      "param_name": "force_override_ccp_monetization_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 88084,
+      "config_name": "ig_android_music_picker_transparency",
+      "param_id": 14,
+      "param_name": "force_override_song_eligibility_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 89534,
+      "config_name": "ig_ai_fonts_android",
+      "param_id": 1,
+      "param_name": "ai_fonts_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 89759,
+      "config_name": "ig_stories_ayt_clips_launcher",
+      "param_id": 3,
+      "param_name": "force_internal_gating",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 90631,
+      "config_name": "ig_stories_internal_only_improvements",
+      "param_id": 0,
+      "param_name": "is_internal_only_indicator_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 90631,
+      "config_name": "ig_stories_internal_only_improvements",
+      "param_id": 2,
+      "param_name": "is_internal_only_share_sheet_target_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 90631,
+      "config_name": "ig_stories_internal_only_improvements",
+      "param_id": 3,
+      "param_name": "is_internal_only_sharecut_button_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 90775,
+      "config_name": "ig_dogfooding_assistant",
+      "param_id": 1,
+      "param_name": "show_in_bug_report_menu",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 91689,
+      "config_name": "basel_android_server_side_voice_enhance",
+      "param_id": 0,
+      "param_name": "enable_internal_testing",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 93536,
+      "config_name": "ig_android_photo_comment",
+      "param_id": 6,
+      "param_name": "is_internal_nux_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 94098,
+      "config_name": "p92_ig4a_preloads_new_screen",
+      "param_id": 3,
+      "param_name": "internal_dogfooding_enable_preloads",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 95077,
+      "config_name": "ig_android_image_aiq_scans_config_v2",
+      "param_id": 9,
+      "param_name": "enable_deliver_progressive_internal_lock_change",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 95305,
+      "config_name": "ig_android_quicksnap",
+      "param_id": 51,
+      "param_name": "internal_mutuals_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 97656,
+      "config_name": "igd_tools_discovery_improvement",
+      "param_id": 4,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 98841,
+      "config_name": "ig_android_clips_translated_audio_dubbing_igfbidv2",
+      "param_id": 1,
+      "param_name": "enable_expanded_language_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 101583,
+      "config_name": "related_ads_pivots",
+      "param_id": 0,
+      "param_name": "enable_debug",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 101583,
+      "config_name": "related_ads_pivots",
+      "param_id": 1,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 103620,
+      "config_name": "xe_switcher_ig4a_wa_linquisition",
+      "param_id": 7,
+      "param_name": "dogfood_disable_oxygen_preloads_check",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 104898,
+      "config_name": "ig_android_stories_lipsync",
+      "param_id": 4,
+      "param_name": "is_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 105366,
+      "config_name": "xav_ig_4a_switcher_f3_uid",
+      "param_id": 3,
+      "param_name": "should_enable_whatsapp_notifications_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 105366,
+      "config_name": "xav_ig_4a_switcher_f3_uid",
+      "param_id": 5,
+      "param_name": "should_enable_wa_phone_number_in_switcher_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 105830,
+      "config_name": "ig_android_ta_projects_launcher",
+      "param_id": 1,
+      "param_name": "should_show_internal_feedback",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 107035,
+      "config_name": "p92_android_dogfooding_icon",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 107261,
+      "config_name": "igbm_android_ctd_in_thread_upsell",
+      "param_id": 8,
+      "param_name": "force_should_show_banner_for_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 107711,
+      "config_name": "basel_android_dogfooding_icon",
+      "param_id": 0,
+      "param_name": "enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 109075,
+      "config_name": "ig4a_reels_flexible_grid",
+      "param_id": 0,
+      "param_name": "is_hybrid_grid_dogfood_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 109075,
+      "config_name": "ig4a_reels_flexible_grid",
+      "param_id": 2,
+      "param_name": "is_flexible_grid_dogfood_enabled",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 116639,
+      "config_name": "xstack_overlayconfig_metaaiinternaldebugv2config",
+      "param_id": 0,
+      "param_name": "enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 118089,
+      "config_name": "switcher_ig4a_linquisition_growth_fdid_rid_mc",
+      "param_id": 7,
+      "param_name": "force_fb_acquisition_ep_visible_for_dogfooding",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 121614,
+      "config_name": "ig4a_ig_edit_text_set_span_internal_fix",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "internal/dogfood config boolean",
+      "changed_base": true
+    },
+    {
+      "config_id": 124662,
+      "config_name": "basel_filter_perf_opt",
+      "param_id": 0,
+      "param_name": "enable_basic_adjust_internal_blur",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    }
+  ]
+}

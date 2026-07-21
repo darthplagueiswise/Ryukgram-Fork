@@ -1,0 +1,186 @@
+{
+  "profile": "employee",
+  "selected_count": 20,
+  "selected": [
+    {
+      "config_id": 28538,
+      "config_name": "ig_android_employee_options",
+      "param_id": 0,
+      "param_name": "is_enabled",
+      "value": true,
+      "reason": "employee config master",
+      "changed_base": true
+    },
+    {
+      "config_id": 48770,
+      "config_name": "ig_e2e_meta_config_override_test",
+      "param_id": 4,
+      "param_name": "is_passing_employee_check",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 48770,
+      "config_name": "ig_e2e_meta_config_override_test",
+      "param_id": 5,
+      "param_name": "is_passing_django_qe_employee_check",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 49223,
+      "config_name": "igd_labyrinth_ui",
+      "param_id": 39,
+      "param_name": "is_internal_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 49726,
+      "config_name": "ig_android_analytics_logging",
+      "param_id": 0,
+      "param_name": "check_for_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 56474,
+      "config_name": "ig_is_employee",
+      "param_id": 0,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 4,
+      "param_name": "enable_ebpaap_employee_tag",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 6,
+      "param_name": "enable_ebpaap_employee_tag_fb4a",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 62526,
+      "config_name": "ebp_clickid_ig",
+      "param_id": 7,
+      "param_name": "enable_ebpaap_employee_tag_ig4a",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 74642,
+      "config_name": "buy_with_integration_iab_config",
+      "param_id": 8,
+      "param_name": "is_test_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 75335,
+      "config_name": "ig_shoppable_everything",
+      "param_id": 6,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 75335,
+      "config_name": "ig_shoppable_everything",
+      "param_id": 9,
+      "param_name": "enable_debug_menu",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 82950,
+      "config_name": "ig4a_metaverse_quicksilver",
+      "param_id": 78,
+      "param_name": "is_internal_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 84046,
+      "config_name": "ig_android_browser_lite_v2",
+      "param_id": 5,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 85292,
+      "config_name": "igd_chat_bot",
+      "param_id": 2,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 85453,
+      "config_name": "igd_chat_pilot",
+      "param_id": 2,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 90775,
+      "config_name": "ig_dogfooding_assistant",
+      "param_id": 1,
+      "param_name": "show_in_bug_report_menu",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 97656,
+      "config_name": "igd_tools_discovery_improvement",
+      "param_id": 4,
+      "param_name": "is_dogfood_user",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 101583,
+      "config_name": "related_ads_pivots",
+      "param_id": 0,
+      "param_name": "enable_debug",
+      "value": true,
+      "reason": "linked native debug control",
+      "changed_base": true
+    },
+    {
+      "config_id": 101583,
+      "config_name": "related_ads_pivots",
+      "param_id": 1,
+      "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    }
+  ]
+}
