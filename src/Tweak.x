@@ -15,6 +15,11 @@
 #import "Features/General/SCIMessagesOnlySchedule.h"
 #include "../modules/fishhook/fishhook.h"
 
+// The MobileConfig identity descriptors are consumed while Instagram builds its
+// user session.  This second, synchronous pass complements the tweak ctor when
+// FBSharedFramework was not ready during injection.
+void SCIInstallMobileConfigEmployeeGateIfNeeded(void);
+
 #define SCI_PREF(key) [SCIUtils getBoolPref:key]
 #define SCI_SCREENSHOT_BLOCKED SCI_PREF(@"remove_screenshot_alert")
 
@@ -50,6 +55,7 @@ static BOOL sDidShowSettings;
 
 %hook IGInstagramAppDelegate
 - (_Bool)application:(UIApplication *)application willFinishLaunchingWithOptions:(id)arg2 {
+	SCIInstallMobileConfigEmployeeGateIfNeeded();
 	[[NSUserDefaults standardUserDefaults] setValue:@(sLGButtons) forKey:@"instagram.override.project.lucent.navigation"];
 	return %orig;
 }

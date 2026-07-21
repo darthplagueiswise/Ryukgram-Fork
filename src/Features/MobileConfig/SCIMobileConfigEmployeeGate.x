@@ -1,102 +1,221 @@
 // SCIMobileConfigEmployeeGate.x
 // =====================================================================
-// Força a determinação REAL de employee/test-user/dogfooding — a camada
-// UPSTREAM que decide o acesso a Internal Settings / Dogfooding.
+// Pre-session MobileConfig identity gate.
+//
+// Instagram imports _ig_is_employee and _ig_is_employee_or_test_user from
+// FBSharedFramework as DATA.  They are 16-byte descriptors, not callable C
+// functions.  Consumers load descriptor->field0 and pass that uint64_t to
+// -getBool:.  The replacement below therefore matches only those two complete
+// specifiers and delegates every other MobileConfig read to its original IMP.
+//
+// Installation has two synchronous, idempotent passes: the tweak constructor
+// and IGInstagramAppDelegate's willFinishLaunching.  The first is early enough
+// for normal session construction; the second only fills a missing descriptor
+// or class if FBSharedFramework had not yet completed loading.  There is no
+// dyld callback, class scan, foreground retry, delayed installation, or
+// preference lookup on the getBool: hot path.
 // =====================================================================
-// Validado no binário (Instagram + FBSharedFramework, UUID 4C4C4424/4C4C446A):
-//   O consumidor do descriptor _ig_is_employee_or_test_user faz:
-//     ldr x8,[slot 0x10E0394E8]  ; x8 = descriptor
-//     ldr x2,[x8]                ; x2 = descriptor->field0 (config do gate)
-//     objc_msgSend(receiver, @selector(getBool:), x2)
-//   ou seja: [<MobileConfigManager> getBool: field0]. Seletor confirmado
-//   = "getBool:" (selref 0x10F85D360). Isso é a camada de MobileConfig da
-//   SESSÃO — independente dos getters ObjC -isEmployee (downstream) que o
-//   SCIEmployeeInternal força. Por isso forçar isEmployee nunca mudou o acesso.
-//
-//   getBool: é implementado por classes ObjC do FBSharedFramework
-//   (IG/FBMobileConfigUserSessionContextManager, ...ContextManager) -> hookável
-//   por MSHookMessageEx (swizzle em runtime, SIDELOAD-SAFE: sem patch em __TEXT,
-//   sem fishhook de C, nada que crashe code-signing).
-//
-// Direcionamento (seção 11 da análise): força YES SÓ quando o argumento do
-// getBool: é o field0 (ou o próprio descriptor) de um dos gates de identidade:
-// ig_is_employee, ig_is_employee_or_test_user, ig_dogfooding_assistant.
-// Todo o resto cai em %orig -> não força gates alheios -> não crasha como o
-// "return true cego" do EasyGating.
 
 #import <substrate.h>
 #import <objc/runtime.h>
-#import "../../Utils.h"
-#import "../Dogfooding/SCIInternalGatePrefs.h"
-#import "../../SCIFileLog.h"
 #import <dlfcn.h>
+#import <stdatomic.h>
+#import <stdint.h>
+#import <stdlib.h>
+#import <string.h>
 
-static const char *kEmpSyms[] = {
+#import "../../Utils.h"
+#import "../../SCIFileLog.h"
+#import "../Dogfooding/SCIInternalGatePrefs.h"
+
+typedef uint64_t SCIMobileConfigBoolSpecifier;
+typedef BOOL (*SCIGetBoolIMP)(id, SEL, SCIMobileConfigBoolSpecifier);
+
+static const char *const kSCIEmployeeDescriptorSymbols[] = {
 	"ig_is_employee",
 	"ig_is_employee_or_test_user",
-	"ig_dogfooding_assistant",
 };
-enum { kEmpN = (int)(sizeof(kEmpSyms) / sizeof(kEmpSyms[0])) };
+enum { kSCIEmployeeDescriptorCount = 2 };
 
-static void *sDesc[kEmpN];
-static void *sField0[kEmpN];
-static BOOL  sResolved[kEmpN];
-static BOOL  sActive = NO;
-static volatile int sHitMask = 0;
+static _Atomic(BOOL) sSCIEmployeeGateEnabled = NO;
+static _Atomic(BOOL) sSCIEmployeeSpecifierResolved[kSCIEmployeeDescriptorCount];
+static _Atomic(SCIMobileConfigBoolSpecifier) sSCIEmployeeSpecifiers[kSCIEmployeeDescriptorCount];
+static _Atomic(uint32_t) sSCIEmployeeLoggedMask = 0;
 
-static inline int sciMatchEmp(void *p) {
-	if (!p) return -1;
-	for (int i = 0; i < kEmpN; i++)
-		if (sResolved[i] && (p == sDesc[i] || p == sField0[i])) return i;
-	return -1;
+typedef struct {
+	Class owner;
+	SCIGetBoolIMP original;
+} SCIGetBoolHook;
+
+static SCIGetBoolHook sSCIGetBoolHooks[4];
+static NSUInteger sSCIGetBoolHookCount = 0;
+static dispatch_once_t sSCIEmployeeGateStateOnce;
+
+static void SCIInitializeEmployeeGateState(void) {
+	dispatch_once(&sSCIEmployeeGateStateOnce, ^{
+		BOOL enabled = [SCIInternalGatePrefs employeeInternalMasterEnabled] ||
+			[SCIUtils getBoolPref:@"sci_force_mc_session_employee_gate"];
+		atomic_store_explicit(&sSCIEmployeeGateEnabled, enabled, memory_order_release);
+	});
 }
 
-static inline void sciEmpLog(int m, id self) {
-	if (!SCIFileLogIsEnabled()) return;
-	if (sHitMask & (1 << m)) return;
-	sHitMask |= (1 << m);
-	SCIFLog(@"SCIEmpGate", @"forced getBool:%s -> YES on %s", kEmpSyms[m], object_getClassName(self));
+static void SCIResolveEmployeeSpecifiers(void) {
+	for (NSUInteger i = 0; i < kSCIEmployeeDescriptorCount; i++) {
+		if (atomic_load_explicit(&sSCIEmployeeSpecifierResolved[i], memory_order_acquire)) {
+			continue;
+		}
+
+		const void *descriptor = dlsym(RTLD_DEFAULT, kSCIEmployeeDescriptorSymbols[i]);
+		if (!descriptor) continue;
+
+		SCIMobileConfigBoolSpecifier specifier =
+			*(const SCIMobileConfigBoolSpecifier *)descriptor;
+		if (!specifier) continue;
+
+		atomic_store_explicit(&sSCIEmployeeSpecifiers[i], specifier, memory_order_release);
+		atomic_store_explicit(&sSCIEmployeeSpecifierResolved[i], YES, memory_order_release);
+	}
 }
 
-#define GB_HOOK(TAG) \
-	static BOOL (*orig_##TAG)(id, SEL, void *) = NULL; \
-	static BOOL repl_##TAG(id self, SEL _cmd, void *cfg) { \
-		if (sActive) { int m = sciMatchEmp(cfg); if (m >= 0) { sciEmpLog(m, self); return YES; } } \
-		return orig_##TAG ? orig_##TAG(self, _cmd, cfg) : NO; \
+static NSInteger SCIEmployeeSpecifierIndex(SCIMobileConfigBoolSpecifier specifier) {
+	if (!specifier) return NSNotFound;
+	for (NSUInteger i = 0; i < kSCIEmployeeDescriptorCount; i++) {
+		if (!atomic_load_explicit(&sSCIEmployeeSpecifierResolved[i], memory_order_acquire)) {
+			continue;
+		}
+		if (specifier == atomic_load_explicit(&sSCIEmployeeSpecifiers[i], memory_order_acquire)) {
+			return (NSInteger)i;
+		}
+	}
+	return NSNotFound;
+}
+
+static void SCILogEmployeeGateHit(NSInteger index, id object) {
+	if (index == NSNotFound || !SCIFileLogIsEnabled()) return;
+	uint32_t bit = UINT32_C(1) << (uint32_t)index;
+	uint32_t seen = atomic_fetch_or_explicit(&sSCIEmployeeLoggedMask, bit, memory_order_relaxed);
+	if (seen & bit) return;
+	SCIFLog(@"SCIEmpGate", @"forced -getBool: %s on %s",
+		kSCIEmployeeDescriptorSymbols[index], object_getClassName(object));
+}
+
+static SCIGetBoolIMP SCIOriginalGetBoolForObject(id object) {
+	for (Class cls = object_getClass(object); cls; cls = class_getSuperclass(cls)) {
+		for (NSUInteger i = 0; i < sSCIGetBoolHookCount; i++) {
+			if (sSCIGetBoolHooks[i].owner == cls) return sSCIGetBoolHooks[i].original;
+		}
+	}
+	return NULL;
+}
+
+static BOOL SCIEmployeeGateGetBool(id self, SEL _cmd,
+	SCIMobileConfigBoolSpecifier specifier) {
+	if (atomic_load_explicit(&sSCIEmployeeGateEnabled, memory_order_acquire)) {
+		NSInteger match = SCIEmployeeSpecifierIndex(specifier);
+		if (match != NSNotFound) {
+			SCILogEmployeeGateHit(match, self);
+			return YES;
+		}
 	}
 
-GB_HOOK(a)
-GB_HOOK(b)
-GB_HOOK(c)
-GB_HOOK(d)
+	SCIGetBoolIMP original = SCIOriginalGetBoolForObject(self);
+	return original ? original(self, _cmd, specifier) : NO;
+}
 
-static void sciHookGetBool(const char *clsName, IMP repl, IMP *orig) {
-	Class c = objc_getClass(clsName);
-	if (!c) return;
-	SEL sel = @selector(getBool:);
-	if (!class_getInstanceMethod(c, sel)) return;
-	@try { MSHookMessageEx(c, sel, repl, orig); } @catch (__unused NSException *e) {}
+static Class SCIGetBoolDeclaringClass(Class cls, SEL selector) {
+	for (Class current = cls; current; current = class_getSuperclass(current)) {
+		unsigned int methodCount = 0;
+		Method *methods = class_copyMethodList(current, &methodCount);
+		BOOL declaresSelector = NO;
+		for (unsigned int i = 0; methods && i < methodCount; i++) {
+			if (method_getName(methods[i]) == selector) {
+				declaresSelector = YES;
+				break;
+			}
+		}
+		free(methods);
+		if (declaresSelector) return current;
+	}
+	return Nil;
+}
+
+static char SCIUnqualifiedObjCType(const char *encoding) {
+	if (!encoding) return '\0';
+	while (*encoding == 'r' || *encoding == 'n' || *encoding == 'N' ||
+		   *encoding == 'o' || *encoding == 'O' || *encoding == 'R' ||
+		   *encoding == 'V') {
+		encoding++;
+	}
+	return *encoding;
+}
+
+static BOOL SCIGetBoolABIMatches(Method method) {
+	if (!method || method_getNumberOfArguments(method) != 3) return NO;
+	char returnType[16] = {0};
+	char argumentType[16] = {0};
+	method_getReturnType(method, returnType, sizeof(returnType));
+	method_getArgumentType(method, 2, argumentType, sizeof(argumentType));
+	char result = SCIUnqualifiedObjCType(returnType);
+	char parameter = SCIUnqualifiedObjCType(argumentType);
+	return (result == 'B' || result == 'c') && (parameter == 'Q' || parameter == 'q');
+}
+
+static BOOL SCIAlreadyHooksGetBoolOwner(Class owner) {
+	for (NSUInteger i = 0; i < sSCIGetBoolHookCount; i++) {
+		if (sSCIGetBoolHooks[i].owner == owner) return YES;
+	}
+	return NO;
+}
+
+static void SCIInstallGetBoolHookOnClass(const char *className) {
+	if (sSCIGetBoolHookCount >= sizeof(sSCIGetBoolHooks) / sizeof(sSCIGetBoolHooks[0])) {
+		return;
+	}
+
+	Class requestedClass = objc_getClass(className);
+	SEL selector = @selector(getBool:);
+	Class owner = SCIGetBoolDeclaringClass(requestedClass, selector);
+	if (!owner || SCIAlreadyHooksGetBoolOwner(owner)) return;
+
+	Method method = class_getInstanceMethod(owner, selector);
+	if (!SCIGetBoolABIMatches(method)) return;
+
+	SCIGetBoolIMP original = (SCIGetBoolIMP)method_getImplementation(method);
+	if (!original) return;
+	MSHookMessageEx(owner, selector, (IMP)SCIEmployeeGateGetBool, (IMP *)&original);
+	if (!original) return;
+
+	sSCIGetBoolHooks[sSCIGetBoolHookCount++] = (SCIGetBoolHook){
+		.owner = owner,
+		.original = original,
+	};
+}
+
+void SCIInstallMobileConfigEmployeeGateIfNeeded(void) {
+	SCIInitializeEmployeeGateState();
+	if (!atomic_load_explicit(&sSCIEmployeeGateEnabled, memory_order_acquire)) return;
+
+	SCIResolveEmployeeSpecifiers();
+	SCIInstallGetBoolHookOnClass("FBMobileConfigUserSessionContextManager");
+	SCIInstallGetBoolHookOnClass("IGMobileConfigUserSessionContextManager");
+	SCIInstallGetBoolHookOnClass("FBMobileConfigContextManager");
+	SCIInstallGetBoolHookOnClass("IGMobileConfigContextManager");
+
+	if (SCIFileLogIsEnabled()) {
+		NSUInteger resolved = 0;
+		for (NSUInteger i = 0; i < kSCIEmployeeDescriptorCount; i++) {
+			if (atomic_load_explicit(&sSCIEmployeeSpecifierResolved[i], memory_order_acquire)) {
+				resolved++;
+			}
+		}
+		SCIFLog(@"SCIEmpGate", @"installed resolved=%lu/%u hooked=%lu",
+			(unsigned long)resolved, kSCIEmployeeDescriptorCount,
+			(unsigned long)sSCIGetBoolHookCount);
+	}
 }
 
 %ctor {
 	@autoreleasepool {
-		sActive = [SCIInternalGatePrefs employeeInternalMasterEnabled]
-		       || [SCIUtils getBoolPref:@"sci_force_mc_session_employee_gate"];
-		if (!sActive) return;
-
-		for (int i = 0; i < kEmpN; i++) {
-			void *d = dlsym(RTLD_DEFAULT, kEmpSyms[i]);
-			if (!d) continue;
-			sDesc[i] = d; sField0[i] = *(void **)d; sResolved[i] = YES;
-		}
-
-		sciHookGetBool("IGMobileConfigUserSessionContextManager", (IMP)repl_a, (IMP *)&orig_a);
-		sciHookGetBool("FBMobileConfigUserSessionContextManager", (IMP)repl_b, (IMP *)&orig_b);
-		sciHookGetBool("IGMobileConfigContextManager",            (IMP)repl_c, (IMP *)&orig_c);
-		sciHookGetBool("FBMobileConfigContextManager",            (IMP)repl_d, (IMP *)&orig_d);
-
-		if (SCIFileLogIsEnabled())
-			SCIFLog(@"SCIEmpGate", @"installed active=%d resolved=%d/%d",
-			        sActive, sResolved[0] + sResolved[1] + sResolved[2], kEmpN);
+		SCIInstallMobileConfigEmployeeGateIfNeeded();
 	}
 }
