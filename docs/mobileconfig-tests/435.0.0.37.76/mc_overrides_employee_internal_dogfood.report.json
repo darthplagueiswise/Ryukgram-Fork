@@ -1,6 +1,6 @@
 {
   "profile": "employee-internal-dogfood",
-  "selected_count": 89,
+  "selected_count": 92,
   "selected": [
     {
       "config_id": 28538,
@@ -115,6 +115,15 @@
       "config_name": "ig_is_employee",
       "param_id": 0,
       "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 56474,
+      "config_name": "ig_is_employee",
+      "param_id": 1,
+      "param_name": "is_employee_or_employee_test_account",
       "value": true,
       "reason": "identity parameter",
       "changed_base": true
@@ -536,6 +545,15 @@
     {
       "config_id": 88084,
       "config_name": "ig_android_music_picker_transparency",
+      "param_id": 13,
+      "param_name": "should_show_multi_audio_variants_for_dogfooding_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 88084,
+      "config_name": "ig_android_music_picker_transparency",
       "param_id": 14,
       "param_name": "force_override_song_eligibility_dogfooding",
       "value": true,
@@ -691,6 +709,15 @@
       "config_name": "ig_android_stories_lipsync",
       "param_id": 4,
       "param_name": "is_internal_only",
+      "value": true,
+      "reason": "internal/dogfood parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 105366,
+      "config_name": "xav_ig_4a_switcher_f3_uid",
+      "param_id": 1,
+      "param_name": "should_show_whatsapp_accounts_dogfooding",
       "value": true,
       "reason": "internal/dogfood parameter",
       "changed_base": true

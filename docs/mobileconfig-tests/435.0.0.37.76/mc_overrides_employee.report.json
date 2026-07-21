@@ -1,6 +1,6 @@
 {
   "profile": "employee",
-  "selected_count": 20,
+  "selected_count": 21,
   "selected": [
     {
       "config_id": 28538,
@@ -52,6 +52,15 @@
       "config_name": "ig_is_employee",
       "param_id": 0,
       "param_name": "is_employee",
+      "value": true,
+      "reason": "identity parameter",
+      "changed_base": true
+    },
+    {
+      "config_id": 56474,
+      "config_name": "ig_is_employee",
+      "param_id": 1,
+      "param_name": "is_employee_or_employee_test_account",
       "value": true,
       "reason": "identity parameter",
       "changed_base": true
