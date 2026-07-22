@@ -44,13 +44,13 @@ static NSString *SCIMCNorm(NSString *s) {
     NSMutableArray<NSURL *> *roots = [NSMutableArray array];
     // IG's per-account data lives in the app's OWN Documents (same base
     // SCIDeviceIdentity/wipeDocuments uses). App-group containers are fallbacks.
-    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    if (docs.length)
-        [roots addObject:[[NSURL fileURLWithPath:docs] URLByAppendingPathComponent:@"mobileconfig"]];
     for (NSString *g in @[@"group.com.burbn.instagram", @"group.com.burbn.family"]) {
         NSURL *c = [fm containerURLForSecurityApplicationGroupIdentifier:g];
         if (c) [roots addObject:[[c URLByAppendingPathComponent:@"Documents"] URLByAppendingPathComponent:@"mobileconfig"]];
     }
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (docs.length)
+        [roots addObject:[[NSURL fileURLWithPath:docs] URLByAppendingPathComponent:@"mobileconfig"]];
     return roots;
 }
 
@@ -127,6 +127,15 @@ static NSString *SCIMCNorm(NSString *s) {
     return nil;
 }
 
+- (NSData *)bundledMappingData {
+    NSBundle *b = SCILocalizationBundle();
+    for (NSString *ext in @[@"json", @"bin"]) {
+        NSString *p = [b pathForResource:@"id_name_mapping" ofType:ext];
+        if (p) { NSData *d = [NSData dataWithContentsOfFile:p]; if (d.length) return d; }
+    }
+    return nil;
+}
+
 - (void)reload {
     _ov = [NSMutableDictionary dictionary];
     _names = [NSMutableDictionary dictionary];
@@ -150,10 +159,7 @@ static NSString *SCIMCNorm(NSString *s) {
     // mapping: user data dir first, then root, then bundle
     NSData *md = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (!md) md = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"id_name_mapping.json"]];
-    if (!md) {
-        NSString *bp = [SCILocalizationBundle() pathForResource:@"id_name_mapping" ofType:@"json"];
-        if (bp) md = [NSData dataWithContentsOfFile:bp];
-    }
+    if (!md) md = [self bundledMappingData];
     // Seed the mapping into the user data dir so Instagram's own internal editor
     // can read names too (only if missing there).
     if (md) {
@@ -277,13 +283,11 @@ static NSString *SCIMCNorm(NSString *s) {
 }
 
 - (BOOL)deployBundledMappingOverwrite:(NSError **)error {
-    NSString *p = [SCILocalizationBundle() pathForResource:@"id_name_mapping" ofType:@"json"];
-    if (!p) {
-        if (error) *error = [NSError errorWithDomain:@"SCIMC" code:404 userInfo:@{NSLocalizedDescriptionKey:@"bundled id_name_mapping.json not found"}];
+    NSData *d = [self bundledMappingData];
+    if (!d) {
+        if (error) *error = [NSError errorWithDomain:@"SCIMC" code:404 userInfo:@{NSLocalizedDescriptionKey:@"bundled id_name_mapping (.json/.bin) not in RyukGram.bundle"}];
         return NO;
     }
-    NSData *d = [NSData dataWithContentsOfFile:p];
-    if (!d) return NO;
     BOOL ok = [d writeToURL:[self.userDataDir URLByAppendingPathComponent:@"id_name_mapping.json"] options:NSDataWritingAtomic error:error];
     [self reload];
     return ok;
@@ -365,8 +369,12 @@ static NSString *SCIMCNorm(NSString *s) {
     NSURL *dir = st.userDataDir;
     BOOL hasOv = [NSFileManager.defaultManager fileExistsAtPath:[dir URLByAppendingPathComponent:@"mc_overrides.json"].path];
     BOOL hasMap = [NSFileManager.defaultManager fileExistsAtPath:[dir URLByAppendingPathComponent:@"id_name_mapping.json"].path];
-    NSString *msg = [NSString stringWithFormat:@"user id: %@\n\ndata dir:\n%@\n\nconfigs loaded: %lu\nmc_overrides.json here: %@\nid_name_mapping.json here: %@",
-        uid, dir.path, (unsigned long)st.configIDs.count, hasOv ? @"yes" : @"NO", hasMap ? @"yes" : @"NO"];
+    NSBundle *rb = SCILocalizationBundle();
+    NSString *bj = [rb pathForResource:@"id_name_mapping" ofType:@"json"];
+    NSString *bb = [rb pathForResource:@"id_name_mapping" ofType:@"bin"];
+    NSString *msg = [NSString stringWithFormat:@"user id: %@\n\ndata dir:\n%@\n\nconfigs: %lu | ov:%@ map:%@\n\nbundle:\n%@\nmap.json:%@ map.bin:%@",
+        uid, dir.path, (unsigned long)st.configIDs.count, hasOv ? @"y" : @"N", hasMap ? @"y" : @"N",
+        rb.bundlePath ?: @"(nil)", bj ? @"y" : @"N", bb ? @"y" : @"N"];
     [self toast:msg];
 }
 
