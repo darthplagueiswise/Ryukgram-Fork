@@ -1,4 +1,5 @@
 #import "SCISettingsSections.h"
+#import "SCIMCBrowser.h"
 #import "../SCISymbolsBrowserViewController.h"
 #import "../SCIIGDSLauncherConfigViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
@@ -379,6 +380,10 @@ static SCISetting *SCIEmployeeInternalSwitch(
 					subtitle:@""
 					icon:[SCISymbol symbolWithName:@"wand.and.stars"]
 					viewController:[SCIIGDSLauncherConfigViewController new]],
+				[SCISetting navigationCellWithTitle:@"MobileConfig Overrides"
+					subtitle:@"Browse every config/param by name; toggle overrides, export mc_overrides.json"
+					icon:[SCISymbol symbolWithName:@"slider.horizontal.3"]
+					viewController:[SCIMCBrowserListController new]],
 			]
 		},
 		@{
