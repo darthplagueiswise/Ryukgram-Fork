@@ -1,5 +1,6 @@
 // SCIMCBrowser.m — RyukGram-Fork
 #import "SCIMCBrowser.h"
+#import "../../Localization/SCILocalization.h"
 #import <objc/message.h>
 
 #pragma mark - helpers
@@ -125,8 +126,15 @@ static NSString *SCIMCNorm(NSString *s) {
     NSData *md = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (!md) md = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (!md) {
-        NSString *bp = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json"];
+        NSString *bp = [SCILocalizationBundle() pathForResource:@"id_name_mapping" ofType:@"json"];
         if (bp) md = [NSData dataWithContentsOfFile:bp];
+    }
+    // Seed the mapping into the user data dir so Instagram's own internal editor
+    // can read names too (only if missing there).
+    if (md) {
+        NSURL *seed = [dir URLByAppendingPathComponent:@"id_name_mapping.json"];
+        if (![NSFileManager.defaultManager fileExistsAtPath:seed.path])
+            [md writeToURL:seed options:NSDataWritingAtomic error:nil];
     }
     if (md) {
         id j = [NSJSONSerialization JSONObjectWithData:md options:0 error:nil];
@@ -244,7 +252,7 @@ static NSString *SCIMCNorm(NSString *s) {
 }
 
 - (BOOL)deployBundledMappingOverwrite:(NSError **)error {
-    NSString *p = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json"];
+    NSString *p = [SCILocalizationBundle() pathForResource:@"id_name_mapping" ofType:@"json"];
     if (!p) {
         if (error) *error = [NSError errorWithDomain:@"SCIMC" code:404 userInfo:@{NSLocalizedDescriptionKey:@"bundled id_name_mapping.json not found"}];
         return NO;

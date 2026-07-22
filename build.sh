@@ -119,7 +119,8 @@ copy_bundle_assets() {
 		-iname '*.jpg' -o \
 		-iname '*.jpeg' -o \
 		-iname '*.pdf' -o \
-		-iname '*.bin' \
+		-iname '*.bin' -o \
+		-iname '*.json' \
 	\) -exec cp {} "$dest/" \;
 }
 
