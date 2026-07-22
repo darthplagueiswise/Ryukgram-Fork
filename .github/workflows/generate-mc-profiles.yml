@@ -1,0 +1,36 @@
+name: Generate MobileConfig profiles
+
+on:
+  pull_request:
+    branches:
+      - experimental4
+    paths:
+      - tools/reverse/generation-input/mc_overrides_base.json
+      - tools/reverse/build_named_mc_profiles.py
+      - Resources/mobileconfig/id_name_mapping.json
+      - .github/workflows/generate-mc-profiles.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate and validate profiles
+        run: |
+          python3 tools/reverse/build_named_mc_profiles.py \
+            --base tools/reverse/generation-input/mc_overrides_base.json \
+            --mapping Resources/mobileconfig/id_name_mapping.json \
+            --outdir generated-mc-profiles
+
+      - name: Upload profiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: mc-overrides-profiles
+          path: generated-mc-profiles/
+          if-no-files-found: error
+          retention-days: 7
