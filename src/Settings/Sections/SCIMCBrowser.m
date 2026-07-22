@@ -196,8 +196,6 @@ static BOOL SCIParseOverrideLine(NSString *line,
     [self bootstrapMappingIfNeeded];
     NSURL *dir = self.mobileconfigDir;
 
-    // Mapping format used by Piko/InstaEclipse:
-    // ["cid:config_name:idx:param_name:idx:param_name:..."]
     NSData *mappingData = [NSData dataWithContentsOfURL:
         [dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (mappingData) {
@@ -361,8 +359,6 @@ static BOOL SCIParseOverrideLine(NSString *line,
 }
 
 - (BOOL)save:(NSError **)error {
-    // Canonicalize every known entry to the rich internal form:
-    // "cid:config_name" -> ["idx: param_name: value"]
     NSMutableDictionary<NSNumber *, NSMutableDictionary<NSNumber *, NSDictionary<NSString *, NSString *> *> *> *configs =
         [NSMutableDictionary dictionary];
 
@@ -417,10 +413,7 @@ static BOOL SCIParseOverrideLine(NSString *line,
 
     NSURL *destination = [self.mobileconfigDir URLByAppendingPathComponent:@"mc_overrides.json"];
     BOOL written = [data writeToURL:destination options:NSDataWritingAtomic error:error];
-    if (written) {
-        _overrides = [output mutableCopy];
-        [_overrides removeObjectForKey:@"_qe_overrides_"];
-    }
+    if (written) [self reload];
     return written;
 }
 
