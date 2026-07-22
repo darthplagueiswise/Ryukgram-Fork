@@ -1,14 +1,31 @@
 // SCIMCBrowser.m — RyukGram-Fork
 #import "SCIMCBrowser.h"
-#import <Preferences/PSSpecifier.h>
+#import <objc/message.h>
+
+#pragma mark - helpers
+
+// lowercase + strip '_' and whitespace, so "internal settings" matches
+// "is_internal_settings_enabled".
+static NSString *SCIMCNorm(NSString *s) {
+    NSMutableString *m = [s.lowercaseString mutableCopy];
+    [m replaceOccurrencesOfString:@"_" withString:@"" options:0 range:NSMakeRange(0, m.length)];
+    NSCharacterSet *ws = NSCharacterSet.whitespaceCharacterSet;
+    NSMutableString *o = [NSMutableString stringWithCapacity:m.length];
+    for (NSUInteger i = 0; i < m.length; i++) {
+        unichar c = [m characterAtIndex:i];
+        if (![ws characterIsMember:c]) [o appendFormat:@"%C", c];
+    }
+    return o;
+}
 
 #pragma mark - Store
 
 @interface SCIMCOverrideStore () {
-    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *_overrides; // "<cid>:" -> ["<idx>: : val"]
-    NSMutableDictionary<NSNumber *, NSString *> *_names;                        // cid -> config name
-    NSMutableDictionary<NSNumber *, NSMutableDictionary<NSNumber *, NSString *> *> *_params; // cid -> {idx->name}
-    NSArray<NSNumber *> *_sortedIDs;
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *_ov;   // "<cid>:<name>" -> lines
+    NSMutableDictionary<NSNumber *, NSString *> *_names;
+    NSMutableDictionary<NSNumber *, NSMutableDictionary<NSNumber *, NSString *> *> *_params;
+    NSMutableDictionary<NSNumber *, NSString *> *_norm;                   // cid -> normalized haystack
+    NSArray<NSNumber *> *_ids;
 }
 @end
 
@@ -20,410 +37,399 @@
     return s;
 }
 
-// Resolve <AppGroup>/Documents/mobileconfig/, creating it if needed.
-- (NSURL *)mobileconfigDir {
+- (NSURL *)mobileconfigRoot {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSURL *base = nil;
-    NSArray *candidates = @[ SCI_APPGROUP, @"group.com.instagram.instagram", @"group.com.burbn.instagram" ];
-    for (NSString *g in candidates) {
+    for (NSString *g in @[@"group.com.burbn.instagram", @"group.com.instagram.instagram"]) {
         NSURL *c = [fm containerURLForSecurityApplicationGroupIdentifier:g];
         if (c) { base = c; break; }
     }
-    if (!base) // fallback: app's own Documents
+    if (!base)
         base = [[fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject].URLByDeletingLastPathComponent;
     NSURL *dir = [[base URLByAppendingPathComponent:@"Documents"] URLByAppendingPathComponent:@"mobileconfig"];
     [fm createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:nil];
     return dir;
 }
 
-// Write/overwrite id_name_mapping.json in the mobileconfig dir.
-- (BOOL)writeMappingData:(NSData *)data error:(NSError **)error {
-    NSURL *dst = [self.mobileconfigDir URLByAppendingPathComponent:@"id_name_mapping.json"];
-    return [data writeToURL:dst options:NSDataWritingAtomic error:error];
-}
-
-// Copy bundled mapping (packaged with the tweak) into place, overwriting.
-- (BOOL)deployBundledMappingOverwrite:(NSError **)error {
-    NSString *p = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json"];
-    if (!p) // also try a mobileconfig subdir inside the bundle
-        p = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json" inDirectory:@"mobileconfig"];
-    if (!p) {
-        if (error) *error = [NSError errorWithDomain:@"SCIMC" code:404
-            userInfo:@{NSLocalizedDescriptionKey:@"bundled id_name_mapping.json not found"}];
-        return NO;
+// The correct location IG reads from: <mobileconfig>/<userid>.data/. Pick the
+// most-recently-modified *.data dir (the active account). If none exists, try the
+// current IG user id; else fall back to the mobileconfig root.
+- (NSURL *)userDataDir {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSURL *root = self.mobileconfigRoot;
+    NSArray<NSURL *> *items = [fm contentsOfDirectoryAtURL:root
+        includingPropertiesForKeys:@[NSURLContentModificationDateKey, NSURLIsDirectoryKey]
+                           options:0 error:nil];
+    NSURL *best = nil; NSDate *bestDate = nil;
+    for (NSURL *u in items) {
+        if (![u.lastPathComponent hasSuffix:@".data"]) continue;
+        NSNumber *isDir = nil; [u getResourceValue:&isDir forKey:NSURLIsDirectoryKey error:nil];
+        if (!isDir.boolValue) continue;
+        NSDate *d = nil; [u getResourceValue:&d forKey:NSURLContentModificationDateKey error:nil];
+        if (!best || (d && [d compare:bestDate] == NSOrderedDescending)) { best = u; bestDate = d ?: NSDate.date; }
     }
-    NSData *d = [NSData dataWithContentsOfFile:p];
-    return d ? [self writeMappingData:d error:error] : NO;
+    if (best) return best;
+    NSString *uid = [self currentIGUserID];
+    if (uid.length) {
+        NSURL *d = [root URLByAppendingPathComponent:[uid stringByAppendingString:@".data"]];
+        [fm createDirectoryAtURL:d withIntermediateDirectories:YES attributes:nil error:nil];
+        return d;
+    }
+    return root;
 }
 
-// If the mapping is missing or a dummy (<10KB, mirrors Piko's size guard), seed it
-// from the tweak bundle so names show up on first run.
-- (void)bootstrapMappingIfNeeded {
-    NSURL *m = [self.mobileconfigDir URLByAppendingPathComponent:@"id_name_mapping.json"];
-    NSNumber *size = nil; [m getResourceValue:&size forKey:NSURLFileSizeKey error:nil];
-    if (!size || size.longLongValue < 10 * 1024)
-        [self deployBundledMappingOverwrite:nil];
+// Best-effort current user pk from the IG runtime; safe if it fails.
+- (NSString *)currentIGUserID {
+    @try {
+        Class ai = NSClassFromString(@"IGAppController");
+        if ([ai respondsToSelector:@selector(sharedInstance)]) {
+            id app = ((id(*)(id, SEL))objc_msgSend)(ai, @selector(sharedInstance));
+            SEL s = NSSelectorFromString(@"currentUser");
+            if ([app respondsToSelector:s]) {
+                id user = ((id(*)(id, SEL))objc_msgSend)(app, s);
+                for (NSString *k in @[@"instagramUserID", @"userID", @"pk"]) {
+                    SEL g = NSSelectorFromString(k);
+                    if ([user respondsToSelector:g]) {
+                        id v = ((id(*)(id, SEL))objc_msgSend)(user, g);
+                        if ([v isKindOfClass:NSString.class]) return v;
+                        if ([v isKindOfClass:NSNumber.class]) return [v stringValue];
+                    }
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
 }
 
 - (void)reload {
-    _overrides = [NSMutableDictionary dictionary];
+    _ov = [NSMutableDictionary dictionary];
     _names = [NSMutableDictionary dictionary];
     _params = [NSMutableDictionary dictionary];
+    _norm = [NSMutableDictionary dictionary];
 
-    [self bootstrapMappingIfNeeded];
-    NSURL *dir = self.mobileconfigDir;
+    NSURL *dir = self.userDataDir;
+    NSURL *root = self.mobileconfigRoot;
 
-    // 1) current overrides
+    // overrides (from the user data dir)
     NSData *od = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"mc_overrides.json"]];
     if (od) {
         id j = [NSJSONSerialization JSONObjectWithData:od options:0 error:nil];
-        if ([j isKindOfClass:NSDictionary.class]) {
-            [(NSDictionary *)j enumerateKeysAndObjectsUsingBlock:^(id k, id v, BOOL *stop) {
+        if ([j isKindOfClass:NSDictionary.class])
+            [(NSDictionary *)j enumerateKeysAndObjectsUsingBlock:^(NSString *k, id v, BOOL *st) {
                 if ([k isEqualToString:@"_qe_overrides_"]) return;
-                if ([v isKindOfClass:NSArray.class])
-                    _overrides[k] = [(NSArray *)v mutableCopy];
+                if ([v isKindOfClass:NSArray.class]) _ov[k] = [(NSArray *)v mutableCopy];
             }];
-        }
     }
 
-    // 2) id-name mapping: JSON array of "cid:cfgname:idx:pname:idx:pname:..."
+    // mapping: user data dir first, then root, then bundle
     NSData *md = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
+    if (!md) md = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"id_name_mapping.json"]];
+    if (!md) {
+        NSString *bp = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json"];
+        if (bp) md = [NSData dataWithContentsOfFile:bp];
+    }
     if (md) {
         id j = [NSJSONSerialization JSONObjectWithData:md options:0 error:nil];
-        if ([j isKindOfClass:NSArray.class]) {
-            for (NSString *entry in (NSArray *)j) {
-                if (![entry isKindOfClass:NSString.class]) continue;
-                NSArray<NSString *> *p = [entry componentsSeparatedByString:@":"];
+        if ([j isKindOfClass:NSArray.class])
+            for (NSString *e in (NSArray *)j) {
+                if (![e isKindOfClass:NSString.class]) continue;
+                NSArray<NSString *> *p = [e componentsSeparatedByString:@":"];
                 if (p.count < 2) continue;
-                NSInteger cid = p[0].integerValue;
+                NSInteger cid = [p[0] integerValue];
                 _names[@(cid)] = p[1];
                 NSMutableDictionary *pm = [NSMutableDictionary dictionary];
                 for (NSUInteger i = 2; i + 1 < p.count; i += 2)
-                    pm[@(p[i].integerValue)] = p[i + 1];
+                    pm[@([p[i] integerValue])] = p[i + 1];
                 _params[@(cid)] = pm;
             }
-        }
     }
-    _sortedIDs = [_names.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    _ids = [_names.allKeys sortedArrayUsingSelector:@selector(compare:)];
 }
 
-- (NSArray<NSNumber *> *)configIDs { return _sortedIDs ?: @[]; }
+- (NSArray<NSNumber *> *)configIDs { return _ids ?: @[]; }
 - (NSString *)nameForConfig:(NSInteger)cid { return _names[@(cid)] ?: [NSString stringWithFormat:@"config %ld", (long)cid]; }
 - (NSDictionary *)paramsForConfig:(NSInteger)cid { return _params[@(cid)] ?: @{}; }
+- (NSString *)nameForConfig:(NSInteger)cid param:(NSInteger)idx { return _params[@(cid)][@(idx)] ?: [NSString stringWithFormat:@"param %ld", (long)idx]; }
+
+- (NSString *)normForConfig:(NSNumber *)cid {
+    NSString *n = _norm[cid];
+    if (n) return n;
+    NSMutableString *hay = [NSMutableString stringWithFormat:@"%@ %@", [self nameForConfig:cid.integerValue], cid];
+    for (NSString *pn in [_params[cid] allValues]) [hay appendFormat:@" %@", pn];
+    n = SCIMCNorm(hay); _norm[cid] = n; return n;
+}
 
 - (NSArray<NSNumber *> *)configIDsMatching:(NSString *)q {
     if (q.length == 0) return self.configIDs;
-    NSString *lq = q.lowercaseString;
-    NSMutableArray *out = [NSMutableArray array];
-    for (NSNumber *cid in _sortedIDs) {
-        if ([[self nameForConfig:cid.integerValue].lowercaseString containsString:lq] ||
-            [cid.stringValue containsString:lq]) { [out addObject:cid]; continue; }
-        for (NSString *pn in [_params[cid] allValues])
-            if ([pn.lowercaseString containsString:lq]) { [out addObject:cid]; break; }
+    NSMutableArray<NSString *> *tokens = [NSMutableArray array];
+    for (NSString *t in [q componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]) {
+        NSString *nt = SCIMCNorm(t);
+        if (nt.length) [tokens addObject:nt];
+    }
+    if (tokens.count == 0) return self.configIDs;
+    NSMutableArray<NSNumber *> *out = [NSMutableArray array];
+    for (NSNumber *cid in _ids) {
+        NSString *hay = [self normForConfig:cid];
+        BOOL all = YES;
+        for (NSString *t in tokens) { if (![hay containsString:t]) { all = NO; break; } }
+        if (all) [out addObject:cid];
     }
     return out;
 }
 
-// override list line format:  "<idx>: : <value>"
-- (nullable NSString *)overrideValueForConfig:(NSInteger)cid param:(NSInteger)idx {
-    NSArray *list = _overrides[[NSString stringWithFormat:@"%ld:", (long)cid]];
+- (NSString *)keyForConfig:(NSInteger)cid {
+    NSString *nm = _names[@(cid)];
+    return nm.length ? [NSString stringWithFormat:@"%ld:%@", (long)cid, nm] : [NSString stringWithFormat:@"%ld:", (long)cid];
+}
+
+- (nullable NSString *)stringValueForConfig:(NSInteger)cid param:(NSInteger)idx {
+    NSArray *list = _ov[[self keyForConfig:cid]];
     for (NSString *line in list) {
         NSArray<NSString *> *seg = [line componentsSeparatedByString:@":"];
-        if (seg.count >= 3 && [seg[0] integerValue] == idx && [seg[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].integerValue == idx)
-            return [seg[2] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (seg.count >= 3 && [[seg[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] integerValue] == idx)
+            return [seg.lastObject stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     }
     return nil;
 }
 
-- (void)setOverrideValue:(nullable NSString *)value forConfig:(NSInteger)cid param:(NSInteger)idx {
-    NSString *key = [NSString stringWithFormat:@"%ld:", (long)cid];
-    NSMutableArray *list = _overrides[key];
-    if (!list) { list = [NSMutableArray array]; _overrides[key] = list; }
-    // remove existing line for idx
+- (SCIMCOverrideState)stateForConfig:(NSInteger)cid param:(NSInteger)idx {
+    NSString *v = [self stringValueForConfig:cid param:idx];
+    if (!v) return SCIMCOverrideSYS;
+    return [v isEqualToString:@"true"] ? SCIMCOverrideON : SCIMCOverrideOFF;
+}
+
+- (void)setState:(SCIMCOverrideState)state forConfig:(NSInteger)cid param:(NSInteger)idx {
+    NSString *key = [self keyForConfig:cid];
+    NSMutableArray *list = _ov[key] ?: [NSMutableArray array];
     NSMutableArray *keep = [NSMutableArray array];
     for (NSString *line in list) {
-        NSArray<NSString *> *seg = [line componentsSeparatedByString:@":"];
-        NSInteger li = seg.count ? [seg[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].integerValue : -1;
+        NSInteger li = [[[line componentsSeparatedByString:@":"][0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] integerValue];
         if (li != idx) [keep addObject:line];
     }
-    if (value) [keep addObject:[NSString stringWithFormat:@"%ld: : %@", (long)idx, value]];
-    // keep descending by index (matches the user's file style)
+    if (state != SCIMCOverrideSYS) {
+        NSString *pn = [self nameForConfig:cid param:idx];
+        [keep addObject:[NSString stringWithFormat:@"%ld: %@: %@", (long)idx, pn, state == SCIMCOverrideON ? @"true" : @"false"]];
+    }
+    // descending by index
     [keep sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
         NSInteger ia = [[a componentsSeparatedByString:@":"][0] integerValue];
         NSInteger ib = [[b componentsSeparatedByString:@":"][0] integerValue];
-        return (ia < ib) ? NSOrderedDescending : (ia > ib ? NSOrderedAscending : NSOrderedSame);
+        return ia < ib ? NSOrderedDescending : (ia > ib ? NSOrderedAscending : NSOrderedSame);
     }];
-    if (keep.count) _overrides[key] = keep; else [_overrides removeObjectForKey:key];
+    if (keep.count) _ov[key] = keep; else [_ov removeObjectForKey:key];
 }
 
+// Ordered write, _qe_overrides_ last, compact — matches the internal file exactly.
 - (BOOL)save:(NSError **)error {
-    // Emit the correct internal format: keys "<num>:<configName>", values
-    // "<idx>: <paramName>: <value>" (names looked up from the loaded mapping),
-    // matching real internal backups. _qe_overrides_ stays last.
-    NSMutableDictionary *out = [NSMutableDictionary dictionary];
-    [_overrides enumerateKeysAndObjectsUsingBlock:^(NSString *k, NSArray *v, BOOL *s){
-        NSInteger cid = k.integerValue;
-        NSString *cname = _names[@(cid)];
-        NSString *namedKey = cname.length ? [NSString stringWithFormat:@"%ld:%@", (long)cid, cname]
-                                          : [NSString stringWithFormat:@"%ld:", (long)cid];
-        NSDictionary *pm = _params[@(cid)] ?: @{};
-        NSMutableArray *nv = [NSMutableArray array];
-        for (NSString *line in v) {
-            NSArray<NSString *> *seg = [line componentsSeparatedByString:@":"];
-            if (seg.count < 3) { [nv addObject:line]; continue; }
-            NSInteger idx = [seg[0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].integerValue;
-            NSString *val = [seg[2] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-            NSString *pn = pm[@(idx)] ?: @"";
-            [nv addObject:[NSString stringWithFormat:@"%ld: %@: %@", (long)idx, pn, val]];
-        }
-        out[namedKey] = nv;
+    NSMutableString *json = [NSMutableString stringWithString:@"{"];
+    NSArray *keys = [_ov.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [@([a integerValue]) compare:@([b integerValue])];
     }];
-    out[@"_qe_overrides_"] = @[];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:out options:0 error:error];
-    if (!data) return NO;
-    NSURL *dst = [self.mobileconfigDir URLByAppendingPathComponent:@"mc_overrides.json"];
-    return [data writeToURL:dst options:NSDataWritingAtomic error:error];
+    BOOL first = YES;
+    for (NSString *k in keys) {
+        if (!first) [json appendString:@","];
+        first = NO;
+        NSData *kd = [NSJSONSerialization dataWithJSONObject:@[k] options:0 error:nil];
+        NSString *ks = [[NSString alloc] initWithData:kd encoding:NSUTF8StringEncoding];
+        ks = [ks substringWithRange:NSMakeRange(1, ks.length - 2)]; // strip [ ]
+        NSData *vd = [NSJSONSerialization dataWithJSONObject:_ov[k] options:0 error:nil];
+        NSString *vs = [[NSString alloc] initWithData:vd encoding:NSUTF8StringEncoding];
+        [json appendFormat:@"%@:%@", ks, vs];
+    }
+    if (!first) [json appendString:@","];
+    [json appendString:@"\"_qe_overrides_\":[]}"];
+
+    NSURL *dst = [self.userDataDir URLByAppendingPathComponent:@"mc_overrides.json"];
+    return [[json dataUsingEncoding:NSUTF8StringEncoding] writeToURL:dst options:NSDataWritingAtomic error:error];
 }
 
-- (void)applyPreset:(NSDictionary<NSString *, NSArray<NSString *> *> *)preset {
-    [preset enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSArray<NSString *> *lines, BOOL *stop) {
-        NSInteger cid = key.integerValue;
-        for (NSString *line in lines) {
-            NSArray<NSString *> *seg = [line componentsSeparatedByString:@":"];
-            if (seg.count < 3) continue;
-            NSInteger idx = [seg[0] integerValue];
-            NSString *val = [seg[2] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-            [self setOverrideValue:val forConfig:cid param:idx];
-        }
-    }];
+- (BOOL)deployBundledMappingOverwrite:(NSError **)error {
+    NSString *p = [[NSBundle mainBundle] pathForResource:@"id_name_mapping" ofType:@"json"];
+    if (!p) {
+        if (error) *error = [NSError errorWithDomain:@"SCIMC" code:404 userInfo:@{NSLocalizedDescriptionKey:@"bundled id_name_mapping.json not found"}];
+        return NO;
+    }
+    NSData *d = [NSData dataWithContentsOfFile:p];
+    if (!d) return NO;
+    BOOL ok = [d writeToURL:[self.userDataDir URLByAppendingPathComponent:@"id_name_mapping.json"] options:NSDataWritingAtomic error:error];
+    [self reload];
+    return ok;
 }
 
-// The internal/dogfood/dev/qe/igplus delta (v439-validated). Kept inline so the
-// browser has a one-tap "unlock internal" even before a mapping is present.
-- (NSDictionary *)internalUnlockPreset {
-    return @{
-      @"36377:":@[@"13: : true"],
-      @"48770:":@[@"5: : true",@"4: : true",@"3: : true",@"1: : true",@"0: : true"],
-      @"49223:":@[@"39: : true",@"38: : true"],
-      @"49726:":@[@"0: : true"],
-      @"50769:":@[@"41: : true"],
-      @"52065:":@[@"1: : true"],
-      @"55291:":@[@"23: : true"],
-      @"56474:":@[@"1: : true",@"0: : true"],
-      @"56859:":@[@"11: : true"],
-      @"57176:":@[@"0: : true"],
-      @"58377:":@[@"14: : true"],
-      @"58792:":@[@"7: : true",@"4: : false",@"2: : false",@"0: : true"],
-      @"59913:":@[@"0: : true"],
-      @"61303:":@[@"39: : true"],
-      @"61771:":@[@"4: : true"],
-      @"62183:":@[@"36: : true"],
-      @"62682:":@[@"1: : true",@"0: : true"],
-      @"65490:":@[@"9: : true"],
-      @"67118:":@[@"0: : true"],
-      @"67737:":@[@"58: : true"],
-      @"69239:":@[@"66: : true"],
-      @"70070:":@[@"2: : true"],
-      @"74642:":@[@"8: : true"],
-      @"75335:":@[@"9: : true",@"6: : true"],
-      @"75518:":@[@"0: : true"],
-      @"75726:":@[@"6: : true"],
-      @"77305:":@[@"6: : true"],
-      @"77429:":@[@"12: : true",@"8: : true"],
-      @"77493:":@[@"3: : true"],
-      @"78944:":@[@"9: : true"],
-      @"78970:":@[@"22: : true"],
-      @"79765:":@[@"8: : true"],
-      @"80778:":@[@"22: : true"],
-      @"81413:":@[@"0: : true"],
-      @"81907:":@[@"33: : true",@"28: : true",@"1: : true"],
-      @"81940:":@[@"70: : true"],
-      @"82708:":@[@"22: : true",@"21: : true"],
-      @"82950:":@[@"78: : true",@"8: : true"],
-      @"83598:":@[@"30: : true"],
-      @"84046:":@[@"5: : true"],
-      @"85119:":@[@"8: : true"],
-      @"85292:":@[@"2: : true"],
-      @"87318:":@[@"0: : true"],
-      @"87707:":@[@"30: : true"],
-      @"89534:":@[@"1: : true"],
-      @"90017:":@[@"4: : true"],
-      @"90631:":@[@"3: : true",@"2: : true",@"0: : true"],
-      @"90775:":@[@"1: : true"],
-      @"91290:":@[@"15: : true"],
-      @"92764:":@[@"0: : true"],
-      @"93536:":@[@"6: : true"],
-      @"94098:":@[@"3: : true"],
-      @"95771:":@[@"5: : true"],
-      @"95973:":@[@"45: : true"],
-      @"95994:":@[@"1: : true"],
-      @"96260:":@[@"1: : true"],
-      @"96765:":@[@"4: : true",@"3: : true",@"2: : true",@"1: : true",@"0: : true"],
-      @"97127:":@[@"0: : true"],
-      @"97242:":@[@"40: : true",@"34: : true"],
-      @"97656:":@[@"4: : true"],
-      @"98841:":@[@"1: : true"],
-      @"99456:":@[@"0: : true"],
-      @"101583:":@[@"1: : true"],
-      @"102522:":@[@"0: : true"],
-      @"103620:":@[@"9: : false",@"7: : true"],
-      @"104898:":@[@"4: : true"],
-      @"105366:":@[@"0: : true"],
-      @"107035:":@[@"0: : true"],
-      @"107261:":@[@"8: : true"],
-      @"107711:":@[@"0: : true"],
-      @"108555:":@[@"10: : true"],
-      @"109075:":@[@"2: : true",@"0: : true"],
-      @"109193:":@[@"14: : true"],
-      @"114227:":@[@"10: : true"],
-      @"117208:":@[@"2: : true"],
-      @"117484:":@[@"1: : true"],
-      @"118965:":@[@"0: : true"],
-      @"119406:":@[@"0: : true"],
-      @"121088:":@[@"0: : true"],
-      @"121139:":@[@"3: : true",@"2: : true",@"1: : true",@"0: : true"],
-      @"124548:":@[@"0: : true"],
+- (void)applyInternalPreset {
+    NSDictionary<NSString *, NSNumber *> *preset = @{
+        @"56474:0":@(SCIMCOverrideON), @"56474:1":@(SCIMCOverrideON), @"58792:0":@(SCIMCOverrideON),
+        @"90775:1":@(SCIMCOverrideON), @"87318:0":@(SCIMCOverrideON), @"57176:0":@(SCIMCOverrideON),
+        @"107035:0":@(SCIMCOverrideON), @"107711:0":@(SCIMCOverrideON), @"121139:0":@(SCIMCOverrideON),
+        @"121139:1":@(SCIMCOverrideON), @"121139:2":@(SCIMCOverrideON), @"121139:3":@(SCIMCOverrideON),
+        @"90631:0":@(SCIMCOverrideON), @"90631:2":@(SCIMCOverrideON), @"90631:3":@(SCIMCOverrideON),
     };
+    [preset enumerateKeysAndObjectsUsingBlock:^(NSString *k, NSNumber *st, BOOL *stop) {
+        NSArray *p = [k componentsSeparatedByString:@":"];
+        [self setState:(SCIMCOverrideState)st.integerValue forConfig:[p[0] integerValue] param:[p[1] integerValue]];
+    }];
 }
 @end
 
-#pragma mark - Root browser
+#pragma mark - Root browser (plain UITableView)
 
-@implementation SCIMCBrowserListController {
-    NSString *_query;
-    UISearchBar *_search;
-}
+@interface SCIMCBrowserListController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
+@property (nonatomic, strong) UITableView *table;
+@property (nonatomic, strong) UISearchBar *search;
+@property (nonatomic, strong) NSArray<NSNumber *> *rows;
+@end
 
-- (NSString *)title { return @"MobileConfig Overrides"; }
+@implementation SCIMCBrowserListController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.title = @"MobileConfig Overrides";
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
     [[SCIMCOverrideStore shared] reload];
-    _search = [[UISearchBar alloc] init];
-    _search.placeholder = @"Search config or param name";
-    _search.delegate = (id<UISearchBarDelegate>)self;
-    [_search sizeToFit];
-    self.table.tableHeaderView = _search;
+
+    self.search = [UISearchBar new];
+    self.search.placeholder = @"Search config / param (e.g. internal settings)";
+    self.search.searchBarStyle = UISearchBarStyleMinimal;
+    self.search.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.search.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.search.returnKeyType = UIReturnKeyDone;
+    self.search.delegate = self;
+    self.search.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.search];
+
+    self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.table.dataSource = self;
+    self.table.delegate = self;
+    self.table.rowHeight = 48;
+    self.table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;   // dismiss keyboard on scroll
+    self.table.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.table registerClass:UITableViewCell.class forCellReuseIdentifier:@"c"];
+    [self.view addSubview:self.table];
+
+    UIBarButtonItem *preset = [[UIBarButtonItem alloc] initWithTitle:@"Preset" style:UIBarButtonItemStylePlain target:self action:@selector(applyPreset)];
+    UIBarButtonItem *deploy = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.doc"] style:UIBarButtonItemStylePlain target:self action:@selector(deployMapping)];
+    self.navigationItem.rightBarButtonItems = @[preset, deploy];
+
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.search.topAnchor constraintEqualToAnchor:g.topAnchor],
+        [self.search.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
+        [self.search.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+        [self.table.topAnchor constraintEqualToAnchor:self.search.bottomAnchor],
+        [self.table.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
+        [self.table.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+        [self.table.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
+    ]];
+    self.rows = [SCIMCOverrideStore.shared configIDs];
 }
 
-- (id)specifiers {
-    if (_specifiers) return _specifiers;
-    NSMutableArray *sp = [NSMutableArray array];
-    SCIMCOverrideStore *store = SCIMCOverrideStore.shared;
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.table reloadData]; }
 
-    PSSpecifier *g0 = [PSSpecifier emptyGroupSpecifier]; [g0 setProperty:@"Presets" forKey:@"footerText"]; [sp addObject:g0];
-
-    PSSpecifier *preset = [PSSpecifier preferenceSpecifierNamed:@"Enable Internal / Dogfood / Dev / QE / IGPlus"
-        target:self set:NULL get:NULL detail:Nil cell:PSButtonCell edit:Nil];
-    [preset setProperty:@YES forKey:@"enabled"]; preset->action = @selector(applyInternalPreset:);
-    [sp addObject:preset];
-
-    PSSpecifier *exp = [PSSpecifier preferenceSpecifierNamed:@"Export → mobileconfig/mc_overrides.json"
-        target:self set:NULL get:NULL detail:Nil cell:PSButtonCell edit:Nil];
-    exp->action = @selector(exportNow:); [sp addObject:exp];
-
-    PSSpecifier *dep = [PSSpecifier preferenceSpecifierNamed:@"Deploy / overwrite id_name_mapping.json"
-        target:self set:NULL get:NULL detail:Nil cell:PSButtonCell edit:Nil];
-    dep->action = @selector(deployMapping:); [sp addObject:dep];
-
-    NSArray<NSNumber *> *ids = [store configIDsMatching:_query];
-    PSSpecifier *g1 = [PSSpecifier emptyGroupSpecifier];
-    [g1 setProperty:[NSString stringWithFormat:@"%lu configs", (unsigned long)ids.count] forKey:@"footerText"];
-    [sp addObject:g1];
-
-    for (NSNumber *cid in ids) {
-        PSSpecifier *row = [PSSpecifier preferenceSpecifierNamed:[store nameForConfig:cid.integerValue]
-            target:self set:NULL get:NULL detail:SCIMCConfigDetailController.class cell:PSLinkCell edit:Nil];
-        [row setProperty:cid forKey:@"sci_cid"];
-        [row setProperty:cid.stringValue forKey:@"subtitle"];
-        [sp addObject:row];
-    }
-    _specifiers = sp;
-    return _specifiers;
-}
-
-- (void)searchBar:(UISearchBar *)sb textDidChange:(NSString *)text {
-    _query = text; _specifiers = nil; [self reloadSpecifiers];
-}
-
-- (void)applyInternalPreset:(PSSpecifier *)s {
-    SCIMCOverrideStore *st = SCIMCOverrideStore.shared;
-    [st applyPreset:[st internalUnlockPreset]];
-    NSError *e = nil; BOOL ok = [st save:&e];
-    [self alert:ok ? @"Internal preset applied and exported. Restart Instagram." :
-        [NSString stringWithFormat:@"Save failed: %@", e.localizedDescription]];
-}
-
-- (void)exportNow:(PSSpecifier *)s {
+- (void)applyPreset {
+    [SCIMCOverrideStore.shared applyInternalPreset];
     NSError *e = nil; BOOL ok = [SCIMCOverrideStore.shared save:&e];
-    [self alert:ok ? @"Exported to mobileconfig/mc_overrides.json. Restart Instagram." :
-        [NSString stringWithFormat:@"Save failed: %@", e.localizedDescription]];
+    [self toast:ok ? @"Internal preset applied. Restart Instagram." : e.localizedDescription];
+    [self.table reloadData];
 }
-
-- (void)deployMapping:(PSSpecifier *)s {
+- (void)deployMapping {
     NSError *e = nil; BOOL ok = [SCIMCOverrideStore.shared deployBundledMappingOverwrite:&e];
-    [SCIMCOverrideStore.shared reload]; _specifiers = nil; [self reloadSpecifiers];
-    [self alert:ok ? @"id_name_mapping.json written to mobileconfig/. Names refreshed." :
-        [NSString stringWithFormat:@"Deploy failed: %@", e.localizedDescription]];
+    self.rows = [SCIMCOverrideStore.shared configIDsMatching:self.search.text];
+    [self.table reloadData];
+    [self toast:ok ? @"Mapping deployed. Names refreshed." : e.localizedDescription];
 }
-
-- (void)alert:(NSString *)msg {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"MobileConfig Overrides"
-        message:msg preferredStyle:UIAlertControllerStyleAlert];
+- (void)toast:(NSString *)m {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:nil message:m preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:a animated:YES completion:nil];
 }
+
+// search: token semantics + keyboard control
+- (void)searchBar:(UISearchBar *)sb textDidChange:(NSString *)text {
+    self.rows = [SCIMCOverrideStore.shared configIDsMatching:text];
+    [self.table reloadData];
+}
+- (void)searchBarSearchButtonClicked:(UISearchBar *)sb { [sb resignFirstResponder]; }
+- (void)searchBarTextDidEndEditing:(UISearchBar *)sb { [sb resignFirstResponder]; }
+
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return self.rows.count; }
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"c"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"c"];
+    NSInteger cid = self.rows[ip.row].integerValue;
+    cell.textLabel.text = [SCIMCOverrideStore.shared nameForConfig:cid];
+    cell.textLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];   // smaller
+    cell.textLabel.numberOfLines = 1;
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld · %lu params", (long)cid, (unsigned long)[SCIMCOverrideStore.shared paramsForConfig:cid].count];
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tv deselectRowAtIndexPath:ip animated:YES];
+    [self.search resignFirstResponder];
+    Class d = NSClassFromString(@"SCIMCConfigDetailController");
+    UIViewController *vc = [d new];
+    [vc setValue:self.rows[ip.row] forKey:@"cid"];
+    [self.navigationController pushViewController:vc animated:YES];
+}
 @end
 
-#pragma mark - Per-config detail
+#pragma mark - Per-config detail (3-state per param)
+
+@interface SCIMCConfigDetailController : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) NSNumber *cid;
+@property (nonatomic, strong) UITableView *table;
+@property (nonatomic, strong) NSArray<NSNumber *> *idxs;
+@end
 
 @implementation SCIMCConfigDetailController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    NSNumber *cid = [self.specifier propertyForKey:@"sci_cid"];
-    _configID = cid.integerValue;
-    self.title = [SCIMCOverrideStore.shared nameForConfig:_configID];
+    NSInteger cid = self.cid.integerValue;
+    self.title = [SCIMCOverrideStore.shared nameForConfig:cid];
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
+    self.table.dataSource = self; self.table.delegate = self;
+    self.table.rowHeight = 54;
+    self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.table registerClass:UITableViewCell.class forCellReuseIdentifier:@"p"];
+    [self.view addSubview:self.table];
+    self.idxs = [[SCIMCOverrideStore.shared paramsForConfig:cid].allKeys sortedArrayUsingSelector:@selector(compare:)];
 }
 
-- (id)specifiers {
-    if (_specifiers) return _specifiers;
-    SCIMCOverrideStore *store = SCIMCOverrideStore.shared;
-    NSInteger cid = [[self.specifier propertyForKey:@"sci_cid"] integerValue] ?: _configID;
-    _configID = cid;
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return self.idxs.count; }
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"p"];
+    NSInteger cid = self.cid.integerValue, idx = self.idxs[ip.row].integerValue;
+    cell.textLabel.text = [SCIMCOverrideStore.shared nameForConfig:cid param:idx];
+    cell.textLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    cell.textLabel.numberOfLines = 1; cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"param %ld", (long)idx];
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
 
-    NSMutableArray *sp = [NSMutableArray array];
-    PSSpecifier *g = [PSSpecifier emptyGroupSpecifier];
-    [g setProperty:[NSString stringWithFormat:@"config %ld — toggle a param to override it to true", (long)cid] forKey:@"footerText"];
-    [sp addObject:g];
+    UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[@"SYS", @"OFF", @"ON"]];
+    seg.selectedSegmentIndex = [SCIMCOverrideStore.shared stateForConfig:cid param:idx];
+    seg.apportionsSegmentWidthsByContent = YES;
+    UIFont *sf = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    [seg setTitleTextAttributes:@{NSFontAttributeName:sf} forState:UIControlStateNormal];
+    seg.tag = (cid << 16) | (idx & 0xFFFF);
+    [seg addTarget:self action:@selector(segChanged:) forControlEvents:UIControlEventValueChanged];
+    cell.accessoryView = seg;
+    return cell;
+}
 
-    NSDictionary<NSNumber *, NSString *> *params = [store paramsForConfig:cid];
-    NSArray<NSNumber *> *idxs = [params.allKeys sortedArrayUsingSelector:@selector(compare:)];
-    for (NSNumber *idx in idxs) {
-        NSString *label = [NSString stringWithFormat:@"%@  (%@)", params[idx], idx];
-        PSSpecifier *sw = [PSSpecifier preferenceSpecifierNamed:label
-            target:self set:@selector(setSwitch:specifier:) get:@selector(getSwitch:)
-            detail:Nil cell:PSSwitchCell edit:Nil];
-        [sw setProperty:@(cid) forKey:@"sci_cid"];
-        [sw setProperty:idx   forKey:@"sci_idx"];
-        [sp addObject:sw];
+- (void)segChanged:(UISegmentedControl *)seg {
+    NSInteger cid = seg.tag >> 16, idx = seg.tag & 0xFFFF;
+    [SCIMCOverrideStore.shared setState:(SCIMCOverrideState)seg.selectedSegmentIndex forConfig:cid param:idx];
+    NSError *e = nil;
+    if (![SCIMCOverrideStore.shared save:&e]) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Save failed" message:e.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
     }
-    _specifiers = sp;
-    return _specifiers;
-}
-
-- (id)getSwitch:(PSSpecifier *)s {
-    NSInteger cid = [[s propertyForKey:@"sci_cid"] integerValue];
-    NSInteger idx = [[s propertyForKey:@"sci_idx"] integerValue];
-    NSString *v = [SCIMCOverrideStore.shared overrideValueForConfig:cid param:idx];
-    return @([v isEqualToString:@"true"]);
-}
-
-- (void)setSwitch:(id)value specifier:(PSSpecifier *)s {
-    NSInteger cid = [[s propertyForKey:@"sci_cid"] integerValue];
-    NSInteger idx = [[s propertyForKey:@"sci_idx"] integerValue];
-    BOOL on = [value boolValue];
-    [SCIMCOverrideStore.shared setOverrideValue:(on ? @"true" : nil) forConfig:cid param:idx];
-    [SCIMCOverrideStore.shared save:nil];   // persist immediately to app-group
 }
 @end

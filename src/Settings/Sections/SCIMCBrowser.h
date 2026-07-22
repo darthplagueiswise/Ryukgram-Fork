@@ -1,65 +1,43 @@
 // SCIMCBrowser.h — RyukGram-Fork
-// Native-style MobileConfig override browser + store.
-//
-// Reads the id-name mapping and the current overrides from the app-group
-// mobileconfig dir, lets you browse every config/param by NAME, toggle
-// overrides, and exports them back to mc_overrides.json in the exact
-// format Instagram consumes. Non-destructive: this is a NEW section, it
-// does not replace your existing menus.
-//
-// Wiring (add ONE specifier to your Dev section — see SCISettings_Dev wiring
-// snippet in the delivery notes):
-//   [SCIMCBrowserListController class] pushes the browser below "Dev".
+// MobileConfig override browser + store. Reads the id-name mapping and current
+// overrides from the per-user data dir (<AppGroup>/Documents/mobileconfig/<uid>.data/),
+// lets you browse every config/param BY NAME, 3-state override each param
+// (SYS / OFF / ON), and writes mc_overrides.json in the exact internal format.
 
 #import <Foundation/Foundation.h>
-#import <Preferences/PSListController.h>
-
-// App-group id used for the mobileconfig dir. Confirm/replace for your sideload.
-// Runtime fallback scans known candidates, then the app's own Documents.
-#ifndef SCI_APPGROUP
-#define SCI_APPGROUP @"group.com.burbn.instagram"
-#endif
+#import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Loads/saves mc_overrides.json and reads names from id_name_mapping.json,
-/// both in <AppGroup>/Documents/mobileconfig/. Format is preserved exactly:
-///   {"<config>:":["<idx>: : <value>", ...], ..., "_qe_overrides_":[]}
+typedef NS_ENUM(NSInteger, SCIMCOverrideState) {
+    SCIMCOverrideSYS = 0,   // no override (remove entry) — app/server value
+    SCIMCOverrideOFF = 1,   // forced false
+    SCIMCOverrideON  = 2,   // forced true
+};
+
 @interface SCIMCOverrideStore : NSObject
 + (instancetype)shared;
 
-@property (nonatomic, readonly) NSURL *mobileconfigDir;      // .../Documents/mobileconfig/
-@property (nonatomic, readonly) NSArray<NSNumber *> *configIDs;  // sorted, from mapping
+@property (nonatomic, readonly) NSURL *mobileconfigRoot;   // .../Documents/mobileconfig/
+@property (nonatomic, readonly) NSURL *userDataDir;        // .../mobileconfig/<uid>.data/
+@property (nonatomic, readonly) NSArray<NSNumber *> *configIDs;
 
-- (void)reload;                                             // re-read both files from disk
-- (NSString *)nameForConfig:(NSInteger)cid;                // config name from mapping
-- (NSDictionary<NSNumber *, NSString *> *)paramsForConfig:(NSInteger)cid; // idx -> param name
-- (NSArray<NSNumber *> *)configIDsMatching:(nullable NSString *)query;
+- (void)reload;
+- (NSString *)nameForConfig:(NSInteger)cid;
+- (NSDictionary<NSNumber *, NSString *> *)paramsForConfig:(NSInteger)cid;
+- (NSString *)nameForConfig:(NSInteger)cid param:(NSInteger)idx;
+- (NSArray<NSNumber *> *)configIDsMatching:(nullable NSString *)query;   // token search
 
-/// Write/overwrite id_name_mapping.json into the mobileconfig dir (the "correct
-/// location" the app reads names from). Returns NO on failure.
-- (BOOL)writeMappingData:(NSData *)data error:(NSError **)error;
-/// Copy the tweak-bundled id_name_mapping.json into the mobileconfig dir,
-/// overwriting. Used on first run and by the "Deploy mapping" button.
+- (SCIMCOverrideState)stateForConfig:(NSInteger)cid param:(NSInteger)idx;
+- (nullable NSString *)stringValueForConfig:(NSInteger)cid param:(NSInteger)idx; // raw ("true"/"false"/…) or nil
+- (void)setState:(SCIMCOverrideState)state forConfig:(NSInteger)cid param:(NSInteger)idx;
+- (BOOL)save:(NSError **)error;
+
 - (BOOL)deployBundledMappingOverwrite:(NSError **)error;
-
-- (nullable NSString *)overrideValueForConfig:(NSInteger)cid param:(NSInteger)idx; // nil = not overridden
-- (void)setOverrideValue:(nullable NSString *)value forConfig:(NSInteger)cid param:(NSInteger)idx; // nil clears
-- (BOOL)save:(NSError **)error;                            // write mc_overrides.json (exact format)
-
-/// Merge a preset (dict of "<config>:" -> ["<idx>: : <value>"]) into current overrides.
-- (void)applyPreset:(NSDictionary<NSString *, NSArray<NSString *> *> *)preset;
-/// The built-in internal/dogfood/dev/qe/igplus preset (the 55-config delta).
-- (NSDictionary<NSString *, NSArray<NSString *> *> *)internalUnlockPreset;
+- (void)applyInternalPreset;   // employee/dogfood/dev/internal one-tap
 @end
 
-/// Root: search + presets + a row per config (name + number). Drills into detail.
-@interface SCIMCBrowserListController : PSListController
-@end
-
-/// Per-config: one switch per param, bound to the store.
-@interface SCIMCConfigDetailController : PSListController
-@property (nonatomic, assign) NSInteger configID;
+@interface SCIMCBrowserListController : UIViewController
 @end
 
 NS_ASSUME_NONNULL_END
