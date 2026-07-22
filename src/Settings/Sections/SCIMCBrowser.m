@@ -1,6 +1,7 @@
 // SCIMCBrowser.m — RyukGram-Fork
 #import "SCIMCBrowser.h"
 #import "../../Localization/SCILocalization.h"
+#import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import <objc/message.h>
 
 #pragma mark - helpers
@@ -38,66 +39,90 @@ static NSString *SCIMCNorm(NSString *s) {
     return s;
 }
 
-- (NSURL *)mobileconfigRoot {
+- (NSArray<NSURL *> *)candidateRoots {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSURL *base = nil;
-    for (NSString *g in @[@"group.com.burbn.instagram", @"group.com.instagram.instagram"]) {
+    NSMutableArray<NSURL *> *roots = [NSMutableArray array];
+    // IG's per-account data lives in the app's OWN Documents (same base
+    // SCIDeviceIdentity/wipeDocuments uses). App-group containers are fallbacks.
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (docs.length)
+        [roots addObject:[[NSURL fileURLWithPath:docs] URLByAppendingPathComponent:@"mobileconfig"]];
+    for (NSString *g in @[@"group.com.burbn.instagram", @"group.com.burbn.family"]) {
         NSURL *c = [fm containerURLForSecurityApplicationGroupIdentifier:g];
-        if (c) { base = c; break; }
+        if (c) [roots addObject:[[c URLByAppendingPathComponent:@"Documents"] URLByAppendingPathComponent:@"mobileconfig"]];
     }
-    if (!base)
-        base = [[fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject].URLByDeletingLastPathComponent;
-    NSURL *dir = [[base URLByAppendingPathComponent:@"Documents"] URLByAppendingPathComponent:@"mobileconfig"];
-    [fm createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    return dir;
+    return roots;
 }
 
-// The correct location IG reads from: <mobileconfig>/<userid>.data/. Pick the
-// most-recently-modified *.data dir (the active account). If none exists, try the
-// current IG user id; else fall back to the mobileconfig root.
+- (NSURL *)mobileconfigRoot {
+    NSURL *r = self.candidateRoots.firstObject;
+    if (r) [NSFileManager.defaultManager createDirectoryAtURL:r withIntermediateDirectories:YES attributes:nil error:nil];
+    return r;
+}
+
+// Resolve <root>/<userid>.data. Uses the live IGUserSession's id; searches every
+// candidate root for an existing <uid>.data (so a manually-placed file is found);
+// creates <uid>.data in the primary root only if nothing exists yet.
 - (NSURL *)userDataDir {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSURL *root = self.mobileconfigRoot;
-    NSArray<NSURL *> *items = [fm contentsOfDirectoryAtURL:root
-        includingPropertiesForKeys:@[NSURLContentModificationDateKey, NSURLIsDirectoryKey]
-                           options:0 error:nil];
-    NSURL *best = nil; NSDate *bestDate = nil;
-    for (NSURL *u in items) {
-        if (![u.lastPathComponent hasSuffix:@".data"]) continue;
-        NSNumber *isDir = nil; [u getResourceValue:&isDir forKey:NSURLIsDirectoryKey error:nil];
-        if (!isDir.boolValue) continue;
-        NSDate *d = nil; [u getResourceValue:&d forKey:NSURLContentModificationDateKey error:nil];
-        if (!best || (d && [d compare:bestDate] == NSOrderedDescending)) { best = u; bestDate = d ?: NSDate.date; }
-    }
-    if (best) return best;
     NSString *uid = [self currentIGUserID];
-    if (uid.length) {
-        NSURL *d = [root URLByAppendingPathComponent:[uid stringByAppendingString:@".data"]];
-        [fm createDirectoryAtURL:d withIntermediateDirectories:YES attributes:nil error:nil];
-        return d;
+    NSArray<NSURL *> *roots = self.candidateRoots;
+
+    if (uid.length)
+        for (NSURL *root in roots) {
+            NSURL *d = [root URLByAppendingPathComponent:[uid stringByAppendingString:@".data"]];
+            if ([fm fileExistsAtPath:d.path]) return d;
+        }
+    // any *.data already holding our files
+    for (NSURL *root in roots)
+        for (NSURL *u in [fm contentsOfDirectoryAtURL:root includingPropertiesForKeys:nil options:0 error:nil]) {
+            if (![u.lastPathComponent hasSuffix:@".data"]) continue;
+            if ([fm fileExistsAtPath:[u URLByAppendingPathComponent:@"mc_overrides.json"].path] ||
+                [fm fileExistsAtPath:[u URLByAppendingPathComponent:@"id_name_mapping.json"].path])
+                return u;
+        }
+    // any *.data at all (most recently modified)
+    for (NSURL *root in roots) {
+        NSURL *best = nil; NSDate *bd = nil;
+        for (NSURL *u in [fm contentsOfDirectoryAtURL:root includingPropertiesForKeys:@[NSURLContentModificationDateKey] options:0 error:nil]) {
+            if (![u.lastPathComponent hasSuffix:@".data"]) continue;
+            NSDate *d = nil; [u getResourceValue:&d forKey:NSURLContentModificationDateKey error:nil];
+            if (!best || (d && [d compare:bd] == NSOrderedDescending)) { best = u; bd = d ?: NSDate.date; }
+        }
+        if (best) return best;
     }
-    return root;
+    NSURL *primary = roots.firstObject;
+    NSString *folder = uid.length ? [uid stringByAppendingString:@".data"] : @"shared.data";
+    NSURL *d = [primary URLByAppendingPathComponent:folder];
+    [fm createDirectoryAtURL:d withIntermediateDirectories:YES attributes:nil error:nil];
+    return d;
 }
 
-// Best-effort current user pk from the IG runtime; safe if it fails.
+// Current user id from the live IGUserSession captured by the dogfood runtime.
 - (NSString *)currentIGUserID {
     @try {
-        Class ai = NSClassFromString(@"IGAppController");
-        if ([ai respondsToSelector:@selector(sharedInstance)]) {
-            id app = ((id(*)(id, SEL))objc_msgSend)(ai, @selector(sharedInstance));
-            SEL s = NSSelectorFromString(@"currentUser");
-            if ([app respondsToSelector:s]) {
-                id user = ((id(*)(id, SEL))objc_msgSend)(app, s);
-                for (NSString *k in @[@"instagramUserID", @"userID", @"pk"]) {
-                    SEL g = NSSelectorFromString(k);
-                    if ([user respondsToSelector:g]) {
-                        id v = ((id(*)(id, SEL))objc_msgSend)(user, g);
-                        if ([v isKindOfClass:NSString.class]) return v;
-                        if ([v isKindOfClass:NSNumber.class]) return [v stringValue];
-                    }
-                }
-            }
+        Class dr = NSClassFromString(@"SCIDogfoodObjectRuntime");
+        id session = nil;
+        if ([dr respondsToSelector:@selector(liveInstanceOfClassNameContaining:)])
+            session = ((id(*)(id, SEL, id))objc_msgSend)(dr, @selector(liveInstanceOfClassNameContaining:), @"IGUserSession");
+        NSArray<NSString *> *keys = @[@"instagramUserID", @"userID", @"loggedInUserId", @"pk"];
+        for (NSString *k in keys) {
+            @try {
+                id v = [session valueForKey:k];
+                if ([v isKindOfClass:NSString.class] && [(NSString *)v length]) return v;
+                if ([v isKindOfClass:NSNumber.class]) return [(NSNumber *)v stringValue];
+            } @catch (__unused id e) {}
         }
+        @try {
+            id user = [session valueForKey:@"user"] ?: [session valueForKey:@"currentUser"];
+            for (NSString *k in keys) {
+                @try {
+                    id v = [user valueForKey:k];
+                    if ([v isKindOfClass:NSString.class] && [(NSString *)v length]) return v;
+                    if ([v isKindOfClass:NSNumber.class]) return [(NSNumber *)v stringValue];
+                } @catch (__unused id e) {}
+            }
+        } @catch (__unused id e) {}
     } @catch (__unused NSException *e) {}
     return nil;
 }
@@ -316,7 +341,8 @@ static NSString *SCIMCNorm(NSString *s) {
 
     UIBarButtonItem *preset = [[UIBarButtonItem alloc] initWithTitle:@"Preset" style:UIBarButtonItemStylePlain target:self action:@selector(applyPreset)];
     UIBarButtonItem *deploy = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.doc"] style:UIBarButtonItemStylePlain target:self action:@selector(deployMapping)];
-    self.navigationItem.rightBarButtonItems = @[preset, deploy];
+    UIBarButtonItem *info = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"info.circle"] style:UIBarButtonItemStylePlain target:self action:@selector(showInfo)];
+    self.navigationItem.rightBarButtonItems = @[preset, deploy, info];
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
@@ -332,6 +358,17 @@ static NSString *SCIMCNorm(NSString *s) {
 }
 
 - (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.table reloadData]; }
+
+- (void)showInfo {
+    SCIMCOverrideStore *st = SCIMCOverrideStore.shared;
+    NSString *uid = [st valueForKey:@"currentIGUserID"] ?: @"(unresolved — open an account screen once)";
+    NSURL *dir = st.userDataDir;
+    BOOL hasOv = [NSFileManager.defaultManager fileExistsAtPath:[dir URLByAppendingPathComponent:@"mc_overrides.json"].path];
+    BOOL hasMap = [NSFileManager.defaultManager fileExistsAtPath:[dir URLByAppendingPathComponent:@"id_name_mapping.json"].path];
+    NSString *msg = [NSString stringWithFormat:@"user id: %@\n\ndata dir:\n%@\n\nconfigs loaded: %lu\nmc_overrides.json here: %@\nid_name_mapping.json here: %@",
+        uid, dir.path, (unsigned long)st.configIDs.count, hasOv ? @"yes" : @"NO", hasMap ? @"yes" : @"NO"];
+    [self toast:msg];
+}
 
 - (void)applyPreset {
     [SCIMCOverrideStore.shared applyInternalPreset];
