@@ -5,6 +5,7 @@
 #import <dlfcn.h>
 #import <objc/runtime.h>
 #import <stdint.h>
+#import <stdlib.h>
 #import <string.h>
 
 typedef void *(*SCIMSFindSymbolFn)(void *image, const char *name);
