@@ -1,0 +1,35 @@
+name: Audit MobileConfig mapping
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - experimental3
+    paths:
+      - .github/workflows/audit-mobileconfig-mapping.yml
+      - tools/reverse/audit_mapping.py
+  push:
+    branches:
+      - agent/ios-mapping-force-download-audit
+    paths:
+      - .github/workflows/audit-mobileconfig-mapping.yml
+      - tools/reverse/audit_mapping.py
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download exact Android 435 mapping
+        run: |
+          curl --fail --location --retry 3 \
+            -o /tmp/435.0.0.37.76.json \
+            https://raw.githubusercontent.com/crimera/piko/dev/docs/mappings/435.0.0.37.76.json
+      - name: Audit relevant entries
+        run: python3 tools/reverse/audit_mapping.py /tmp/435.0.0.37.76.json
