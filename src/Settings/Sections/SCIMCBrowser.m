@@ -3,6 +3,25 @@
 #import "../../Localization/SCILocalization.h"
 #import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import <objc/message.h>
+#include <mach-o/dyld.h>
+#include <mach-o/getsect.h>
+#include <dlfcn.h>
+
+// Read the id-name mapping embedded directly in THIS dylib's own __DATA,__idmap
+// section (via -sectcreate at link time — see Makefile). This is the primary
+// source: unlike a bundle resource, it cannot be dropped by a sideload injector
+// independently of the dylib, because it IS part of the dylib's own bytes —
+// confirmed empirically that plain images inside RyukGram.bundle survive
+// Feather's .deb-injection while a loose large .json/.bin next to them does not.
+static NSData *SCIEmbeddedMappingData(void) {
+    Dl_info info;
+    if (!dladdr((const void *)&SCIEmbeddedMappingData, &info) || !info.dli_fbase) return nil;
+    const struct mach_header_64 *mh = (const struct mach_header_64 *)info.dli_fbase;
+    unsigned long size = 0;
+    uint8_t *data = getsectiondata(mh, "__DATA", "__idmap", &size);
+    if (!data || size == 0) return nil;
+    return [NSData dataWithBytes:data length:size];
+}
 
 #pragma mark - helpers
 
@@ -156,8 +175,11 @@ static NSString *SCIMCNorm(NSString *s) {
             }];
     }
 
-    // mapping: user data dir first, then root, then bundle
-    NSData *md = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
+    // mapping: embedded-in-dylib FIRST (survives any injector's resource
+    // handling since it's part of the dylib's own bytes), then user data dir,
+    // then root, then RyukGram.bundle (legacy path, kept as last resort).
+    NSData *md = SCIEmbeddedMappingData();
+    if (!md) md = [NSData dataWithContentsOfURL:[dir URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (!md) md = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:@"id_name_mapping.json"]];
     if (!md) md = [self bundledMappingData];
     // Seed the mapping into the user data dir so Instagram's own internal editor
@@ -372,9 +394,14 @@ static NSString *SCIMCNorm(NSString *s) {
     NSBundle *rb = SCILocalizationBundle();
     NSString *bj = [rb pathForResource:@"id_name_mapping" ofType:@"json"];
     NSString *bb = [rb pathForResource:@"id_name_mapping" ofType:@"bin"];
-    NSString *msg = [NSString stringWithFormat:@"user id: %@\n\ndata dir:\n%@\n\nconfigs: %lu | ov:%@ map:%@\n\nbundle:\n%@\nmap.json:%@ map.bin:%@",
+    NSString *tagPath = [rb pathForResource:@"sci_bundle_buildtag" ofType:@"txt"];
+    NSString *tag = tagPath ? [[NSString stringWithContentsOfFile:tagPath encoding:NSUTF8StringEncoding error:nil]
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"(no build tag — STALE bundle)";
+    NSData *emb = SCIEmbeddedMappingData();
+    NSString *embInfo = emb ? [NSString stringWithFormat:@"y (%lu bytes)", (unsigned long)emb.length] : @"N — dylib has no __idmap section, rebuild needed";
+    NSString *msg = [NSString stringWithFormat:@"user id: %@\n\ndata dir:\n%@\n\nconfigs: %lu | ov:%@ map:%@\n\nembedded-in-dylib: %@\n\nbundle:\n%@\nmap.json:%@ map.bin:%@\nbuild tag: %@",
         uid, dir.path, (unsigned long)st.configIDs.count, hasOv ? @"y" : @"N", hasMap ? @"y" : @"N",
-        rb.bundlePath ?: @"(nil)", bj ? @"y" : @"N", bb ? @"y" : @"N"];
+        embInfo, rb.bundlePath ?: @"(nil)", bj ? @"y" : @"N", bb ? @"y" : @"N", tag];
     [self toast:msg];
 }
 

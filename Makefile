@@ -28,6 +28,15 @@ $(TWEAK_NAME)_CFLAGS = -fobjc-arc -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Librar
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression
 
+# Embed the id-name mapping directly INTO the dylib's __DATA segment (not as a
+# separate bundle resource). Rationale: sideload injectors (Feather/Ellekit
+# .deb-injection, cyan, etc.) are proven to correctly carry the dylib itself and
+# plain image assets sitting in RyukGram.bundle, but a loose large .json/.bin next
+# to them does not reliably survive whatever re-signing/merge step those tools do.
+# A custom Mach-O section travels as part of the dylib's own bytes, so it can't be
+# dropped independently of the dylib. Read back at runtime via getsectiondata().
+$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap,src/BundleAssets/id_name_mapping.json
+
 ifeq ($(FINALPACKAGE),1)
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-x
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_SCI*
