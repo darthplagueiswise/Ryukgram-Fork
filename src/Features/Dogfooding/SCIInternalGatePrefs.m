@@ -136,7 +136,7 @@ static void SCIClearCrashMarker(void) {
 + (NSArray<NSString *> *)allGateKeys {
     return @[
         kSCIForceIGObjCMasterKey,
-        @"sci_employee_internal",
+        @"sci_tier2_employee_internal",
         @"sci_force_ig_is_employee",
         @"sci_force_employee_defaults_persist",
         @"sci_force_ig_featured_internal_badge",
@@ -189,8 +189,7 @@ static void SCIClearCrashMarker(void) {
 
 + (BOOL)boolForKey:(NSString *)key { return [SCIUtils getBoolPref:key]; }
 + (BOOL)employeeInternalMasterEnabled {
-    return [self boolForKey:@"sci_employee_internal"] ||
-           [self boolForKey:kSCIForceIGObjCMasterKey] ||
+    return [self boolForKey:kSCIForceIGObjCMasterKey] ||
            [self boolForKey:@"sci_force_ig_is_employee"];
 }
 + (BOOL)mobileConfigBoolGateEnabledForKey:(NSString *)key { return [self boolForKey:kSCIMobileConfigMasterKey] || (key.length && [self boolForKey:key]); }

@@ -61,8 +61,8 @@ void SCIAdvancedHooksApplyForChangedKey(NSString *key, BOOL isOn) {
     if (!isOn || !key.length) return;
     @autoreleasepool {
         if ([key isEqualToString:@"sci_internal_menus"]) (void)SCIInternalMenusForceApplyNow();
-        // Internal settings bug-reporter init agora é instalado no %ctor de
-        // SCIEmployeeInternal.x (toggle sci_employee_internal, requer restart).
+        // Internal-settings menu hooks remain separate from the Tier-2
+        // MobileConfig toggle and are installed only for their explicit rows.
         if (SCIKeyEqualsAny(key, SCIIGDSKeys())) SCIIGDSEnsureHooksInstalled();
     }
 }

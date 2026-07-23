@@ -4,10 +4,10 @@
 #import "../SCIIGDSLauncherConfigViewController.h"
 #import "../../Features/Dogfooding/SCIInternalSettingsApplier.h"
 #import "../../Features/Dogfooding/SCIInternalMenusLauncher.h"
-#import "../../Features/Dogfooding/SCIInternalGatePrefs.h"
 #import "../../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import "../../Features/Dogfooding/SCIGraphQLDogfoodDiagnostics.h"
 #import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
+#import "../../Features/MobileConfig/SCITier2EmployeeGate.h"
 
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
@@ -99,7 +99,29 @@ static SCISetting *SCIExperimentSwitch(
 	}];
 }
 
-static SCISetting *SCIEmployeeInternalSwitch(
+static SCISetting *SCITier2EmployeeInternalSwitch(void) {
+	return [SCISetting switchCellWithTitle:SCILocalized(@"Tier-2 Employee / Internal")
+		subtitle:SCILocalized(@"Discovers the shared raw MobileConfig gate structurally and returns YES only for its verified descriptor")
+		value:^BOOL {
+			return [SCIUtils getBoolPref:@"sci_tier2_employee_internal"];
+		} action:^(BOOL on) {
+			// The old employee toggle and its getBool: hook are deliberately not a
+			// fallback: Tier-2 owns this preference and fails closed if it cannot
+			// prove the current app's structural shape.
+			[SCIUtils setPref:@NO forKey:@"sci_employee_internal"];
+			[SCIUtils setPref:@NO forKey:@"sci_force_mc_session_employee_gate"];
+			[SCIUtils setPref:@(on) forKey:@"sci_tier2_employee_internal"];
+			SCITier2EmployeeGateSetEnabled(on);
+			[SCIUtils showToastForDuration:2.5
+				title:on ? @"Tier-2 Employee / Internal applied"
+				         : @"Tier-2 Employee / Internal disabled"
+				subtitle:on
+					? @"Verified MobileConfig reads are redirected; cached results may need a restart"
+					: @"Original MobileConfig results are used"];
+		}];
+}
+
+static SCISetting *SCIInternalSettingsSwitch(
 	NSString *title,
 	NSString *subtitle,
 	NSString *key
@@ -111,14 +133,11 @@ static SCISetting *SCIEmployeeInternalSwitch(
 		SCIRefreshGraphQLDogfoodForceEnabled();
 		SCIInstallEmployeeInternalHooksIfNeeded();
 		SCIInstallGraphQLDogfoodForceHooksIfNeeded();
-		BOOL identityMaster = [key isEqualToString:@"sci_employee_internal"];
 		[SCIUtils showToastForDuration:2.0
 			title:on
-				? (identityMaster ? @"Employee / Internal applied" : @"Internal preference applied")
+				? @"Internal preference applied"
 				: @"Preference disabled"
-			subtitle:(on && identityMaster)
-				? @"Force hooks installed; diagnostics remain explicit"
-				: nil];
+			subtitle:nil];
 	}];
 }
 
@@ -127,8 +146,10 @@ static SCISetting *SCIEmployeeInternalSwitch(
 + (SCISetting *)devNavCell {
 	SCIRegisterGraphQLDogfoodDevDefaults();
 
-	if ([SCIInternalGatePrefs employeeInternalMasterEnabled] ||
-		[SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
+	if ([SCIUtils getBoolPref:@"sci_tier2_employee_internal"]) {
+		SCITier2EmployeeGateSetEnabled(YES);
+	}
+	if ([SCIUtils getBoolPref:@"sci_force_internal_settings_availability"] ||
 		[SCIUtils getBoolPref:@"sci_force_internal_settings_menu"] ||
 		[SCIUtils getBoolPref:@"sci_force_internal_settings_loggedout"]) {
 		SCIInstallEmployeeInternalHooksIfNeeded();
@@ -185,15 +206,11 @@ static SCISetting *SCIEmployeeInternalSwitch(
 			]
 		},
 		@{
-			@"header": SCILocalized(@"Employee, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"Internal Settings and Dogfooding Assistant are separate native routes. Employee / Internal unifies legacy masters, hooks only validated BOOL identity getters, and forces the exact local GraphQL eligibility decision. Pando fragments stay diagnostic; no isDogfooder/isEmployeeOrTestUser getter is invented. DirectNotes is never a fallback. Internal-only content may still require Lighthouse/VPN."),
+			@"header": SCILocalized(@"Tier-2, GraphQL Dogfood & Internal Settings"),
+			@"footer": SCILocalized(@"Tier-2 selects one shared MobileConfig leaf by shape and reuse, then lets all consumers of that gate observe its enabled value. It uses a signed ElleKit message hook only; unrelated MobileConfig reads keep their original result. Internal-only content may still require server authorization."),
 			@"rows": @[
-				SCIEmployeeInternalSwitch(
-					SCILocalized(@"Employee / Internal"),
-					SCILocalized(@"Forces validated isEmployee getters and the exact local GraphQL eligibility path; Pando fragments are observed without inventing BOOL getters"),
-					@"sci_employee_internal"
-				),
-				SCIEmployeeInternalSwitch(
+				SCITier2EmployeeInternalSwitch(),
+				SCIInternalSettingsSwitch(
 					SCILocalized(@"Override Internal Settings availability"),
 					SCILocalized(@"Applies the selected IGInternalSettingsAvailabilityStatus raw value; this field is an enum, not a BOOL"),
 					@"sci_force_internal_settings_availability"
@@ -202,14 +219,14 @@ static SCISetting *SCIEmployeeInternalSwitch(
 					subtitle:SCILocalized(@"0 = available/open, 1 = unavailable/silent, 2 = access denied; applies on next refresh or tap")
 					defaultsKey:@"sci_internal_settings_availability_raw_value"
 					min:0 max:2 step:1 label:@"raw" singularLabel:@"raw"],
-				SCIEmployeeInternalSwitch(
+				SCIInternalSettingsSwitch(
 					SCILocalized(@"Internal settings menu"),
 					SCILocalized(@"Forces showInternalSettings and shake-to-report in both validated initializer ABIs"),
 					@"sci_force_internal_settings_menu"
 				),
-				SCIEmployeeInternalSwitch(
+				SCIInternalSettingsSwitch(
 					SCILocalized(@"Internal settings while logged out"),
-					SCILocalized(@"Explicitly forces showLoggedOutInternalSettings; it is not implied by Employee / Internal"),
+					SCILocalized(@"Explicitly forces showLoggedOutInternalSettings; it is independent from Tier-2"),
 					@"sci_force_internal_settings_loggedout"
 				),
 				[SCISetting buttonCellWithTitle:SCILocalized(@"Sessionless MobileConfig state")
@@ -320,7 +337,6 @@ static SCISetting *SCIEmployeeInternalSwitch(
 				[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18" defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Force all EasyGating BOOL readers") subtitle:@"" defaultsKey:@"sci_force_easy_gating_all" requiresRestart:YES],
-				[SCISetting switchCellWithTitle:SCILocalized(@"Session employee gate (getBool:)") subtitle:@"IG/FBMobileConfigUserSessionContextManager -getBool: -> employee/test-user/dogfooding" defaultsKey:@"sci_force_mc_session_employee_gate" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Dogfooding Assistant: socket bypass") subtitle:SCILocalized(@"Intercept tap and present IGSundialYourAlgoDogfoodingAssistantViewController directly") defaultsKey:@"sci_dogfooding_socket_bypass" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:@"EasyGating Internal" subtitle:@"EasyGatingGetBoolean_Internal_DoNotUseOrMock" defaultsKey:@"sci_force_easy_gating_internal" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:@"EasyGating Platform" subtitle:@"EasyGatingPlatformGetBoolean" defaultsKey:@"sci_force_easy_gating_platform" requiresRestart:YES],
