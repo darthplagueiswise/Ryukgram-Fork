@@ -9,9 +9,10 @@
  * MobileConfig descriptors.
  *
  * Sideload safety:
- *   - resolves ElleKit's native EKHookFunction directly;
- *   - requires EKEnableThreadSafety from the same Mach-O image;
- *   - never falls back to MSHookFunction, DobbyHook, or a generic provider;
+ *   - uses the documented MSHookFunction API only after proving that
+ *     MSHookFunction, EKHookFunction, and EKEnableThreadSafety come from the
+ *     same ElleKit Mach-O image;
+ *   - explicitly rejects a Dobby-backed provider;
  *   - patches only the unique 3-instruction employee thunk;
  *   - installs once on the main thread after UIApplication activation;
  *   - uses ElleKit's returned original trampoline when the toggle is off.
@@ -55,13 +56,13 @@ typedef struct {
 } Tier2ImageLayout;
 
 typedef BOOL (*Tier2EmployeeThunk)(id session);
-typedef void *(*Tier2EKHookFunction)(void *target,
-                                     void *replacement,
-                                     bool internalSkipChecks);
+typedef void (*Tier2MSHookFunction)(void *target,
+                                    void *replacement,
+                                    void **original);
 typedef void (*Tier2EKEnableThreadSafety)(int enabled);
 
 typedef struct {
-    Tier2EKHookFunction hookFunction;
+    Tier2MSHookFunction hookFunction;
     Tier2EKEnableThreadSafety enableThreadSafety;
     const char *imagePath;
 } Tier2ElleKitAPI;
@@ -369,23 +370,39 @@ static BOOL Tier2ResolveElleKitAPI(Tier2ElleKitAPI *api) {
     if (!api) return NO;
     memset(api, 0, sizeof(*api));
 
-    void *hookFunction = dlsym(RTLD_DEFAULT, "EKHookFunction");
+    void *substrateHook = dlsym(RTLD_DEFAULT, "MSHookFunction");
+    void *elleKitHook = dlsym(RTLD_DEFAULT, "EKHookFunction");
     void *threadSafety = dlsym(RTLD_DEFAULT, "EKEnableThreadSafety");
-    if (!hookFunction || !threadSafety) return NO;
+    void *dobbyHook = dlsym(RTLD_DEFAULT, "DobbyHook");
+    if (!substrateHook || !elleKitHook || !threadSafety) return NO;
 
-    Dl_info hookInfo;
+    Dl_info substrateInfo;
+    Dl_info elleKitInfo;
     Dl_info threadSafetyInfo;
-    if (!Tier2SymbolInfo(hookFunction, &hookInfo) ||
+    if (!Tier2SymbolInfo(substrateHook, &substrateInfo) ||
+        !Tier2SymbolInfo(elleKitHook, &elleKitInfo) ||
         !Tier2SymbolInfo(threadSafety, &threadSafetyInfo)) {
         return NO;
     }
 
-    if (hookInfo.dli_fbase != threadSafetyInfo.dli_fbase) return NO;
+    if (substrateInfo.dli_fbase != elleKitInfo.dli_fbase ||
+        substrateInfo.dli_fbase != threadSafetyInfo.dli_fbase) {
+        return NO;
+    }
 
-    api->hookFunction = (Tier2EKHookFunction)hookFunction;
+    if (dobbyHook) {
+        Dl_info dobbyInfo;
+        if (Tier2SymbolInfo(dobbyHook, &dobbyInfo) &&
+            dobbyInfo.dli_fbase == substrateInfo.dli_fbase) {
+            NSLog(@"[SCITier2] refusing Dobby-backed hook provider");
+            return NO;
+        }
+    }
+
+    api->hookFunction = (Tier2MSHookFunction)substrateHook;
     api->enableThreadSafety =
         (Tier2EKEnableThreadSafety)threadSafety;
-    api->imagePath = hookInfo.dli_fname;
+    api->imagePath = substrateInfo.dli_fname;
     return YES;
 }
 
@@ -451,13 +468,14 @@ static void Tier2InstallNow(void) {
          */
         elleKit.enableThreadSafety(1);
 
-        void *original = elleKit.hookFunction(
+        void *original = NULL;
+        elleKit.hookFunction(
             (void *)thunk,
             (void *)Tier2EmployeeThunkReplacement,
-            false);
+            &original);
 
         if (!original) {
-            NSLog(@"[SCITier2] EKHookFunction rejected employee thunk; not retrying");
+            NSLog(@"[SCITier2] verified ElleKit MSHookFunction rejected employee thunk; not retrying");
             atomic_store_explicit(&gTier2HookFailed,
                                   true,
                                   memory_order_release);
