@@ -1,4 +1,5 @@
 #import "../../Utils.h"
+#import <UIKit/UIKit.h>
 #import "SCIInternalGatePrefs.h"
 #import <objc/runtime.h>
 #import <substrate.h>
@@ -51,7 +52,7 @@ static void (*orig_DGWarningExpiration)(id, SEL, id) = NULL;
 // a separate local coordinator callback, hooked independently below. Returning
 // @YES here is therefore the exact local eligible/pass value, not a guessed
 // enum or a global -status override.
-static id DGExactEligibilityStatus(id self, SEL _cmd) {
+__attribute__((unused)) static id DGExactEligibilityStatus(id self, SEL _cmd) {
     if (DGForceOn()) return @YES;
     return orig_DGExactEligibilityStatus
         ? orig_DGExactEligibilityStatus(self, _cmd)
@@ -102,6 +103,33 @@ static BOOL DGMethodMatches(Method method, const char *expected) {
         isEqualToString:DGNormalizedEncoding(expected)];
 }
 
+// DogfoodingProductionLockoutViewController is the screen IG shows when a
+// production (IGDistributedMobileBuild) user is denied dogfooding. Unlike the
+// eligibility RESPONSE (a runtime Swift GQLModel that is NOT a static ObjC class
+// and therefore cannot be swizzled), this lockout VC is a real Swift @objc
+// UIViewController (_TtC17IGDogfoodingFirst41...), so -viewDidLoad is hookable.
+// Bypassing it removes the block on internal access. This replaces the previous
+// eligibility-status observer, whose target class does not exist at runtime
+// (that was the persistent "missing=1" in the dogfood snapshot).
+static void (*orig_DGLockoutViewDidLoad)(id, SEL) = NULL;
+static void DGLockoutViewDidLoad(id self, SEL _cmd) {
+    if (orig_DGLockoutViewDidLoad) orig_DGLockoutViewDidLoad(self, _cmd);
+    if (!DGForceOn()) return;
+    __weak UIViewController *weakVC = (UIViewController *)self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = weakVC;
+        if (!vc) return;
+        UINavigationController *nav = vc.navigationController;
+        if (nav && nav.viewControllers.count > 1) {
+            [nav popViewControllerAnimated:NO];
+        } else if (vc.presentingViewController) {
+            [vc dismissViewControllerAnimated:NO completion:nil];
+        } else {
+            vc.view.hidden = YES;
+        }
+    });
+}
+
 void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void) {
     static BOOL objcGroupInstalled = NO;
     static BOOL statusInstalled = NO;
@@ -129,20 +157,23 @@ void SCIInstallGraphQLDogfoodForceHooksIfNeeded(void) {
         }
     }
 
+    // Eligibility RESPONSE is a runtime Swift GQLModel (no static ObjC class) and
+    // cannot be swizzled; targeting it was the "missing=1". The real, hookable gate
+    // is the production lockout VC below.
     if (!statusInstalled) {
-        Class statusClass = objc_getClass(
-            "DogfoodingEligibilityQuery_xdtApi_V1_Dogfooding_EligibilityStatusResponseImpl"
+        Class lockout = objc_getClass(
+            "_TtC17IGDogfoodingFirst41DogfoodingProductionLockoutViewController"
         );
-        SEL statusSel = NSSelectorFromString(@"status");
-        Method statusMethod = statusClass ? class_getInstanceMethod(statusClass, statusSel) : NULL;
-        if (DGMethodMatches(statusMethod, "@16@0:8")) {
-            MSHookMessageEx(statusClass, statusSel,
-                            (IMP)DGExactEligibilityStatus,
-                            (IMP *)&orig_DGExactEligibilityStatus);
-            statusInstalled = (orig_DGExactEligibilityStatus != NULL);
-        } else if (statusMethod) {
-            DGFLOG("skip exact eligibility status; ABI=%{public}s",
-                   method_getTypeEncoding(statusMethod));
+        SEL vdlSel = @selector(viewDidLoad);
+        Method vdl = lockout ? class_getInstanceMethod(lockout, vdlSel) : NULL;
+        if (DGMethodMatches(vdl, "v16@0:8")) {
+            MSHookMessageEx(lockout, vdlSel,
+                            (IMP)DGLockoutViewDidLoad,
+                            (IMP *)&orig_DGLockoutViewDidLoad);
+            statusInstalled = (orig_DGLockoutViewDidLoad != NULL);
+        } else if (vdl) {
+            DGFLOG("skip lockout bypass; ABI=%{public}s",
+                   method_getTypeEncoding(vdl));
         }
     }
 
