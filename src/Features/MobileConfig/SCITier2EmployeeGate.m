@@ -3,21 +3,18 @@
  *
  * Structural iOS translation of InstaEclipse Tier-2 semantics.
  *
- * This module discovers and hooks ONLY the canonical `_ig_is_employee` thunk.
- * It never reads, aliases, redirects or forces `_ig_is_employee_or_test_user`,
- * test-account gates, dogfood gates, or unrelated MobileConfig descriptors.
+ * The module discovers and hooks ONLY the canonical `_ig_is_employee`
+ * `(session) -> BOOL` thunk. It never aliases or forces
+ * `_ig_is_employee_or_test_user`, test-account, dogfood, or unrelated
+ * MobileConfig descriptors.
  *
- * Discovery contains no hard-coded image offset or numeric MobileConfig id:
- *   ADRP x1, employee-descriptor GOT page
- *   LDR  x1, [x1, employee-descriptor GOT slot]
- *   B    shared `(session, descriptor) -> BOOL` evaluator
- *
- * Sideload safety requirements:
- *   - the generic Substrate symbol must be provided by ElleKit;
- *   - ElleKit's thread-safety mode is enabled before MSHookFunction;
- *   - only the tiny canonical `(session) -> BOOL` thunk is patched;
- *   - the shared evaluator remains untouched;
- *   - installation runs once, on the main thread, after app activation.
+ * Sideload safety:
+ *   - resolves ElleKit's native EKHookFunction directly;
+ *   - requires EKEnableThreadSafety from the same Mach-O image;
+ *   - never falls back to MSHookFunction, DobbyHook, or a generic provider;
+ *   - patches only the unique 3-instruction employee thunk;
+ *   - installs once on the main thread after UIApplication activation;
+ *   - uses ElleKit's returned original trampoline when the toggle is off.
  */
 
 #import "SCITier2EmployeeGate.h"
@@ -42,7 +39,7 @@
 enum {
     kTier2MaxGotRanges = 4,
     kTier2MaxDescriptorSlots = 8,
-    kTier2MinimumThunkFanIn = 2,
+    kTier2MinimumBoolConsumers = 2,
 };
 
 typedef struct {
@@ -57,24 +54,24 @@ typedef struct {
     size_t gotRangeCount;
 } Tier2ImageLayout;
 
-typedef BOOL (*Tier2DescriptorEvaluator)(id session, const void *descriptor);
-typedef void (*Tier2FunctionHooker)(void *target, void *replacement,
-                                    void **original);
-typedef void (*Tier2ThreadSafetySetter)(int enabled);
+typedef BOOL (*Tier2EmployeeThunk)(id session);
+typedef void *(*Tier2EKHookFunction)(void *target,
+                                     void *replacement,
+                                     bool internalSkipChecks);
+typedef void (*Tier2EKEnableThreadSafety)(int enabled);
 
 typedef struct {
-    Tier2FunctionHooker hookFunction;
-    Tier2ThreadSafetySetter enableThreadSafety;
+    Tier2EKHookFunction hookFunction;
+    Tier2EKEnableThreadSafety enableThreadSafety;
     const char *imagePath;
 } Tier2ElleKitAPI;
 
 static atomic_bool gTier2Enabled = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installed = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installing = ATOMIC_VAR_INIT(false);
-static atomic_bool gTier2Attempted = ATOMIC_VAR_INIT(false);
+static atomic_bool gTier2HookFailed = ATOMIC_VAR_INIT(false);
 
-static const void *gEmployeeDescriptor = NULL;
-static Tier2DescriptorEvaluator gEmployeeEvaluator = NULL;
+static Tier2EmployeeThunk gOriginalEmployeeThunk = NULL;
 
 static uintptr_t Tier2StripDataPointer(uintptr_t value) {
 #if __has_feature(ptrauth_calls) && __has_include(<ptrauth.h>)
@@ -100,17 +97,22 @@ static BOOL Tier2Inside(uintptr_t address, uintptr_t start, size_t size) {
     return size != 0 && address >= start && address - start < size;
 }
 
-static void Tier2AddRange(Tier2Range *ranges, size_t *count,
-                          size_t maximum, uintptr_t start, size_t size) {
+static void Tier2AddRange(Tier2Range *ranges,
+                          size_t *count,
+                          size_t maximum,
+                          uintptr_t start,
+                          size_t size) {
     if (!start || !size || *count >= maximum) return;
     ranges[(*count)++] = (Tier2Range){ start, size };
 }
 
 static BOOL Tier2BuildMainImageLayout(Tier2ImageLayout *layout) {
+    if (!layout) return NO;
     memset(layout, 0, sizeof(*layout));
 
     const struct mach_header_64 *header = NULL;
     intptr_t slide = 0;
+
     for (uint32_t index = 0; index < _dyld_image_count(); ++index) {
         const struct mach_header *candidate = _dyld_get_image_header(index);
         if (candidate && candidate->magic == MH_MAGIC_64 &&
@@ -123,44 +125,59 @@ static BOOL Tier2BuildMainImageLayout(Tier2ImageLayout *layout) {
     if (!header) return NO;
 
     const uint8_t *cursor = (const uint8_t *)header + sizeof(*header);
-    const uint8_t *end = cursor + header->sizeofcmds;
+    const uint8_t *commandsEnd = cursor + header->sizeofcmds;
+
     for (uint32_t commandIndex = 0;
          commandIndex < header->ncmds &&
-         cursor + sizeof(struct load_command) <= end;
+         cursor + sizeof(struct load_command) <= commandsEnd;
          ++commandIndex) {
-        const struct load_command *command = (const struct load_command *)cursor;
+        const struct load_command *command =
+            (const struct load_command *)cursor;
+
         if (command->cmdsize < sizeof(*command) ||
-            cursor + command->cmdsize > end) {
+            cursor + command->cmdsize > commandsEnd) {
             return NO;
         }
 
         if (command->cmd == LC_SEGMENT_64) {
             const struct segment_command_64 *segment =
                 (const struct segment_command_64 *)command;
-            const struct section_64 *section =
+            const struct section_64 *sections =
                 (const struct section_64 *)((const uint8_t *)segment +
                                             sizeof(*segment));
+
+            const size_t expectedSize = sizeof(*segment) +
+                ((size_t)segment->nsects * sizeof(struct section_64));
+            if (expectedSize > command->cmdsize) return NO;
+
             for (uint32_t sectionIndex = 0;
                  sectionIndex < segment->nsects;
                  ++sectionIndex) {
+                const struct section_64 *section = &sections[sectionIndex];
                 const uintptr_t address =
-                    (uintptr_t)section[sectionIndex].addr + (uintptr_t)slide;
-                const size_t sectionSize = (size_t)section[sectionIndex].size;
-                if (Tier2NameIs(section[sectionIndex].sectname, "__text") &&
-                    Tier2NameIs(section[sectionIndex].segname, "__TEXT")) {
+                    (uintptr_t)section->addr + (uintptr_t)slide;
+                const size_t sectionSize = (size_t)section->size;
+
+                if (Tier2NameIs(section->sectname, "__text") &&
+                    Tier2NameIs(section->segname, "__TEXT")) {
                     layout->text = address;
                     layout->textSize = sectionSize;
-                } else if (Tier2NameIs(section[sectionIndex].sectname, "__got") ||
-                           Tier2NameIs(section[sectionIndex].sectname, "__auth_got")) {
-                    Tier2AddRange(layout->gotRanges, &layout->gotRangeCount,
-                                  kTier2MaxGotRanges, address, sectionSize);
+                } else if (Tier2NameIs(section->sectname, "__got") ||
+                           Tier2NameIs(section->sectname, "__auth_got")) {
+                    Tier2AddRange(layout->gotRanges,
+                                  &layout->gotRangeCount,
+                                  kTier2MaxGotRanges,
+                                  address,
+                                  sectionSize);
                 }
             }
         }
+
         cursor += command->cmdsize;
     }
 
-    return layout->text && layout->textSize >= 12 && layout->gotRangeCount;
+    return layout->text && layout->textSize >= 12 &&
+           layout->gotRangeCount != 0;
 }
 
 static BOOL Tier2IsADRP(uint32_t instruction) {
@@ -179,6 +196,10 @@ static BOOL Tier2IsBL(uint32_t instruction) {
     return (instruction & UINT32_C(0xfc000000)) == UINT32_C(0x94000000);
 }
 
+static BOOL Tier2IsCBZW0(uint32_t instruction) {
+    return (instruction & UINT32_C(0x7e00001f)) == UINT32_C(0x34000000);
+}
+
 static int64_t Tier2SignExtend(uint64_t value, unsigned int bits) {
     const uint64_t sign = UINT64_C(1) << (bits - 1);
     return (int64_t)((value ^ sign) - sign);
@@ -193,7 +214,8 @@ static uintptr_t Tier2DecodeADRP(uint32_t instruction, uintptr_t pc) {
 }
 
 static uintptr_t Tier2DecodeBranch(uint32_t instruction, uintptr_t pc) {
-    const int64_t delta = Tier2SignExtend(instruction & 0x03ffffff, 26) << 2;
+    const int64_t delta =
+        Tier2SignExtend(instruction & UINT32_C(0x03ffffff), 26) << 2;
     return (uintptr_t)((intptr_t)pc + delta);
 }
 
@@ -209,18 +231,24 @@ static size_t Tier2CollectDescriptorSlots(
     const uintptr_t wanted = Tier2StripDataPointer((uintptr_t)descriptor);
 
     for (size_t rangeIndex = 0;
-         rangeIndex < layout->gotRangeCount && count < kTier2MaxDescriptorSlots;
+         rangeIndex < layout->gotRangeCount &&
+         count < kTier2MaxDescriptorSlots;
          ++rangeIndex) {
         const Tier2Range range = layout->gotRanges[rangeIndex];
         uintptr_t cursor = (range.start + sizeof(uintptr_t) - 1) &
                            ~(uintptr_t)(sizeof(uintptr_t) - 1);
         const uintptr_t end = range.start + range.size;
-        for (; cursor + sizeof(uintptr_t) <= end; cursor += sizeof(uintptr_t)) {
+
+        for (; cursor + sizeof(uintptr_t) <= end;
+             cursor += sizeof(uintptr_t)) {
             const uintptr_t value = *(const uintptr_t *)cursor;
-            if (Tier2StripDataPointer(value) == wanted) slots[count++] = cursor;
+            if (Tier2StripDataPointer(value) == wanted) {
+                slots[count++] = cursor;
+            }
             if (count == kTier2MaxDescriptorSlots) break;
         }
     }
+
     return count;
 }
 
@@ -233,26 +261,33 @@ static BOOL Tier2SlotIsKnown(uintptr_t slot,
     return NO;
 }
 
-static size_t Tier2DirectFanIn(const Tier2ImageLayout *layout,
-                               uintptr_t target) {
+static size_t Tier2BooleanConsumerFanIn(const Tier2ImageLayout *layout,
+                                        uintptr_t target) {
     const uint32_t *words = (const uint32_t *)layout->text;
     const size_t count = layout->textSize / sizeof(uint32_t);
     size_t fanIn = 0;
 
-    for (size_t index = 0; index < count; ++index) {
-        const uint32_t instruction = words[index];
-        if (!Tier2IsBL(instruction) && !Tier2IsB(instruction)) continue;
+    for (size_t index = 0; index + 1 < count; ++index) {
+        const uint32_t call = words[index];
+        if (!Tier2IsBL(call)) continue;
+
         const uintptr_t pc = layout->text + index * sizeof(uint32_t);
-        if (Tier2DecodeBranch(instruction, pc) == target) ++fanIn;
+        if (Tier2DecodeBranch(call, pc) != target) continue;
+
+        if (Tier2IsCBZW0(words[index + 1])) ++fanIn;
     }
+
     return fanIn;
 }
 
 static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
                                    const void *employeeDescriptor,
                                    uintptr_t *outThunk,
-                                   uintptr_t *outEvaluator,
-                                   size_t *outFanIn) {
+                                   size_t *outBoolConsumers) {
+    if (!layout || !employeeDescriptor || !outThunk || !outBoolConsumers) {
+        return NO;
+    }
+
     uintptr_t slots[kTier2MaxDescriptorSlots] = {0};
     const size_t slotCount = Tier2CollectDescriptorSlots(
         layout, employeeDescriptor, slots);
@@ -261,15 +296,16 @@ static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
     const uint32_t *words = (const uint32_t *)layout->text;
     const size_t wordCount = layout->textSize / sizeof(uint32_t);
     uintptr_t selectedThunk = 0;
-    uintptr_t selectedEvaluator = 0;
-    size_t selectedFanIn = 0;
-    size_t candidates = 0;
+    size_t selectedConsumers = 0;
+    size_t candidateCount = 0;
 
     for (size_t index = 0; index + 2 < wordCount; ++index) {
         const uint32_t adrp = words[index];
         const uint32_t ldr = words[index + 1];
         const uint32_t branch = words[index + 2];
-        if (!Tier2IsADRP(adrp) || !Tier2IsLDRXUnsigned(ldr) ||
+
+        if (!Tier2IsADRP(adrp) ||
+            !Tier2IsLDRXUnsigned(ldr) ||
             !Tier2IsB(branch)) {
             continue;
         }
@@ -277,30 +313,33 @@ static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
         const unsigned int adrpRegister = adrp & 0x1f;
         const unsigned int ldrDestination = ldr & 0x1f;
         const unsigned int ldrBase = (ldr >> 5) & 0x1f;
-        if (adrpRegister != 1 || ldrDestination != 1 || ldrBase != 1) continue;
+        if (adrpRegister != 1 || ldrDestination != 1 || ldrBase != 1) {
+            continue;
+        }
 
         const uintptr_t pc = layout->text + index * sizeof(uint32_t);
-        const uintptr_t slot = Tier2LDRTarget(Tier2DecodeADRP(adrp, pc), ldr);
+        const uintptr_t slot =
+            Tier2LDRTarget(Tier2DecodeADRP(adrp, pc), ldr);
         if (!Tier2SlotIsKnown(slot, slots, slotCount)) continue;
 
         const uintptr_t evaluator = Tier2DecodeBranch(branch, pc + 8);
         if (!Tier2Inside(evaluator, layout->text, layout->textSize)) continue;
 
-        const size_t fanIn = Tier2DirectFanIn(layout, pc);
-        if (fanIn < kTier2MinimumThunkFanIn) continue;
+        const size_t boolConsumers =
+            Tier2BooleanConsumerFanIn(layout, pc);
+        if (boolConsumers < kTier2MinimumBoolConsumers) continue;
 
-        ++candidates;
-        if (fanIn > selectedFanIn) {
+        ++candidateCount;
+        if (boolConsumers > selectedConsumers) {
             selectedThunk = pc;
-            selectedEvaluator = evaluator;
-            selectedFanIn = fanIn;
+            selectedConsumers = boolConsumers;
         }
     }
 
-    if (candidates != 1 || !selectedThunk || !selectedEvaluator) return NO;
+    if (candidateCount != 1 || !selectedThunk) return NO;
+
     *outThunk = selectedThunk;
-    *outEvaluator = selectedEvaluator;
-    *outFanIn = selectedFanIn;
+    *outBoolConsumers = selectedConsumers;
     return YES;
 }
 
@@ -309,9 +348,8 @@ static BOOL Tier2EmployeeThunkReplacement(id session) {
         return YES;
     }
 
-    Tier2DescriptorEvaluator evaluator = gEmployeeEvaluator;
-    const void *descriptor = gEmployeeDescriptor;
-    return evaluator && descriptor ? evaluator(session, descriptor) : NO;
+    Tier2EmployeeThunk original = gOriginalEmployeeThunk;
+    return original ? original(session) : NO;
 }
 
 static void *Tier2ResolveEmployeeDescriptor(void) {
@@ -331,30 +369,23 @@ static BOOL Tier2ResolveElleKitAPI(Tier2ElleKitAPI *api) {
     if (!api) return NO;
     memset(api, 0, sizeof(*api));
 
-    void *substrateHook = dlsym(RTLD_DEFAULT, "MSHookFunction");
-    void *elleKitHook = dlsym(RTLD_DEFAULT, "EKHookFunction");
+    void *hookFunction = dlsym(RTLD_DEFAULT, "EKHookFunction");
     void *threadSafety = dlsym(RTLD_DEFAULT, "EKEnableThreadSafety");
-    if (!substrateHook || !elleKitHook || !threadSafety) {
-        return NO;
-    }
+    if (!hookFunction || !threadSafety) return NO;
 
-    Dl_info substrateInfo;
-    Dl_info elleKitInfo;
+    Dl_info hookInfo;
     Dl_info threadSafetyInfo;
-    if (!Tier2SymbolInfo(substrateHook, &substrateInfo) ||
-        !Tier2SymbolInfo(elleKitHook, &elleKitInfo) ||
+    if (!Tier2SymbolInfo(hookFunction, &hookInfo) ||
         !Tier2SymbolInfo(threadSafety, &threadSafetyInfo)) {
         return NO;
     }
 
-    if (substrateInfo.dli_fbase != elleKitInfo.dli_fbase ||
-        substrateInfo.dli_fbase != threadSafetyInfo.dli_fbase) {
-        return NO;
-    }
+    if (hookInfo.dli_fbase != threadSafetyInfo.dli_fbase) return NO;
 
-    api->hookFunction = (Tier2FunctionHooker)substrateHook;
-    api->enableThreadSafety = (Tier2ThreadSafetySetter)threadSafety;
-    api->imagePath = substrateInfo.dli_fname;
+    api->hookFunction = (Tier2EKHookFunction)hookFunction;
+    api->enableThreadSafety =
+        (Tier2EKEnableThreadSafety)threadSafety;
+    api->imagePath = hookInfo.dli_fname;
     return YES;
 }
 
@@ -365,72 +396,80 @@ static void Tier2ClearLegacyEmployeeMasters(void) {
         @"sci_force_ig_internal_employee",
         @"sci_force_ig_is_employee"
     ];
+
     for (NSString *key in keys) [SCIUtils setPref:@NO forKey:key];
 }
 
 static void Tier2InstallNow(void) {
-    NSCAssert(NSThread.isMainThread, @"Tier-2 install must run on main thread");
+    NSCAssert(NSThread.isMainThread,
+              @"Tier-2 install must run on main thread");
 
     if (!atomic_load_explicit(&gTier2Enabled, memory_order_acquire) ||
         atomic_load_explicit(&gTier2Installed, memory_order_acquire) ||
-        atomic_load_explicit(&gTier2Attempted, memory_order_acquire)) {
+        atomic_load_explicit(&gTier2HookFailed, memory_order_acquire)) {
         return;
     }
 
     bool expected = false;
     if (!atomic_compare_exchange_strong_explicit(
-            &gTier2Installing, &expected, true,
-            memory_order_acq_rel, memory_order_acquire)) {
+            &gTier2Installing,
+            &expected,
+            true,
+            memory_order_acq_rel,
+            memory_order_acquire)) {
         return;
     }
-    atomic_store_explicit(&gTier2Attempted, true, memory_order_release);
 
     @autoreleasepool {
         Tier2ImageLayout layout;
         Tier2ElleKitAPI elleKit;
         uintptr_t thunk = 0;
-        uintptr_t evaluator = 0;
-        size_t fanIn = 0;
+        size_t boolConsumers = 0;
 
         const void *employeeDescriptor = Tier2ResolveEmployeeDescriptor();
-        const BOOL discovered = employeeDescriptor &&
+        const BOOL ready = employeeDescriptor &&
             Tier2ResolveElleKitAPI(&elleKit) &&
             Tier2BuildMainImageLayout(&layout) &&
-            Tier2FindEmployeeThunk(&layout, employeeDescriptor,
-                                   &thunk, &evaluator, &fanIn);
+            Tier2FindEmployeeThunk(&layout,
+                                   employeeDescriptor,
+                                   &thunk,
+                                   &boolConsumers);
 
-        if (discovered) {
-            /*
-             * Publish the exact original thunk semantics before patching. The
-             * replacement never needs ElleKit's trampoline: when disabled it
-             * calls the untouched evaluator with the exact employee descriptor.
-             */
-            gEmployeeDescriptor = employeeDescriptor;
-            gEmployeeEvaluator = (Tier2DescriptorEvaluator)evaluator;
+        if (!ready) {
+            NSLog(@"[SCITier2] ElleKit/discovery unavailable; failing closed");
+            atomic_store_explicit(&gTier2Installing,
+                                  false,
+                                  memory_order_release);
+            return;
+        }
 
-            /*
-             * Official ElleKit exposes this switch specifically so all other
-             * threads are suspended around ElleKit's page-write and original-
-             * protection restoration sequence.
-             */
-            elleKit.enableThreadSafety(1);
+        /*
+         * DobbyHook is intentionally not used here. Its official Darwin
+         * backend changes the target page to RW|COPY, writes the patch, and
+         * restores RX without suspending peer threads. ElleKit's rawHook does
+         * suspend/resume them when thread safety is enabled.
+         */
+        elleKit.enableThreadSafety(1);
 
-            void *originalMarker = NULL;
-            elleKit.hookFunction((void *)thunk,
-                                 (void *)Tier2EmployeeThunkReplacement,
-                                 &originalMarker);
+        void *original = elleKit.hookFunction(
+            (void *)thunk,
+            (void *)Tier2EmployeeThunkReplacement,
+            false);
 
-            if (originalMarker) {
-                atomic_store_explicit(&gTier2Installed, true,
-                                      memory_order_release);
-                NSLog(@"[SCITier2] ElleKit thread-safe employee thunk installed provider=%s thunk=%p evaluator=%p fanIn=%zu",
-                      elleKit.imagePath ? elleKit.imagePath : "<unknown>",
-                      (void *)thunk, (void *)evaluator, fanIn);
-            } else {
-                NSLog(@"[SCITier2] ElleKit rejected employee thunk hook; not retrying");
-            }
+        if (!original) {
+            NSLog(@"[SCITier2] EKHookFunction rejected employee thunk; not retrying");
+            atomic_store_explicit(&gTier2HookFailed,
+                                  true,
+                                  memory_order_release);
         } else {
-            NSLog(@"[SCITier2] employee thunk discovery/provider validation failed closed");
+            gOriginalEmployeeThunk = (Tier2EmployeeThunk)original;
+            atomic_store_explicit(&gTier2Installed,
+                                  true,
+                                  memory_order_release);
+            NSLog(@"[SCITier2] ElleKit employee thunk installed provider=%s thunk=%p boolConsumers=%zu",
+                  elleKit.imagePath ? elleKit.imagePath : "<unknown>",
+                  (void *)thunk,
+                  boolConsumers);
         }
     }
 
