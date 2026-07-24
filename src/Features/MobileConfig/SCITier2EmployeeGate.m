@@ -3,19 +3,20 @@
  *
  * Structural iOS translation of InstaEclipse Tier-2 semantics.
  *
- * The module discovers and hooks ONLY the canonical `_ig_is_employee`
+ * The module discovers ONLY the canonical `_ig_is_employee`
  * `(session) -> BOOL` thunk. It never aliases or forces
  * `_ig_is_employee_or_test_user`, test-account, dogfood, or unrelated
  * MobileConfig descriptors.
  *
- * Sideload safety:
- *   - uses the documented MSHookFunction API only after proving that
- *     MSHookFunction, EKHookFunction, and EKEnableThreadSafety come from the
- *     same ElleKit Mach-O image;
- *   - explicitly rejects a Dobby-backed provider;
- *   - patches only the unique 3-instruction employee thunk;
- *   - installs once on the main thread after UIApplication activation;
- *   - uses ElleKit's returned original trampoline when the toggle is off.
+ * Feather / sideload safety:
+ *   - no inline function patcher, page-protection change or __TEXT write;
+ *   - uses ElleKit's EKJITLessHook hardware-breakpoint backend;
+ *   - passes orig = NULL because this thunk starts with ADRP, not PACIBSP;
+ *   - when disabled, reproduces the original thunk by calling the untouched
+ *     evaluator with the exact `_ig_is_employee` descriptor;
+ *   - proves the exception port and hardware breakpoint before reporting the
+ *     hook as installed;
+ *   - fails closed with no inline-hook fallback.
  */
 
 #import "SCITier2EmployeeGate.h"
@@ -25,6 +26,7 @@
 #import <UIKit/UIKit.h>
 #import <dispatch/dispatch.h>
 #import <dlfcn.h>
+#import <mach/mach.h>
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 
@@ -41,6 +43,7 @@ enum {
     kTier2MaxGotRanges = 4,
     kTier2MaxDescriptorSlots = 8,
     kTier2MinimumBoolConsumers = 2,
+    kTier2ArmDebugState64 = 15,
 };
 
 typedef struct {
@@ -55,24 +58,33 @@ typedef struct {
     size_t gotRangeCount;
 } Tier2ImageLayout;
 
-typedef BOOL (*Tier2EmployeeThunk)(id session);
-typedef void (*Tier2MSHookFunction)(void *target,
-                                    void *replacement,
-                                    void **original);
-typedef void (*Tier2EKEnableThreadSafety)(int enabled);
+typedef BOOL (*Tier2DescriptorEvaluator)(id session, const void *descriptor);
+typedef void (*Tier2EKJITLessHook)(void *target,
+                                   void *replacement,
+                                   void **original);
+typedef mach_port_t (*Tier2EKLaunchExceptionHandler)(void);
 
 typedef struct {
-    Tier2MSHookFunction hookFunction;
-    Tier2EKEnableThreadSafety enableThreadSafety;
+    Tier2EKJITLessHook hook;
+    Tier2EKLaunchExceptionHandler launchExceptionHandler;
     const char *imagePath;
-} Tier2ElleKitAPI;
+} Tier2JITLessAPI;
+
+typedef struct {
+    uint64_t bvr[16];
+    uint64_t bcr[16];
+    uint64_t wvr[16];
+    uint64_t wcr[16];
+    uint64_t mdscr_el1;
+} Tier2ArmDebugState64;
 
 static atomic_bool gTier2Enabled = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installed = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installing = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2HookFailed = ATOMIC_VAR_INIT(false);
 
-static Tier2EmployeeThunk gOriginalEmployeeThunk = NULL;
+static const void *gEmployeeDescriptor = NULL;
+static Tier2DescriptorEvaluator gEmployeeEvaluator = NULL;
 
 static uintptr_t Tier2StripDataPointer(uintptr_t value) {
 #if __has_feature(ptrauth_calls) && __has_include(<ptrauth.h>)
@@ -143,14 +155,13 @@ static BOOL Tier2BuildMainImageLayout(Tier2ImageLayout *layout) {
         if (command->cmd == LC_SEGMENT_64) {
             const struct segment_command_64 *segment =
                 (const struct segment_command_64 *)command;
-            const struct section_64 *sections =
-                (const struct section_64 *)((const uint8_t *)segment +
-                                            sizeof(*segment));
-
             const size_t expectedSize = sizeof(*segment) +
                 ((size_t)segment->nsects * sizeof(struct section_64));
             if (expectedSize > command->cmdsize) return NO;
 
+            const struct section_64 *sections =
+                (const struct section_64 *)((const uint8_t *)segment +
+                                            sizeof(*segment));
             for (uint32_t sectionIndex = 0;
                  sectionIndex < segment->nsects;
                  ++sectionIndex) {
@@ -263,7 +274,7 @@ static BOOL Tier2SlotIsKnown(uintptr_t slot,
 }
 
 static size_t Tier2BooleanConsumerFanIn(const Tier2ImageLayout *layout,
-                                        uintptr_t target) {
+                                         uintptr_t target) {
     const uint32_t *words = (const uint32_t *)layout->text;
     const size_t count = layout->textSize / sizeof(uint32_t);
     size_t fanIn = 0;
@@ -274,7 +285,6 @@ static size_t Tier2BooleanConsumerFanIn(const Tier2ImageLayout *layout,
 
         const uintptr_t pc = layout->text + index * sizeof(uint32_t);
         if (Tier2DecodeBranch(call, pc) != target) continue;
-
         if (Tier2IsCBZW0(words[index + 1])) ++fanIn;
     }
 
@@ -284,8 +294,10 @@ static size_t Tier2BooleanConsumerFanIn(const Tier2ImageLayout *layout,
 static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
                                    const void *employeeDescriptor,
                                    uintptr_t *outThunk,
+                                   uintptr_t *outEvaluator,
                                    size_t *outBoolConsumers) {
-    if (!layout || !employeeDescriptor || !outThunk || !outBoolConsumers) {
+    if (!layout || !employeeDescriptor || !outThunk || !outEvaluator ||
+        !outBoolConsumers) {
         return NO;
     }
 
@@ -297,6 +309,7 @@ static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
     const uint32_t *words = (const uint32_t *)layout->text;
     const size_t wordCount = layout->textSize / sizeof(uint32_t);
     uintptr_t selectedThunk = 0;
+    uintptr_t selectedEvaluator = 0;
     size_t selectedConsumers = 0;
     size_t candidateCount = 0;
 
@@ -333,13 +346,17 @@ static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
         ++candidateCount;
         if (boolConsumers > selectedConsumers) {
             selectedThunk = pc;
+            selectedEvaluator = evaluator;
             selectedConsumers = boolConsumers;
         }
     }
 
-    if (candidateCount != 1 || !selectedThunk) return NO;
+    if (candidateCount != 1 || !selectedThunk || !selectedEvaluator) {
+        return NO;
+    }
 
     *outThunk = selectedThunk;
+    *outEvaluator = selectedEvaluator;
     *outBoolConsumers = selectedConsumers;
     return YES;
 }
@@ -349,8 +366,9 @@ static BOOL Tier2EmployeeThunkReplacement(id session) {
         return YES;
     }
 
-    Tier2EmployeeThunk original = gOriginalEmployeeThunk;
-    return original ? original(session) : NO;
+    Tier2DescriptorEvaluator evaluator = gEmployeeEvaluator;
+    const void *descriptor = gEmployeeDescriptor;
+    return evaluator && descriptor ? evaluator(session, descriptor) : NO;
 }
 
 static void *Tier2ResolveEmployeeDescriptor(void) {
@@ -366,44 +384,92 @@ static BOOL Tier2SymbolInfo(void *symbol, Dl_info *info) {
            info->dli_fbase != NULL;
 }
 
-static BOOL Tier2ResolveElleKitAPI(Tier2ElleKitAPI *api) {
+static BOOL Tier2ResolveJITLessAPI(Tier2JITLessAPI *api) {
     if (!api) return NO;
     memset(api, 0, sizeof(*api));
 
-    void *substrateHook = dlsym(RTLD_DEFAULT, "MSHookFunction");
-    void *elleKitHook = dlsym(RTLD_DEFAULT, "EKHookFunction");
-    void *threadSafety = dlsym(RTLD_DEFAULT, "EKEnableThreadSafety");
-    void *dobbyHook = dlsym(RTLD_DEFAULT, "DobbyHook");
-    if (!substrateHook || !elleKitHook || !threadSafety) return NO;
+    void *jitless = dlsym(RTLD_DEFAULT, "EKJITLessHook");
+    void *launcher = dlsym(RTLD_DEFAULT, "EKLaunchExceptionHandler");
+    void *registry = dlsym(RTLD_DEFAULT, "EKAddHookToRegistry");
+    if (!jitless || !launcher || !registry) return NO;
 
-    Dl_info substrateInfo;
-    Dl_info elleKitInfo;
-    Dl_info threadSafetyInfo;
-    if (!Tier2SymbolInfo(substrateHook, &substrateInfo) ||
-        !Tier2SymbolInfo(elleKitHook, &elleKitInfo) ||
-        !Tier2SymbolInfo(threadSafety, &threadSafetyInfo)) {
+    Dl_info jitlessInfo;
+    Dl_info launcherInfo;
+    Dl_info registryInfo;
+    if (!Tier2SymbolInfo(jitless, &jitlessInfo) ||
+        !Tier2SymbolInfo(launcher, &launcherInfo) ||
+        !Tier2SymbolInfo(registry, &registryInfo)) {
         return NO;
     }
 
-    if (substrateInfo.dli_fbase != elleKitInfo.dli_fbase ||
-        substrateInfo.dli_fbase != threadSafetyInfo.dli_fbase) {
+    if (jitlessInfo.dli_fbase != launcherInfo.dli_fbase ||
+        jitlessInfo.dli_fbase != registryInfo.dli_fbase) {
         return NO;
     }
 
-    if (dobbyHook) {
-        Dl_info dobbyInfo;
-        if (Tier2SymbolInfo(dobbyHook, &dobbyInfo) &&
-            dobbyInfo.dli_fbase == substrateInfo.dli_fbase) {
-            NSLog(@"[SCITier2] refusing Dobby-backed hook provider");
-            return NO;
+    api->hook = (Tier2EKJITLessHook)jitless;
+    api->launchExceptionHandler =
+        (Tier2EKLaunchExceptionHandler)launcher;
+    api->imagePath = jitlessInfo.dli_fname;
+    return YES;
+}
+
+static BOOL Tier2ExceptionPortIsInstalled(mach_port_t expectedPort) {
+    if (expectedPort == MACH_PORT_NULL) return NO;
+
+    exception_mask_t masks[EXC_TYPES_COUNT] = {0};
+    mach_port_t ports[EXC_TYPES_COUNT] = {0};
+    exception_behavior_t behaviors[EXC_TYPES_COUNT] = {0};
+    thread_state_flavor_t flavors[EXC_TYPES_COUNT] = {0};
+    mach_msg_type_number_t count = EXC_TYPES_COUNT;
+
+    const kern_return_t result = task_get_exception_ports(
+        mach_task_self_,
+        EXC_MASK_BREAKPOINT,
+        masks,
+        &count,
+        ports,
+        behaviors,
+        flavors);
+    if (result != KERN_SUCCESS) return NO;
+
+    BOOL found = NO;
+    for (mach_msg_type_number_t index = 0; index < count; ++index) {
+        if ((masks[index] & EXC_MASK_BREAKPOINT) != 0 &&
+            ports[index] == expectedPort) {
+            found = YES;
+        }
+        if (ports[index] != MACH_PORT_NULL) {
+            mach_port_deallocate(mach_task_self_, ports[index]);
         }
     }
+    return found;
+}
 
-    api->hookFunction = (Tier2MSHookFunction)substrateHook;
-    api->enableThreadSafety =
-        (Tier2EKEnableThreadSafety)threadSafety;
-    api->imagePath = substrateInfo.dli_fname;
-    return YES;
+static BOOL Tier2CurrentThreadHasBreakpoint(uintptr_t target) {
+    Tier2ArmDebugState64 state;
+    memset(&state, 0, sizeof(state));
+    mach_msg_type_number_t count =
+        (mach_msg_type_number_t)(sizeof(state) / sizeof(uint32_t));
+
+    const thread_t thread = mach_thread_self();
+    const kern_return_t result = thread_get_state(
+        thread,
+        kTier2ArmDebugState64,
+        (thread_state_t)&state,
+        &count);
+    mach_port_deallocate(mach_task_self_, thread);
+    if (result != KERN_SUCCESS) return NO;
+
+    const uint64_t addressMask = UINT64_C(0x0000007fffffffff);
+    const uint64_t wanted = ((uint64_t)target) & addressMask;
+    for (size_t index = 0; index < 16; ++index) {
+        if ((state.bvr[index] & addressMask) == wanted &&
+            (state.bcr[index] & UINT64_C(1)) != 0) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static void Tier2ClearLegacyEmployeeMasters(void) {
@@ -419,7 +485,7 @@ static void Tier2ClearLegacyEmployeeMasters(void) {
 
 static void Tier2InstallNow(void) {
     NSCAssert(NSThread.isMainThread,
-              @"Tier-2 install must run on main thread");
+              @"Tier-2 JIT-less install must run on main thread");
 
     if (!atomic_load_explicit(&gTier2Enabled, memory_order_acquire) ||
         atomic_load_explicit(&gTier2Installed, memory_order_acquire) ||
@@ -439,54 +505,77 @@ static void Tier2InstallNow(void) {
 
     @autoreleasepool {
         Tier2ImageLayout layout;
-        Tier2ElleKitAPI elleKit;
+        Tier2JITLessAPI elleKit;
         uintptr_t thunk = 0;
+        uintptr_t evaluator = 0;
         size_t boolConsumers = 0;
 
         const void *employeeDescriptor = Tier2ResolveEmployeeDescriptor();
         const BOOL ready = employeeDescriptor &&
-            Tier2ResolveElleKitAPI(&elleKit) &&
+            Tier2ResolveJITLessAPI(&elleKit) &&
             Tier2BuildMainImageLayout(&layout) &&
             Tier2FindEmployeeThunk(&layout,
                                    employeeDescriptor,
                                    &thunk,
+                                   &evaluator,
                                    &boolConsumers);
 
         if (!ready) {
-            NSLog(@"[SCITier2] ElleKit/discovery unavailable; failing closed");
+            NSLog(@"[SCITier2] JIT-less ElleKit/discovery unavailable; failing closed");
             atomic_store_explicit(&gTier2Installing,
                                   false,
                                   memory_order_release);
             return;
         }
 
-        /*
-         * DobbyHook is intentionally not used here. Its official Darwin
-         * backend changes the target page to RW|COPY, writes the patch, and
-         * restores RX without suspending peer threads. ElleKit's rawHook does
-         * suspend/resume them when thread safety is enabled.
-         */
-        elleKit.enableThreadSafety(1);
+        const mach_port_t exceptionPort =
+            elleKit.launchExceptionHandler();
+        if (!Tier2ExceptionPortIsInstalled(exceptionPort)) {
+            NSLog(@"[SCITier2] ElleKit breakpoint exception port unavailable; failing closed");
+            atomic_store_explicit(&gTier2HookFailed,
+                                  true,
+                                  memory_order_release);
+            atomic_store_explicit(&gTier2Installing,
+                                  false,
+                                  memory_order_release);
+            return;
+        }
 
-        void *original = NULL;
-        elleKit.hookFunction(
-            (void *)thunk,
-            (void *)Tier2EmployeeThunkReplacement,
-            &original);
+        gEmployeeDescriptor = employeeDescriptor;
+        gEmployeeEvaluator = (Tier2DescriptorEvaluator)evaluator;
 
-        if (!original) {
-            NSLog(@"[SCITier2] verified ElleKit MSHookFunction rejected employee thunk; not retrying");
+        const uint32_t originalInstructions[3] = {
+            ((const uint32_t *)thunk)[0],
+            ((const uint32_t *)thunk)[1],
+            ((const uint32_t *)thunk)[2],
+        };
+
+        elleKit.hook((void *)thunk,
+                     (void *)Tier2EmployeeThunkReplacement,
+                     NULL);
+
+        const BOOL textUnchanged =
+            ((const uint32_t *)thunk)[0] == originalInstructions[0] &&
+            ((const uint32_t *)thunk)[1] == originalInstructions[1] &&
+            ((const uint32_t *)thunk)[2] == originalInstructions[2];
+        const BOOL breakpointInstalled =
+            Tier2CurrentThreadHasBreakpoint(thunk);
+
+        if (!textUnchanged || !breakpointInstalled) {
+            NSLog(@"[SCITier2] JIT-less hook validation failed textUnchanged=%d breakpoint=%d; no inline fallback",
+                  textUnchanged,
+                  breakpointInstalled);
             atomic_store_explicit(&gTier2HookFailed,
                                   true,
                                   memory_order_release);
         } else {
-            gOriginalEmployeeThunk = (Tier2EmployeeThunk)original;
             atomic_store_explicit(&gTier2Installed,
                                   true,
                                   memory_order_release);
-            NSLog(@"[SCITier2] ElleKit employee thunk installed provider=%s thunk=%p boolConsumers=%zu",
+            NSLog(@"[SCITier2] ElleKit JIT-less employee thunk installed provider=%s thunk=%p evaluator=%p boolConsumers=%zu",
                   elleKit.imagePath ? elleKit.imagePath : "<unknown>",
                   (void *)thunk,
+                  (void *)evaluator,
                   boolConsumers);
         }
     }
