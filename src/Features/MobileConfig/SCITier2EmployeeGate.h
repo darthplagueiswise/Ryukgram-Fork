@@ -2,9 +2,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Enables or disables the canonical Tier-2 `_ig_is_employee` gate. The
-/// installed hook is ElleKit-only; disabling delegates to ElleKit's preserved
-/// original thunk trampoline without touching combined employee/test gates.
+/// Enables or disables the canonical Tier-2 `_ig_is_employee` gate. The hook
+/// uses ElleKit's JIT-less hardware-breakpoint backend and never modifies the
+/// Instagram executable's `__TEXT`. Disabling reproduces the original thunk by
+/// calling its untouched evaluator with the exact employee descriptor.
 FOUNDATION_EXPORT void SCITier2EmployeeGateSetEnabled(BOOL enabled);
 FOUNDATION_EXPORT BOOL SCITier2EmployeeGateEnabled(void);
 FOUNDATION_EXPORT BOOL SCITier2EmployeeGateInstalled(void);
