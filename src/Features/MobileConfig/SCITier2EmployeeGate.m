@@ -1,20 +1,23 @@
 /*
  * SCITier2EmployeeGate.m
  *
- * Safe iOS translation of InstaEclipse Tier-2 semantics.
+ * Structural iOS translation of InstaEclipse Tier-2 semantics.
  *
- * This module discovers and hooks ONLY the canonical `_ig_is_employee` gate.
+ * This module discovers and hooks ONLY the canonical `_ig_is_employee` thunk.
  * It never reads, aliases, redirects or forces `_ig_is_employee_or_test_user`,
  * test-account gates, dogfood gates, or unrelated MobileConfig descriptors.
  *
- * Discovery is structural and contains no image offset or numeric MC id:
+ * Discovery contains no hard-coded image offset or numeric MobileConfig id:
  *   ADRP x1, employee-descriptor GOT page
  *   LDR  x1, [x1, employee-descriptor GOT slot]
  *   B    shared `(session, descriptor) -> BOOL` evaluator
  *
- * Installation is deliberately deferred until UIApplicationDidBecomeActive.
- * The constructor only registers an observer; it does not scan Mach-O text or
- * install a function hook on the launch path.
+ * Sideload safety requirements:
+ *   - the generic Substrate symbol must be provided by ElleKit;
+ *   - ElleKit's thread-safety mode is enabled before MSHookFunction;
+ *   - only the tiny canonical `(session) -> BOOL` thunk is patched;
+ *   - the shared evaluator remains untouched;
+ *   - installation runs once, on the main thread, after app activation.
  */
 
 #import "SCITier2EmployeeGate.h"
@@ -57,27 +60,33 @@ typedef struct {
 typedef BOOL (*Tier2DescriptorEvaluator)(id session, const void *descriptor);
 typedef void (*Tier2FunctionHooker)(void *target, void *replacement,
                                     void **original);
+typedef void (*Tier2ThreadSafetySetter)(int enabled);
+
+typedef struct {
+    Tier2FunctionHooker hookFunction;
+    Tier2ThreadSafetySetter enableThreadSafety;
+    const char *imagePath;
+} Tier2ElleKitAPI;
 
 static atomic_bool gTier2Enabled = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installed = ATOMIC_VAR_INIT(false);
 static atomic_bool gTier2Installing = ATOMIC_VAR_INIT(false);
+static atomic_bool gTier2Attempted = ATOMIC_VAR_INIT(false);
 
 static const void *gEmployeeDescriptor = NULL;
-static Tier2DescriptorEvaluator gOriginalEvaluator = NULL;
+static Tier2DescriptorEvaluator gEmployeeEvaluator = NULL;
 
-static dispatch_queue_t Tier2InstallQueue(void) {
-    static dispatch_queue_t queue;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.ryukgram.tier2-employee",
-                                      DISPATCH_QUEUE_SERIAL);
-    });
-    return queue;
-}
-
-static uintptr_t Tier2StripPointer(uintptr_t value) {
+static uintptr_t Tier2StripDataPointer(uintptr_t value) {
 #if __has_feature(ptrauth_calls) && __has_include(<ptrauth.h>)
     return (uintptr_t)ptrauth_strip((void *)value, ptrauth_key_asda);
+#else
+    return value;
+#endif
+}
+
+static void *Tier2StripFunctionPointer(void *value) {
+#if __has_feature(ptrauth_calls) && __has_include(<ptrauth.h>)
+    return ptrauth_strip(value, ptrauth_key_function_pointer);
 #else
     return value;
 #endif
@@ -192,11 +201,12 @@ static uintptr_t Tier2LDRTarget(uintptr_t page, uint32_t instruction) {
     return page + (((instruction >> 10) & 0xfff) * sizeof(uintptr_t));
 }
 
-static size_t Tier2CollectDescriptorSlots(const Tier2ImageLayout *layout,
-                                          const void *descriptor,
-                                          uintptr_t slots[kTier2MaxDescriptorSlots]) {
+static size_t Tier2CollectDescriptorSlots(
+    const Tier2ImageLayout *layout,
+    const void *descriptor,
+    uintptr_t slots[kTier2MaxDescriptorSlots]) {
     size_t count = 0;
-    const uintptr_t wanted = Tier2StripPointer((uintptr_t)descriptor);
+    const uintptr_t wanted = Tier2StripDataPointer((uintptr_t)descriptor);
 
     for (size_t rangeIndex = 0;
          rangeIndex < layout->gotRangeCount && count < kTier2MaxDescriptorSlots;
@@ -207,7 +217,7 @@ static size_t Tier2CollectDescriptorSlots(const Tier2ImageLayout *layout,
         const uintptr_t end = range.start + range.size;
         for (; cursor + sizeof(uintptr_t) <= end; cursor += sizeof(uintptr_t)) {
             const uintptr_t value = *(const uintptr_t *)cursor;
-            if (Tier2StripPointer(value) == wanted) slots[count++] = cursor;
+            if (Tier2StripDataPointer(value) == wanted) slots[count++] = cursor;
             if (count == kTier2MaxDescriptorSlots) break;
         }
     }
@@ -238,11 +248,11 @@ static size_t Tier2DirectFanIn(const Tier2ImageLayout *layout,
     return fanIn;
 }
 
-static BOOL Tier2FindEmployeeEvaluator(const Tier2ImageLayout *layout,
-                                       const void *employeeDescriptor,
-                                       uintptr_t *outThunk,
-                                       uintptr_t *outEvaluator,
-                                       size_t *outFanIn) {
+static BOOL Tier2FindEmployeeThunk(const Tier2ImageLayout *layout,
+                                   const void *employeeDescriptor,
+                                   uintptr_t *outThunk,
+                                   uintptr_t *outEvaluator,
+                                   size_t *outFanIn) {
     uintptr_t slots[kTier2MaxDescriptorSlots] = {0};
     const size_t slotCount = Tier2CollectDescriptorSlots(
         layout, employeeDescriptor, slots);
@@ -294,29 +304,58 @@ static BOOL Tier2FindEmployeeEvaluator(const Tier2ImageLayout *layout,
     return YES;
 }
 
-static BOOL Tier2DescriptorMatches(const void *actual,
-                                   const void *expected) {
-    return actual && expected &&
-           Tier2StripPointer((uintptr_t)actual) ==
-           Tier2StripPointer((uintptr_t)expected);
-}
-
-static BOOL Tier2EvaluatorReplacement(id session, const void *descriptor) {
-    Tier2DescriptorEvaluator original = gOriginalEvaluator;
-    if (!original) return NO;
-
-    if (atomic_load_explicit(&gTier2Enabled, memory_order_acquire) &&
-        Tier2DescriptorMatches(descriptor, gEmployeeDescriptor)) {
+static BOOL Tier2EmployeeThunkReplacement(id session) {
+    if (atomic_load_explicit(&gTier2Enabled, memory_order_acquire)) {
         return YES;
     }
 
-    return original(session, descriptor);
+    Tier2DescriptorEvaluator evaluator = gEmployeeEvaluator;
+    const void *descriptor = gEmployeeDescriptor;
+    return evaluator && descriptor ? evaluator(session, descriptor) : NO;
 }
 
 static void *Tier2ResolveEmployeeDescriptor(void) {
     void *descriptor = dlsym(RTLD_DEFAULT, "ig_is_employee");
     if (!descriptor) descriptor = dlsym(RTLD_DEFAULT, "_ig_is_employee");
     return descriptor;
+}
+
+static BOOL Tier2SymbolInfo(void *symbol, Dl_info *info) {
+    if (!symbol || !info) return NO;
+    memset(info, 0, sizeof(*info));
+    return dladdr(Tier2StripFunctionPointer(symbol), info) != 0 &&
+           info->dli_fbase != NULL;
+}
+
+static BOOL Tier2ResolveElleKitAPI(Tier2ElleKitAPI *api) {
+    if (!api) return NO;
+    memset(api, 0, sizeof(*api));
+
+    void *substrateHook = dlsym(RTLD_DEFAULT, "MSHookFunction");
+    void *elleKitHook = dlsym(RTLD_DEFAULT, "EKHookFunction");
+    void *threadSafety = dlsym(RTLD_DEFAULT, "EKEnableThreadSafety");
+    if (!substrateHook || !elleKitHook || !threadSafety) {
+        return NO;
+    }
+
+    Dl_info substrateInfo;
+    Dl_info elleKitInfo;
+    Dl_info threadSafetyInfo;
+    if (!Tier2SymbolInfo(substrateHook, &substrateInfo) ||
+        !Tier2SymbolInfo(elleKitHook, &elleKitInfo) ||
+        !Tier2SymbolInfo(threadSafety, &threadSafetyInfo)) {
+        return NO;
+    }
+
+    if (substrateInfo.dli_fbase != elleKitInfo.dli_fbase ||
+        substrateInfo.dli_fbase != threadSafetyInfo.dli_fbase) {
+        return NO;
+    }
+
+    api->hookFunction = (Tier2FunctionHooker)substrateHook;
+    api->enableThreadSafety = (Tier2ThreadSafetySetter)threadSafety;
+    api->imagePath = substrateInfo.dli_fname;
+    return YES;
 }
 
 static void Tier2ClearLegacyEmployeeMasters(void) {
@@ -330,8 +369,11 @@ static void Tier2ClearLegacyEmployeeMasters(void) {
 }
 
 static void Tier2InstallNow(void) {
+    NSCAssert(NSThread.isMainThread, @"Tier-2 install must run on main thread");
+
     if (!atomic_load_explicit(&gTier2Enabled, memory_order_acquire) ||
-        atomic_load_explicit(&gTier2Installed, memory_order_acquire)) {
+        atomic_load_explicit(&gTier2Installed, memory_order_acquire) ||
+        atomic_load_explicit(&gTier2Attempted, memory_order_acquire)) {
         return;
     }
 
@@ -341,61 +383,83 @@ static void Tier2InstallNow(void) {
             memory_order_acq_rel, memory_order_acquire)) {
         return;
     }
+    atomic_store_explicit(&gTier2Attempted, true, memory_order_release);
 
     @autoreleasepool {
         Tier2ImageLayout layout;
+        Tier2ElleKitAPI elleKit;
         uintptr_t thunk = 0;
         uintptr_t evaluator = 0;
         size_t fanIn = 0;
 
-        gEmployeeDescriptor = Tier2ResolveEmployeeDescriptor();
-        Tier2FunctionHooker hooker =
-            (Tier2FunctionHooker)dlsym(RTLD_DEFAULT, "MSHookFunction");
-
-        BOOL discovered = gEmployeeDescriptor && hooker &&
+        const void *employeeDescriptor = Tier2ResolveEmployeeDescriptor();
+        const BOOL discovered = employeeDescriptor &&
+            Tier2ResolveElleKitAPI(&elleKit) &&
             Tier2BuildMainImageLayout(&layout) &&
-            Tier2FindEmployeeEvaluator(&layout, gEmployeeDescriptor,
-                                       &thunk, &evaluator, &fanIn);
+            Tier2FindEmployeeThunk(&layout, employeeDescriptor,
+                                   &thunk, &evaluator, &fanIn);
 
         if (discovered) {
-            void *original = NULL;
-            hooker((void *)evaluator,
-                   (void *)Tier2EvaluatorReplacement,
-                   &original);
-            gOriginalEvaluator = (Tier2DescriptorEvaluator)original;
-            if (gOriginalEvaluator) {
+            /*
+             * Publish the exact original thunk semantics before patching. The
+             * replacement never needs ElleKit's trampoline: when disabled it
+             * calls the untouched evaluator with the exact employee descriptor.
+             */
+            gEmployeeDescriptor = employeeDescriptor;
+            gEmployeeEvaluator = (Tier2DescriptorEvaluator)evaluator;
+
+            /*
+             * Official ElleKit exposes this switch specifically so all other
+             * threads are suspended around ElleKit's page-write and original-
+             * protection restoration sequence.
+             */
+            elleKit.enableThreadSafety(1);
+
+            void *originalMarker = NULL;
+            elleKit.hookFunction((void *)thunk,
+                                 (void *)Tier2EmployeeThunkReplacement,
+                                 &originalMarker);
+
+            if (originalMarker) {
                 atomic_store_explicit(&gTier2Installed, true,
                                       memory_order_release);
-                NSLog(@"[SCITier2] installed employee-only thunk=%p evaluator=%p fanIn=%zu",
+                NSLog(@"[SCITier2] ElleKit thread-safe employee thunk installed provider=%s thunk=%p evaluator=%p fanIn=%zu",
+                      elleKit.imagePath ? elleKit.imagePath : "<unknown>",
                       (void *)thunk, (void *)evaluator, fanIn);
+            } else {
+                NSLog(@"[SCITier2] ElleKit rejected employee thunk hook; not retrying");
             }
-        }
-
-        if (!atomic_load_explicit(&gTier2Installed, memory_order_acquire)) {
-            NSLog(@"[SCITier2] employee-only discovery failed closed");
+        } else {
+            NSLog(@"[SCITier2] employee thunk discovery/provider validation failed closed");
         }
     }
 
     atomic_store_explicit(&gTier2Installing, false, memory_order_release);
 }
 
-static void Tier2ScheduleInstallAfterActivation(void) {
+static void Tier2ScheduleInstallOnMainThread(void) {
     if (!atomic_load_explicit(&gTier2Enabled, memory_order_acquire)) return;
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                 (int64_t)(2.0 * NSEC_PER_SEC)),
-                   Tier2InstallQueue(), ^{
+    if (NSThread.isMainThread) {
         Tier2InstallNow();
-    });
+    } else {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            Tier2InstallNow();
+        });
+    }
 }
 
 void SCITier2EmployeeGateSetEnabled(BOOL enabled) {
     if (enabled) Tier2ClearLegacyEmployeeMasters();
     atomic_store_explicit(&gTier2Enabled, enabled, memory_order_release);
 
-    if (enabled && UIApplication.sharedApplication.applicationState ==
-                   UIApplicationStateActive) {
-        Tier2ScheduleInstallAfterActivation();
+    if (enabled) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (UIApplication.sharedApplication.applicationState ==
+                UIApplicationStateActive) {
+                Tier2InstallNow();
+            }
+        });
     }
 }
 
@@ -417,9 +481,9 @@ static void Tier2Bootstrap(void) {
         [NSNotificationCenter.defaultCenter
             addObserverForName:UIApplicationDidBecomeActiveNotification
                         object:nil
-                         queue:nil
+                         queue:NSOperationQueue.mainQueue
                     usingBlock:^(__unused NSNotification *notification) {
-            Tier2ScheduleInstallAfterActivation();
+            Tier2ScheduleInstallOnMainThread();
         }];
     }
 }
