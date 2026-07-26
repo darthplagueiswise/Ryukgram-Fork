@@ -647,9 +647,19 @@ static NSAttributedString *SCIMCPrefixedText(NSString *prefix,
 }
 @end
 
-#pragma mark - Root browser
+#pragma mark - Controller declarations
 
-@class SCIMCConfigDetailController;
+// The complete interface must be visible before the root browser instantiates
+// the detail controller. A forward declaration is not sufficient for class or
+// property messages under the project's strict Objective-C diagnostics.
+@interface SCIMCConfigDetailController : UIViewController <UITableViewDataSource,
+                                                             UITableViewDelegate,
+                                                             UISearchResultsUpdating>
+@property (nonatomic, strong) NSNumber *cid;
+@property (nonatomic, strong, nullable) NSNumber *focusParam;
+@end
+
+#pragma mark - Root browser
 
 @interface SCIMCBrowserListController () <UITableViewDataSource,
                                            UITableViewDelegate,
@@ -872,9 +882,9 @@ static NSAttributedString *SCIMCPrefixedText(NSString *prefix,
 
     SCIMCBrowserResult *result = self.rows[indexPath.row];
     SCIMCConfigDetailController *detail = [SCIMCConfigDetailController new];
-    [detail setValue:result.configID forKey:@"cid"];
+    detail.cid = result.configID;
     if (result.kind == SCIMCBrowserResultParam) {
-        [detail setValue:result.paramID forKey:@"focusParam"];
+        detail.focusParam = result.paramID;
     }
     [self.navigationController pushViewController:detail animated:YES];
 }
@@ -882,11 +892,7 @@ static NSAttributedString *SCIMCPrefixedText(NSString *prefix,
 
 #pragma mark - Per-config detail
 
-@interface SCIMCConfigDetailController : UIViewController <UITableViewDataSource,
-                                                             UITableViewDelegate,
-                                                             UISearchResultsUpdating>
-@property (nonatomic, strong) NSNumber *cid;
-@property (nonatomic, strong, nullable) NSNumber *focusParam;
+@interface SCIMCConfigDetailController ()
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) NSArray<NSNumber *> *allIndexes;
