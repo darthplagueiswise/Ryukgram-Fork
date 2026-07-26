@@ -6,7 +6,14 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
+SCIMC_BROWSER_SOURCE := src/Settings/Sections/SCIMCBrowser.m
+SCIMC_BROWSER_GENERATED := src/Settings/Sections/SCIMCBrowser.generated.m
+RYUKGRAM_SOURCE_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
+
+$(TWEAK_NAME)_FILES = $(filter-out $(SCIMC_BROWSER_SOURCE) $(SCIMC_BROWSER_GENERATED),$(RYUKGRAM_SOURCE_FILES)) $(SCIMC_BROWSER_GENERATED) modules/fishhook/fishhook.c
+
+$(SCIMC_BROWSER_GENERATED): $(SCIMC_BROWSER_SOURCE) tools/generate-scimc-browser.py
+	@python3 tools/generate-scimc-browser.py "$(SCIMC_BROWSER_SOURCE)" "$(SCIMC_BROWSER_GENERATED)"
 
 # The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
 # longer baked in here — it ships as a standalone NoPluginsPatch.dylib
@@ -24,13 +31,7 @@ SCI_TARGET_FLAGS = -DTARGET_OS_MAC=1 -DTARGET_OS_OSX=0 -DTARGET_OS_IPHONE=1 -DTA
 # logger, its NSLog tee, and the Settings row compile out to nothing.
 SCI_FILELOG ?= 1
 
-# SCIMCBrowser defines its private detail controller later in the same
-# translation unit. Clang can resolve it correctly at runtime, but with -Werror
-# it promotes the temporary forward-class method diagnostics to build errors.
-# Keep every other warning strict and suppress only those two diagnostics.
-SCI_MC_BROWSER_FORWARD_FLAGS = -Wno-receiver-forward-class -Wno-objc-method-access
-
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/Frameworks/Accelerate.framework/Frameworks $(SCI_TARGET_FLAGS) $(SCI_MC_BROWSER_FORWARD_FLAGS) -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DSCI_FILELOG=$(SCI_FILELOG) -include src/SCIPrefix.h
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/SubFrameworks -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Library/Frameworks/Accelerate.framework/Frameworks $(SCI_TARGET_FLAGS) -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DSCI_FILELOG=$(SCI_FILELOG) -include src/SCIPrefix.h
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression
 
@@ -55,6 +56,9 @@ endif
 CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+clean::
+	@rm -f "$(SCIMC_BROWSER_GENERATED)"
 
 ifeq ($(FINALPACKAGE),1)
 after-all::
