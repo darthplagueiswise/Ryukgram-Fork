@@ -6,14 +6,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-SCIMC_BROWSER_SOURCE := src/Settings/Sections/SCIMCBrowser.m
-SCIMC_BROWSER_GENERATED := src/Settings/Sections/SCIMCBrowser.generated.m
-RYUKGRAM_SOURCE_FILES := $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \))
-
-$(TWEAK_NAME)_FILES = $(filter-out $(SCIMC_BROWSER_SOURCE) $(SCIMC_BROWSER_GENERATED),$(RYUKGRAM_SOURCE_FILES)) $(SCIMC_BROWSER_GENERATED) modules/fishhook/fishhook.c
-
-$(SCIMC_BROWSER_GENERATED): $(SCIMC_BROWSER_SOURCE) tools/generate-scimc-browser.py
-	@python3 tools/generate-scimc-browser.py "$(SCIMC_BROWSER_SOURCE)" "$(SCIMC_BROWSER_GENERATED)"
+$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
 
 # The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
 # longer baked in here — it ships as a standalone NoPluginsPatch.dylib
@@ -56,9 +49,6 @@ endif
 CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-
-clean::
-	@rm -f "$(SCIMC_BROWSER_GENERATED)"
 
 ifeq ($(FINALPACKAGE),1)
 after-all::
