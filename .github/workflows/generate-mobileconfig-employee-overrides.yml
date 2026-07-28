@@ -1,0 +1,77 @@
+name: Generate MobileConfig employee overrides
+
+on:
+  push:
+    branches:
+      - analysis/mobileconfig-employee-overrides
+    paths:
+      - .github/workflows/generate-mobileconfig-employee-overrides.yml
+      - tools/reverse/mobileconfig_mapping_overrides.py
+      - tools/reverse/fixtures/mc_overrides_user_base.json
+  pull_request:
+    branches:
+      - experimental3
+    paths:
+      - .github/workflows/generate-mobileconfig-employee-overrides.yml
+      - tools/reverse/mobileconfig_mapping_overrides.py
+      - tools/reverse/fixtures/mc_overrides_user_base.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MAPPING_URL: https://github.com/crimera/piko/raw/refs/heads/dev/docs/mappings/435.0.0.37.76.json
+      OUTPUT_DIR: docs/mobileconfig-tests/435.0.0.37.76
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: analysis/mobileconfig-employee-overrides
+
+      - name: Generate employee-only override
+        run: |
+          mkdir -p "$OUTPUT_DIR"
+          python3 tools/reverse/mobileconfig_mapping_overrides.py \
+            --base tools/reverse/fixtures/mc_overrides_user_base.json \
+            --mapping "$MAPPING_URL" \
+            --profile employee \
+            --output "$OUTPUT_DIR/mc_overrides_employee.json" \
+            --report "$OUTPUT_DIR/mc_overrides_employee.report.json"
+
+      - name: Generate expanded employee/internal/dogfood override
+        run: |
+          python3 tools/reverse/mobileconfig_mapping_overrides.py \
+            --base tools/reverse/fixtures/mc_overrides_user_base.json \
+            --mapping "$MAPPING_URL" \
+            --profile employee-internal-dogfood \
+            --output "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.json" \
+            --report "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.report.json"
+
+      - name: Validate generated JSON
+        run: |
+          python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee.json" >/dev/null
+          python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee.report.json" >/dev/null
+          python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.json" >/dev/null
+          python3 -m json.tool "$OUTPUT_DIR/mc_overrides_employee_internal_dogfood.report.json" >/dev/null
+
+      - name: Commit generated fixtures on direct branch runs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$OUTPUT_DIR"
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git commit -m "Generate employee MobileConfig override fixtures"
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobileconfig-employee-overrides-435
+          path: docs/mobileconfig-tests/435.0.0.37.76/
