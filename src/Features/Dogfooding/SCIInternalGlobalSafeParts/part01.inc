@@ -63,12 +63,12 @@ static void SCIInstallMobileConfigEmployeeHooks(void) {
     if (!(original) && SCIEncodingMatches(method, expectedEncoding)) \
         MSHookMessageEx(cls, selector, (IMP)(replacement), (IMP *)&(original)); \
 } while (0)
-    SCI_HOOK_MC("getBool:", "B24@0:8{mc_bool_param_t=Q}16", SCI_MCGetBool, orig_MCGetBool);
-    SCI_HOOK_MC("getBool:withDefault:", "B28@0:8{mc_bool_param_t=Q}16B24", SCI_MCGetBoolDefault, orig_MCGetBoolDefault);
-    SCI_HOOK_MC("getBool:withOptions:", "B32@0:8{mc_bool_param_t=Q}16@24", SCI_MCGetBoolOptions, orig_MCGetBoolOptions);
-    SCI_HOOK_MC("getBool:withOptions:withDefault:", "B36@0:8{mc_bool_param_t=Q}16@24B32", SCI_MCGetBoolOptionsDefault, orig_MCGetBoolOptionsDefault);
-    SCI_HOOK_MC("getBoolWithoutLogging:", "B24@0:8{mc_bool_param_t=Q}16", SCI_MCGetBoolNoLog, orig_MCGetBoolNoLog);
-    SCI_HOOK_MC("getBoolWithoutLogging:withDefault:", "B28@0:8{mc_bool_param_t=Q}16B24", SCI_MCGetBoolNoLogDefault, orig_MCGetBoolNoLogDefault);
+    SCI_HOOK_MC(@"getBool:", "B24@0:8{mc_bool_param_t=Q}16", SCI_MCGetBool, orig_MCGetBool);
+    SCI_HOOK_MC(@"getBool:withDefault:", "B28@0:8{mc_bool_param_t=Q}16B24", SCI_MCGetBoolDefault, orig_MCGetBoolDefault);
+    SCI_HOOK_MC(@"getBool:withOptions:", "B32@0:8{mc_bool_param_t=Q}16@24", SCI_MCGetBoolOptions, orig_MCGetBoolOptions);
+    SCI_HOOK_MC(@"getBool:withOptions:withDefault:", "B36@0:8{mc_bool_param_t=Q}16@24B32", SCI_MCGetBoolOptionsDefault, orig_MCGetBoolOptionsDefault);
+    SCI_HOOK_MC(@"getBoolWithoutLogging:", "B24@0:8{mc_bool_param_t=Q}16", SCI_MCGetBoolNoLog, orig_MCGetBoolNoLog);
+    SCI_HOOK_MC(@"getBoolWithoutLogging:withDefault:", "B28@0:8{mc_bool_param_t=Q}16B24", SCI_MCGetBoolNoLogDefault, orig_MCGetBoolNoLogDefault);
 #undef SCI_HOOK_MC
     installed = orig_MCGetBool || orig_MCGetBoolDefault || orig_MCGetBoolOptions ||
                 orig_MCGetBoolOptionsDefault || orig_MCGetBoolNoLog || orig_MCGetBoolNoLogDefault;
