@@ -26,7 +26,7 @@ The runtime hook forces only this exact parameter while the Employee/Internal ma
 - `1`: unavailable because the internal rollout/plugin is absent (or Sapienz);
 - `2`: denied because the account is not employee/test-user.
 
-The current Bug Reporter initializer is hooked through its Objective-C ABI. It receives status `0` and `showInternalSettings = YES`. `SCIInternalBugMenuPreflight.x` is deliberately installed two main-queue turns after the older hook, so it remains outermost and prevents the legacy implementation from re-enabling Dogfooding Assistant before native `viewDidLoad`.
+The current and legacy Bug Reporter initializers are hooked through their validated Objective-C ABIs. `SCIInternalGlobalSafe.x` is the single authoritative implementation: it forwards through the older Employee/Internal hook under a thread-local menu-mutation suppression, then enforces status `0`, `showInternalSettings = YES` and provider-aware Assistant visibility before native lifecycle code observes the object. The GraphQL/dyld bridge calls the same idempotent exported installer as late frameworks load.
 
 ## XPlugins ABI correction
 
