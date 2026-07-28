@@ -1,4 +1,3 @@
-}
 
 static NSString *SCITextInView(UIView *view) {
     if ([view isKindOfClass:UILabel.class] && ((UILabel *)view).text.length) return ((UILabel *)view).text;
