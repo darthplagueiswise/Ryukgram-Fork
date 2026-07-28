@@ -9,20 +9,16 @@
 #define DGBLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] GraphQLDynamicBridge " fmt, ##__VA_ARGS__)
 
 extern NSUInteger SCIRefreshGraphQLDogfoodDynamicStatusHooks(void);
-extern BOOL SCIInstallInternalGlobalHooksIfNeeded(void);
 
 static NSString *(*orig_SCIGraphQLInstallObservers)(id, SEL) = NULL;
 static id (*orig_SCIDogfoodEligibilityBuilder)(id, SEL, id) = NULL;
 
 static NSString *SCIGraphQLInstallObservers(id self, SEL _cmd) {
-    BOOL internalReady = SCIInstallInternalGlobalHooksIfNeeded();
     NSUInteger dynamicCount = SCIRefreshGraphQLDogfoodDynamicStatusHooks();
     NSString *base = orig_SCIGraphQLInstallObservers
         ? orig_SCIGraphQLInstallObservers(self, _cmd)
         : @"observer installer unavailable";
-    return [NSString stringWithFormat:
-            @"Internal global hooks ready: %@\nDynamic eligibility roots installed: %lu\n\n%@",
-            internalReady ? @"YES" : @"NO / waiting for framework",
+    return [NSString stringWithFormat:@"Dynamic eligibility roots installed: %lu\n\n%@",
             (unsigned long)dynamicCount, base ?: @""];
 }
 
@@ -34,7 +30,6 @@ static id SCIDogfoodEligibilityBuilder(id self, SEL _cmd, id lookbackDays) {
     // This runs only when Instagram actually builds DogfoodingEligibilityQuery,
     // never during launch. Generated Pando response classes are loaded by then,
     // so resolve the concrete root/status model without a ctor-wide scan.
-    SCIInstallInternalGlobalHooksIfNeeded();
     NSUInteger count = SCIRefreshGraphQLDogfoodDynamicStatusHooks();
     DGBLOG("query built; dynamic roots installed=%lu", (unsigned long)count);
     return builder;
@@ -60,10 +55,15 @@ void SCIInstallGraphQLDogfoodQueryBridgeIfNeeded(void) {
     installed = (orig_SCIDogfoodEligibilityBuilder != NULL);
 }
 
+
 // Correct install timing for classes that live in frameworks loaded AFTER the
-// dylib (IGDogfoodingFirst, IGDogfooderProd, Bug Reporter and MobileConfig).
-// %ctor alone is too early; the existing callback is coalesced and dispatches
-// off the dyld lock before performing targeted class/selector lookups.
+// dylib (IGDogfoodingFirst, IGDogfooderProd, the Swift coordinator/lockout VC).
+// %ctor alone is too early (objc_getClass == nil); a user-triggered/viewDidLoad
+// pass is too late (the build-status check already ran and cached useCache=1).
+// dyld notifies us as each image loads+binds; we then re-run the idempotent
+// installer so every target is hooked the moment its framework appears — before
+// Instagram's session-start dogfooding flow uses it. The hook itself is deferred
+// off the dyld lock (main queue) to avoid deadlocking the ObjC runtime lock.
 static atomic_bool sDGScanQueued = false;
 static atomic_bool sDGAllInstalled = false;
 
@@ -71,24 +71,18 @@ static void SCIDGImageAdded(const struct mach_header *mh, intptr_t slide) {
     (void)mh; (void)slide;
     if (atomic_load(&sDGAllInstalled)) return;
     bool expected = false;
-    if (!atomic_compare_exchange_strong(&sDGScanQueued, &expected, true)) return;
+    if (!atomic_compare_exchange_strong(&sDGScanQueued, &expected, true)) return; // coalesce
     dispatch_async(dispatch_get_main_queue(), ^{
         atomic_store(&sDGScanQueued, false);
         if (atomic_load(&sDGAllInstalled)) return;
-
-        BOOL internalReady = SCIInstallInternalGlobalHooksIfNeeded();
         Class cls = objc_getClass("SCIGraphQLDogfoodDiagnostics");
         if (!cls) return;
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
         NSString *result = [cls performSelector:@selector(installObservers)];
         #pragma clang diagnostic pop
-
-        // Latch only after both the existing Dogfood hooks and the new
-        // MobileConfig/Bug Reporter hooks are installed. This avoids stopping
-        // retries while FBSharedFramework or IGBugReporterMenu is still absent.
-        if (internalReady &&
-            [result isKindOfClass:[NSString class]] &&
+        // Latch off once nothing is missing (all target classes have loaded+hooked).
+        if ([result isKindOfClass:[NSString class]] &&
             [result rangeOfString:@"ABI-mismatched: none"].location != NSNotFound) {
             atomic_store(&sDGAllInstalled, true);
         }
@@ -97,8 +91,6 @@ static void SCIDGImageAdded(const struct mach_header *mh, intptr_t slide) {
 
 %ctor {
     @autoreleasepool {
-        SCIInstallInternalGlobalHooksIfNeeded();
-
         Class cls = objc_getClass("SCIGraphQLDogfoodDiagnostics");
         SEL selector = NSSelectorFromString(@"installObservers");
         Class meta = cls ? object_getClass(cls) : Nil;
@@ -108,7 +100,8 @@ static void SCIDGImageAdded(const struct mach_header *mh, intptr_t slide) {
                             (IMP)SCIGraphQLInstallObservers,
                             (IMP *)&orig_SCIGraphQLInstallObservers);
         }
-        // Reuse one existing image-load callback for all late-loaded targets.
+        // Install on every image load so late-loading framework classes get hooked
+        // at the right time (fires immediately for already-loaded images too).
         _dyld_register_func_for_add_image(SCIDGImageAdded);
     }
 }
