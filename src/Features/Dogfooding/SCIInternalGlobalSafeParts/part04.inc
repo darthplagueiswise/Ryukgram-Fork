@@ -95,11 +95,3 @@ BOOL SCIInstallInternalGlobalHooksIfNeeded(void) {
                        orig_OpenDogfoodingSettingsVC && orig_OpenInstagramDebugMenu;
     return mcReady && menuReady && openerReady;
 }
-
-%ctor {
-    @autoreleasepool {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            SCIInstallInternalGlobalHooksIfNeeded();
-        });
-    }
-}
