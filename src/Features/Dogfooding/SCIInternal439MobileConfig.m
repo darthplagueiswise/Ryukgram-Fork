@@ -94,6 +94,7 @@ static SCI439MCOptionsDefaultIMP orig_SCI439GetBoolOptionsDefault = NULL;
 static SCI439MCOneIMP orig_SCI439GetBoolWithoutLogging = NULL;
 static SCI439MCDefaultIMP orig_SCI439GetBoolWithoutLoggingDefault = NULL;
 static SCI439MCDefaultIMP orig_SCI439GetBoolXStackDefault = NULL;
+static BOOL sSCI439HooksInstalled = NO;
 
 static BOOL SCI439GetBool(id self, SEL _cmd, SCI439MCBoolParam param) {
     if (SCI439ShouldForceBool(param)) return YES;
@@ -174,15 +175,16 @@ static BOOL SCI439InstallOne(Class cls, const char *selectorName,
 }
 
 void SCIInstallInternal439MobileConfigHooksIfNeeded(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        if (!SCI439InternalModeEnabled()) return;
+    if (sSCI439HooksInstalled || !SCI439InternalModeEnabled()) return;
 
-        Class cls = objc_getClass("FBMobileConfigContextManager");
-        if (!cls) {
-            SCI439LOG("FBMobileConfigContextManager unavailable");
-            return;
-        }
+    Class cls = objc_getClass("FBMobileConfigContextManager");
+    if (!cls) {
+        SCI439LOG("FBMobileConfigContextManager unavailable; retry remains allowed");
+        return;
+    }
+
+    @synchronized (cls) {
+        if (sSCI439HooksInstalled) return;
 
         NSUInteger installed = 0;
         installed += SCI439InstallOne(cls, "getBool:",
@@ -207,9 +209,10 @@ void SCIInstallInternal439MobileConfigHooksIfNeeded(void) {
             (IMP)SCI439GetBoolXStackDefault,
             (IMP *)&orig_SCI439GetBoolXStackDefault, 4, NO, YES);
 
+        sSCI439HooksInstalled = installed > 0;
         SCI439LOG("installed %lu targeted MobileConfig hooks",
                   (unsigned long)installed);
-    });
+    }
 }
 
 __attribute__((constructor))
