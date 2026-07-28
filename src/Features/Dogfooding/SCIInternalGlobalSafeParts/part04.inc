@@ -19,8 +19,7 @@
     }
 
     @try {
-        ((void (*)(id, SEL, id, id, id))objc_msgSend)(
-            launcher, selector, config, top, session);
+        ((void (*)(id, SEL, id, id, id))objc_msgSend)(launcher, selector, config, top, session);
         [self noteAction:@"Open Native Dogfood Settings"
                   status:@"sent through validated factory"
                   detail:[self dogfoodNativeState]];
@@ -38,18 +37,13 @@ static void (*orig_OpenInstagramDebugMenu)(id, SEL, id) = NULL;
 
 static NSString *SCI_OpenDogfoodingSettingsVC(id self, SEL _cmd) {
     BOOL opened = [SCIDogfoodObjectRuntime tryOpenNativeDogfoodSettings];
-    return opened
-        ? @"opened native Dogfooding Settings through validated factory"
-        : @"blocked: native Dogfooding Assistant provider/config unavailable";
+    return opened ? @"opened native Dogfooding Settings through validated factory"
+                  : @"blocked: native Dogfooding Assistant provider/config unavailable";
 }
 
 static void SCI_OpenInstagramDebugMenu(id self, SEL _cmd, id completion) {
-    // Retry late-loaded FBShared/Bug Reporter classes immediately before the
-    // native entry point. Every installer is idempotent and ABI-validated.
     SCIInstallInternalGlobalHooksIfNeeded();
-    if (orig_OpenInstagramDebugMenu) {
-        orig_OpenInstagramDebugMenu(self, _cmd, completion);
-    }
+    if (orig_OpenInstagramDebugMenu) orig_OpenInstagramDebugMenu(self, _cmd, completion);
 }
 
 static void SCIInstallSafeDogfoodOpeners(void) {
@@ -61,10 +55,8 @@ static void SCIInstallSafeDogfoodOpeners(void) {
     SEL tryOpen = @selector(tryOpenNativeDogfoodSettings);
     Method tryOpenMethod = runtimeMeta ? class_getInstanceMethod(runtimeMeta, tryOpen) : NULL;
     if (!orig_TryOpenNativeDogfoodSettings &&
-        (SCIEncodingMatches(tryOpenMethod, "B16@0:8") ||
-         SCIEncodingMatches(tryOpenMethod, "c16@0:8"))) {
-        MSHookMessageEx(runtimeMeta, tryOpen,
-                        (IMP)SCI_TryOpenNativeDogfoodSettings,
+        (SCIEncodingMatches(tryOpenMethod, "B16@0:8") || SCIEncodingMatches(tryOpenMethod, "c16@0:8"))) {
+        MSHookMessageEx(runtimeMeta, tryOpen, (IMP)SCI_TryOpenNativeDogfoodSettings,
                         (IMP *)&orig_TryOpenNativeDogfoodSettings);
     }
 
@@ -72,28 +64,23 @@ static void SCIInstallSafeDogfoodOpeners(void) {
     Class menusMeta = menus ? object_getClass(menus) : Nil;
     SEL openSettings = NSSelectorFromString(@"openDogfoodingSettingsVC");
     Method openMethod = menusMeta ? class_getInstanceMethod(menusMeta, openSettings) : NULL;
-    if (!orig_OpenDogfoodingSettingsVC && openMethod &&
-        method_getNumberOfArguments(openMethod) == 2) {
-        MSHookMessageEx(menusMeta, openSettings,
-                        (IMP)SCI_OpenDogfoodingSettingsVC,
+    if (!orig_OpenDogfoodingSettingsVC && openMethod && method_getNumberOfArguments(openMethod) == 2) {
+        MSHookMessageEx(menusMeta, openSettings, (IMP)SCI_OpenDogfoodingSettingsVC,
                         (IMP *)&orig_OpenDogfoodingSettingsVC);
     }
 
     SEL openDebug = NSSelectorFromString(@"openInstagramDebugMenuWithCompletion:");
     Method debugMethod = menusMeta ? class_getInstanceMethod(menusMeta, openDebug) : NULL;
-    if (!orig_OpenInstagramDebugMenu && debugMethod &&
-        method_getNumberOfArguments(debugMethod) == 3) {
-        MSHookMessageEx(menusMeta, openDebug,
-                        (IMP)SCI_OpenInstagramDebugMenu,
+    if (!orig_OpenInstagramDebugMenu && debugMethod && method_getNumberOfArguments(debugMethod) == 3) {
+        MSHookMessageEx(menusMeta, openDebug, (IMP)SCI_OpenInstagramDebugMenu,
                         (IMP *)&orig_OpenInstagramDebugMenu);
     }
 
-    installed = orig_TryOpenNativeDogfoodSettings ||
-                orig_OpenDogfoodingSettingsVC || orig_OpenInstagramDebugMenu;
+    installed = orig_TryOpenNativeDogfoodSettings || orig_OpenDogfoodingSettingsVC || orig_OpenInstagramDebugMenu;
 }
 
 BOOL SCIInstallInternalGlobalHooksIfNeeded(void) {
-    if (!SCIInternalMenuOn() && !SCIEmployeeInternalMasterOn()) return NO;
+    if (!SCIInternalMenuOn() && !SCIEmployeeInternalMasterOn()) return YES;
     SCIInstallLegacyEmployeeSuppressionHook();
     SCIInstallEmployeeInternalHooksIfNeeded();
     SCIInstallMobileConfigEmployeeHooks();
@@ -105,15 +92,12 @@ BOOL SCIInstallInternalGlobalHooksIfNeeded(void) {
                    orig_MCGetBoolNoLog && orig_MCGetBoolNoLogDefault;
     BOOL menuReady = orig_SafeBugMenuCurrent || orig_SafeBugMenuLegacy;
     BOOL openerReady = orig_TryOpenNativeDogfoodSettings &&
-                       orig_OpenDogfoodingSettingsVC &&
-                       orig_OpenInstagramDebugMenu;
+                       orig_OpenDogfoodingSettingsVC && orig_OpenInstagramDebugMenu;
     return mcReady && menuReady && openerReady;
 }
 
 %ctor {
     @autoreleasepool {
-        // One deferred pass runs after tweak constructors, ensuring the existing
-        // Bug Reporter hook is installed before the payload-safety wrapper.
         dispatch_async(dispatch_get_main_queue(), ^{
             SCIInstallInternalGlobalHooksIfNeeded();
         });
