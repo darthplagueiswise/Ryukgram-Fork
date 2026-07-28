@@ -3,19 +3,16 @@
 #import "../../Utils.h"
 #import <Foundation/Foundation.h>
 
-// On-toggle apply for the Dev hooks that are installed on demand.
+// On-toggle apply for the Dev hooks that are genuinely safe to install live.
 //
-// The static BOOL gates (IG-only/internal ObjC getters, EasyGating/MobileConfig/
-// Sessioned C gates) are NO LONGER applied here — they were rewritten onto
-// priv-main conventions:
-//   • ObjC getters  → SCIDevInternalGates.x (always-on %hook, live pref read)
-//   • C gates       → SCIDevCGates.x (fishhook latched at %ctor; needs restart)
-// This orchestrator now only drives the genuinely on-demand pieces: internal
-// menus force, the internal-settings shake menu, the IGDS launcher hooks, and
-// the build-verified IG439 MobileConfig installer.
+// Employee/Internal for the new IG is a coordinated launch-time chain:
+// SCIEmployeeInternal -> SCIInternalGlobalSafe -> SCIInternalBugMenuPreflight.
+// Installing only one layer after a live preference change could expose a stale
+// Assistant row before its XPlugins payload guard is outermost. Therefore those
+// keys intentionally require an app restart; their method bodies read prefs live
+// once the complete chain has been installed.
 
 void SCIIGDSEnsureHooksInstalled(void);
-void SCIInstallInternal439MobileConfigHooksIfNeeded(void);
 
 static BOOL SCIKeyEqualsAny(NSString *key, NSArray<NSString *> *keys) {
     if (!key.length) return NO;
@@ -70,10 +67,10 @@ void SCIAdvancedHooksApplyForChangedKey(NSString *key, BOOL isOn) {
             (void)SCIInternalMenusForceApplyNow();
         }
         if (SCIKeyEqualsAny(key, SCIInternalSettingsKeys())) {
-            SCIInstallInternal439MobileConfigHooksIfNeeded();
+            // Deliberately no partial live install. The complete safe chain is
+            // installed from its constructors on the next app launch.
+            return;
         }
-        // Internal settings bug-reporter init is installed by
-        // SCIEmployeeInternal.x. Its method bodies read the live preferences.
         if (SCIKeyEqualsAny(key, SCIIGDSKeys())) SCIIGDSEnsureHooksInstalled();
     }
 }
