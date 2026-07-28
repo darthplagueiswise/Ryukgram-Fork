@@ -6,9 +6,10 @@
 // On-toggle apply for the Dev hooks that are genuinely safe to install live.
 //
 // Employee/Internal for the new IG is a coordinated launch-time chain:
-// SCIEmployeeInternal -> SCIInternalGlobalSafe -> SCIInternalBugMenuPreflight.
+// SCIEmployeeInternal -> SCIInternalGlobalSafe (MobileConfig + Bug Reporter
+// payload preflight + validated Dogfood openers).
 // Installing only one layer after a live preference change could expose a stale
-// Assistant row before its XPlugins payload guard is outermost. Therefore those
+// Assistant row before its XPlugins payload guard is installed. Therefore those
 // keys intentionally require an app restart; their method bodies read prefs live
 // once the complete chain has been installed.
 
