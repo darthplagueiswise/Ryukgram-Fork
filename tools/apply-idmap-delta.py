@@ -72,7 +72,15 @@ def main() -> int:
             raise ValueError(f"delta key {config_id} does not match entry ID {parsed_id}")
         by_id[parsed_id] = entry
 
-    order = [int(value) for value in delta["order"]]
+    order_values = list(delta.get("order", []))
+    for order_file in delta.get("order_files", []):
+        part_path = args.delta.parent / order_file
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        if not isinstance(part, list):
+            raise ValueError(f"{part_path}: expected a JSON array of IDs")
+        order_values.extend(part)
+
+    order = [int(value) for value in order_values]
     if len(order) != len(set(order)):
         raise ValueError("delta order contains duplicate IDs")
     if set(order) != set(by_id):
