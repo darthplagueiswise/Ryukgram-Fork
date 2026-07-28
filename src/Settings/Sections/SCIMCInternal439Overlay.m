@@ -11,6 +11,7 @@
 #import <mach-o/getsect.h>
 #import <mach-o/loader.h>
 #import <os/log.h>
+#import <string.h>
 
 #define SCI439MAPLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] IG439Map " fmt, ##__VA_ARGS__)
 
