@@ -57,7 +57,16 @@ def main() -> int:
     for config_id in delta.get("removed_ids", []):
         by_id.pop(int(config_id), None)
 
-    for config_id, entry in delta.get("entries", {}).items():
+    replacement_entries = dict(delta.get("entries", {}))
+    for entry_file in delta.get("entry_files", []):
+        part_path = args.delta.parent / entry_file
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        overlap = set(replacement_entries).intersection(part)
+        if overlap:
+            raise ValueError(f"duplicate delta entry IDs in {part_path}: {sorted(overlap)[:10]}")
+        replacement_entries.update(part)
+
+    for config_id, entry in replacement_entries.items():
         parsed_id = entry_id(entry)
         if parsed_id != int(config_id):
             raise ValueError(f"delta key {config_id} does not match entry ID {parsed_id}")
