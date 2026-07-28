@@ -37,6 +37,11 @@ $(TWEAK_NAME)_LDFLAGS += -lcompression
 # dropped independently of the dylib. Read back at runtime via getsectiondata().
 $(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap,src/BundleAssets/id_name_mapping.json
 
+# Small build-verified overlay for Instagram(16). It is intentionally separate
+# from the generated catalogue so aliases recovered by disassembly can be
+# reviewed and updated without rewriting the large one-line mapping.
+$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap439,src/BundleAssets/id_name_mapping_internal439.json
+
 ifeq ($(FINALPACKAGE),1)
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-x
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_SCI*
@@ -68,5 +73,4 @@ endif
 
 # clean-flexing::
 # 	$(MAKE) -C modules/flexing clean
-
 # endif
