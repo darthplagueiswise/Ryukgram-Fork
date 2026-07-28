@@ -29,14 +29,15 @@ $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression
 
 # Rebuild the exact verified Mapping-V8 snapshot from the repository baseline
-# plus a compact checked delta. The generator validates both the baseline and
-# final SHA-256, so a stale or partial catalogue fails the build instead of
-# silently embedding the wrong names.
+# plus a compact checked delta. THEOS_OBJ_DIR is architecture-sensitive: the
+# outer make sees .theos/obj while the arm64 submake sees .theos/obj/arm64.
+# Keep the generated catalogue in one architecture-independent absolute path so
+# before-all and the linker always reference the same file.
 SCI_IDMAP_BASE := src/BundleAssets/id_name_mapping.json
 SCI_IDMAP_DELTA_DIR := Resources/mobileconfig/id_name_mapping_v8_delta.parts
 SCI_IDMAP_DELTA_PARTS := $(sort $(wildcard $(SCI_IDMAP_DELTA_DIR)/part*))
 SCI_IDMAP_TOOL := tools/apply-idmap-v8.py
-SCI_IDMAP_GENERATED := $(THEOS_OBJ_DIR)/id_name_mapping.v8.json
+SCI_IDMAP_GENERATED := $(CURDIR)/.theos/generated/id_name_mapping.v8.json
 
 $(SCI_IDMAP_GENERATED): $(SCI_IDMAP_BASE) $(SCI_IDMAP_DELTA_PARTS) $(SCI_IDMAP_TOOL)
 	@mkdir -p "$(dir $@)"
@@ -70,6 +71,11 @@ endif
 CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+# Make the generated catalogue an explicit prerequisite of the architecture
+# dylib target. This closes the race even when Theos enters the arm64 submake
+# without running the outer before-all target first.
+$(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib: $(SCI_IDMAP_GENERATED)
 
 ifeq ($(FINALPACKAGE),1)
 after-all::
