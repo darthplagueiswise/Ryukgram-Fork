@@ -31,13 +31,13 @@ $(TWEAK_NAME)_LDFLAGS += -lcompression
 # Rebuild the exact verified Mapping-V8 snapshot from the repository baseline
 # plus a compact checked delta. THEOS_OBJ_DIR is architecture-sensitive: the
 # outer make sees .theos/obj while the arm64 submake sees .theos/obj/arm64.
-# Keep the generated catalogue in one architecture-independent absolute path so
-# before-all and the linker always reference the same file.
+# Keep the generated catalogue in one architecture-independent absolute path.
 SCI_IDMAP_BASE := src/BundleAssets/id_name_mapping.json
 SCI_IDMAP_DELTA_DIR := Resources/mobileconfig/id_name_mapping_v8_delta.parts
 SCI_IDMAP_DELTA_PARTS := $(sort $(wildcard $(SCI_IDMAP_DELTA_DIR)/part*))
 SCI_IDMAP_TOOL := tools/apply-idmap-v8.py
 SCI_IDMAP_GENERATED := $(CURDIR)/.theos/generated/id_name_mapping.v8.json
+SCI_IDMAP_SECTION_SOURCE := src/BundleAssets/SCIIdMapSections.m
 
 $(SCI_IDMAP_GENERATED): $(SCI_IDMAP_BASE) $(SCI_IDMAP_DELTA_PARTS) $(SCI_IDMAP_TOOL)
 	@mkdir -p "$(dir $@)"
@@ -45,19 +45,11 @@ $(SCI_IDMAP_GENERATED): $(SCI_IDMAP_BASE) $(SCI_IDMAP_DELTA_PARTS) $(SCI_IDMAP_T
 
 before-all:: $(SCI_IDMAP_GENERATED)
 
-# Embed the id-name mapping directly INTO the dylib's __DATA segment (not as a
-# separate bundle resource). Rationale: sideload injectors (Feather/Ellekit
-# .deb-injection, cyan, etc.) are proven to correctly carry the dylib itself and
-# plain image assets sitting in RyukGram.bundle, but a loose large .json/.bin next
-# to them does not reliably survive whatever re-signing/merge step those tools do.
-# A custom Mach-O section travels as part of the dylib's own bytes, so it can't be
-# dropped independently of the dylib. Read back at runtime via getsectiondata().
-$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap,$(SCI_IDMAP_GENERATED)
-
-# Small build-verified overlay for Instagram(16). It is intentionally separate
-# from the generated catalogue so aliases recovered by disassembly can be
-# reviewed and updated without rewriting the large one-line mapping.
-$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap439,src/BundleAssets/id_name_mapping_internal439.json
+# SCIIdMapSections.m embeds both JSON files through assembler .incbin directives
+# into a normal arm64 object containing __DATA,__idmap and __DATA,__idmap439.
+# The raw JSON paths must not be placed in *_LDFLAGS: doing so can make the
+# clang++ driver treat them as ordinary linker inputs and report "unknown file
+# type". Runtime access through getsectiondata() remains unchanged.
 
 ifeq ($(FINALPACKAGE),1)
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-x
@@ -72,10 +64,9 @@ CCFLAGS += -std=c++11
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-# Make the generated catalogue an explicit prerequisite of the architecture
-# dylib target. This closes the race even when Theos enters the arm64 submake
-# without running the outer before-all target first.
-$(THEOS_OBJ_DIR)/$(TWEAK_NAME).dylib: $(SCI_IDMAP_GENERATED)
+# The object produced from SCIIdMapSections.m uses .incbin, so the generated
+# Mapping-V8 file must exist before that one translation unit is compiled.
+$(THEOS_OBJ_DIR)/$(SCI_IDMAP_SECTION_SOURCE).$(_THEOS_OBJ_FILE_TAG).o: $(SCI_IDMAP_GENERATED) src/BundleAssets/id_name_mapping_internal439.json
 
 ifeq ($(FINALPACKAGE),1)
 after-all::
