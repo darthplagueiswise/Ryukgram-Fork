@@ -8,9 +8,9 @@
 // Instagram+0x02BD80E4. A provider returns a 16-byte pair in x0/x1
 // (data pointer, element count). Never replace it with a BOOL/sentinel pointer.
 
-#import "../../Utils.h"
-#import "SCIInternalGatePrefs.h"
-#import "SCIDogfoodObjectRuntime.h"
+#import "../../../Utils.h"
+#import "../SCIInternalGatePrefs.h"
+#import "../SCIDogfoodObjectRuntime.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
