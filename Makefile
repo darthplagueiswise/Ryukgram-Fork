@@ -28,6 +28,22 @@ $(TWEAK_NAME)_CFLAGS = -fobjc-arc -F$(THEOS)/sdks/iPhoneOS26.2.sdk/System/Librar
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression
 
+# Rebuild the exact verified Mapping-V8 snapshot from the repository baseline
+# plus a compact checked delta. The generator validates both the baseline and
+# final SHA-256, so a stale or partial catalogue fails the build instead of
+# silently embedding the wrong names.
+SCI_IDMAP_BASE := src/BundleAssets/id_name_mapping.json
+SCI_IDMAP_DELTA_DIR := Resources/mobileconfig/id_name_mapping_v8_delta.parts
+SCI_IDMAP_DELTA_PARTS := $(sort $(wildcard $(SCI_IDMAP_DELTA_DIR)/part*))
+SCI_IDMAP_TOOL := tools/apply-idmap-v8.py
+SCI_IDMAP_GENERATED := $(THEOS_OBJ_DIR)/id_name_mapping.v8.json
+
+$(SCI_IDMAP_GENERATED): $(SCI_IDMAP_BASE) $(SCI_IDMAP_DELTA_PARTS) $(SCI_IDMAP_TOOL)
+	@mkdir -p "$(dir $@)"
+	@python3 "$(SCI_IDMAP_TOOL)" "$(SCI_IDMAP_BASE)" "$(SCI_IDMAP_DELTA_DIR)" "$@"
+
+before-all:: $(SCI_IDMAP_GENERATED)
+
 # Embed the id-name mapping directly INTO the dylib's __DATA segment (not as a
 # separate bundle resource). Rationale: sideload injectors (Feather/Ellekit
 # .deb-injection, cyan, etc.) are proven to correctly carry the dylib itself and
@@ -35,7 +51,7 @@ $(TWEAK_NAME)_LDFLAGS += -lcompression
 # to them does not reliably survive whatever re-signing/merge step those tools do.
 # A custom Mach-O section travels as part of the dylib's own bytes, so it can't be
 # dropped independently of the dylib. Read back at runtime via getsectiondata().
-$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap,src/BundleAssets/id_name_mapping.json
+$(TWEAK_NAME)_LDFLAGS += -Wl,-sectcreate,__DATA,__idmap,$(SCI_IDMAP_GENERATED)
 
 # Small build-verified overlay for Instagram(16). It is intentionally separate
 # from the generated catalogue so aliases recovered by disassembly can be
