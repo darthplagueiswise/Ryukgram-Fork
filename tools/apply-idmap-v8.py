@@ -29,9 +29,20 @@ def main() -> int:
     args = parser.parse_args()
 
     base_bytes = args.base.read_bytes()
-    delta_bytes = args.delta.read_bytes()
-    if args.delta.name.endswith(".gz.b64"):
+    if args.delta.is_dir():
+        parts = sorted(args.delta.glob("part*"))
+        if not parts:
+            raise SystemExit("Mapping-V8 delta directory contains no part files")
+        expected = [f"part{i:02d}" for i in range(len(parts))]
+        actual = [part.name for part in parts]
+        if actual != expected:
+            raise SystemExit(f"Mapping-V8 delta parts are not contiguous: {actual}")
+        delta_bytes = b"".join(part.read_bytes() for part in parts)
         delta_bytes = gzip.decompress(base64.b64decode(delta_bytes))
+    else:
+        delta_bytes = args.delta.read_bytes()
+        if args.delta.name.endswith(".gz.b64"):
+            delta_bytes = gzip.decompress(base64.b64decode(delta_bytes))
     delta = json.loads(delta_bytes)
     if sha256(base_bytes) != delta["base_sha256"]:
         raise SystemExit("id mapping baseline SHA-256 mismatch; refusing a stale delta")
