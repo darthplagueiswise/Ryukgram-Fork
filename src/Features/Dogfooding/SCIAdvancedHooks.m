@@ -11,9 +11,11 @@
 //   • ObjC getters  → SCIDevInternalGates.x (always-on %hook, live pref read)
 //   • C gates       → SCIDevCGates.x (fishhook latched at %ctor; needs restart)
 // This orchestrator now only drives the genuinely on-demand pieces: internal
-// menus force, the internal-settings shake menu, and the IGDS launcher hooks.
+// menus force, the internal-settings shake menu, the IGDS launcher hooks, and
+// the build-verified IG439 MobileConfig installer.
 
 void SCIIGDSEnsureHooksInstalled(void);
+void SCIInstallInternal439MobileConfigHooksIfNeeded(void);
 
 static BOOL SCIKeyEqualsAny(NSString *key, NSArray<NSString *> *keys) {
     if (!key.length) return NO;
@@ -22,8 +24,12 @@ static BOOL SCIKeyEqualsAny(NSString *key, NSArray<NSString *> *keys) {
 }
 
 static NSArray<NSString *> *SCIInternalSettingsKeys(void) {
-    return @[@"sci_force_internal_settings_menu",
+    return @[@"sci_employee_internal",
+             @"sci_force_ig_internal_employee",
+             @"sci_force_ig_is_employee",
+             @"sci_force_internal_settings_menu",
              @"sci_force_internal_settings_loggedout",
+             @"sci_force_internal_settings_availability",
              @"sci_apply_internal_native",
              @"sci_apply_force_bloks",
              @"sci_apply_bloks_prefetch"];
@@ -60,9 +66,14 @@ static NSArray<NSString *> *SCIIGDSKeys(void) {
 void SCIAdvancedHooksApplyForChangedKey(NSString *key, BOOL isOn) {
     if (!isOn || !key.length) return;
     @autoreleasepool {
-        if ([key isEqualToString:@"sci_internal_menus"]) (void)SCIInternalMenusForceApplyNow();
-        // Internal settings bug-reporter init agora é instalado no %ctor de
-        // SCIEmployeeInternal.x (toggle sci_employee_internal, requer restart).
+        if ([key isEqualToString:@"sci_internal_menus"]) {
+            (void)SCIInternalMenusForceApplyNow();
+        }
+        if (SCIKeyEqualsAny(key, SCIInternalSettingsKeys())) {
+            SCIInstallInternal439MobileConfigHooksIfNeeded();
+        }
+        // Internal settings bug-reporter init is installed by
+        // SCIEmployeeInternal.x. Its method bodies read the live preferences.
         if (SCIKeyEqualsAny(key, SCIIGDSKeys())) SCIIGDSEnsureHooksInstalled();
     }
 }
