@@ -2,15 +2,13 @@
 
 ## Audited binaries
 
-- `Instagram(16)`
-  - SHA-256: `fa19f499c560b188d2802e3a1a36642209ee6e42d7639c1ebe010f14b2c4cd9b`
-- `FBSharedFramework(14)`
-  - SHA-256: `a79c110c59e7c16e5608227e12807583c1afcf80cb2a2e38302f147dbf99c12b`
+- `Instagram(16)` SHA-256: `fa19f499c560b188d2802e3a1a36642209ee6e42d7639c1ebe010f14b2c4cd9b`
+- `FBSharedFramework(14)` SHA-256: `a79c110c59e7c16e5608227e12807583c1afcf80cb2a2e38302f147dbf99c12b`
 - Both Mach-O images are decrypted (`cryptid = 0`).
 
-The Apple `otool` binary was not available on the Linux analysis host. Load commands, Objective-C metadata and Mach-O structures were checked with LLVM tooling; ARM64 control flow, chained fixups, symbols and raw data were independently inspected. No old offset was reused without revalidation.
+The Apple `otool` binary was unavailable on the Linux analysis host. Load commands, Objective-C metadata and Mach-O structures were checked with LLVM tooling; ARM64 control flow, chained fixups, symbols and raw data were independently inspected. No old offset was reused without revalidation.
 
-## Names that no longer exist
+## Removed legacy names
 
 The following literal names have zero ASCII and UTF-16 occurrences in both new binaries and are absent from symbols, imports, exports and chained bindings:
 
@@ -20,14 +18,14 @@ The following literal names have zero ASCII and UTF-16 occurrences in both new b
 - `is_employee_or_employee_test_account`
 - `ig_dogfooding_first_client`
 
-The remaining `is_employee` strings belong to fields, ivars, selectors and reporting/telemetry surfaces. `_IGDeviceReportFBUserIsEmployeeKey`, `_is_employee`, `_is_employee_value_set` and `IGApplicationStateLogger ... isEmployee:` are not the authorization path for Internal Settings in this build.
+The remaining `is_employee` strings belong to fields, ivars, selectors and telemetry. `_IGDeviceReportFBUserIsEmployeeKey`, `_is_employee`, `_is_employee_value_set` and `IGApplicationStateLogger ... isEmployee:` are not the Internal Settings authorization path in this build.
 
 ## Availability resolver
 
 The Swift type is `IGInternalSettingsAvailabilityStatus`.
 
 - resolver: `Instagram + 0x09E5D194`
-- VA in the audited image: `0x109E5D194`
+- VA: `0x109E5D194`
 - direct callers:
   - `0x104F54944`
   - `0x1059599F0`
@@ -50,24 +48,20 @@ Raw values:
 - `1`: unavailable because the internal plugin/rollout is absent
 - `2`: denied by employee/test-account identity
 
-The existing `SCIEmployeeInternal.x` initializer hook remains the safe client-side place to set raw status `0` and the presentation booleans. It does not recreate removed plugin data.
+The consolidated outer Bug Reporter hook supplies status `0` and `showInternalSettings = YES` without pretending that removed XPlugins data exists.
 
 ## Canonical employee/test-user path
 
-The generated fragment is obtained through:
-
-```text
-asIGUserIsEmployeeOrTestUserFragment
-```
+The generated fragment is obtained through `asIGUserIsEmployeeOrTestUserFragment`.
 
 - Objective-C stub: `0x10A55FA5C`
 - shared helper: `0x104177F3C`
-- the helper has ten direct callers
+- direct callers: 10
 
-It accepts the account through three routes:
+The helper accepts an account through three routes:
 
 1. `accountBadges` contains internal badge value `0`;
-2. `graphQLID.integerValue` belongs to either reserved test range:
+2. `graphQLID.integerValue` belongs to either reserved range:
    - `90,010,000,000,000 <= ID < 90,020,000,000,000`
    - `15,812,502,200,005,009 <= ID < 15,852,502,200,005,009`
 3. fallback MobileConfig boolean.
@@ -81,20 +75,20 @@ The fallback uses `_MC(context)`, `FBMobileConfigOptions.withoutLogging` and `-[
 Decoded fields:
 
 - type: `0x81` (boolean)
-- config: `0x00A7` = `167`
-- parameter: `0x00000134` = `308`
+- config: `0x00A7` (`167`)
+- parameter: `0x00000134` (`308`)
 
-The verified framework implementation is at `FBSharedFramework + 0x47F070`, with encoding:
+The verified framework implementation is `FBSharedFramework + 0x47F070`, encoding:
 
 ```text
 B32@0:8{mc_bool_param_t=Q}16@24
 ```
 
-`SCIInternal439MobileConfig.m` hooks the actual Objective-C methods, validates every runtime signature before installation and forces only this packed key and the Dogfooding Assistant key. It does not patch `__TEXT`.
+`SCIInternalGlobalSafe.x` hooks every present boolean getter variant after validating its runtime ABI and forces only this exact employee/test-user parameter while the Employee/Internal master is enabled. It does not patch `__TEXT` and does not force unrelated MobileConfig values.
 
 ## Dogfooding Assistant and MAISA
 
-Dogfooding Assistant presentation boolean:
+Dogfooding Assistant presentation parameter:
 
 ```text
 0x00810A8A000139D6
@@ -102,9 +96,9 @@ Dogfooding Assistant presentation boolean:
 
 Decoded:
 
-- type: `0x81` (boolean)
-- config: `0x0A8A` = `2698`
-- parameter: `0x000139D6` = `80342`
+- type: `0x81`
+- config: `0x0A8A` (`2698`)
+- parameter: `0x000139D6` (`80342`)
 
 MAISA UX variant:
 
@@ -115,10 +109,10 @@ MAISA UX variant:
 Decoded:
 
 - type: `0x82` (int64)
-- config: `0x139D` = `5021`
-- parameter: `0x00001B09` = `6921`
+- config: `0x139D` (`5021`)
+- parameter: `0x00001B09` (`6921`)
 
-The caller normalizes raw value `4` to `0`. No MAISA value is forced by this patch because a useful native variant has not yet been established. It is mapped for inspection only.
+The caller normalizes raw value `4` to `0`. No MAISA value is forced. The Dogfooding Assistant boolean is forced only if its native XPlugins socket provider returns a real non-empty payload.
 
 ## Bug Reporter menu ABI
 
@@ -146,14 +140,20 @@ showDogfoodingAssistant:
 maisaUXVariantRawValue:
 ```
 
-Swift initializer address: `0x104F8C954`.
+Verified Objective-C encoding:
 
-Direct callers:
+```text
+@104@0:8@16@24@32@40@48@56q64q72B80B84B88B92q96
+```
 
-- `0x1001A2854`
-- `0x1011574A4`
-- `0x104B5D6A8`
-- `0x104F54A44`
+`entryPoint` is an object at `@56`; the earlier preliminary `q56` assumption was incorrect.
+
+- Swift initializer address: `0x104F8C954`
+- direct callers:
+  - `0x1001A2854`
+  - `0x1011574A4`
+  - `0x104B5D6A8`
+  - `0x104F54A44`
 
 Recovered scalar layout:
 
@@ -164,39 +164,38 @@ Recovered scalar layout:
 - `+0xCB`: `showDogfoodingAssistant`
 - `+0xCC`: `maisaUXVariant`
 
-`showInternalSettings` is originally built as:
+Original `showInternalSettings` expression:
 
 ```text
 internal_only && !hide-internal-settings-in-bug-report-menu
 ```
 
-Forcing the initializer and live scalar state can expose the top-level row and avoid raw status `2`. It does not restore the removed pinned socket described below.
+The safe outer hook validates both current and legacy initializer ABIs, suppresses the older menu mutation while forwarding to the original hook, then enforces Internal Settings state before native lifecycle code observes the object.
 
 ## Critical XPlugins ABI correction
 
 The former proposal to rebind `_XPluginsGetDataFuncOrAbort(0x64327C01)` to a function returning `x0 = 1` was invalid and must never be implemented.
 
-Hash:
+### `internal_only`
 
-```text
-0x64327C01
-```
-
+- hash: `0x64327C01`
 - wrapper: `0x10410D7E4`
 - XPlugins data table: `0x10EA1BCA0`
-- table entry index: `1788`
-- entry address: `0x10EA22C60`
-- provider target: `0x102BD80E4`
+- table index: `1788` of `2305`
+- entry: `0x10EA22C60`
+- provider: `0x102BD80E4`
+- result: `{ NULL, 0 }`
 
-The target is a null data provider:
+The provider ABI is a pair `(data pointer, count)` in `x0/x1`, not a boolean:
 
-```asm
-mov x0, #0
-mov x1, #0
-ret
+```c
+struct XPluginsDataPair {
+    const void *data;   // x0
+    uintptr_t count;    // x1
+};
 ```
 
-The provider ABI is a pair `(data pointer, count)` in `x0/x1`, not a boolean. Confirmed consumers include:
+Confirmed consumers include:
 
 ```text
 0x104F8CB24: ldr w20, [x0, #8]
@@ -213,43 +212,45 @@ Swift reflection identifies the nested item type as `IGPinnedInternalSettingsSoc
 - `imageID`
 - `pinnedByDefaultID`
 
-A second provider, hash `0x253F21CF`, should supply the actual array of plugin rows. It is also compiled to the same null `(0, 0)` provider. The subsystem is therefore absent in two independent layers:
+A second provider, hash `0x253F21CF`, should supply the actual plugin row array. It also resolves to the null `{ NULL, 0 }` provider. The subsystem is absent in two layers:
 
 1. no descriptor containing the three function IDs;
 2. no collection of `Plugin` rows.
 
-Returning a sentinel pointer would make presence checks pass and then crash when functional consumers dereference address `0x1`. Supplying only three guessed IDs would still leave the row collection missing.
+The action `ig.action.navigation.OpenInternalSettings` and function ID `0x20AA` remain registered, but the handler reaches the same null provider through `0x10643E000`; it is not a provider-independent opener.
 
-The action `ig.action.navigation.OpenInternalSettings` and function ID `0x20AA` remain registered, but the handler eventually reaches the same null provider through `0x10643E000`; it is not a provider-independent opener.
+### Dogfooding Assistant socket
 
-### Repository rule
+- hash: `0x7FBC8058`
+- provider: `0x102BD80E4`
+- result: `{ NULL, 0 }`
 
-The following are explicitly forbidden for this build:
+The two empty providers remain untouched. The implementation never returns a sentinel pointer, never inline-hooks the wrapper and never fabricates incomplete plugin data.
 
-- rebinding `0x64327C01` to a BOOL/sentinel provider;
-- inline-hooking the wrapper in `__TEXT`;
-- fabricating an incomplete `NIGPinnedInternalSettingsSocketPluginData` object;
-- claiming that the native pinned Internal Settings socket has been restored.
+## Applied safe implementation
 
-The two XPlugins providers remain untouched.
+`src/Features/Dogfooding/SCIInternalGlobalSafe.x` is the single authoritative new-build layer. Its split `.inc` files compile into one Logos translation unit and static scope.
 
-## Applied patch
+It:
 
-### Targeted runtime MobileConfig
+- probes both XPlugins hashes through their real pair-return ABI;
+- forces employee/test-user MobileConfig only for `0x008100A700000134`;
+- forces Dogfooding Assistant MobileConfig only when `0x7FBC8058` has real data and count;
+- hooks all six present `getBool*` variants with exact encodings;
+- validates current and legacy Bug Reporter initializer encodings;
+- sets status `0` and `showInternalSettings = YES`;
+- keeps `showDogfoodingAssistant = NO` while the socket payload is empty;
+- clears stale Assistant state before `viewDidLoad` and `viewDidAppear`;
+- intercepts a stale Assistant row before Instagram's native handler;
+- opens Dogfooding Settings only through the validated factory `openWithConfig:onViewController:userSession:` with a captured native config/session;
+- never calls the unavailable initializer that terminates with `brk #1`;
+- retries idempotently as late frameworks load through the existing coalesced GraphQL/dyld bridge.
 
-`src/Features/Dogfooding/SCIInternal439MobileConfig.m`:
+Internal settings whose controllers have independent validated entry points remain usable. Surfaces whose only route is the absent pinned socket remain unavailable until the complete native descriptor and row producer are present.
 
-- installs only when Employee/Internal or the Internal Settings force toggles are enabled;
-- hooks every present boolean getter variant after validating its runtime ABI;
-- forces:
-  - `0x008100A700000134` — employee/test-user fallback;
-  - `0x00810A8A000139D6` — Dogfooding Assistant presentation;
-- preserves all other MobileConfig values;
-- performs no class scan, dyld image callback or `__TEXT` patch.
+## Verified mapping
 
-### Verified mapping overlay
-
-`src/BundleAssets/id_name_mapping_internal439.json` contains analyst-verified aliases:
+`src/BundleAssets/id_name_mapping_internal439.json` contains analyst-recovered aliases:
 
 ```text
 167:308    is_employee_or_test_user_fallback
@@ -257,14 +258,19 @@ The two XPlugins providers remain untouched.
 5021:6921  maisa_ux_variant
 ```
 
-These are recovered semantic annotations for the audited build, not surviving upstream symbol names.
+The full Mapping-V8 catalogue is reconstructed from the retained baseline and `Resources/mobileconfig/id_name_mapping_v8_delta.parts/part00...part08` by `tools/apply-idmap-v8.py`.
 
-The overlay is embedded as `__DATA,__idmap439`. `SCIMCInternal439Overlay.m` merges it after every MobileConfig browser reload so the verified aliases override stale catalogue labels without rewriting the generated mapping.
+Validation requirements:
 
-The Internal preset now adds only the two verified boolean overrides. MAISA remains system-controlled.
+- baseline entries: `5581`
+- target entries: `5584`
+- target SHA-256: `06b7bd08ba4e21f8f54aaa01163847438b9a398e193a663d6f1b8befc8a43eb2`
+- contiguous part names
+- complete target ID coverage
+- no duplicate target IDs
 
-## Scope and limitation
+The generated JSON is embedded in `__DATA,__idmap`; the 439 aliases are embedded in `__DATA,__idmap439`.
 
-This patch restores the verified client-side identity fallback, Dogfooding Assistant gate and Bug Reporter presentation state. It does not impersonate backend authorization, invent server responses or reconstruct the removed pinned plugin collection.
+## Scope
 
-Native controllers that still expose validated independent Objective-C/Swift entry points may be opened directly by `SCIInternalMenusLauncher`. Any controller whose only route is the null XPlugins socket remains unavailable until a complete native producer and collection ABI are recovered.
+This patch restores the verified client-side employee fallback and Bug Reporter Internal Settings path. It does not impersonate backend authorization, invent server responses or claim to reconstruct the removed pinned plugin collection. Dogfooding Assistant remains hidden and blocked in the audited build because its socket provider is genuinely empty.
