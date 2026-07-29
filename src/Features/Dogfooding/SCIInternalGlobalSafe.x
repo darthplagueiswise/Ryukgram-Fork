@@ -8,26 +8,94 @@
 #include "SCIInternalGlobalSafeParts/part03.inc"
 #include "SCIInternalGlobalSafeParts/part04.inc"
 
-// Exact class/selector installation can legitimately run before Instagram has
-// realised every target class. Retry a small, bounded number of times instead of
-// registering a global dyld callback or scanning the runtime on every image load.
-static void SCIInternalGlobalInstallAttempt(NSUInteger attempt) {
-    if (!SCIInternalMenuOn() && !SCIEmployeeInternalMasterOn()) return;
+#import <mach-o/dyld.h>
+#import <mach-o/loader.h>
+#import <stdatomic.h>
 
-    BOOL ready = SCIInstallInternalGlobalHooksIfNeeded();
-    if (ready || attempt >= 5) return;
+// MSHookMessageEx/Logos method hooks belong on Objective-C dispatch surfaces.
+// Install synchronously from the tweak constructor for launch-linked images.
+// A single dyld callback handles genuinely late IG/FB images; its callback only
+// filters/coalesces and schedules the real Objective-C work after dyld returns.
+// There are no guessed dispatch_after delays and no global class sweep.
 
-    static const NSTimeInterval delays[] = { 0.25, 0.75, 1.5, 3.0, 6.0 };
-    NSTimeInterval delay = delays[MIN(attempt, (NSUInteger)4)];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        SCIInternalGlobalInstallAttempt(attempt + 1);
+static _Atomic(BOOL) sSCIInternalInstallQueued = NO;
+
+static BOOL SCIInternalGlobalEnabled(void) {
+    return SCIInternalMenuOn() || SCIEmployeeInternalMasterOn();
+}
+
+static const char *SCIImageInstallName(const struct mach_header *mh) {
+    if (!mh || mh->magic != MH_MAGIC_64) return NULL;
+    const struct mach_header_64 *header = (const struct mach_header_64 *)mh;
+    const uint8_t *cursor = (const uint8_t *)(header + 1);
+
+    for (uint32_t index = 0; index < header->ncmds; index++) {
+        const struct load_command *command = (const struct load_command *)cursor;
+        if (command->cmdsize < sizeof(struct load_command)) break;
+        if (command->cmd == LC_ID_DYLIB &&
+            command->cmdsize >= sizeof(struct dylib_command)) {
+            const struct dylib_command *dylibCommand =
+                (const struct dylib_command *)command;
+            uint32_t offset = dylibCommand->dylib.name.offset;
+            if (offset < command->cmdsize) {
+                const char *path = (const char *)command + offset;
+                const char *leaf = strrchr(path, '/');
+                return leaf ? leaf + 1 : path;
+            }
+        }
+        cursor += command->cmdsize;
+    }
+    return NULL;
+}
+
+static BOOL SCIImageMayContainInternalTargets(const struct mach_header *mh) {
+    if (!mh) return NO;
+    if (mh->filetype == MH_EXECUTE || mh->filetype == MH_BUNDLE) return YES;
+
+    const char *name = SCIImageInstallName(mh);
+    if (!name || !name[0]) return NO;
+
+    // Target exact IG/FB class names only inside the installer. The image filter
+    // merely avoids waking the installer for unrelated system libraries.
+    return strncmp(name, "IG", 2) == 0 ||
+           strncmp(name, "FB", 2) == 0 ||
+           strstr(name, "Instagram") != NULL ||
+           strstr(name, "Meta") != NULL;
+}
+
+static void SCIInstallInternalGlobalHooksNow(void) {
+    if (!SCIInternalGlobalEnabled()) return;
+    SCIInstallInternalGlobalHooksIfNeeded();
+}
+
+static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
+                                        intptr_t vmaddr_slide) {
+    (void)vmaddr_slide;
+    if (!SCIInternalGlobalEnabled()) return;
+    if (!SCIImageMayContainInternalTargets(mh)) return;
+
+    BOOL expected = NO;
+    if (!atomic_compare_exchange_strong_explicit(&sSCIInternalInstallQueued,
+                                                  &expected, YES,
+                                                  memory_order_acq_rel,
+                                                  memory_order_relaxed)) {
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store_explicit(&sSCIInternalInstallQueued, NO,
+                              memory_order_release);
+        SCIInstallInternalGlobalHooksNow();
     });
 }
 
 void SCIRequestInternalGlobalHooksInstall(void) {
+    if ([NSThread isMainThread]) {
+        SCIInstallInternalGlobalHooksNow();
+        return;
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
-        SCIInternalGlobalInstallAttempt(0);
+        SCIInstallInternalGlobalHooksNow();
     });
 }
 
@@ -69,11 +137,12 @@ NSString *SCIInternalGlobalHookStatus(void) {
         SCIDogfoodAssistantPayloadAvailable() ? @"available" : @"empty/unavailable"];
 }
 
-// Logos directives must live in the .x translation unit. The C preprocessor
-// expands the .inc files only after Logos has parsed this file, so placing %ctor
-// inside an included fragment would leave raw Logos syntax for clang.
+// Logos directives must live in the .x translation unit. %ctor runs after this
+// dependent dylib is loaded and before main, which is the correct point for the
+// launch-linked Objective-C classes. The dyld callback covers only later images.
 %ctor {
     @autoreleasepool {
-        SCIRequestInternalGlobalHooksInstall();
+        SCIInstallInternalGlobalHooksNow();
+        _dyld_register_func_for_add_image(SCIInternalGlobalImageAdded);
     }
 }
