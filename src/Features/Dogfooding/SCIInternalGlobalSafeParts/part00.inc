@@ -19,6 +19,7 @@
 #import <dlfcn.h>
 #import <os/log.h>
 #import <stdint.h>
+#import <stdatomic.h>
 #import <string.h>
 
 #define IGSLOG(fmt, ...) os_log(OS_LOG_DEFAULT, "[SCIGate] InternalGlobalSafe " fmt, ##__VA_ARGS__)
@@ -87,15 +88,25 @@ static void SCIInstallLegacyEmployeeSuppressionHook(void) {
     installed = orig_EmployeeInternalMasterEnabled != NULL;
 }
 
+// Do not dispatch_once a failed lookup. At tweak-constructor time the image that
+// exports XPluginsGetDataFuncOrAbort may not have been loaded yet. Caching NULL
+// forever made every later payload check incorrectly report unavailable.
 static SCIXPluginsGetDataFuncOrAbortFn SCIResolveXPluginsGetter(void) {
-    static SCIXPluginsGetDataFuncOrAbortFn fn = NULL;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        void *symbol = dlsym(RTLD_DEFAULT, "XPluginsGetDataFuncOrAbort");
-        if (!symbol) symbol = MSFindSymbol(NULL, "_XPluginsGetDataFuncOrAbort");
-        fn = (SCIXPluginsGetDataFuncOrAbortFn)symbol;
-    });
-    return fn;
+    static _Atomic(uintptr_t) cachedAddress = 0;
+    uintptr_t cached = atomic_load_explicit(&cachedAddress, memory_order_acquire);
+    if (cached) return (SCIXPluginsGetDataFuncOrAbortFn)cached;
+
+    void *symbol = dlsym(RTLD_DEFAULT, "XPluginsGetDataFuncOrAbort");
+    if (!symbol) symbol = MSFindSymbol(NULL, "_XPluginsGetDataFuncOrAbort");
+    if (!symbol) return NULL;
+
+    uintptr_t resolved = (uintptr_t)symbol;
+    uintptr_t expected = 0;
+    atomic_compare_exchange_strong_explicit(&cachedAddress, &expected, resolved,
+                                            memory_order_release,
+                                            memory_order_relaxed);
+    cached = atomic_load_explicit(&cachedAddress, memory_order_acquire);
+    return (SCIXPluginsGetDataFuncOrAbortFn)cached;
 }
 
 static BOOL SCIXPluginsPayloadAvailable(uint32_t hash) {
