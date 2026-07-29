@@ -14,11 +14,12 @@
 
 // MSHookMessageEx/Logos method hooks belong on Objective-C dispatch surfaces.
 // Install synchronously from the tweak constructor for launch-linked images.
-// A single dyld callback handles genuinely late IG/FB images; its callback only
-// filters/coalesces and schedules the real Objective-C work after dyld returns.
-// There are no guessed dispatch_after delays and no global class sweep.
+// If the feature is enabled, one filtered dyld callback covers genuinely late
+// IG/FB images. The callback only coalesces and schedules work after dyld returns:
+// no guessed timer, global class sweep, or work for unrelated system images.
 
 static _Atomic(BOOL) sSCIInternalInstallQueued = NO;
+static dispatch_once_t sSCIInternalDyldObserverOnce;
 
 static BOOL SCIInternalGlobalEnabled(void) {
     return SCIInternalMenuOn() || SCIEmployeeInternalMasterOn();
@@ -28,10 +29,14 @@ static const char *SCIImageInstallName(const struct mach_header *mh) {
     if (!mh || mh->magic != MH_MAGIC_64) return NULL;
     const struct mach_header_64 *header = (const struct mach_header_64 *)mh;
     const uint8_t *cursor = (const uint8_t *)(header + 1);
+    const uint8_t *end = cursor + header->sizeofcmds;
 
     for (uint32_t index = 0; index < header->ncmds; index++) {
+        if (cursor + sizeof(struct load_command) > end) break;
         const struct load_command *command = (const struct load_command *)cursor;
-        if (command->cmdsize < sizeof(struct load_command)) break;
+        if (command->cmdsize < sizeof(struct load_command) ||
+            cursor + command->cmdsize > end) break;
+
         if (command->cmd == LC_ID_DYLIB &&
             command->cmdsize >= sizeof(struct dylib_command)) {
             const struct dylib_command *dylibCommand =
@@ -89,13 +94,22 @@ static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
     });
 }
 
+static void SCIEnsureInternalGlobalDyldObserver(void) {
+    if (!SCIInternalGlobalEnabled()) return;
+    dispatch_once(&sSCIInternalDyldObserverOnce, ^{
+        _dyld_register_func_for_add_image(SCIInternalGlobalImageAdded);
+    });
+}
+
 void SCIRequestInternalGlobalHooksInstall(void) {
     if ([NSThread isMainThread]) {
         SCIInstallInternalGlobalHooksNow();
+        SCIEnsureInternalGlobalDyldObserver();
         return;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         SCIInstallInternalGlobalHooksNow();
+        SCIEnsureInternalGlobalDyldObserver();
     });
 }
 
@@ -137,12 +151,14 @@ NSString *SCIInternalGlobalHookStatus(void) {
         SCIDogfoodAssistantPayloadAvailable() ? @"available" : @"empty/unavailable"];
 }
 
-// Logos directives must live in the .x translation unit. %ctor runs after this
-// dependent dylib is loaded and before main, which is the correct point for the
-// launch-linked Objective-C classes. The dyld callback covers only later images.
+// %ctor runs after this dependent dylib is loaded and before main. Install the
+// exact launch-linked targets only when the persisted feature is enabled. The
+// dyld observer is likewise registered only on first enable, not for stock mode.
 %ctor {
     @autoreleasepool {
-        SCIInstallInternalGlobalHooksNow();
-        _dyld_register_func_for_add_image(SCIInternalGlobalImageAdded);
+        if (SCIInternalGlobalEnabled()) {
+            SCIInstallInternalGlobalHooksNow();
+            SCIEnsureInternalGlobalDyldObserver();
+        }
     }
 }
