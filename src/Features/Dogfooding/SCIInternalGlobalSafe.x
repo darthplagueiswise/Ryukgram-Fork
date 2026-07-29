@@ -84,6 +84,7 @@ static void SCIInstallInternalGlobalHooksNow(void) {
 static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
                                         intptr_t vmaddr_slide) {
     (void)vmaddr_slide;
+    SCIAdvanceXPluginsImageGeneration();
     if (!atomic_load_explicit(&sSCIInternalFeatureEnabled,
                               memory_order_acquire)) return;
     if (!SCIImageMayContainInternalTargets(mh)) return;
