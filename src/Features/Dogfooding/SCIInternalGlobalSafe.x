@@ -15,14 +15,22 @@
 // MSHookMessageEx/Logos method hooks belong on Objective-C dispatch surfaces.
 // Install synchronously from the tweak constructor for launch-linked images.
 // If the feature is enabled, one filtered dyld callback covers genuinely late
-// IG/FB images. The callback only coalesces and schedules work after dyld returns:
-// no guessed timer, global class sweep, or work for unrelated system images.
+// IG/FB images. The callback performs only Mach-O filtering, atomics and an
+// asynchronous handoff: no Objective-C, timer, global class sweep or hook work.
 
+static _Atomic(BOOL) sSCIInternalFeatureEnabled = NO;
 static _Atomic(BOOL) sSCIInternalInstallQueued = NO;
 static dispatch_once_t sSCIInternalDyldObserverOnce;
 
 static BOOL SCIInternalGlobalEnabled(void) {
     return SCIInternalMenuOn() || SCIEmployeeInternalMasterOn();
+}
+
+static BOOL SCIRefreshInternalGlobalEnabledSnapshot(void) {
+    BOOL enabled = SCIInternalGlobalEnabled();
+    atomic_store_explicit(&sSCIInternalFeatureEnabled, enabled,
+                          memory_order_release);
+    return enabled;
 }
 
 static const char *SCIImageInstallName(const struct mach_header *mh) {
@@ -76,7 +84,8 @@ static void SCIInstallInternalGlobalHooksNow(void) {
 static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
                                         intptr_t vmaddr_slide) {
     (void)vmaddr_slide;
-    if (!SCIInternalGlobalEnabled()) return;
+    if (!atomic_load_explicit(&sSCIInternalFeatureEnabled,
+                              memory_order_acquire)) return;
     if (!SCIImageMayContainInternalTargets(mh)) return;
 
     BOOL expected = NO;
@@ -95,7 +104,8 @@ static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
 }
 
 static void SCIEnsureInternalGlobalDyldObserver(void) {
-    if (!SCIInternalGlobalEnabled()) return;
+    if (!atomic_load_explicit(&sSCIInternalFeatureEnabled,
+                              memory_order_acquire)) return;
     dispatch_once(&sSCIInternalDyldObserverOnce, ^{
         _dyld_register_func_for_add_image(SCIInternalGlobalImageAdded);
     });
@@ -103,11 +113,13 @@ static void SCIEnsureInternalGlobalDyldObserver(void) {
 
 void SCIRequestInternalGlobalHooksInstall(void) {
     if ([NSThread isMainThread]) {
+        if (!SCIRefreshInternalGlobalEnabledSnapshot()) return;
         SCIInstallInternalGlobalHooksNow();
         SCIEnsureInternalGlobalDyldObserver();
         return;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (!SCIRefreshInternalGlobalEnabledSnapshot()) return;
         SCIInstallInternalGlobalHooksNow();
         SCIEnsureInternalGlobalDyldObserver();
     });
@@ -156,7 +168,7 @@ NSString *SCIInternalGlobalHookStatus(void) {
 // dyld observer is likewise registered only on first enable, not for stock mode.
 %ctor {
     @autoreleasepool {
-        if (SCIInternalGlobalEnabled()) {
+        if (SCIRefreshInternalGlobalEnabledSnapshot()) {
             SCIInstallInternalGlobalHooksNow();
             SCIEnsureInternalGlobalDyldObserver();
         }
