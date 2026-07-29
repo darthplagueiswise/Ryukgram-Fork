@@ -45,6 +45,12 @@ static const uint32_t kSCIInternalOnlyPluginHash = 0x64327C01U;
 static const uint32_t kSCIDogfoodSocketPluginHash = 0x7FBC8058U;
 
 static __thread BOOL sSCISuppressLegacyEmployeeMenuMutation = NO;
+static _Atomic(uint64_t) sSCIXPluginsImageGeneration = 1;
+
+static void SCIAdvanceXPluginsImageGeneration(void) {
+    atomic_fetch_add_explicit(&sSCIXPluginsImageGeneration, 1,
+                              memory_order_release);
+}
 
 static BOOL SCIEmployeeInternalMasterOn(void) {
     return [SCIUtils getBoolPref:@"sci_employee_internal"] ||
@@ -88,17 +94,29 @@ static void SCIInstallLegacyEmployeeSuppressionHook(void) {
     installed = orig_EmployeeInternalMasterEnabled != NULL;
 }
 
-// Do not dispatch_once a failed lookup. At tweak-constructor time the image that
-// exports XPluginsGetDataFuncOrAbort may not have been loaded yet. Caching NULL
-// forever made every later payload check incorrectly report unavailable.
+// A constructor-time miss must not be cached forever, but repeatedly calling
+// MSFindSymbol(NULL, ...) is also wasteful. Cache a negative result only for the
+// current dyld image generation; any newly added image invalidates that miss.
 static SCIXPluginsGetDataFuncOrAbortFn SCIResolveXPluginsGetter(void) {
     static _Atomic(uintptr_t) cachedAddress = 0;
+    static _Atomic(uint64_t) failedGeneration = 0;
+
     uintptr_t cached = atomic_load_explicit(&cachedAddress, memory_order_acquire);
     if (cached) return (SCIXPluginsGetDataFuncOrAbortFn)cached;
 
+    uint64_t generation = atomic_load_explicit(&sSCIXPluginsImageGeneration,
+                                                memory_order_acquire);
+    if (atomic_load_explicit(&failedGeneration, memory_order_acquire) == generation) {
+        return NULL;
+    }
+
     void *symbol = dlsym(RTLD_DEFAULT, "XPluginsGetDataFuncOrAbort");
     if (!symbol) symbol = MSFindSymbol(NULL, "_XPluginsGetDataFuncOrAbort");
-    if (!symbol) return NULL;
+    if (!symbol) {
+        atomic_store_explicit(&failedGeneration, generation,
+                              memory_order_release);
+        return NULL;
+    }
 
     uintptr_t resolved = (uintptr_t)symbol;
     uintptr_t expected = 0;
