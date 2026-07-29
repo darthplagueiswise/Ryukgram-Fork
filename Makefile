@@ -52,12 +52,12 @@ before-all:: $(SCI_IDMAP_GENERATED)
 # type". Runtime access through getsectiondata() remains unchanged.
 
 ifeq ($(FINALPACKAGE),1)
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-x
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_SCI*
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_sci*
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_kSCI*
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_dm*
-	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,__Z*
+$(TWEAK_NAME)_LDFLAGS += -Wl,-x
+$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_SCI*
+$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_sci*
+$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_kSCI*
+$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,_dm*
+$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,__Z*
 endif
 
 CCFLAGS += -std=c++11
