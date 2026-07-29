@@ -54,12 +54,12 @@ NSString *SCIInternalGlobalHookStatus(void) {
 
     return [NSString stringWithFormat:
         @"Employee master: %@\n"
-         "Internal menu: %@\n"
-         "MobileConfig employee readers: %lu/6\n"
-         "Bug Reporter hooks: %lu/5\n"
-         "Native opener bridges: %lu/3\n"
-         "XPlugins internal_only payload: %@\n"
-         "XPlugins Dogfooding payload: %@",
+         @"Internal menu: %@\n"
+         @"MobileConfig employee readers: %lu/6\n"
+         @"Bug Reporter hooks: %lu/5\n"
+         @"Native opener bridges: %lu/3\n"
+         @"XPlugins internal_only payload: %@\n"
+         @"XPlugins Dogfooding payload: %@",
         SCIEmployeeInternalMasterOn() ? @"ON" : @"OFF",
         SCIInternalMenuOn() ? @"ON" : @"OFF",
         (unsigned long)mcCount,
