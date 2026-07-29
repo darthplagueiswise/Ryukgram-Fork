@@ -15,8 +15,8 @@
 // MSHookMessageEx/Logos method hooks belong on Objective-C dispatch surfaces.
 // Install synchronously from the tweak constructor for launch-linked images.
 // If the feature is enabled, one filtered dyld callback covers genuinely late
-// IG/FB images. The callback performs only Mach-O filtering, atomics and an
-// asynchronous handoff: no Objective-C, timer, global class sweep or hook work.
+// IG/FB images. The callback performs only Mach-O filtering, atomics and a C
+// dispatch handoff: no Objective-C, timer, global class sweep or hook work.
 
 static _Atomic(BOOL) sSCIInternalFeatureEnabled = NO;
 static _Atomic(BOOL) sSCIInternalInstallQueued = NO;
@@ -81,6 +81,13 @@ static void SCIInstallInternalGlobalHooksNow(void) {
     SCIInstallInternalGlobalHooksIfNeeded();
 }
 
+static void SCIInternalGlobalInstallDeferred(void *context) {
+    (void)context;
+    atomic_store_explicit(&sSCIInternalInstallQueued, NO,
+                          memory_order_release);
+    SCIInstallInternalGlobalHooksNow();
+}
+
 static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
                                         intptr_t vmaddr_slide) {
     (void)vmaddr_slide;
@@ -97,11 +104,8 @@ static void SCIInternalGlobalImageAdded(const struct mach_header *mh,
         return;
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        atomic_store_explicit(&sSCIInternalInstallQueued, NO,
-                              memory_order_release);
-        SCIInstallInternalGlobalHooksNow();
-    });
+    dispatch_async_f(dispatch_get_main_queue(), NULL,
+                     SCIInternalGlobalInstallDeferred);
 }
 
 static void SCIEnsureInternalGlobalDyldObserver(void) {
