@@ -7,6 +7,7 @@
 #import "../../Features/Dogfooding/SCISymbolBrowserEngine.h"
 #import "../../Features/Dogfooding/SCIGraphQLDogfoodDiagnostics.h"
 #import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
+#import "../../Features/MobileConfig/SCIIdNameMapGenerator.h"
 
 void SCIInstallUnifiedExperimentManagerHooksIfNeeded(void);
 void SCIInstallInternalDevMenuHooksIfNeeded(void);
@@ -144,6 +145,58 @@ static SCISetting *SCIInternalSettingsSwitch(
 				: @"Preference disabled"
 			subtitle:nil];
 	}];
+}
+
+#pragma mark - id_name_mapping generator
+
+static SCIIdNameMapUnit SCIIdNameMapSelectedUnit(void) {
+	NSInteger raw = (NSInteger)[SCIUtils getDoublePref:@"sci_idnamemap_unit"];
+	if (raw < 0 || raw > 2) raw = 0;
+	return (SCIIdNameMapUnit)raw;
+}
+
+static double SCIIdNameMapTimeout(void) {
+	NSInteger seconds = (NSInteger)[SCIUtils getDoublePref:@"sci_idnamemap_timeout"];
+	if (seconds < 5) seconds = 30;
+	return (double)seconds;
+}
+
+static int SCIIdNameMapMode(void) {
+	NSInteger mode = (NSInteger)[SCIUtils getDoublePref:@"sci_idnamemap_mode"];
+	if (mode < 0 || mode > 3) mode = 1;
+	return (int)mode;
+}
+
+static void SCIIdNameMapPresentReport(NSString *title, NSString *report) {
+	UIViewController *top = SCIDevTop();
+	if (!top) return;
+	UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+		message:report preferredStyle:UIAlertControllerStyleAlert];
+	[alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copy")
+		style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+			UIPasteboard.generalPasteboard.string = report ?: @"";
+		}]];
+	[alert addAction:[UIAlertAction actionWithTitle:@"OK"
+		style:UIAlertActionStyleCancel handler:nil]];
+	[top presentViewController:alert animated:YES completion:nil];
+}
+
+static void SCIIdNameMapExport(void) {
+	NSURL *url = [SCIIdNameMapGenerator mappingFileURL];
+	if (!url) {
+		[SCIUtils showErrorHUDWithDescription:SCILocalized(@"id_name_mapping.json not generated yet")];
+		return;
+	}
+	UIViewController *top = SCIDevTop();
+	if (!top) return;
+	UIActivityViewController *sheet =
+		[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+	if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+		sheet.popoverPresentationController.sourceView = top.view;
+		sheet.popoverPresentationController.sourceRect =
+			CGRectMake(CGRectGetMidX(top.view.bounds), CGRectGetMidY(top.view.bounds), 1, 1);
+	}
+	[top presentViewController:sheet animated:YES completion:nil];
 }
 
 @implementation SCITweakSettings (Section_Dev)
@@ -390,6 +443,77 @@ static SCISetting *SCIInternalSettingsSwitch(
 						NSString *result = [SCIInternalMenusLauncher openInternalURLString:@"instagram://internal_settings"];
 						if (!SCIDevResultWasHandled(result)) SCIDevShow(@"Internal URL", result);
 					}],
+			]
+		},
+		@{
+			@"header": SCILocalized(@"id_name_mapping generator"),
+			@"footer": SCILocalized(@"Neither this .app nor the Android APK ships a populated name table — the iOS bundle has no mobileconfig_res/ at all and the APK ships params_names_v4_u0.txt as an empty array. Names only exist after the OEM stack runs a param-list request and persists the extra data. These rows drive FBMobileConfigFBTGlobalSessionManager -> FBMobileConfigFBTContextManagerHolder -> reload:/syncConfigsAndMayUpdateManager:syncFetchTimeout: and, when the C++ entry point is reachable, FBMobileConfigManager::updateConfigsWithParamsListSynchronously. Every ObjC type encoding is verified before dispatch; a mismatch reports instead of calling. Requires an authenticated session — Tier-2 above helps, it does not replace server authorization."),
+			@"rows": @[
+				[SCISetting menuCellWithTitle:SCILocalized(@"Unit")
+					subtitle:SCILocalized(@"Which context manager holder to drive")
+					menu:[UIMenu menuWithTitle:@"" children:@[
+						[UIAction actionWithTitle:SCILocalized(@"Current session") image:nil identifier:nil
+							handler:^(__unused UIAction *a) { [SCIUtils setPref:@0 forKey:@"sci_idnamemap_unit"]; }],
+						[UIAction actionWithTitle:SCILocalized(@"Admin (kMobileConfigAdminId)") image:nil identifier:nil
+							handler:^(__unused UIAction *a) { [SCIUtils setPref:@1 forKey:@"sci_idnamemap_unit"]; }],
+						[UIAction actionWithTitle:SCILocalized(@"Sessionless") image:nil identifier:nil
+							handler:^(__unused UIAction *a) { [SCIUtils setPref:@2 forKey:@"sci_idnamemap_unit"]; }],
+					]]],
+				[SCISetting stepperCellWithTitle:SCILocalized(@"Sync fetch timeout")
+					subtitle:SCILocalized(@"Passed to reload: and syncConfigsAndMayUpdateManager: as a double")
+					defaultsKey:@"sci_idnamemap_timeout"
+					min:5 max:120 step:5 label:@"seconds" singularLabel:@"second"],
+				[SCISetting stepperCellWithTitle:SCILocalized(@"Param-list request mode")
+					subtitle:SCILocalized(@"FBMobileConfigRequestForParamListMode; mode 1 is the one that persists names")
+					defaultsKey:@"sci_idnamemap_mode"
+					min:0 max:3 step:1 label:@"mode" singularLabel:@"mode"],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Wiring state")
+					subtitle:SCILocalized(@"Holders, containerPath, reload:/sync ABI, contextManagerCreator, fetcherSetter and live manager pointer — read-only")
+					icon:[SCISymbol symbolWithName:@"checkmark.shield"]
+					action:^{
+						SCIIdNameMapPresentReport(SCILocalized(@"id_name_mapping wiring"),
+							[SCIIdNameMapGenerator wiringState]);
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Check fetcher binding")
+					subtitle:SCILocalized(@"Reports whether _fetcherSetter survived the last manager rebuild")
+					icon:[SCISymbol symbolWithName:@"link"]
+					action:^{
+						SCIIdNameMapPresentReport(SCILocalized(@"Fetcher binding"),
+							[SCIIdNameMapGenerator rebindFetcherForUnit:SCIIdNameMapSelectedUnit()]);
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Reload + rebind")
+					subtitle:SCILocalized(@"reload: only — lets the holder recreate the manager through contextManagerCreator")
+					icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
+					action:^{
+						SCIIdNameMapPresentReport(SCILocalized(@"Reload"),
+							[SCIIdNameMapGenerator reloadUnit:SCIIdNameMapSelectedUnit()
+													  timeout:SCIIdNameMapTimeout()]);
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Generate id_name_mapping.json")
+					subtitle:SCILocalized(@"Full sequence: reload -> null shared_ptr sync (OEM rebind) -> param-list in the selected mode -> poll for the persisted file")
+					icon:[SCISymbol symbolWithName:@"square.and.arrow.down"]
+					action:^{
+						[SCIUtils showToastForDuration:2.0
+							title:SCILocalized(@"Running param-list sync…")
+							subtitle:SCILocalized(@"This blocks a background queue for up to the timeout")];
+						[SCIIdNameMapGenerator generateForUnit:SCIIdNameMapSelectedUnit()
+													   timeout:SCIIdNameMapTimeout()
+														  mode:SCIIdNameMapMode()
+													completion:^(NSString *report) {
+							SCIIdNameMapPresentReport(SCILocalized(@"id_name_mapping"), report);
+						}];
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Mapping file state")
+					subtitle:SCILocalized(@"Path, size, config/param counts and modification date")
+					icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
+					action:^{
+						SCIIdNameMapPresentReport(SCILocalized(@"Mapping file"),
+							[SCIIdNameMapGenerator mappingFileState]);
+					}],
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Export id_name_mapping.json")
+					subtitle:SCILocalized(@"Share sheet on the persisted file")
+					icon:[SCISymbol symbolWithName:@"square.and.arrow.up"]
+					action:^{ SCIIdNameMapExport(); }],
 			]
 		},
 		@{
