@@ -150,9 +150,12 @@ static SCISetting *SCIInternalSettingsSwitch(
 #pragma mark - id_name_mapping generator
 
 static SCIIdNameMapUnit SCIIdNameMapSelectedUnit(void) {
-	NSInteger raw = (NSInteger)[SCIUtils getDoublePref:@"sci_idnamemap_unit"];
-	if (raw < 0 || raw > 2) raw = 0;
-	return (SCIIdNameMapUnit)raw;
+	// The menu cell stores STRING values through UICommand.propertyList, so this
+	// pref must be read with getStringPref — not as a number.
+	NSString *raw = [SCIUtils getStringPref:@"sci_idnamemap_unit"];
+	if ([raw isEqualToString:@"admin"]) return SCIIdNameMapUnitAdmin;
+	if ([raw isEqualToString:@"sessionless"]) return SCIIdNameMapUnitSessionless;
+	return SCIIdNameMapUnitCurrentSession;
 }
 
 static double SCIIdNameMapTimeout(void) {
@@ -449,16 +452,14 @@ static void SCIIdNameMapExport(void) {
 			@"header": SCILocalized(@"id_name_mapping generator"),
 			@"footer": SCILocalized(@"Neither this .app nor the Android APK ships a populated name table — the iOS bundle has no mobileconfig_res/ at all and the APK ships params_names_v4_u0.txt as an empty array. Names only exist after the OEM stack runs a param-list request and persists the extra data. These rows drive FBMobileConfigFBTGlobalSessionManager -> FBMobileConfigFBTContextManagerHolder -> reload:/syncConfigsAndMayUpdateManager:syncFetchTimeout: and, when the C++ entry point is reachable, FBMobileConfigManager::updateConfigsWithParamsListSynchronously. Every ObjC type encoding is verified before dispatch; a mismatch reports instead of calling. Requires an authenticated session — Tier-2 above helps, it does not replace server authorization."),
 			@"rows": @[
+				// SCISetting -submenuForButton: rebuilds the menu and skips every
+				// child that is not a UICommand carrying propertyList
+				// {defaultsKey,value}. UIAction children were dropped, leaving an
+				// empty menu and an untappable "..." button — hence the shared
+				// menus table below.
 				[SCISetting menuCellWithTitle:SCILocalized(@"Unit")
 					subtitle:SCILocalized(@"Which context manager holder to drive")
-					menu:[UIMenu menuWithTitle:@"" children:@[
-						[UIAction actionWithTitle:SCILocalized(@"Current session") image:nil identifier:nil
-							handler:^(__unused UIAction *a) { [SCIUtils setPref:@0 forKey:@"sci_idnamemap_unit"]; }],
-						[UIAction actionWithTitle:SCILocalized(@"Admin (kMobileConfigAdminId)") image:nil identifier:nil
-							handler:^(__unused UIAction *a) { [SCIUtils setPref:@1 forKey:@"sci_idnamemap_unit"]; }],
-						[UIAction actionWithTitle:SCILocalized(@"Sessionless") image:nil identifier:nil
-							handler:^(__unused UIAction *a) { [SCIUtils setPref:@2 forKey:@"sci_idnamemap_unit"]; }],
-					]]],
+					menu:[self menus][@"sci_idnamemap_unit"]],
 				[SCISetting stepperCellWithTitle:SCILocalized(@"Sync fetch timeout")
 					subtitle:SCILocalized(@"Passed to reload: and syncConfigsAndMayUpdateManager: as a double")
 					defaultsKey:@"sci_idnamemap_timeout"

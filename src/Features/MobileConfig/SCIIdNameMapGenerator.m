@@ -50,21 +50,88 @@ static id SCICallObjectGetter(id target, NSString *selectorName) {
 	}
 }
 
-/// Reads a two-pointer shared_ptr/weak_ptr ivar and returns its raw __ptr_.
-/// The ivar type encoding must match `expectedPrefix` or nothing is read.
-static void *SCIRawPointerFromSmartPointerIvar(id object,
-											   const char *ivarName,
-											   const char *expectedPrefix) {
-	if (!object || !ivarName) return NULL;
-	Ivar ivar = class_getInstanceVariable(object_getClass(object), ivarName);
-	if (!ivar) return NULL;
-	const char *encoding = ivar_getTypeEncoding(ivar);
-	if (!encoding || !expectedPrefix) return NULL;
-	if (strncmp(encoding, expectedPrefix, strlen(expectedPrefix)) != 0) return NULL;
+/// True when an ivar type encoding is a libc++ smart pointer to a MobileConfig
+/// manager. IG does not use FBMobileConfigContextObjcImpl here — on device the
+/// _mobileconfig ivar holds IGMobileConfigContextManager — so the ivar name is
+/// never assumed; only the encoding is trusted.
+static BOOL SCIEncodingIsManagerSmartPointer(const char *encoding) {
+	if (!encoding) return NO;
+	BOOL smart = strstr(encoding, "shared_ptr<") || strstr(encoding, "weak_ptr<");
+	if (!smart) return NO;
+	if (!strstr(encoding, "mobileconfig::")) return NO;
+	return strstr(encoding, "FBMobileConfigManager") != NULL ||
+		   strstr(encoding, "IFBMobileConfigManager") != NULL;
+}
+
+/// Reads the raw __ptr_ out of a two-pointer smart-pointer ivar.
+static void *SCIReadSmartPointerIvar(id object, Ivar ivar) {
 	ptrdiff_t offset = ivar_getOffset(ivar);
 	if (offset <= 0) return NULL;
 	SCIRawSharedPtr raw = *(SCIRawSharedPtr *)((__bridge void *)object + offset);
 	return raw.ptr;
+}
+
+/// Depth-first search for a manager smart pointer, following ObjC-typed ivars.
+/// `path` receives the ivar chain that produced the hit, for the report.
+static void *SCIScanForManagerPointer(id object, int depth, NSMutableString *path) {
+	if (!object || depth < 0) return NULL;
+
+	Class cls = object_getClass(object);
+	unsigned int count = 0;
+	Ivar *ivars = class_copyIvarList(cls, &count);
+	if (!ivars) return NULL;
+
+	void *found = NULL;
+	NSMutableArray<NSString *> *objectIvars = [NSMutableArray array];
+
+	for (unsigned int i = 0; i < count && !found; i++) {
+		const char *encoding = ivar_getTypeEncoding(ivars[i]);
+		const char *name = ivar_getName(ivars[i]);
+		if (SCIEncodingIsManagerSmartPointer(encoding)) {
+			void *raw = SCIReadSmartPointerIvar(object, ivars[i]);
+			if (raw) {
+				found = raw;
+				[path appendFormat:@"%@.%s", NSStringFromClass(cls), name ?: "?"];
+			}
+		} else if (encoding && encoding[0] == '@' && name) {
+			[objectIvars addObject:@(name)];
+		}
+	}
+	free(ivars);
+	if (found) return found;
+
+	for (NSString *name in objectIvars) {
+		Ivar ivar = class_getInstanceVariable(cls, name.UTF8String);
+		if (!ivar) continue;
+		id child = object_getIvar(object, ivar);
+		if (!child || child == object) continue;
+		NSMutableString *childPath = [NSMutableString string];
+		void *raw = SCIScanForManagerPointer(child, depth - 1, childPath);
+		if (raw) {
+			[path appendFormat:@"%@.%@ -> %@", NSStringFromClass(cls), name, childPath];
+			return raw;
+		}
+	}
+	return NULL;
+}
+
+/// Lists the ivars of an object so an unresolved manager is actionable instead
+/// of just "unreadable".
+static NSString *SCIDescribeIvars(id object) {
+	if (!object) return @"(nil)";
+	unsigned int count = 0;
+	Ivar *ivars = class_copyIvarList(object_getClass(object), &count);
+	if (!ivars) return @"(no ivars)";
+	NSMutableArray<NSString *> *lines = [NSMutableArray array];
+	for (unsigned int i = 0; i < count && i < 24; i++) {
+		const char *name = ivar_getName(ivars[i]);
+		const char *encoding = ivar_getTypeEncoding(ivars[i]);
+		NSString *type = encoding ? @(encoding) : @"?";
+		if (type.length > 72) type = [[type substringToIndex:72] stringByAppendingString:@"…"];
+		[lines addObject:[NSString stringWithFormat:@"    %s %@", name ?: "?", type]];
+	}
+	free(ivars);
+	return [lines componentsJoinedByString:@"\n"];
 }
 
 #pragma mark - Holder resolution
@@ -108,28 +175,40 @@ static NSString *SCIStringIvar(id object, const char *name) {
 	return [value isKindOfClass:NSString.class] ? value : nil;
 }
 
-/// holder -> _mcFbtManager -> _mobileconfig -> _configManager.__ptr_
+/// holder -> mcFbtManager -> (any depth) -> smart pointer to the C++ manager.
+/// On device the intermediate object is IGMobileConfigContextManager, not
+/// FBMobileConfigContextObjcImpl, so the walk is encoding-driven, not name-driven.
 static void *SCIRawManagerPointer(id holder, NSString **detail) {
-	id fbtManager = SCICallObjectGetter(holder, @"mcFbtManager");
-	if (!fbtManager) {
-		if (detail) *detail = @"mcFbtManager=nil";
+	if (!holder) {
+		if (detail) *detail = @"holder=nil";
 		return NULL;
 	}
+
+	NSMutableString *path = [NSMutableString string];
+	void *raw = SCIScanForManagerPointer(holder, 4, path);
+	if (raw) {
+		if (detail) *detail = path;
+		return raw;
+	}
+
+	id fbtManager = SCICallObjectGetter(holder, @"mcFbtManager");
+	if (!fbtManager) {
+		if (detail) *detail = @"mcFbtManager=nil and no manager ivar on the holder";
+		return NULL;
+	}
+
 	id contextImpl = nil;
 	Ivar ivar = class_getInstanceVariable(object_getClass(fbtManager), "_mobileconfig");
 	if (ivar) contextImpl = object_getIvar(fbtManager, ivar);
-	if (!contextImpl) {
-		if (detail) *detail = [NSString stringWithFormat:@"%@._mobileconfig=nil",
-			NSStringFromClass(object_getClass(fbtManager))];
-		return NULL;
+
+	if (detail) {
+		*detail = [NSString stringWithFormat:
+			@"no manager smart-pointer ivar found.\n  %@ ivars:\n%@\n  %@ ivars:\n%@",
+			NSStringFromClass(object_getClass(fbtManager)), SCIDescribeIvars(fbtManager),
+			contextImpl ? NSStringFromClass(object_getClass(contextImpl)) : @"(no _mobileconfig)",
+			SCIDescribeIvars(contextImpl)];
 	}
-	void *raw = SCIRawPointerFromSmartPointerIvar(contextImpl, "_configManager",
-		"{weak_ptr<mobileconfig::IFBMobileConfigManager>");
-	if (!raw && detail) {
-		*detail = [NSString stringWithFormat:@"%@._configManager unreadable",
-			NSStringFromClass(object_getClass(contextImpl))];
-	}
-	return raw;
+	return NULL;
 }
 
 #pragma mark - C++ entry point
@@ -316,10 +395,15 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 
 	id fetcherSetter = SCICallObjectGetter(holder, @"fetcherSetter");
 	if (!fetcherSetter) {
+		NSString *detail = nil;
+		void *rawManager = SCIRawManagerPointer(holder, &detail);
 		return [NSString stringWithFormat:
-			@"%@: _fetcherSetter is nil.\nThe holder was built without a fetcher setter, so a "
-			@"recreated manager can never get its fetcher back. Nothing to rebind.",
-			[self nameForUnit:unit]];
+			@"%@: _fetcherSetter is nil.\nThis holder was built without a fetcher setter AND without a "
+			@"contextManagerCreator, so no reload can ever rebind one — the FBT init-params path that "
+			@"carries those blocks is not the one this app uses.\n\nThat is fine: the param-list entry "
+			@"point is exported, so Generate calls it directly on the live manager instead.\n\nmanager: %@",
+			[self nameForUnit:unit],
+			rawManager ? [NSString stringWithFormat:@"%p via %@", rawManager, detail] : (detail ?: @"unresolved")];
 	}
 
 	NSString *detail = nil;
@@ -371,7 +455,12 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 
 		id holder = SCIHolderForUnit(unit);
 		if (!holder) {
-			[report appendString:@"holder: nil — nothing to drive."];
+			[report appendFormat:
+				@"holder: nil.\nFBMobileConfigFBTGlobalSessionManager only sets up the holders the "
+				@"app actually initialises. On this build just the current-session holder exists, so "
+				@"%@ has nothing behind it. Pick \"Current session\" — the admin table needs an admin "
+				@"unit manager that this app never creates.",
+				[self nameForUnit:unit]];
 			dispatch_async(dispatch_get_main_queue(), ^{ completion(report); });
 			return;
 		}
@@ -391,40 +480,58 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 		NSDate *beforeDate = nil;
 		if (before) [before getResourceValue:&beforeDate forKey:NSURLContentModificationDateKey error:nil];
 
-		// Step 1 — reload so the holder rebuilds through contextManagerCreator.
-		[report appendFormat:@"1. %@\n", [self reloadUnit:unit timeout:timeout]];
+		// This build's holder reports contextManagerCreator = nil and
+		// fetcherSetter = nil, so the OEM cannot rebind a fetcher for us. The
+		// param-list entry point is exported though, so the direct call on the
+		// live manager is the primary path and the holder sync is secondary.
+		id creator = SCICallObjectGetter(holder, @"contextManagerCreator");
+		id fetcherSetter = SCICallObjectGetter(holder, @"fetcherSetter");
+		[report appendFormat:@"contextManagerCreator: %@   fetcherSetter: %@\n\n",
+			creator ? @"set" : @"nil", fetcherSetter ? @"set" : @"nil"];
 
-		// Step 2 — null shared_ptr: the holder recreates the manager and
-		// reinstalls the fetcher via its own _fetcherSetter. This is the rebind.
-		long long syncResult = 0;
-		@try {
-			SCIRawSharedPtr null = {NULL, NULL};
-			syncResult = ((long long (*)(id, SEL, SCIRawSharedPtr, double))objc_msgSend)(
-				holder, syncSel, null, timeout);
-			[report appendFormat:@"2. syncConfigsAndMayUpdateManager(null, %.1f) -> %lld\n", timeout, syncResult];
-		} @catch (id exception) {
-			[report appendFormat:@"2. sync exception: %@\n", exception];
-			dispatch_async(dispatch_get_main_queue(), ^{ completion(report); });
-			return;
-		}
-
-		// Step 3 — param-list request in the requested mode, when the C++ entry
-		// point is reachable. This is what makes the framework persist names.
+		// Step 1 — resolve the live C++ manager before anything is torn down.
 		NSString *detail = nil;
 		void *rawManager = SCIRawManagerPointer(holder, &detail);
+		[report appendFormat:@"1. manager: %@\n",
+			rawManager ? [NSString stringWithFormat:@"%p via %@", rawManager, detail] : (detail ?: @"unresolved")];
+
+		// Step 2 — param-list request in the requested mode. This is the call
+		// that makes FBMobileConfigStorageManager::persistExtraData write names.
 		SCIParamListSyncFn fn = SCIResolveParamListSync();
+		BOOL paramListRan = NO;
 		if (fn && rawManager) {
 			@try {
 				fn(rawManager, (int)timeout, mode);
-				[report appendFormat:@"3. updateConfigsWithParamsListSynchronously(%d, %d) on %p — returned\n",
-					(int)timeout, mode, rawManager];
+				paramListRan = YES;
+				[report appendFormat:@"2. updateConfigsWithParamsListSynchronously(%d, %d) — returned\n",
+					(int)timeout, mode];
 			} @catch (id exception) {
-				[report appendFormat:@"3. param-list exception: %@\n", exception];
+				[report appendFormat:@"2. param-list exception: %@\n", exception];
 			}
 		} else if (!fn) {
-			[report appendString:@"3. param-list symbol not exported — relying on the holder sync only\n"];
+			[report appendString:@"2. param-list symbol not exported — skipped\n"];
 		} else {
-			[report appendFormat:@"3. no manager pointer (%@) — param-list skipped\n", detail ?: @"unresolved"];
+			[report appendString:@"2. no manager pointer — param-list skipped\n"];
+		}
+
+		// Step 3 — only rebuild through the holder when the OEM actually has the
+		// blocks to rebind with; otherwise a reload would drop the manager we
+		// just used and gain nothing.
+		if (creator || fetcherSetter) {
+			[report appendFormat:@"3. %@\n", [self reloadUnit:unit timeout:timeout]];
+			@try {
+				SCIRawSharedPtr null = {NULL, NULL};
+				long long syncResult = ((long long (*)(id, SEL, SCIRawSharedPtr, double))objc_msgSend)(
+					holder, syncSel, null, timeout);
+				[report appendFormat:@"   syncConfigsAndMayUpdateManager(null, %.1f) -> %lld\n", timeout, syncResult];
+			} @catch (id exception) {
+				[report appendFormat:@"   sync exception: %@\n", exception];
+			}
+		} else if (!paramListRan) {
+			[report appendString:@"3. holder has neither block and the direct call did not run — "
+				@"nothing left to drive.\n"];
+		} else {
+			[report appendString:@"3. holder rebuild skipped (no creator/setter to rebind with)\n"];
 		}
 
 		// Step 4 — the framework persists asynchronously; poll briefly.
