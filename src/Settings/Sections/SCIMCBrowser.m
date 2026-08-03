@@ -1,5 +1,6 @@
 // SCIMCBrowser.m — RyukGram-Fork
 #import "SCIMCBrowser.h"
+#import "../../Features/MobileConfig/SCIMCLiveApply.h"
 #import "../../Localization/SCILocalization.h"
 #import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import <objc/message.h>
@@ -615,8 +616,11 @@ static NSURL *SCIMCManagerContainerRoot(void) {
     UIAction *info = [UIAction actionWithTitle:@"Informações" image:[UIImage systemImageNamed:@"info.circle"] identifier:nil handler:^(__unused UIAction *action) {
         [weakSelf showInfo];
     }];
+    UIAction *liveProbe = [UIAction actionWithTitle:@"Apply ao vivo: is_employee (probe)" image:[UIImage systemImageNamed:@"bolt.fill"] identifier:nil handler:^(__unused UIAction *action) {
+        [weakSelf runLiveProbe];
+    }];
     UIBarButtonItem *more = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] style:UIBarButtonItemStylePlain target:nil action:nil];
-    more.menu = [UIMenu menuWithTitle:@"" children:@[preset, deploy, info]];
+    more.menu = [UIMenu menuWithTitle:[NSString stringWithFormat:@"Live wiring: %@", [SCIMCLiveApply wiringStatus]] children:@[preset, deploy, liveProbe, info]];
     self.navigationItem.rightBarButtonItem = more;
 }
 
@@ -679,6 +683,11 @@ static NSURL *SCIMCManagerContainerRoot(void) {
     detail.cid = result.configID;
     if (result.kind == SCIMCBrowserResultParam) detail.focusParam = result.paramID;
     [self.navigationController pushViewController:detail animated:YES];
+}
+
+- (void)runLiveProbe {
+    NSString *msg = [SCIMCLiveApply applyIsEmployeeProbe];
+    [self showAlertTitle:@"Live apply" message:msg];
 }
 
 - (void)showInfo {
