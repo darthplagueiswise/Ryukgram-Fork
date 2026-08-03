@@ -3,6 +3,8 @@
 #import "../../Localization/SCILocalization.h"
 #import "../../Features/Dogfooding/SCIDogfoodObjectRuntime.h"
 #import <objc/message.h>
+#import <objc/runtime.h>
+#import "../../UI/SCIUIKit26LiquidGlass.h"
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 #include <dlfcn.h>
@@ -160,6 +162,30 @@ typedef NS_ENUM(NSInteger, SCIMCBrowserResultKind) {
 - (NSArray<SCIMCBrowserResult *> *)browserResultsMatching:(nullable NSString *)query;
 @end
 
+
+// Resolve the directory IG's LIVE MobileConfig manager actually reads, via the
+// FBT holder's _containerPath ivar (the same path the id_name_map generator's
+// diagnostic reports). On a Feather sideload the app-group entitlement can
+// resolve to a different container than IG's real one, which is why overrides
+// written under containerURLForSecurityApplicationGroupIdentifier never appeared
+// where the manager looks. Writing under _containerPath fixes that.
+static NSURL *SCIMCManagerContainerRoot(void) {
+    @try {
+        Class gsm = NSClassFromString(@"FBMobileConfigFBTGlobalSessionManager");
+        SEL sharedSel = @selector(sharedInstance);
+        if (![gsm respondsToSelector:sharedSel]) return nil;
+        id shared = ((id(*)(id, SEL))objc_msgSend)(gsm, sharedSel);
+        SEL holderSel = NSSelectorFromString(@"currentSessionContextManagerHolder");
+        if (![shared respondsToSelector:holderSel]) return nil;
+        id holder = ((id(*)(id, SEL))objc_msgSend)(shared, holderSel);
+        if (!holder) return nil;
+        Ivar iv = class_getInstanceVariable(object_getClass(holder), "_containerPath");
+        id cp = iv ? object_getIvar(holder, iv) : nil;
+        if (![cp isKindOfClass:NSString.class] || ![(NSString *)cp length]) return nil;
+        return [[NSURL fileURLWithPath:(NSString *)cp] URLByAppendingPathComponent:@"mobileconfig"];
+    } @catch (__unused id e) { return nil; }
+}
+
 @implementation SCIMCOverrideStore
 
 + (instancetype)shared {
@@ -175,6 +201,8 @@ typedef NS_ENUM(NSInteger, SCIMCBrowserResultKind) {
 - (NSArray<NSURL *> *)candidateRoots {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSURL *> *roots = NSMutableArray.array;
+    NSURL *managerRoot = SCIMCManagerContainerRoot(); // where IG's live manager actually reads
+    if (managerRoot) [roots addObject:managerRoot];
     for (NSString *group in @[@"group.com.burbn.instagram", @"group.com.burbn.family"]) {
         NSURL *container = [fm containerURLForSecurityApplicationGroupIdentifier:group];
         if (container) {
@@ -358,17 +386,20 @@ typedef NS_ENUM(NSInteger, SCIMCBrowserResultKind) {
             [results addObject:[SCIMCBrowserResult configResult:configID]];
             continue;
         }
-        if (SCIMCMatchesTokens([NSString stringWithFormat:@"%@ %@", configName, configID], tokens)) {
-            [results addObject:[SCIMCBrowserResult configResult:configID]];
-        }
-        NSArray<NSNumber *> *indexes = [[self paramsForConfig:cid].allKeys sortedArrayUsingSelector:@selector(compare:)];
-        for (NSNumber *paramID in indexes) {
-            NSString *paramName = [self nameForConfig:cid param:paramID.integerValue];
-            NSString *candidate = [NSString stringWithFormat:@"%@ %@ %@ %@", paramName, paramID, configName, configID];
-            if (SCIMCMatchesTokens(candidate, tokens)) {
-                [results addObject:[SCIMCBrowserResult paramResult:paramID config:configID]];
+        // Unified search: a config produces a SINGLE row when it matches by its
+        // own name/id OR by ANY of its parameters — instead of scattering one
+        // row per matching param. Tapping the config opens the detail, whose own
+        // search filters/highlights the individual parameters.
+        BOOL matched = SCIMCMatchesTokens([NSString stringWithFormat:@"%@ %@", configName, configID], tokens);
+        if (!matched) {
+            for (NSNumber *paramID in [self paramsForConfig:cid].allKeys) {
+                NSString *paramName = [self nameForConfig:cid param:paramID.integerValue];
+                if (SCIMCMatchesTokens([NSString stringWithFormat:@"%@ %@ %@ %@", paramName, paramID, configName, configID], tokens)) {
+                    matched = YES; break;
+                }
             }
         }
+        if (matched) [results addObject:[SCIMCBrowserResult configResult:configID]];
     }
     return results;
 }
@@ -565,6 +596,10 @@ typedef NS_ENUM(NSInteger, SCIMCBrowserResultKind) {
     self.table.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(0.0, 16.0, 0.0, 12.0);
     [self.view addSubview:self.table];
 
+    // Match the rest of the tweak: Liquid Glass surfaces instead of custom fills.
+    SCIUIKit26ConfigureViewController(self);
+    SCIUIKit26ConfigureTableView(self.table);
+
     [self configureActionsMenu];
     [self refreshRows];
 }
@@ -711,6 +746,10 @@ typedef NS_ENUM(NSInteger, SCIMCBrowserResultKind) {
     self.table.separatorInset = UIEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
     [self.table registerClass:SCIMCParameterCell.class forCellReuseIdentifier:@"SCIMCParameter"];
     [self.view addSubview:self.table];
+
+    // Match the rest of the tweak: Liquid Glass surfaces instead of custom fills.
+    SCIUIKit26ConfigureViewController(self);
+    SCIUIKit26ConfigureTableView(self.table);
 }
 
 - (void)viewDidAppear:(BOOL)animated {
