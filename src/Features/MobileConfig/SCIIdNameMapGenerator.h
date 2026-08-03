@@ -61,6 +61,9 @@ typedef NS_ENUM(NSInteger, SCIIdNameMapUnit) {
 /// Re-applies _fetcherSetter on the live manager and reports what happened.
 + (NSString *)rebindFetcherForUnit:(SCIIdNameMapUnit)unit;
 
+/// Reinstalls the fetcher captured at startup onto the unit's live manager.
++ (NSString *)reinstallFetcherForUnit:(SCIIdNameMapUnit)unit;
+
 /// reload: on the selected holder (OEM signature takes a double timeout).
 + (NSString *)reloadUnit:(SCIIdNameMapUnit)unit timeout:(double)timeout;
 
@@ -76,6 +79,14 @@ typedef NS_ENUM(NSInteger, SCIIdNameMapUnit) {
 + (nullable NSURL *)mappingFileURL;
 
 + (NSString *)nameForUnit:(SCIIdNameMapUnit)unit;
+
+/// One-line status for the settings row accessory: "5,581 configs", "none",
+/// "no manager". Cheap enough to evaluate on every cell render.
++ (NSString *)shortStatus;
+
+/// One-line verdict for the setup row accessory: "ready", "no session",
+/// "no fetcher", "blocked".
++ (NSString *)wiringSummary;
 
 @end
 

@@ -7,6 +7,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
+#import "../../../modules/fishhook/fishhook.h"
 
 #pragma mark - ABI helpers
 
@@ -216,7 +217,18 @@ static void *SCIRawManagerPointer(id holder, NSString **detail) {
 static const char *kSCIParamListSymbol =
 	"_ZN12mobileconfig21FBMobileConfigManager40updateConfigsWithParamsListSynchronouslyEiNS_37FBMobileConfigRequestForParamListModeE";
 
+// mobileconfig::FBMobileConfigManager::setFetcher(shared_ptr<FBMobileConfigFetcher>, bool)
+// Instagram imports this symbol (it appears as an undefined reference in the main
+// image), so the call crosses the image boundary and fishhook can intercept it —
+// no __TEXT patching, which is what gets sideloaded builds SIGKILLed on iOS 27.
+static const char *kSCISetFetcherSymbol =
+	"_ZN12mobileconfig21FBMobileConfigManager10setFetcherENSt3__110shared_ptrINS_21FBMobileConfigFetcherEEEb";
+
 typedef void (*SCIParamListSyncFn)(void *self, int timeout, int mode);
+
+// A std::shared_ptr is not trivially copyable, so AAPCS64 passes it by invisible
+// reference: the ABI-level parameter is a pointer to a caller-owned temporary.
+typedef void (*SCISetFetcherFn)(void *self, SCIRawSharedPtr *fetcher, bool flag);
 
 static SCIParamListSyncFn SCIResolveParamListSync(void) {
 	static SCIParamListSyncFn fn = NULL;
@@ -225,6 +237,85 @@ static SCIParamListSyncFn SCIResolveParamListSync(void) {
 		fn = (SCIParamListSyncFn)dlsym(RTLD_DEFAULT, kSCIParamListSymbol);
 	});
 	return fn;
+}
+
+static SCISetFetcherFn SCIResolveSetFetcher(void) {
+	static SCISetFetcherFn fn = NULL;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		fn = (SCISetFetcherFn)dlsym(RTLD_DEFAULT, kSCISetFetcherSymbol);
+	});
+	return fn;
+}
+
+#pragma mark - Fetcher capture
+
+// The holder carries no _fetcherSetter on this build, so nothing can reinstall a
+// fetcher after the manager is rebuilt. Instead of synthesising one (there is no
+// exported IGMobileConfigFetcher constructor), the fetcher the app installs at
+// startup is captured on its way through setFetcher and pinned, so it can be
+// reinstalled on whatever manager is live later.
+static SCIRawSharedPtr sSCICapturedFetcher = {NULL, NULL};
+static void *sSCICapturedForManager = NULL;
+static NSUInteger sSCICaptureCount = 0;
+
+/// libc++ __shared_weak_count: { vptr; long __shared_owners_; long __shared_weak_owners_; }
+/// __shared_owners_ is the owner count minus one. Adding one pins the object for
+/// the process lifetime — deliberate: an unpinned copy could dangle by the time
+/// the Dev row runs.
+static void SCIPinSharedPtr(SCIRawSharedPtr ptr) {
+	if (!ptr.ptr || !ptr.ctrl) return;
+	long *owners = (long *)((char *)ptr.ctrl + 8);
+	__atomic_fetch_add(owners, 1, __ATOMIC_SEQ_CST);
+}
+
+static SCISetFetcherFn sSCIOriginalSetFetcher = NULL;
+
+static void SCISetFetcherCapture(void *self, SCIRawSharedPtr *fetcher, bool flag) {
+	if (fetcher && fetcher->ptr) {
+		sSCICapturedFetcher = *fetcher;
+		sSCICapturedForManager = self;
+		sSCICaptureCount++;
+		SCIPinSharedPtr(*fetcher);
+	}
+	if (sSCIOriginalSetFetcher) sSCIOriginalSetFetcher(self, fetcher, flag);
+}
+
+void SCIInstallMobileConfigFetcherCaptureIfNeeded(void) {
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		struct rebinding r = {
+			kSCISetFetcherSymbol,
+			(void *)SCISetFetcherCapture,
+			(void **)&sSCIOriginalSetFetcher
+		};
+		rebind_symbols(&r, 1);
+	});
+}
+
+/// Reinstalls the captured fetcher on `manager`. Returns a human-readable result.
+static NSString *SCIReinstallCapturedFetcher(void *manager) {
+	if (!manager) return @"no manager pointer";
+	if (!sSCICapturedFetcher.ptr) {
+		return [NSString stringWithFormat:
+			@"no fetcher captured yet (setFetcher seen %lu times).\nThe capture hook only fires "
+			@"when the app installs a fetcher — relaunch with the tweak loaded and try again.",
+			(unsigned long)sSCICaptureCount];
+	}
+	SCISetFetcherFn fn = sSCIOriginalSetFetcher ?: SCIResolveSetFetcher();
+	if (!fn) return @"setFetcher symbol unavailable";
+
+	SCIRawSharedPtr copy = sSCICapturedFetcher;
+	SCIPinSharedPtr(copy);   // the callee's copy takes its own reference
+	@try {
+		fn(manager, &copy, true);
+	} @catch (id exception) {
+		return [NSString stringWithFormat:@"setFetcher exception: %@", exception];
+	}
+	return [NSString stringWithFormat:@"fetcher %p reinstalled on manager %p%@",
+		copy.ptr, manager,
+		(sSCICapturedForManager && sSCICapturedForManager != manager)
+			? @" (manager changed since capture)" : @""];
 }
 
 #pragma mark - Mapping file discovery
@@ -240,8 +331,24 @@ static NSArray<NSURL *> *SCIMappingSearchRoots(id holder) {
 		[roots addObject:[base URLByAppendingPathComponent:@"mobileconfig"]];
 	}
 
+	// The holder's containerPath moved between builds (app-local
+	// Documents/AppGroup/Documents on one, the shared group container on
+	// another), so every known layout is searched rather than just the current
+	// containerPath — otherwise an existing file reads as "not found".
+	NSURL *group = [fm containerURLForSecurityApplicationGroupIdentifier:@"group.com.burbn.instagram"];
+	if (group) {
+		NSURL *groupDocs = [group URLByAppendingPathComponent:@"Documents"];
+		[roots addObject:groupDocs];
+		[roots addObject:[groupDocs URLByAppendingPathComponent:@"mobileconfig"]];
+	}
+
 	NSURL *documents = [fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
-	if (documents) [roots addObject:[documents URLByAppendingPathComponent:@"mobileconfig"]];
+	if (documents) {
+		[roots addObject:[documents URLByAppendingPathComponent:@"mobileconfig"]];
+		NSURL *mirrored = [documents URLByAppendingPathComponent:@"AppGroup/Documents"];
+		[roots addObject:mirrored];
+		[roots addObject:[mirrored URLByAppendingPathComponent:@"mobileconfig"]];
+	}
 
 	NSURL *library = [fm URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask].firstObject;
 	if (library) [roots addObject:[library URLByAppendingPathComponent:@"mobileconfig"]];
@@ -314,6 +421,13 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 		modified ?: @"unknown"];
 }
 
+static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
+	NSString *raw = [NSUserDefaults.standardUserDefaults stringForKey:@"sci_idnamemap_unit"];
+	if ([raw isEqualToString:@"admin"]) return SCIIdNameMapUnitAdmin;
+	if ([raw isEqualToString:@"sessionless"]) return SCIIdNameMapUnitSessionless;
+	return SCIIdNameMapUnitCurrentSession;
+}
+
 #pragma mark - Implementation
 
 @implementation SCIIdNameMapGenerator
@@ -327,7 +441,13 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 	}
 }
 
++ (void)load {
+	// Must be rebound before Instagram installs its fetcher at startup.
+	SCIInstallMobileConfigFetcherCaptureIfNeeded();
+}
+
 + (NSString *)wiringState {
+	SCIInstallMobileConfigFetcherCaptureIfNeeded();
 	NSMutableString *report = [NSMutableString string];
 
 	Class globalCls = NSClassFromString(@"FBMobileConfigFBTGlobalSessionManager");
@@ -338,8 +458,13 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 	if (!global) return report;
 
 	SCIParamListSyncFn fn = SCIResolveParamListSync();
-	[report appendFormat:@"updateConfigsWithParamsListSynchronously: %@\n\n",
+	[report appendFormat:@"updateConfigsWithParamsListSynchronously: %@\n",
 		fn ? @"exported (dlsym ok)" : @"not exported (local symbol) — holder path only"];
+	[report appendFormat:@"setFetcher: %@\n",
+		(sSCIOriginalSetFetcher || SCIResolveSetFetcher()) ? @"resolved" : @"unavailable"];
+	[report appendFormat:@"fetcher captured: %@ (setFetcher seen %lu×)\n\n",
+		sSCICapturedFetcher.ptr ? [NSString stringWithFormat:@"%p", sSCICapturedFetcher.ptr] : @"none",
+		(unsigned long)sSCICaptureCount];
 
 	SCIIdNameMapUnit units[] = {
 		SCIIdNameMapUnitCurrentSession,
@@ -382,7 +507,8 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 		[report appendFormat:@"fetcherSetter: %@\n", fetcherSetter ? @"set" : @"NIL (this is the wiring gap)"];
 		[report appendFormat:@"mcFbtManager: %@\n", fbtManager ? NSStringFromClass(object_getClass(fbtManager)) : @"nil"];
 		[report appendFormat:@"manager ptr: %@\n\n",
-			rawManager ? [NSString stringWithFormat:@"%p", rawManager] : (detail ?: @"unresolved")];
+			rawManager ? [NSString stringWithFormat:@"%p via %@", rawManager, detail ?: @"?"]
+					   : (detail ?: @"unresolved")];
 	}
 
 	[report appendFormat:@"mapping file:\n%@", SCIDescribeMappingFile(SCIFindMappingFile(SCIHolderForUnit(SCIIdNameMapUnitCurrentSession)))];
@@ -420,6 +546,16 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 		@"%@: fetcherSetter set, manager %p live.\nUse \"Reload + rebind\" so the OEM holder "
 		@"re-runs contextManagerCreator + fetcherSetter itself.",
 		[self nameForUnit:unit], rawManager];
+}
+
++ (NSString *)reinstallFetcherForUnit:(SCIIdNameMapUnit)unit {
+	SCIInstallMobileConfigFetcherCaptureIfNeeded();
+	id holder = SCIHolderForUnit(unit);
+	if (!holder) return [NSString stringWithFormat:@"%@: holder nil", [self nameForUnit:unit]];
+	NSString *detail = nil;
+	void *rawManager = SCIRawManagerPointer(holder, &detail);
+	if (!rawManager) return [NSString stringWithFormat:@"%@: %@", [self nameForUnit:unit], detail ?: @"no manager"];
+	return SCIReinstallCapturedFetcher(rawManager);
 }
 
 + (NSString *)reloadUnit:(SCIIdNameMapUnit)unit timeout:(double)timeout {
@@ -476,9 +612,25 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 			return;
 		}
 
+		// A hand-placed mapping (e.g. the Android table copied into the App
+		// Group) makes "the file exists" meaningless. Move it aside first: if
+		// nothing reappears, the framework definitively did not write, and the
+		// backup is restored so nothing is lost.
+		NSFileManager *fm = NSFileManager.defaultManager;
 		NSURL *before = SCIFindMappingFile(holder);
-		NSDate *beforeDate = nil;
-		if (before) [before getResourceValue:&beforeDate forKey:NSURLContentModificationDateKey error:nil];
+		NSURL *backup = nil;
+		if (before) {
+			backup = [before.URLByDeletingLastPathComponent URLByAppendingPathComponent:
+				[NSString stringWithFormat:@"id_name_mapping.pre-%.0f.json", NSDate.date.timeIntervalSince1970]];
+			NSError *moveError = nil;
+			if ([fm moveItemAtURL:before toURL:backup error:&moveError]) {
+				[report appendFormat:@"existing mapping moved aside:\n  %@\n\n", backup.lastPathComponent];
+			} else {
+				backup = nil;
+				[report appendFormat:@"could not move existing mapping aside (%@) — a stale file may "
+					@"be reported below\n\n", moveError.localizedDescription];
+			}
+		}
 
 		// This build's holder reports contextManagerCreator = nil and
 		// fetcherSetter = nil, so the OEM cannot rebind a fetcher for us. The
@@ -495,30 +647,38 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 		[report appendFormat:@"1. manager: %@\n",
 			rawManager ? [NSString stringWithFormat:@"%p via %@", rawManager, detail] : (detail ?: @"unresolved")];
 
-		// Step 2 — param-list request in the requested mode. This is the call
+		// Step 2 — reinstall the captured fetcher. Without a fetcher the manager
+		// has nothing to send the request with and the call below returns
+		// instantly having done nothing.
+		[report appendFormat:@"2. %@\n", SCIReinstallCapturedFetcher(rawManager)];
+
+		// Step 3 — param-list request in the requested mode. This is the call
 		// that makes FBMobileConfigStorageManager::persistExtraData write names.
+		// The elapsed time is the tell: a few milliseconds means it no-opped,
+		// a real request blocks for a network round trip.
 		SCIParamListSyncFn fn = SCIResolveParamListSync();
 		BOOL paramListRan = NO;
 		if (fn && rawManager) {
+			NSDate *started = NSDate.date;
 			@try {
 				fn(rawManager, (int)timeout, mode);
 				paramListRan = YES;
-				[report appendFormat:@"2. updateConfigsWithParamsListSynchronously(%d, %d) — returned\n",
-					(int)timeout, mode];
+				[report appendFormat:@"3. updateConfigsWithParamsListSynchronously(%d, %d) — returned after %.0f ms\n",
+					(int)timeout, mode, [NSDate.date timeIntervalSinceDate:started] * 1000.0];
 			} @catch (id exception) {
-				[report appendFormat:@"2. param-list exception: %@\n", exception];
+				[report appendFormat:@"3. param-list exception: %@\n", exception];
 			}
 		} else if (!fn) {
-			[report appendString:@"2. param-list symbol not exported — skipped\n"];
+			[report appendString:@"3. param-list symbol not exported — skipped\n"];
 		} else {
-			[report appendString:@"2. no manager pointer — param-list skipped\n"];
+			[report appendString:@"3. no manager pointer — param-list skipped\n"];
 		}
 
 		// Step 3 — only rebuild through the holder when the OEM actually has the
 		// blocks to rebind with; otherwise a reload would drop the manager we
 		// just used and gain nothing.
 		if (creator || fetcherSetter) {
-			[report appendFormat:@"3. %@\n", [self reloadUnit:unit timeout:timeout]];
+			[report appendFormat:@"4. %@\n", [self reloadUnit:unit timeout:timeout]];
 			@try {
 				SCIRawSharedPtr null = {NULL, NULL};
 				long long syncResult = ((long long (*)(id, SEL, SCIRawSharedPtr, double))objc_msgSend)(
@@ -528,32 +688,41 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 				[report appendFormat:@"   sync exception: %@\n", exception];
 			}
 		} else if (!paramListRan) {
-			[report appendString:@"3. holder has neither block and the direct call did not run — "
+			[report appendString:@"4. holder has neither block and the direct call did not run — "
 				@"nothing left to drive.\n"];
 		} else {
-			[report appendString:@"3. holder rebuild skipped (no creator/setter to rebind with)\n"];
+			[report appendString:@"4. holder rebuild skipped (no creator/setter to rebind with)\n"];
 		}
 
-		// Step 4 — the framework persists asynchronously; poll briefly.
+		// Step 5 — the framework persists asynchronously; poll for a brand new file.
 		NSURL *after = nil;
 		for (int i = 0; i < 20; i++) {
 			[NSThread sleepForTimeInterval:0.5];
 			after = SCIFindMappingFile(holder);
-			if (!after) continue;
-			if (!before) break;
-			NSDate *afterDate = nil;
-			[after getResourceValue:&afterDate forKey:NSURLContentModificationDateKey error:nil];
-			if (afterDate && beforeDate && [afterDate compare:beforeDate] == NSOrderedDescending) break;
+			if (after && (!backup || ![after.path isEqualToString:backup.path])) break;
+			after = nil;
 		}
 
-		[report appendFormat:@"\n4. %@", SCIDescribeMappingFile(after ?: before)];
-		if (after && before && [after.path isEqualToString:before.path] && beforeDate) {
-			NSDate *afterDate = nil;
-			[after getResourceValue:&afterDate forKey:NSURLContentModificationDateKey error:nil];
-			if (afterDate && [afterDate compare:beforeDate] != NSOrderedDescending) {
-				[report appendString:@"\n\nFile did not change. Check the wiring row: a nil "
-					@"_fetcherSetter or an unauthenticated session both end here."];
+		if (after) {
+			[report appendFormat:@"\n5. FRAMEWORK WROTE A NEW FILE\n%@", SCIDescribeMappingFile(after)];
+			if (backup) [report appendFormat:@"\n\nprevious file kept as %@", backup.lastPathComponent];
+		} else {
+			if (backup) {
+				NSError *restoreError = nil;
+				NSURL *original = [backup.URLByDeletingLastPathComponent
+					URLByAppendingPathComponent:@"id_name_mapping.json"];
+				if ([fm moveItemAtURL:backup toURL:original error:&restoreError]) {
+					[report appendString:@"\n5. nothing was written — previous file restored.\n"];
+				} else {
+					[report appendFormat:@"\n5. nothing was written and the restore failed (%@).\n"
+						@"Your file is still at %@\n", restoreError.localizedDescription, backup.lastPathComponent];
+				}
+			} else {
+				[report appendString:@"\n5. nothing was written.\n"];
 			}
+			[report appendString:
+				@"\nRead step 2 and the elapsed time in step 3: no captured fetcher, or a param-list "
+				@"call that returned in a few milliseconds, both mean no request left the device."];
 		}
 
 		dispatch_async(dispatch_get_main_queue(), ^{ completion(report); });
@@ -565,6 +734,31 @@ static NSString *SCIDescribeMappingFile(NSURL *url) {
 	if (!url) url = SCIFindMappingFile(SCIHolderForUnit(SCIIdNameMapUnitAdmin));
 	if (!url) url = SCIFindMappingFile(nil);
 	return url;
+}
+
++ (NSString *)wiringSummary {
+	SCIInstallMobileConfigFetcherCaptureIfNeeded();
+	if (!SCIGlobalSessionManager()) return SCILocalized(@"unavailable");
+	id holder = SCIHolderForUnit(SCIIdNameMapSelectedUnitForSummary());
+	if (!holder) return SCILocalized(@"no session");
+	NSString *detail = nil;
+	if (!SCIRawManagerPointer(holder, &detail)) return SCILocalized(@"no manager");
+	if (!SCIResolveParamListSync()) return SCILocalized(@"blocked");
+	if (!sSCICapturedFetcher.ptr) return SCILocalized(@"no fetcher");
+	return SCILocalized(@"ready");
+}
+
++ (NSString *)shortStatus {
+	NSURL *url = [self mappingFileURL];
+	if (!url) return SCILocalized(@"none");
+	NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:nil];
+	if (!data) return SCILocalized(@"unreadable");
+	id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+	if (![parsed isKindOfClass:NSArray.class]) return SCILocalized(@"invalid");
+	NSNumberFormatter *f = [NSNumberFormatter new];
+	f.numberStyle = NSNumberFormatterDecimalStyle;
+	return [NSString stringWithFormat:SCILocalized(@"%@ configs"),
+		[f stringFromNumber:@([(NSArray *)parsed count])]];
 }
 
 + (NSString *)mappingFileState {

@@ -449,75 +449,103 @@ static void SCIIdNameMapExport(void) {
 			]
 		},
 		@{
-			@"header": SCILocalized(@"id_name_mapping generator"),
-			@"footer": SCILocalized(@"Neither this .app nor the Android APK ships a populated name table — the iOS bundle has no mobileconfig_res/ at all and the APK ships params_names_v4_u0.txt as an empty array. Names only exist after the OEM stack runs a param-list request and persists the extra data. These rows drive FBMobileConfigFBTGlobalSessionManager -> FBMobileConfigFBTContextManagerHolder -> reload:/syncConfigsAndMayUpdateManager:syncFetchTimeout: and, when the C++ entry point is reachable, FBMobileConfigManager::updateConfigsWithParamsListSynchronously. Every ObjC type encoding is verified before dispatch; a mismatch reports instead of calling. Requires an authenticated session — Tier-2 above helps, it does not replace server authorization."),
+			@"header": SCILocalized(@"Config name mapping"),
+			@"footer": SCILocalized(@"Instagram ships config IDs but no names: the iOS bundle has no mobileconfig_res/ folder at all, and the Android APK ships an empty name table. Names only exist after the app itself runs a param-list request and writes them to disk. Step 1 checks whether that is possible on this build; step 2 attempts it. Both are read-only diagnostics until step 2, which moves any existing file aside and restores it if nothing new is written. A signed-in session is required."),
 			@"rows": @[
-				// SCISetting -submenuForButton: rebuilds the menu and skips every
-				// child that is not a UICommand carrying propertyList
-				// {defaultsKey,value}. UIAction children were dropped, leaving an
-				// empty menu and an untappable "..." button — hence the shared
-				// menus table below.
 				[SCISetting menuCellWithTitle:SCILocalized(@"Unit")
-					subtitle:SCILocalized(@"Which context manager holder to drive")
+					subtitle:SCILocalized(@"Which config table to ask for")
 					menu:[self menus][@"sci_idnamemap_unit"]],
-				[SCISetting stepperCellWithTitle:SCILocalized(@"Sync fetch timeout")
-					subtitle:SCILocalized(@"Passed to reload: and syncConfigsAndMayUpdateManager: as a double")
+				// The stepper prints its value INTO the subtitle via
+				// -formatString:withValue:label:singularLabel:, so the subtitle
+				// must carry the two %@ placeholders — without them the row shows
+				// bare +/- buttons and no number at all.
+				[SCISetting stepperCellWithTitle:SCILocalized(@"Request timeout")
+					subtitle:SCILocalized(@"Give up after %@ %@")
 					defaultsKey:@"sci_idnamemap_timeout"
 					min:5 max:120 step:5 label:@"seconds" singularLabel:@"second"],
-				[SCISetting stepperCellWithTitle:SCILocalized(@"Param-list request mode")
-					subtitle:SCILocalized(@"FBMobileConfigRequestForParamListMode; mode 1 is the one that persists names")
+				[SCISetting stepperCellWithTitle:SCILocalized(@"Request mode")
+					subtitle:SCILocalized(@"Using mode %@%@ — mode 1 is the one that writes names")
 					defaultsKey:@"sci_idnamemap_mode"
-					min:0 max:3 step:1 label:@"mode" singularLabel:@"mode"],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Wiring state")
-					subtitle:SCILocalized(@"Holders, containerPath, reload:/sync ABI, contextManagerCreator, fetcherSetter and live manager pointer — read-only")
+					min:0 max:3 step:1 label:@"" singularLabel:@""],
+
+				({ SCISetting *setting = [SCISetting buttonCellWithTitle:SCILocalized(@"1 · Check what's possible")
+					subtitle:SCILocalized(@"Which pieces of the native config stack are reachable on this build")
 					icon:[SCISymbol symbolWithName:@"checkmark.shield"]
 					action:^{
-						SCIIdNameMapPresentReport(SCILocalized(@"id_name_mapping wiring"),
+						SCIIdNameMapPresentReport(SCILocalized(@"Setup check"),
 							[SCIIdNameMapGenerator wiringState]);
-					}],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Check fetcher binding")
-					subtitle:SCILocalized(@"Reports whether _fetcherSetter survived the last manager rebuild")
-					icon:[SCISymbol symbolWithName:@"link"]
-					action:^{
-						SCIIdNameMapPresentReport(SCILocalized(@"Fetcher binding"),
-							[SCIIdNameMapGenerator rebindFetcherForUnit:SCIIdNameMapSelectedUnit()]);
-					}],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Reload + rebind")
-					subtitle:SCILocalized(@"reload: only — lets the holder recreate the manager through contextManagerCreator")
-					icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
-					action:^{
-						SCIIdNameMapPresentReport(SCILocalized(@"Reload"),
-							[SCIIdNameMapGenerator reloadUnit:SCIIdNameMapSelectedUnit()
-													  timeout:SCIIdNameMapTimeout()]);
-					}],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Generate id_name_mapping.json")
-					subtitle:SCILocalized(@"Full sequence: reload -> null shared_ptr sync (OEM rebind) -> param-list in the selected mode -> poll for the persisted file")
+					}];
+					setting.dynamicValueText = ^NSString *{ return [SCIIdNameMapGenerator wiringSummary]; };
+					setting; }),
+
+				({ SCISetting *setting = [SCISetting buttonCellWithTitle:SCILocalized(@"2 · Generate names")
+					subtitle:SCILocalized(@"Asks Instagram's own config manager for the name list and waits for it to be written")
 					icon:[SCISymbol symbolWithName:@"square.and.arrow.down"]
 					action:^{
 						[SCIUtils showToastForDuration:2.0
-							title:SCILocalized(@"Running param-list sync…")
-							subtitle:SCILocalized(@"This blocks a background queue for up to the timeout")];
+							title:SCILocalized(@"Requesting name list…")
+							subtitle:SCILocalized(@"Up to the timeout above")];
 						[SCIIdNameMapGenerator generateForUnit:SCIIdNameMapSelectedUnit()
 													   timeout:SCIIdNameMapTimeout()
 														  mode:SCIIdNameMapMode()
 													completion:^(NSString *report) {
-							SCIIdNameMapPresentReport(SCILocalized(@"id_name_mapping"), report);
+							SCIIdNameMapPresentReport(SCILocalized(@"Generate"), report);
 						}];
-					}],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Mapping file state")
-					subtitle:SCILocalized(@"Path, size, config/param counts and modification date")
+					}];
+					setting.whatsNewID = @"dev_idnamemap";
+					setting; }),
+
+				({ SCISetting *setting = [SCISetting buttonCellWithTitle:SCILocalized(@"3 · Current file")
+					subtitle:SCILocalized(@"Where it is, how big, how many configs and params it names")
 					icon:[SCISymbol symbolWithName:@"doc.text.magnifyingglass"]
 					action:^{
 						SCIIdNameMapPresentReport(SCILocalized(@"Mapping file"),
 							[SCIIdNameMapGenerator mappingFileState]);
-					}],
-				[SCISetting buttonCellWithTitle:SCILocalized(@"Export id_name_mapping.json")
-					subtitle:SCILocalized(@"Share sheet on the persisted file")
+					}];
+					setting.dynamicValueText = ^NSString *{ return [SCIIdNameMapGenerator shortStatus]; };
+					setting; }),
+
+				[SCISetting buttonCellWithTitle:SCILocalized(@"Share the file")
+					subtitle:SCILocalized(@"Send id_name_mapping.json out of the app")
 					icon:[SCISymbol symbolWithName:@"square.and.arrow.up"]
 					action:^{ SCIIdNameMapExport(); }],
+
+				[SCISetting navigationCellWithTitle:SCILocalized(@"Advanced")
+					subtitle:SCILocalized(@"Manual steps — only useful when step 2 fails")
+					icon:[SCISymbol symbolWithName:@"wrench.and.screwdriver"]
+					navSections:@[
+						@{
+							@"header": SCILocalized(@"Manual steps"),
+							@"footer": SCILocalized(@"Step 2 already performs all of these in order. Run them individually to see exactly which one fails. \"Reinstall the network fetcher\" puts back the network component captured when Instagram started — without it the manager has nothing to send the request with and the request returns instantly having done nothing. \"Rebuild the manager\" throws the current config manager away and asks Instagram to build a new one; on this build the app provides no rebuild hooks, so it reports a status code and changes nothing useful."),
+							@"rows": @[
+								[SCISetting buttonCellWithTitle:SCILocalized(@"Reinstall the network fetcher")
+									subtitle:SCILocalized(@"Puts the captured fetcher back on the live manager")
+									icon:[SCISymbol symbolWithName:@"bolt.horizontal"]
+									action:^{
+										SCIIdNameMapPresentReport(SCILocalized(@"Fetcher"),
+											[SCIIdNameMapGenerator reinstallFetcherForUnit:SCIIdNameMapSelectedUnit()]);
+									}],
+								[SCISetting buttonCellWithTitle:SCILocalized(@"Inspect fetcher wiring")
+									subtitle:SCILocalized(@"Whether the app left a way to reattach a fetcher after a rebuild")
+									icon:[SCISymbol symbolWithName:@"link"]
+									action:^{
+										SCIIdNameMapPresentReport(SCILocalized(@"Fetcher wiring"),
+											[SCIIdNameMapGenerator rebindFetcherForUnit:SCIIdNameMapSelectedUnit()]);
+									}],
+								[SCISetting buttonCellWithTitle:SCILocalized(@"Rebuild the manager")
+									subtitle:SCILocalized(@"Discards the current config manager and reports the status code")
+									icon:[SCISymbol symbolWithName:@"arrow.clockwise"]
+									action:^{
+										SCIIdNameMapPresentReport(SCILocalized(@"Rebuild"),
+											[SCIIdNameMapGenerator reloadUnit:SCIIdNameMapSelectedUnit()
+																	  timeout:SCIIdNameMapTimeout()]);
+									}],
+							]
+						}
+					]],
 			]
 		},
-		@{
+				@{
 			@"header": SCILocalized(@"Runtime"),
 			@"footer": SCILocalized(@"The ObjC index includes supported BOOL methods with zero or one object/integer argument; GraphQL dogfood uses exact typed hooks instead of a global status hook."),
 			@"rows": @[
