@@ -7,6 +7,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
+#import <mach/mach.h>
 #import "../../../modules/fishhook/fishhook.h"
 
 #pragma mark - ABI helpers
@@ -248,6 +249,104 @@ static SCISetFetcherFn SCIResolveSetFetcher(void) {
 	return fn;
 }
 
+#pragma mark - Safe memory probing
+
+/// Reads `size` bytes without ever faulting: vm_read_overwrite returns a kern
+/// error for unmapped pages instead of raising SIGSEGV. Every dereference of a
+/// C++ pointer recovered from an ivar goes through this.
+static BOOL SCISafeRead(const void *address, void *out, size_t size) {
+	if (!address || !out || !size) return NO;
+	vm_size_t read = 0;
+	kern_return_t kr = vm_read_overwrite(mach_task_self(),
+										 (vm_address_t)address,
+										 (vm_size_t)size,
+										 (vm_address_t)out,
+										 &read);
+	return kr == KERN_SUCCESS && read == size;
+}
+
+/// Itanium C++ ABI: the vptr points at the address point; typeinfo sits one slot
+/// before it, and a std::type_info stores its mangled name at offset 8.
+/// Returns the dynamic type name, or nil when the object cannot be identified.
+static NSString *SCIDynamicTypeName(const void *object) {
+	void *vptr = NULL;
+	if (!SCISafeRead(object, &vptr, sizeof(vptr)) || !vptr) return nil;
+
+	Dl_info info;
+	if (!dladdr(vptr, &info)) return nil;   // dladdr compares ranges, never dereferences
+
+	void *typeInfo = NULL;
+	if (!SCISafeRead((const char *)vptr - sizeof(void *), &typeInfo, sizeof(typeInfo))) return nil;
+	if (!typeInfo) return nil;
+
+	const char *namePtr = NULL;
+	if (!SCISafeRead((const char *)typeInfo + sizeof(void *), &namePtr, sizeof(namePtr))) return nil;
+	if (!namePtr) return nil;
+
+	char buffer[128] = {0};
+	if (!SCISafeRead(namePtr, buffer, sizeof(buffer) - 1)) return nil;
+	buffer[sizeof(buffer) - 1] = '\0';
+	if (!buffer[0]) return nil;
+	return @(buffer);
+}
+
+static NSString *SCIImageNameForAddress(const void *address) {
+	Dl_info info;
+	if (!address || !dladdr(address, &info) || !info.dli_fname) return @"unknown image";
+	return @(info.dli_fname).lastPathComponent;
+}
+
+/// The param-list call is a non-virtual FBMobileConfigManager member. Invoking it
+/// on anything else — an IFBMobileConfigManager base subobject, a stale weak_ptr
+/// target, a different implementation — reads the wrong offsets and takes the app
+/// down. Confirmed RTTI in FBSharedFramework: N12mobileconfig21FBMobileConfigManagerE.
+static NSString *kSCIManagerTypeName = @"N12mobileconfig21FBMobileConfigManagerE";
+
+static BOOL SCIManagerPointerLooksSafe(const void *manager, NSString **reason) {
+	if (!manager) {
+		if (reason) *reason = @"null";
+		return NO;
+	}
+	NSString *type = SCIDynamicTypeName(manager);
+	if (!type) {
+		if (reason) *reason = @"object is not readable — the weak_ptr target is gone";
+		return NO;
+	}
+	if ([type isEqualToString:kSCIManagerTypeName]) {
+		if (reason) *reason = [NSString stringWithFormat:@"FBMobileConfigManager (%@)",
+			SCIImageNameForAddress(manager)];
+		return YES;
+	}
+	if (reason) {
+		*reason = [NSString stringWithFormat:
+			@"dynamic type is %@, not FBMobileConfigManager — calling a manager method on it "
+			@"would read the wrong offsets", type];
+	}
+	return NO;
+}
+
+#pragma mark - Crash breadcrumb
+
+// The param-list call runs inside Instagram's own C++ stack; if it faults there
+// is no exception to catch and the app is simply gone. A marker written before
+// the call and cleared after turns that silent death into a reportable fact on
+// the next launch.
+static NSString *const kSCICrashBreadcrumbKey = @"sci_idnamemap_inflight";
+
+static void SCIBreadcrumbBegin(NSString *step) {
+	[NSUserDefaults.standardUserDefaults setObject:step forKey:kSCICrashBreadcrumbKey];
+	[NSUserDefaults.standardUserDefaults synchronize];
+}
+
+static void SCIBreadcrumbEnd(void) {
+	[NSUserDefaults.standardUserDefaults removeObjectForKey:kSCICrashBreadcrumbKey];
+	[NSUserDefaults.standardUserDefaults synchronize];
+}
+
+static NSString *SCIBreadcrumbPending(void) {
+	return [NSUserDefaults.standardUserDefaults stringForKey:kSCICrashBreadcrumbKey];
+}
+
 #pragma mark - Fetcher capture
 
 // The holder carries no _fetcherSetter on this build, so nothing can reinstall a
@@ -304,6 +403,11 @@ static NSString *SCIReinstallCapturedFetcher(void *manager) {
 	}
 	SCISetFetcherFn fn = sSCIOriginalSetFetcher ?: SCIResolveSetFetcher();
 	if (!fn) return @"setFetcher symbol unavailable";
+
+	NSString *reason = nil;
+	if (!SCIManagerPointerLooksSafe(manager, &reason)) {
+		return [NSString stringWithFormat:@"refusing to call setFetcher: %@", reason];
+	}
 
 	SCIRawSharedPtr copy = sSCICapturedFetcher;
 	SCIPinSharedPtr(copy);   // the callee's copy takes its own reference
@@ -462,6 +566,11 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 		fn ? @"exported (dlsym ok)" : @"not exported (local symbol) — holder path only"];
 	[report appendFormat:@"setFetcher: %@\n",
 		(sSCIOriginalSetFetcher || SCIResolveSetFetcher()) ? @"resolved" : @"unavailable"];
+	NSString *pending = SCIBreadcrumbPending();
+	if (pending) {
+		[report appendFormat:@"⚠︎ last attempt did not finish: %@\n"
+			@"   the app went down inside that call — see \"Request mode\" below\n", pending];
+	}
 	[report appendFormat:@"fetcher captured: %@ (setFetcher seen %lu×)\n\n",
 		sSCICapturedFetcher.ptr ? [NSString stringWithFormat:@"%p", sSCICapturedFetcher.ptr] : @"none",
 		(unsigned long)sSCICaptureCount];
@@ -506,9 +615,14 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 		[report appendFormat:@"contextManagerCreator: %@\n", creator ? @"set" : @"NIL"];
 		[report appendFormat:@"fetcherSetter: %@\n", fetcherSetter ? @"set" : @"NIL (this is the wiring gap)"];
 		[report appendFormat:@"mcFbtManager: %@\n", fbtManager ? NSStringFromClass(object_getClass(fbtManager)) : @"nil"];
-		[report appendFormat:@"manager ptr: %@\n\n",
-			rawManager ? [NSString stringWithFormat:@"%p via %@", rawManager, detail ?: @"?"]
-					   : (detail ?: @"unresolved")];
+		if (rawManager) {
+			NSString *safety = nil;
+			BOOL safe = SCIManagerPointerLooksSafe(rawManager, &safety);
+			[report appendFormat:@"manager ptr: %p via %@\n", rawManager, detail ?: @"?"];
+			[report appendFormat:@"object check: %@ %@\n\n", safe ? @"PASS" : @"FAIL", safety ?: @""];
+		} else {
+			[report appendFormat:@"manager ptr: %@\n\n", detail ?: @"unresolved"];
+		}
 	}
 
 	[report appendFormat:@"mapping file:\n%@", SCIDescribeMappingFile(SCIFindMappingFile(SCIHolderForUnit(SCIIdNameMapUnitCurrentSession)))];
@@ -658,27 +772,33 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 		// a real request blocks for a network round trip.
 		SCIParamListSyncFn fn = SCIResolveParamListSync();
 		BOOL paramListRan = NO;
-		if (fn && rawManager) {
+		NSString *safety = nil;
+		BOOL safe = SCIManagerPointerLooksSafe(rawManager, &safety);
+		[report appendFormat:@"3. object check: %@\n", safety ?: @"unknown"];
+
+		if (fn && safe) {
 			NSDate *started = NSDate.date;
+			SCIBreadcrumbBegin([NSString stringWithFormat:@"param-list mode %d, timeout %d", mode, (int)timeout]);
 			@try {
 				fn(rawManager, (int)timeout, mode);
 				paramListRan = YES;
-				[report appendFormat:@"3. updateConfigsWithParamsListSynchronously(%d, %d) — returned after %.0f ms\n",
+				[report appendFormat:@"4. updateConfigsWithParamsListSynchronously(%d, %d) — returned after %.0f ms\n",
 					(int)timeout, mode, [NSDate.date timeIntervalSinceDate:started] * 1000.0];
 			} @catch (id exception) {
-				[report appendFormat:@"3. param-list exception: %@\n", exception];
+				[report appendFormat:@"4. param-list exception: %@\n", exception];
 			}
+			SCIBreadcrumbEnd();
 		} else if (!fn) {
-			[report appendString:@"3. param-list symbol not exported — skipped\n"];
+			[report appendString:@"4. param-list symbol not exported — skipped\n"];
 		} else {
-			[report appendString:@"3. no manager pointer — param-list skipped\n"];
+			[report appendString:@"4. skipped — the object check above did not pass\n"];
 		}
 
 		// Step 3 — only rebuild through the holder when the OEM actually has the
 		// blocks to rebind with; otherwise a reload would drop the manager we
 		// just used and gain nothing.
 		if (creator || fetcherSetter) {
-			[report appendFormat:@"4. %@\n", [self reloadUnit:unit timeout:timeout]];
+			[report appendFormat:@"5. %@\n", [self reloadUnit:unit timeout:timeout]];
 			@try {
 				SCIRawSharedPtr null = {NULL, NULL};
 				long long syncResult = ((long long (*)(id, SEL, SCIRawSharedPtr, double))objc_msgSend)(
@@ -688,10 +808,10 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 				[report appendFormat:@"   sync exception: %@\n", exception];
 			}
 		} else if (!paramListRan) {
-			[report appendString:@"4. holder has neither block and the direct call did not run — "
+			[report appendString:@"5. holder has neither block and the direct call did not run — "
 				@"nothing left to drive.\n"];
 		} else {
-			[report appendString:@"4. holder rebuild skipped (no creator/setter to rebind with)\n"];
+			[report appendString:@"5. holder rebuild skipped (no creator/setter to rebind with)\n"];
 		}
 
 		// Step 5 — the framework persists asynchronously; poll for a brand new file.
@@ -704,7 +824,7 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 		}
 
 		if (after) {
-			[report appendFormat:@"\n5. FRAMEWORK WROTE A NEW FILE\n%@", SCIDescribeMappingFile(after)];
+			[report appendFormat:@"\n6. FRAMEWORK WROTE A NEW FILE\n%@", SCIDescribeMappingFile(after)];
 			if (backup) [report appendFormat:@"\n\nprevious file kept as %@", backup.lastPathComponent];
 		} else {
 			if (backup) {
@@ -712,13 +832,13 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 				NSURL *original = [backup.URLByDeletingLastPathComponent
 					URLByAppendingPathComponent:@"id_name_mapping.json"];
 				if ([fm moveItemAtURL:backup toURL:original error:&restoreError]) {
-					[report appendString:@"\n5. nothing was written — previous file restored.\n"];
+					[report appendString:@"\n6. nothing was written — previous file restored.\n"];
 				} else {
-					[report appendFormat:@"\n5. nothing was written and the restore failed (%@).\n"
+					[report appendFormat:@"\n6. nothing was written and the restore failed (%@).\n"
 						@"Your file is still at %@\n", restoreError.localizedDescription, backup.lastPathComponent];
 				}
 			} else {
-				[report appendString:@"\n5. nothing was written.\n"];
+				[report appendString:@"\n6. nothing was written.\n"];
 			}
 			[report appendString:
 				@"\nRead step 2 and the elapsed time in step 3: no captured fetcher, or a param-list "
@@ -744,7 +864,12 @@ static SCIIdNameMapUnit SCIIdNameMapSelectedUnitForSummary(void) {
 	NSString *detail = nil;
 	if (!SCIRawManagerPointer(holder, &detail)) return SCILocalized(@"no manager");
 	if (!SCIResolveParamListSync()) return SCILocalized(@"blocked");
+	NSString *safety = nil;
+	if (!SCIManagerPointerLooksSafe(SCIRawManagerPointer(holder, NULL), &safety)) {
+		return SCILocalized(@"unsafe");
+	}
 	if (!sSCICapturedFetcher.ptr) return SCILocalized(@"no fetcher");
+	if (SCIBreadcrumbPending()) return SCILocalized(@"last run crashed");
 	return SCILocalized(@"ready");
 }
 

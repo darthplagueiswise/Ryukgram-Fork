@@ -516,7 +516,7 @@ static void SCIIdNameMapExport(void) {
 					navSections:@[
 						@{
 							@"header": SCILocalized(@"Manual steps"),
-							@"footer": SCILocalized(@"Step 2 already performs all of these in order. Run them individually to see exactly which one fails. \"Reinstall the network fetcher\" puts back the network component captured when Instagram started — without it the manager has nothing to send the request with and the request returns instantly having done nothing. \"Rebuild the manager\" throws the current config manager away and asks Instagram to build a new one; on this build the app provides no rebuild hooks, so it reports a status code and changes nothing useful."),
+							@"footer": SCILocalized(@"Step 2 already runs all of these in order — use them one at a time to see which one fails.\n\nReinstall the network fetcher: Instagram creates a network component at launch and hands it to the config manager. It is captured on the way through and put back here. Without it the manager has no way to send anything, and the request returns instantly having done nothing.\n\nInspect fetcher wiring: reports whether the app left a hook to reattach that component automatically after the manager is rebuilt. On this build it did not — which is why the reinstall above is manual.\n\nRebuild the manager: throws the current config manager away and asks Instagram for a new one. The number it returns is Instagram's own status code, not a result. With no rebuild hooks present this changes nothing useful."),
 							@"rows": @[
 								[SCISetting buttonCellWithTitle:SCILocalized(@"Reinstall the network fetcher")
 									subtitle:SCILocalized(@"Puts the captured fetcher back on the live manager")
@@ -526,7 +526,7 @@ static void SCIIdNameMapExport(void) {
 											[SCIIdNameMapGenerator reinstallFetcherForUnit:SCIIdNameMapSelectedUnit()]);
 									}],
 								[SCISetting buttonCellWithTitle:SCILocalized(@"Inspect fetcher wiring")
-									subtitle:SCILocalized(@"Whether the app left a way to reattach a fetcher after a rebuild")
+									subtitle:SCILocalized(@"Whether the app left a hook to reattach the fetcher automatically")
 									icon:[SCISymbol symbolWithName:@"link"]
 									action:^{
 										SCIIdNameMapPresentReport(SCILocalized(@"Fetcher wiring"),
