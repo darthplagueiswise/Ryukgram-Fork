@@ -66,23 +66,37 @@ static BOOL ECInstMatches(Class cls, SEL sel, const char *enc) {
 // ===================================================================
 //  Known ObjC identity surface (plain classes) — %hook
 // ===================================================================
+// isEmployee : B16@0:8 (ivar accessor, FBSharedFramework)
 %group SCIEmployeeConsumersKnownObjC
 
-%hook IGFacebookUserInfo   // isEmployee : B16@0:8 (ivar accessor, FBSharedFramework)
-- (BOOL)isEmployee { return ECMasterOn() ? YES : %orig; }
+%hook IGFacebookUserInfo
+- (BOOL)isEmployee {
+    return ECMasterOn() ? YES : %orig;
+}
 %end
 
-%hook IGAdPlatformLogger_objc   // isEmployee B16@0:8 ; setIsEmployee: v20@0:8B16
-- (BOOL)isEmployee { return ECMasterOn() ? YES : %orig; }
-- (void)setIsEmployee:(BOOL)value { %orig(ECMasterOn() ? YES : value); }
+// isEmployee B16@0:8 ; setIsEmployee: v20@0:8B16
+%hook IGAdPlatformLogger_objc
+- (BOOL)isEmployee {
+    return ECMasterOn() ? YES : %orig;
+}
+- (void)setIsEmployee:(BOOL)value {
+    %orig(ECMasterOn() ? YES : value);
+}
 %end
 
-%hook FBWKWebView   // setIsEmployee: v20@0:8B16
-- (void)setIsEmployee:(BOOL)value { %orig(ECMasterOn() ? YES : value); }
+// setIsEmployee: v20@0:8B16
+%hook FBWKWebView
+- (void)setIsEmployee:(BOOL)value {
+    %orig(ECMasterOn() ? YES : value);
+}
 %end
 
-%hook FBWKWebViewDelegateAdaptor   // setIsEmployee: v20@0:8B16
-- (void)setIsEmployee:(BOOL)value { %orig(ECMasterOn() ? YES : value); }
+// setIsEmployee: v20@0:8B16
+%hook FBWKWebViewDelegateAdaptor
+- (void)setIsEmployee:(BOOL)value {
+    %orig(ECMasterOn() ? YES : value);
+}
 %end
 
 %end // group SCIEmployeeConsumersKnownObjC
