@@ -10,7 +10,7 @@
 // per-key descriptor symbols the older tweak used (_ig_is_employee,
 // _ig_is_employee_or_test_user, _ig_dogfooding_assistant,
 // _ig_dogfooding_first_client) are gone from this build entirely: 0 hits as
-// export, import, or raw string in Instagram AND FBSharedFramework. The two
+// exported symbol, imported symbol, or raw string in Instagram AND FBSharedFramework. The two
 // literal IDs also do not appear anywhere statically — not as an 8-byte
 // constant-pool value, not as a movz/movk immediate — because they are
 // assigned at runtime. So they cannot be validated ahead of time and silently
