@@ -57,11 +57,25 @@ static Method DGDDirectMethod(Class cls, SEL selector) {
 	return result;
 }
 
+// class_getInstanceMethod() performs Objective-C method resolution when a
+// selector is absent. That is unsafe while probing every loaded Meta class:
+// Instagram 376 has Pando classes whose resolver forwards an internal class
+// message and raises NSInvalidArgumentException. Walk the already-realized
+// method lists instead, which preserves inherited lookup without messaging the
+// candidate class or invoking +resolveInstanceMethod:.
+static Method DGDMethodInHierarchyWithoutResolving(Class cls, SEL selector) {
+	for (Class current = cls; current; current = class_getSuperclass(current)) {
+		Method method = DGDDirectMethod(current, selector);
+		if (method) return method;
+	}
+	return NULL;
+}
+
 static void DGDInstallStatusHook(id nested) {
 	if (!nested) return;
 	DGDEnsureState();
 
-	Class cls = [nested class];
+	Class cls = object_getClass(nested);
 	NSString *name = NSStringFromClass(cls) ?: @"";
 	@synchronized (sDGStatusHookedClasses) {
 		if ([sDGStatusHookedClasses containsObject:name]) return;
@@ -69,7 +83,7 @@ static void DGDInstallStatusHook(id nested) {
 	}
 
 	SEL selector = NSSelectorFromString(@"status");
-	Method method = class_getInstanceMethod(cls, selector);
+	Method method = DGDMethodInHierarchyWithoutResolving(cls, selector);
 	if (!DGDObjectGetter(method)) {
 		@synchronized (sDGStatusHookedClasses) { [sDGStatusHookedClasses removeObject:name]; }
 		return;
@@ -151,7 +165,8 @@ NSUInteger SCIRefreshGraphQLDogfoodDynamicStatusHooks(void) {
 		NSString *name = [NSStringFromClass(cls) lowercaseString];
 		if ([name containsString:@"gql"] || [name containsString:@"graphql"] ||
 		    [name containsString:@"pando"]) {
-			Method inherited = class_getInstanceMethod(cls, rootSelector);
+			Method inherited = DGDMethodInHierarchyWithoutResolving(
+				class_getSuperclass(cls), rootSelector);
 			if (inherited) installed += DGDInstallRootHook(cls, rootSelector, inherited) ? 1 : 0;
 		}
 	}
