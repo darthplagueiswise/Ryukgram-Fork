@@ -1,7 +1,7 @@
-// Current experiment C-gate bridge for Instagram(29) + FBSharedFramework(105).
-// The removed IGMobileConfigBooleanValueForInternalUse symbol is intentionally
-// absent. Every remaining target below was confirmed as an Instagram import and
-// FBSharedFramework export in the supplied binaries.
+// Legacy experiment C-gate bridge for builds that expose these exact imports.
+// Employee DATA descriptors are handled separately by the version-adaptive
+// SCICSymbolStub reader filter when IGMobileConfigBooleanValueForInternalUse is
+// present (including Instagram 376).
 #import <Foundation/Foundation.h>
 #import "../../../modules/fishhook/fishhook.h"
 #import <os/log.h>

@@ -91,7 +91,10 @@ static BOOL SCI_MCGetBoolNoLogDefault(id self, SEL _cmd,
 static void SCIInstallMobileConfigEmployeeHooks(void) {
     if (!SCIEmployeeInternalMasterOn()) return;
 
+    BOOL descriptorReady = SCISyncEmployeeMobileConfigDescriptorForcing();
+
     Class cls = objc_getClass("FBMobileConfigContextManager");
+    if (!cls) cls = objc_getClass("IGMobileConfigContextManager");
     if (!cls) return;
 
 #define SCI_HOOK_MC(selectorName, expectedEncoding, replacement, original) do { \
@@ -130,8 +133,9 @@ static void SCIInstallMobileConfigEmployeeHooks(void) {
     count += orig_MCGetBoolOptionsDefault != NULL;
     count += orig_MCGetBoolNoLog != NULL;
     count += orig_MCGetBoolNoLogDefault != NULL;
-    IGSLOG("MC employee hooks=%lu/6 internalPayload=%d assistantPayload=%d",
+    IGSLOG("MC employee hooks=%lu/6 descriptorReader=%d internalPayload=%d assistantPayload=%d",
            (unsigned long)count,
+           descriptorReady,
            SCIInternalOnlyPayloadAvailable(),
            SCIDogfoodAssistantPayloadAvailable());
 }

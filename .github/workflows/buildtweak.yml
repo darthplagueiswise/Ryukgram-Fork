@@ -8,6 +8,7 @@ on:
             - 'experimental2'
             - 'experimental3'
             - 'experimental4'
+            - 'experimental5'
     workflow_dispatch:
 
 concurrency:
@@ -30,6 +31,7 @@ jobs:
               uses: actions/checkout@v4
               with:
                 path: main
+                fetch-depth: 0
 
             - name: Install Dependencies
               run: brew install ldid dpkg make
@@ -81,8 +83,8 @@ jobs:
             - name: Setup FFmpegKit
               run: cd main && ./scripts/setup-ffmpegkit.sh
 
-            - name: Install Python dependencies (obfuscate-classes.py)
-              run: pip3 install lief || pip3 install lief --break-system-packages
+            - name: Install Python Mach-O dependencies
+              run: python3 -m pip install capstone lief || python3 -m pip install capstone lief --break-system-packages
 
             - name: Build rootless
               run: |

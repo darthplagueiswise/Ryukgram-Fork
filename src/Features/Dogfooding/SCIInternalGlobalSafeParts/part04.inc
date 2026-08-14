@@ -122,7 +122,9 @@ BOOL SCIInstallInternalGlobalHooksIfNeeded(void) {
     SCIInstallBugMenuPayloadSafety();
     SCIInstallSafeDogfoodOpeners();
 
-    BOOL mcReady = !employeeOn ||
+    BOOL descriptorReady = !employeeOn ||
+        SCISyncEmployeeMobileConfigDescriptorForcing();
+    BOOL mcReady = !employeeOn || descriptorReady ||
         (orig_MCGetBool &&
          orig_MCGetBoolDefault &&
          orig_MCGetBoolOptions &&

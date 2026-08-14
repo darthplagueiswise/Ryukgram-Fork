@@ -3,9 +3,9 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
+#import <mach-o/dyld.h>
 
 static NSString *const kOverridesKey = @"sci_symbol_overrides";
-static const char *kImageSuffix[2] = { "/Instagram", "/FBSharedFramework" };
 static NSDictionary<NSString *, NSNumber *> *sRuntimeOverrideCache;
 static NSMutableSet<NSString *> *sInstalledOverrideKeys;
 static NSMutableDictionary<NSString *, NSNumber *> *sObservedOriginalValues;
@@ -56,13 +56,74 @@ static SCISymbolArgumentKind SCIArgumentKindForMethod(Method m) {
 static BOOL SCIIsSupportedBoolMethod(Method m) {
 	if (!m) return NO;
 	char ret[16] = {0}; method_getReturnType(m, ret, sizeof(ret));
-	if (!(ret[0] == 'B' || ret[0] == 'c' || ret[0] == 'C')) return NO;
+	const char *type = ret;
+	while (*type == 'r' || *type == 'n' || *type == 'N' || *type == 'o' ||
+		   *type == 'O' || *type == 'R' || *type == 'V') type++;
+	// arm64 iOS encodes Objective-C BOOL as `B`. Treating generic char (`c/C`)
+	// as BOOL produced non-boolean rows and unsafe replacement signatures.
+	if (*type != 'B') return NO;
 	return SCIArgumentKindForMethod(m) >= 0;
 }
+
+// Runtime browser policy: these are common NSObject/UIKit protocol or state
+// methods, not experiment gates. Reject them during discovery so they never
+// reappear through search or an "All" view. The list is semantic UI policy;
+// persisted exact overrides remain installable for backwards compatibility.
+static NSSet<NSString *> *SCIStructuralNoiseSelectorNames(void) {
+	static NSSet<NSString *> *names = nil;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		names = [NSSet setWithArray:@[
+			@"isEqual:", @"isEqualToDiffableObject:", @"isEqualToString:",
+			@"respondsToSelector:", @"conformsToProtocol:",
+			@"isKindOfClass:", @"isMemberOfClass:", @"isProxy",
+			@"allowsWeakReference", @"retainWeakReference",
+			@"supportsSecureCoding", @"automaticallyNotifiesObserversForKey:",
+			@"makeImmutable", @"quick_flexibilityFor:",
+			@"canRespondToGesture:", @"gestureRecognizerShouldBegin:",
+			@"gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:",
+			@"gestureRecognizer:shouldReceiveTouch:",
+			@"gestureRecognizer:shouldBeRequiredToFailByGestureRecognizer:",
+			@"gestureRecognizer:shouldRequireFailureOfGestureRecognizer:",
+			@"canPerformAction:withSender:",
+			@"textFieldShouldReturn:", @"textFieldShouldBeginEditing:",
+			@"textFieldShouldEndEditing:", @"textFieldShouldClear:",
+			@"textField:shouldChangeCharactersInRange:replacementString:",
+			@"textViewShouldBeginEditing:", @"textViewShouldEndEditing:",
+			@"textView:shouldChangeTextInRange:replacementText:",
+			@"searchBarShouldBeginEditing:", @"searchBarShouldEndEditing:",
+			@"scrollViewShouldScrollToTop:",
+			@"becomeFirstResponder", @"resignFirstResponder",
+			@"canBecomeFirstResponder", @"canResignFirstResponder",
+			@"isFirstResponder", @"isAccessibilityElement",
+			@"accessibilityActivate", @"accessibilityPerformEscape",
+			@"accessibilityPerformMagicTap", @"accessibilityScroll:",
+			@"isHidden", @"isSelected", @"isEnabled", @"isHighlighted",
+			@"enabled", @"disabled", @"selected", @"userInteractionEnabled",
+			@"isOpaque", @"clipsToBounds", @"isUserInteractionEnabled",
+			@"isFocused", @"canBecomeFocused", @"prefersStatusBarHidden",
+			@"prefersNavigationBarHidden", @"prefersNavigationBarDividerHidden",
+			@"prefersHomeIndicatorAutoHidden", @"shouldAutorotate",
+			@"isLoading", @"isPlaying", @"isMuted", @"isActive", @"isPaused",
+		]];
+	});
+	return names;
+}
+
+static BOOL SCISelectorIsStructuralNoise(NSString *selectorName) {
+	if (!selectorName.length) return YES;
+	if ([SCIStructuralNoiseSelectorNames() containsObject:selectorName]) return YES;
+	NSString *lower = selectorName.lowercaseString;
+	return [lower hasPrefix:@"isequal"] ||
+		[lower hasPrefix:@"respondstoselector"] ||
+		[lower hasPrefix:@"canrespond"];
+}
+
 static BOOL SCISelectorAllowed(const char *name, Method m) {
 	if (!name || !m) return NO;
 	if (strncmp(name, "set", 3) == 0 || strncmp(name, "init", 4) == 0) return NO;
-	if (!strcmp(name, "isEqual:") || !strcmp(name, "respondsToSelector:")) return NO;
+	NSString *selectorName = [NSString stringWithUTF8String:name];
+	if (SCISelectorIsStructuralNoise(selectorName)) return NO;
 	return SCIIsSupportedBoolMethod(m);
 }
 static BOOL SCIParseKey(NSString *key, NSString **cn, NSString **sn, BOOL *cm) {
@@ -129,15 +190,54 @@ static BOOL SCIInstallKey(NSString *key) {
 @implementation SCISymbolClass @end
 
 @implementation SCISymbolBrowserEngine
-+ (NSArray<SCISymbolClass *> *)classesForImage:(SCISymbolImage)image {
-	if (image < SCISymbolImageInstagram || image > SCISymbolImageFBShared) return @[];
-	const char *suffix = kImageSuffix[image]; size_t sl = strlen(suffix);
++ (NSArray<NSString *> *)runtimeImagePaths {
+	NSString *executable = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+	NSString *frameworkRoot = [[NSBundle.mainBundle.bundlePath
+		stringByAppendingPathComponent:@"Frameworks"] stringByStandardizingPath];
+	NSMutableOrderedSet<NSString *> *paths = [NSMutableOrderedSet orderedSet];
+	uint32_t imageCount = _dyld_image_count();
+	for (uint32_t index = 0; index < imageCount; index++) {
+		const char *raw = _dyld_get_image_name(index);
+		if (!raw) continue;
+		NSString *path = [[NSString stringWithUTF8String:raw] stringByStandardizingPath];
+		if (!path.length) continue;
+		BOOL isMain = executable.length && [path isEqualToString:executable];
+		BOOL isFramework = frameworkRoot.length &&
+			([path isEqualToString:frameworkRoot] ||
+			 [path hasPrefix:[frameworkRoot stringByAppendingString:@"/"]]);
+		if (isMain || isFramework) [paths addObject:path];
+	}
+	NSArray<NSString *> *sorted = [paths.array sortedArrayUsingComparator:
+		^NSComparisonResult(NSString *a, NSString *b) {
+			BOOL am = executable.length && [a isEqualToString:executable];
+			BOOL bm = executable.length && [b isEqualToString:executable];
+			if (am != bm) return am ? NSOrderedAscending : NSOrderedDescending;
+			return [[self shortNameForImagePath:a]
+				compare:[self shortNameForImagePath:b]
+				options:NSCaseInsensitiveSearch];
+		}];
+	return sorted ?: @[];
+}
+
++ (NSString *)shortNameForImagePath:(NSString *)imagePath {
+	NSString *name = imagePath.lastPathComponent;
+	return name.length ? name : @"Image";
+}
+
++ (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName {
+	return SCISelectorIsStructuralNoise(selectorName);
+}
+
++ (NSArray<SCISymbolClass *> *)classesForImagePath:(NSString *)imagePath {
+	NSString *wanted = imagePath.stringByStandardizingPath;
+	if (!wanted.length) return @[];
 	unsigned int count = 0; Class *all = objc_copyClassList(&count);
 	if (!all) return @[];
 	NSMutableArray *out = [NSMutableArray array];
 	for (unsigned int i = 0; i < count; i++) {
 		Class cls = all[i]; const char *img = class_getImageName(cls); if (!img) continue;
-		size_t il = strlen(img); if (il < sl || strcmp(img + il - sl, suffix)) continue;
+		NSString *classImage = [[NSString stringWithUTF8String:img] stringByStandardizingPath];
+		if (![classImage isEqualToString:wanted]) continue;
 		NSString *cn = NSStringFromClass(cls); if (!cn.length) continue;
 		NSMutableArray *methodsOut = [NSMutableArray array];
 		for (int pass = 0; pass < 2; pass++) {
@@ -162,6 +262,22 @@ static BOOL SCIInstallKey(NSString *key) {
 	free(all);
 	[out sortUsingComparator:^NSComparisonResult(SCISymbolClass *a, SCISymbolClass *b) { return [a.className compare:b.className]; }];
 	return out.copy;
+}
++ (NSArray<SCISymbolClass *> *)classesForImage:(SCISymbolImage)image {
+	if (image < SCISymbolImageInstagram || image > SCISymbolImageFBShared) return @[];
+	NSArray<NSString *> *paths = [self runtimeImagePaths];
+	NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+	if (image == SCISymbolImageInstagram) {
+		return main.length ? [self classesForImagePath:main] : @[];
+	}
+	for (NSString *preferred in @[@"FBSharedFramework", @"InstagramSharedFramework"]) {
+		for (NSString *path in paths) {
+			if ([[self shortNameForImagePath:path] isEqualToString:preferred]) {
+				return [self classesForImagePath:path];
+			}
+		}
+	}
+	return @[];
 }
 + (NSNumber *)liveValueForClass:(NSString *)cn selector:(NSString *)sn isClassMethod:(BOOL)cm {
 	Class cls = NSClassFromString(cn); SEL sel = NSSelectorFromString(sn); if (!cls || !sel) return nil;
@@ -197,8 +313,8 @@ static BOOL SCIInstallKey(NSString *key) {
 }
 + (NSUInteger)setForClassNeedles:(NSArray<NSString *> *)classNeedles selectorNeedles:(NSArray<NSString *> *)selectorNeedles value:(NSNumber *)value requireBoth:(BOOL)both {
 	NSUInteger n = 0;
-	for (SCISymbolImage img = SCISymbolImageInstagram; img <= SCISymbolImageFBShared; img++) {
-		for (SCISymbolClass *c in [self classesForImage:img]) {
+	for (NSString *imagePath in [self runtimeImagePaths]) {
+		for (SCISymbolClass *c in [self classesForImagePath:imagePath]) {
 			BOOL cm = [self className:c.className matchesAny:classNeedles];
 			for (SCISymbolGetter *g in c.getters) {
 				BOOL sm = [self selectorName:g.selectorName matchesAny:selectorNeedles];

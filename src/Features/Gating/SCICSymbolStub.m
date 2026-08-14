@@ -68,23 +68,35 @@ static BOOL SCIParamDescriptorSymbolKnown(NSString *name) {
     return [SCIParamDescriptorSymbols() containsObject:name ?: @""];
 }
 
-// A descriptor is forceable if it is in the curated list OR it resolves to a
-// non-null DATA pointer via dlsym (a runtime-confirmed descriptor, e.g. one the
-// xref resolver tied to IGMobileConfigBooleanValueForInternalUse). This is safe
-// to widen because the reader filter matches by the descriptor POINTER against
-// the reader's argument — a symbol that is not actually the consumed descriptor
-// simply never matches, so orig is returned unchanged.
+static void *SCIResolveRuntimeSymbol(NSString *name) {
+    if (![name isKindOfClass:NSString.class] || !name.length) return NULL;
+    void *symbol = dlsym(RTLD_DEFAULT, name.UTF8String);
+    if (!symbol) {
+        NSString *under = [@"_" stringByAppendingString:name];
+        symbol = dlsym(RTLD_DEFAULT, under.UTF8String);
+    }
+    return symbol;
+}
+
+static BOOL SCIParamDescriptorReaderAvailable(void) {
+    return SCIResolveRuntimeSymbol(@"IGMobileConfigBooleanValueForInternalUse") != NULL;
+}
+
+// The descriptor backend exists in Instagram 376 but was removed in later
+// builds. Do not trust a curated name by itself: both the DATA symbol and its
+// reader must resolve in the running process before the browser can advertise a
+// working patch. This keeps the backend version-adaptive without permanently
+// disabling it at constructor time.
 static BOOL SCIParamDescriptorSymbolForceable(NSString *name) {
     if (![name isKindOfClass:NSString.class] || !name.length) return NO;
-    if (SCIParamDescriptorSymbolKnown(name)) return YES;
-    if (dlsym(RTLD_DEFAULT, name.UTF8String) != NULL) return YES;
-    NSString *under = [@"_" stringByAppendingString:name];
-    return dlsym(RTLD_DEFAULT, under.UTF8String) != NULL;
+    return SCIParamDescriptorReaderAvailable() && SCIResolveRuntimeSymbol(name) != NULL;
 }
 
 typedef struct {
     char name[128];
     void *addr;
+    atomic_uint_fast64_t rawValue;
+    atomic_bool hasRawValue;
     atomic_int force; // -1 none, 0/1 forced
     atomic_int observedBool; // -1 unknown, 0/1 last native value
     atomic_uint hits;
@@ -110,12 +122,17 @@ static void SCIParamDescriptorRefreshCache(void) {
         id v = prefs[key];
         atomic_store(&g_param_slots[i].force, [v isKindOfClass:NSNumber.class] ? ([v boolValue] ? 1 : 0) : -1);
         if (!g_param_slots[i].addr) {
-            void *p = dlsym(RTLD_DEFAULT, g_param_slots[i].name);
-            if (!p) {
-                NSString *under = [@"_" stringByAppendingString:key];
-                p = dlsym(RTLD_DEFAULT, under.UTF8String);
-            }
-            g_param_slots[i].addr = p;
+            g_param_slots[i].addr = SCIResolveRuntimeSymbol(key);
+        }
+        if (g_param_slots[i].addr) {
+            // Instagram 376 passes the 64-bit descriptor VALUE in x3. Newer
+            // readers seen by this project passed a descriptor address in x0
+            // or x2. Cache both representations so the hot hook can match
+            // either ABI without dereferencing arbitrary call arguments.
+            uint64_t raw = 0;
+            memcpy(&raw, g_param_slots[i].addr, sizeof(raw));
+            atomic_store(&g_param_slots[i].rawValue, raw);
+            atomic_store(&g_param_slots[i].hasRawValue, true);
         }
     }
 }
@@ -129,11 +146,9 @@ static void SCIParamDescriptorEnsureSlot(NSString *name) {
     atomic_store(&slot->force, -1);
     atomic_store(&slot->observedBool, -1);
     atomic_store(&slot->hits, 0);
-    slot->addr = dlsym(RTLD_DEFAULT, slot->name);
-    if (!slot->addr) {
-        NSString *under = [@"_" stringByAppendingString:name];
-        slot->addr = dlsym(RTLD_DEFAULT, under.UTF8String);
-    }
+    atomic_store(&slot->rawValue, 0);
+    atomic_store(&slot->hasRawValue, false);
+    slot->addr = SCIResolveRuntimeSymbol(name);
 }
 
 static void SCIParamDescriptorInstallSlotsForPersisted(void) {
@@ -144,12 +159,19 @@ static void SCIParamDescriptorInstallSlotsForPersisted(void) {
     SCIParamDescriptorRefreshCache();
 }
 static SCIParamDescriptorSlot *SCIParamDescriptorSlotForMobileConfigBoolArgs(void *a0, void *a1, void *a2, void *a3) {
-    (void)a1; (void)a3;
+    (void)a1;
     // Hot path: no NSUserDefaults and no slot creation. Slots/cache are mounted
     // by setParamDescriptorForce/Observe and reinstallPersistedStubs.
     for (int i = 0; i < g_param_slot_count; i++) {
-        if (!g_param_slots[i].addr) continue;
-        if (a0 == g_param_slots[i].addr || a2 == g_param_slots[i].addr) return &g_param_slots[i];
+        SCIParamDescriptorSlot *slot = &g_param_slots[i];
+        if (!slot->addr) continue;
+        uint64_t raw = atomic_load(&slot->rawValue);
+        BOOL hasRaw = atomic_load(&slot->hasRawValue);
+        // Verified ABIs only: later builds used a descriptor pointer in x0/x2;
+        // Instagram 376 passes the raw descriptor value in x3. Never compare
+        // the default BOOL x1 or unrelated trailing registers.
+        if (a0 == slot->addr || a2 == slot->addr || a3 == slot->addr ||
+            (hasRaw && (uint64_t)(uintptr_t)a3 == raw)) return slot;
     }
     return NULL;
 }
@@ -276,7 +298,14 @@ typedef void *(*SCICOrigPtr8)(void *, void *, void *, void *, void *, void *, vo
 static bool call_orig_bool(SCICStubSlot *s, void *a0, void *a1, void *a2, void *a3, void *a4, void *a5, void *a6, void *a7) {
     if (!s || !s->orig) return false;
     switch (s->profile) {
-        case SCICStubProfileIGMobileConfigBoolean: { bool (*o)(void *, bool, void *) = (void *)s->orig; return o(a0, ((uintptr_t)a1) != 0, a2); }
+        case SCICStubProfileIGMobileConfigBoolean: {
+            // 376 consumes x3 (the raw mc_bool_param_t descriptor). Calling the
+            // original through the old three-argument typedef clobbered that
+            // register and made employee forcing a no-op/crash risk. Preserve
+            // every integer argument register just like the EasyGating readers.
+            SCICOrigBool8 o = (SCICOrigBool8)s->orig;
+            return o(a0, a1, a2, a3, a4, a5, a6, a7);
+        }
         case SCICStubProfileEasyGatingBoolean:
         case SCICStubProfileEasyGatingAuthBoolean: {
             // EasyGating readers in IG 434 are generated C++/MCI readers, not
@@ -434,7 +463,8 @@ static void SCIStubRefreshCache(void) {
 + (BOOL)canForceAsParamDescriptor:(NSString *)name { return SCIParamDescriptorSymbolForceable(name); }
 + (NSNumber *)forceForParamDescriptorSymbol:(NSString *)name { id v = SCIParamBoolPref()[name ?: @""]; return [v isKindOfClass:NSNumber.class] ? v : nil; }
 + (BOOL)setParamDescriptorForce:(NSNumber *)value forSymbol:(NSString *)name {
-    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolForceable(name)) return NO;
+    if (![name isKindOfClass:NSString.class] || !name.length) return NO;
+    if (value && !SCIParamDescriptorSymbolForceable(name)) return NO;
     NSMutableDictionary *d = [SCIParamBoolPref() mutableCopy] ?: [NSMutableDictionary dictionary];
     if (value) d[name] = value; else [d removeObjectForKey:name];
     [SCIUtils setPref:d forKey:kParamBoolOverrides];
@@ -449,7 +479,8 @@ static void SCIStubRefreshCache(void) {
 // hook live, and rehydrate it on launch from reinstallPersistedStubs. The hook
 // hot path only checks the fixed in-memory slot table.
 + (BOOL)setParamDescriptorObserve:(BOOL)observe forSymbol:(NSString *)name {
-    if (![name isKindOfClass:NSString.class] || !name.length || !SCIParamDescriptorSymbolForceable(name)) return NO;
+    if (![name isKindOfClass:NSString.class] || !name.length) return NO;
+    if (observe && !SCIParamDescriptorSymbolForceable(name)) return NO;
     NSMutableDictionary *d = [SCIParamObservePref() mutableCopy] ?: [NSMutableDictionary dictionary];
     if (observe) d[name] = @YES; else [d removeObjectForKey:name];
     [SCIUtils setPref:d forKey:kParamBoolObserve];

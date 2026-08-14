@@ -26,6 +26,8 @@
 
 void SCIInstallEmployeeIdentityHooksIfNeeded(void);
 void SCIInstallEmployeeIdentityHooksForObject(id object);
+BOOL SCIEmployeeMobileConfigDescriptorBackendAvailable(void);
+BOOL SCISyncEmployeeMobileConfigDescriptorForcing(void);
 BOOL SCIInstallInternalGlobalHooksIfNeeded(void);
 
 typedef struct {

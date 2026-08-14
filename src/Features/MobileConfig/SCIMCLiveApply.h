@@ -16,10 +16,10 @@
 //   removeOverrideForParam(unsigned long long, bool)
 //     symbol: _ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb
 //
-// paramID note: this is the 64-bit MobileConfig param hash (the SAME identifier
-// the EasyGating evaluators read), e.g. ig_is_employee param0 == 0x8102c800010921
-// as encoded in the IG binary's _ig_is_employee descriptor. It is NOT the local
-// build ordinal from params_map.txt.
+// paramID note: this is the 64-bit MobileConfig descriptor value (the SAME
+// identifier the native reader consumes). It must be resolved from the running
+// image because it changes between Instagram builds; it is not the local build
+// ordinal from params_map.txt.
 
 #import <Foundation/Foundation.h>
 
@@ -38,15 +38,17 @@ typedef NS_ENUM(NSInteger, SCIMCLiveResult) {
 /// "no symbols". Cheap; safe to call on every cell render.
 + (NSString *)wiringStatus;
 
+/// Read an exported MobileConfig DATA descriptor from the running image. Returns
+/// zero when the symbol is absent in this app version.
++ (uint64_t)paramIDForDescriptorSymbol:(NSString *)symbolName;
+
 /// Set (value) or clear (remove) a single override live. paramID is the 64-bit
 /// MobileConfig param hash. Returns SCIMCLiveOK on success.
 + (SCIMCLiveResult)setOverrideForParamID:(uint64_t)paramID value:(BOOL)value;
 + (SCIMCLiveResult)clearOverrideForParamID:(uint64_t)paramID;
 
-/// Validation entry point: forces ig_is_employee (config 56474, param 0,
-/// paramID 0x8102c800010921 — read directly from the IG binary descriptor) to
-/// true, live. If internal gating flips without relaunch, the 64-bit paramID
-/// space is confirmed and every other config can be driven the same way.
+/// Validation entry point: resolves this build's ig_is_employee descriptor and
+/// forces it true through the live overrides table.
 + (NSString *)applyIsEmployeeProbe;
 
 @end

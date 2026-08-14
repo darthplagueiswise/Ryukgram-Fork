@@ -117,8 +117,8 @@ static BOOL SCICConsumerIsBoolReader(NSArray<SCIXrefHit *> *hits, NSString **con
     if (self.callerSymbol) d[@"callerSymbol"] = self.callerSymbol;
     if (self.returnKind) d[@"returnKind"] = self.returnKind;
     d[@"strategy"] = SCICStrategyString(self.strategy);
-    d[@"runtimeAddress"] = @(self.runtimeAddress);
-    d[@"symtabAddress"] = @(self.symtabAddress);
+    // ASLR addresses belong only to the current process. Never persist them as
+    // browser state; cold-launch reapply must resolve and validate again.
     d[@"dataSize"] = @(self.dataSize);
     d[@"function"] = @(self.function);
     d[@"data"] = @(self.data);
@@ -148,8 +148,8 @@ static BOOL SCICConsumerIsBoolReader(NSArray<SCIXrefHit *> *hits, NSString **con
     p.callerSymbol = [dict[@"callerSymbol"] isKindOfClass:NSString.class] ? dict[@"callerSymbol"] : nil;
     p.returnKind = [dict[@"returnKind"] isKindOfClass:NSString.class] ? dict[@"returnKind"] : nil;
     p.strategy = SCICStrategyFromString([dict[@"strategy"] isKindOfClass:NSString.class] ? dict[@"strategy"] : nil);
-    p.runtimeAddress = [dict[@"runtimeAddress"] respondsToSelector:@selector(longLongValue)] ? (uintptr_t)[dict[@"runtimeAddress"] longLongValue] : 0;
-    p.symtabAddress = [dict[@"symtabAddress"] respondsToSelector:@selector(longLongValue)] ? (uintptr_t)[dict[@"symtabAddress"] longLongValue] : 0;
+    p.runtimeAddress = 0;
+    p.symtabAddress = 0;
     p.dataSize = [dict[@"dataSize"] respondsToSelector:@selector(longLongValue)] ? (NSUInteger)[dict[@"dataSize"] longLongValue] : 0;
     p.function = [dict[@"function"] boolValue]; p.data = [dict[@"data"] boolValue]; p.swiftLike = [dict[@"swiftLike"] boolValue];
     p.hasBindPointer = [dict[@"hasBindPointer"] boolValue]; p.objcClassMethod = [dict[@"objcClassMethod"] boolValue];
@@ -188,6 +188,24 @@ static BOOL SCICConsumerIsBoolReader(NSArray<SCIXrefHit *> *hits, NSString **con
 }
 
 @end
+
+static BOOL SCICAddressMatchesPlanImage(uintptr_t address,
+                                        SCICRuntimePatchPlan *plan) {
+    if (!address) return NO;
+    if (!plan.image.length) return YES;
+    Dl_info info = {0};
+    if (!dladdr((void *)address, &info) || !info.dli_fname) return NO;
+    NSString *actual = [NSString stringWithUTF8String:info.dli_fname];
+    return [actual.lastPathComponent isEqualToString:plan.image];
+}
+
+static uintptr_t SCICResolveDataAddressForPlan(SCICRuntimePatchPlan *plan) {
+    if (SCICAddressMatchesPlanImage(plan.runtimeAddress, plan)) {
+        return plan.runtimeAddress;
+    }
+    uintptr_t resolved = (uintptr_t)SCICResolveSymbolAddress(plan.symbol);
+    return SCICAddressMatchesPlanImage(resolved, plan) ? resolved : 0;
+}
 
 #pragma mark - DATA pointer rebind
 
@@ -488,8 +506,7 @@ static BOOL SCICPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
         case SCICRuntimePatchStrategyDataPatchBytes: {
             NSData *bytes = [value isKindOfClass:NSData.class] ? value : nil;
             if (!bytes.length) { if (error) *error = [NSError errorWithDomain:@"SCICRuntimePatchResolver" code:22 userInfo:@{NSLocalizedDescriptionKey:@"patch bytes required"}]; return NO; }
-            uintptr_t addr = (uintptr_t)SCICResolveSymbolAddress(plan.symbol);
-            if (!addr) addr = plan.runtimeAddress;
+            uintptr_t addr = SCICResolveDataAddressForPlan(plan);
             NSData *snapshot = nil;
             ok = SCICPatchMemory(addr, bytes, &snapshot, error);
             if (ok) {
@@ -534,8 +551,7 @@ static BOOL SCICPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
             NSString *b64 = [persisted[@"snapshot"] isKindOfClass:NSString.class] ? persisted[@"snapshot"] : SCICDictPref(kSCICRuntimeDataPatchSnapshotsKey)[plan.symbol];
             NSData *snapshot = b64.length ? [[NSData alloc] initWithBase64EncodedString:b64 options:0] : nil;
             if (!snapshot.length) { ok = NO; if (error) *error = [NSError errorWithDomain:@"SCICRuntimePatchResolver" code:23 userInfo:@{NSLocalizedDescriptionKey:@"missing DATA patch snapshot"}]; break; }
-            uintptr_t addr = (uintptr_t)SCICResolveSymbolAddress(plan.symbol);
-            if (!addr) addr = plan.runtimeAddress;
+            uintptr_t addr = SCICResolveDataAddressForPlan(plan);
             ok = SCICPatchMemory(addr, snapshot, NULL, error);
             break;
         }
@@ -583,7 +599,7 @@ static BOOL SCICPatchMemory(uintptr_t address, NSData *bytes, NSData **snapshotO
                         // Launch reapply must never reuse an old ASLR address.
                         // DATA byte patches are cold-launch safe only when the
                         // current process can resolve the symbol again.
-                        uintptr_t addr = (uintptr_t)SCICResolveSymbolAddress(plan.symbol);
+                        uintptr_t addr = SCICResolveDataAddressForPlan(plan);
                         if (addr) SCICPatchMemory(addr, bytes, NULL, NULL);
                     }
                     break;

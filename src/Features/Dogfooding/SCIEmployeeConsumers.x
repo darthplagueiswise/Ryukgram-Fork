@@ -41,10 +41,11 @@
 //       — an unrelated false friend, not an identity/dogfooding surface. It
 //       hooked nothing, ever; removed rather than left as dead weight.
 //
-// Ownership boundary (unchanged): this file owns ONLY ObjC identity surfaces.
-// Bug Reporter / Internal Settings presentation and the MobileConfig getBool:
-// readers stay owned exclusively by SCIInternalGlobalSafe.x. Nothing here
-// hooks IGBugReportMenuViewController or FBMobileConfigContextManager.
+// Ownership boundary: this file owns ObjC identity surfaces and coordinates the
+// two exact employee DATA descriptors with SCICSymbolStub. The typed ObjC
+// MobileConfig getBool: hooks remain in SCIInternalGlobalSafe, while the C
+// reader ABI lives centrally in SCICSymbolStub. Nothing here hooks Bug Reporter
+// presentation or broad MobileConfig classes.
 //
 // Every class/selector/ABI below was re-verified against BOTH the build this
 // file originally shipped against and the current uploaded Instagram/
@@ -57,7 +58,9 @@
 #import "../../Utils.h"
 #import "SCIInternalGatePrefs.h"
 #import "SCIInstallOnce.h"
+#import "../Gating/SCICSymbolStub.h"
 #import <Foundation/Foundation.h>
+#import <dlfcn.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <os/log.h>
@@ -75,6 +78,49 @@ static inline BOOL ECMasterOn(void) {
 }
 static inline BOOL ECTestUserOn(void) {
     return ECMasterOn() || [SCIUtils getBoolPref:@"sci_force_ig_is_test_user"];
+}
+
+static void *ECResolveRuntimeSymbol(const char *name) {
+    if (!name || !name[0]) return NULL;
+    void *symbol = dlsym(RTLD_DEFAULT, name);
+    if (!symbol) {
+        NSString *under = [@"_" stringByAppendingString:
+            [NSString stringWithUTF8String:name] ?: @""];
+        symbol = dlsym(RTLD_DEFAULT, under.UTF8String);
+    }
+    return symbol;
+}
+
+BOOL SCIEmployeeMobileConfigDescriptorBackendAvailable(void) {
+    if (!ECResolveRuntimeSymbol("IGMobileConfigBooleanValueForInternalUse")) {
+        return NO;
+    }
+    return ECResolveRuntimeSymbol("ig_is_employee") ||
+           ECResolveRuntimeSymbol("ig_is_employee_or_test_user");
+}
+
+// Instagram 376 evaluates employee identity through the exported MobileConfig
+// DATA descriptors. Static xrefs show their raw 64-bit values being loaded into
+// x3 before IGMobileConfigBooleanValueForInternalUse is called. Mount those two
+// exact reader-filter slots when this runtime exposes them; later builds that
+// removed the reader simply stay on the ObjC identity layer below.
+BOOL SCISyncEmployeeMobileConfigDescriptorForcing(void) {
+    BOOL enabled = ECMasterOn();
+    BOOL available = SCIEmployeeMobileConfigDescriptorBackendAvailable();
+    for (NSString *name in @[@"ig_is_employee", @"ig_is_employee_or_test_user"]) {
+        BOOL present = ECResolveRuntimeSymbol(name.UTF8String) != NULL;
+        if (enabled && available && present) {
+            [SCICSymbolStub setParamDescriptorForce:@YES forSymbol:name];
+        } else {
+            // Clear stale per-build state when a descriptor/reader disappears
+            // or the master is disabled; only exact runtime-resolved entries
+            // may survive persistence.
+            [SCICSymbolStub setParamDescriptorForce:nil forSymbol:name];
+        }
+    }
+    return !enabled || (available &&
+        [SCICSymbolStub hookInstalledForSymbol:
+            @"IGMobileConfigBooleanValueForInternalUse"]);
 }
 
 // Encoding compare that treats {'B','c','C'} as one BOOL class.
@@ -308,6 +354,7 @@ void SCIInstallEmployeeIdentityHooksForObject(id object) {
 
 void SCIInstallEmployeeIdentityHooksIfNeeded(void) {
     if (!ECMasterOn()) return;
+    SCISyncEmployeeMobileConfigDescriptorForcing();
     NSUInteger known = ECInstallKnownObjC();
     ECInstallSwiftIdentityHooks();
     ECLOG("identity install attempt: %lu/9 known-ObjC hooks now installed (idempotent; safe to call again)",
@@ -317,6 +364,7 @@ void SCIInstallEmployeeIdentityHooksIfNeeded(void) {
 void SCIInstallEmployeeInternalHooksIfNeeded(void) {
     // Compat entry retained for older Settings callers: defer to the global
     // installer that owns identity + MobileConfig + Bug Reporter ordering.
+    SCISyncEmployeeMobileConfigDescriptorForcing();
     SCIRequestInternalGlobalHooksInstall();
 }
 
