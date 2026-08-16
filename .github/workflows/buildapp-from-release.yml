@@ -1,0 +1,144 @@
+name: Build self-contained sideload IPA from release
+
+on:
+  workflow_dispatch:
+    inputs:
+      decrypted_instagram_url:
+        description: Decrypted Instagram IPA · direct URL
+        default: ""
+        required: true
+        type: string
+      release_tag:
+        description: Release tag · blank uses latest
+        default: ""
+        required: false
+        type: string
+      bundle_id:
+        description: Optional replacement bundle identifier
+        default: ""
+        required: false
+        type: string
+      app_name:
+        description: Optional Home Screen name
+        default: ""
+        required: false
+        type: string
+      upload_artifact:
+        description: Upload the built IPA
+        default: true
+        required: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Inject RyukGram.dylib only
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging and analysis tools
+        run: |
+          brew install dpkg
+          python3 -m pip install --upgrade capstone lief
+          python3 -m pip install --force-reinstall https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Resolve release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          TAG="$INPUT_TAG"
+          [ -n "$TAG" ] || TAG="$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)"
+          [ -n "$TAG" ] || { echo "::error::Could not resolve a release tag."; exit 1; }
+          VERSION="${TAG#v}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Download the current repository's rootless package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets packages
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir release-assets --pattern '*.deb'
+          DEB="$(ls -t release-assets/*rootless*.deb release-assets/*.deb 2>/dev/null | head -n1 || true)"
+          [ -n "$DEB" ] || { echo "::error::No rootless RyukGram deb found in $TAG."; exit 1; }
+          echo "DEB=$DEB" >> "$GITHUB_ENV"
+
+      - name: Extract and validate the self-contained tweak
+        run: |
+          set -euo pipefail
+          STAGE="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$STAGE"
+          DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
+          BUNDLE="$(find "$STAGE" -type d -name RyukGram.bundle | head -n1)"
+          [ -n "$DYLIB" ] || { echo "::error::RyukGram.dylib is absent from the package."; exit 1; }
+          [ -n "$BUNDLE" ] || { echo "::error::RyukGram.bundle is absent from the package."; exit 1; }
+          cp "$DYLIB" packages/RyukGram.dylib
+          cp -R "$BUNDLE" packages/RyukGram.bundle
+          python3 scripts/validate-macho.py packages/RyukGram.dylib
+          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+          rm -rf "$STAGE"
+
+      - name: Download Instagram IPA
+        env:
+          INSTAGRAM_URL: ${{ inputs.decrypted_instagram_url }}
+        run: |
+          set -euo pipefail
+          curl -fL "$INSTAGRAM_URL" -o packages/Instagram.ipa
+
+      - name: Build one self-contained IPA
+        env:
+          BUNDLE_ID: ${{ inputs.bundle_id }}
+          APP_NAME: ${{ inputs.app_name }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARGS=()
+          [ -n "$BUNDLE_ID" ] && EXTRA_ARGS+=(-b "$BUNDLE_ID")
+          [ -n "$APP_NAME" ] && EXTRA_ARGS+=(-n "$APP_NAME")
+          cyan \
+            -i packages/Instagram.ipa \
+            -o packages/RyukGram-sideloaded.ipa \
+            -f packages/RyukGram.dylib packages/RyukGram.bundle \
+            -c 9 -m 15.0 -du \
+            ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+
+          APPEX_SRC="extensions/OpenInstagramSafariExtension.appex"
+          if [ -d "$APPEX_SRC" ]; then
+            STAGE="$(mktemp -d)"
+            unzip -q packages/RyukGram-sideloaded.ipa -d "$STAGE"
+            APP_DIR="$(find "$STAGE/Payload" -maxdepth 1 -type d -name '*.app' | head -n1)"
+            mkdir -p "$APP_DIR/PlugIns"
+            cp -R "$APPEX_SRC" "$APP_DIR/PlugIns/"
+            (cd "$STAGE" && zip -qr -9 ../repacked.ipa Payload)
+            mv "$STAGE/../repacked.ipa" packages/RyukGram-sideloaded.ipa
+            rm -rf "$STAGE"
+          fi
+          mv packages/RyukGram-sideloaded.ipa "packages/RyukGram_self-contained_v${VERSION}.ipa"
+
+      - name: Verify IPA has no secondary fixer
+        run: |
+          STAGE="$(mktemp -d)"
+          unzip -q "packages/RyukGram_self-contained_v${VERSION}.ipa" -d "$STAGE"
+          test "$(find "$STAGE/Payload" -type f -name RyukGram.dylib | wc -l | tr -d ' ')" = 1
+          test "$(find "$STAGE/Payload" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+          rm -rf "$STAGE"
+
+      - name: Upload IPA
+        if: ${{ inputs.upload_artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: RyukGram_self-contained_v${{ env.VERSION }}
+          path: packages/RyukGram_self-contained_v*.ipa
+          if-no-files-found: error

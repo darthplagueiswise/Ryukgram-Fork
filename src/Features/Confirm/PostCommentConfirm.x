@@ -2,12 +2,7 @@
 
 %hook IGCommentComposer.IGCommentComposerController
 - (void)onSendButtonTap {
-    if ([SCIUtils getBoolPref:@"post_comment_confirm"]) {
-        NSLog(@"[SCInsta] Confirm post comment triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    } else {
-        return %orig;
-    }
+    if (![RYGUtils getBoolPref:@"post_comment_confirm"]) { %orig; return; }
+    [RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm posting comment")];
 }
 %end

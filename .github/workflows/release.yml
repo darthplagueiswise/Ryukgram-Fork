@@ -1,4 +1,4 @@
-name: Build and Release RyukGram Vanilla
+name: Build and Release RyukGram · SDK 26.5
 
 on:
     workflow_dispatch:
@@ -13,12 +13,13 @@ jobs:
         runs-on: macos-latest
         permissions:
             contents: write
+        env:
+            THEOS: ${{ github.workspace }}/theos
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
-                submodules: recursive
                 fetch-depth: 0
 
             - name: Clean Homebrew runner taps
@@ -27,13 +28,15 @@ jobs:
                 brew untap azure/bicep || true
 
             - name: Install Dependencies
-              run: brew install ldid dpkg make gh
+              run: |
+                brew install ldid dpkg make gh
+                python3 -m pip install --upgrade capstone lief
 
             - name: Set PATH
               run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
             - name: Setup Theos
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
                 repository: theos/theos
                 ref: master
@@ -42,9 +45,9 @@ jobs:
 
             - name: SDK Caching
               id: SDK
-              uses: actions/cache@v5
+              uses: actions/cache@v4
               env:
-                cache-name: iPhoneOS26.2.sdk
+                cache-name: iPhoneOS26.5.sdk
               with:
                 path: ${{ github.workspace }}/theos/sdks/
                 key: ${{ runner.os }}-${{ env.cache-name }}
@@ -56,7 +59,7 @@ jobs:
               run: |
                 git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
                 cd iOS-SDKs
-                git sparse-checkout set --no-cone iPhoneOS26.2.sdk
+                git sparse-checkout set --no-cone iPhoneOS26.5.sdk
                 git checkout
                 mv *.sdk $THEOS/sdks
               env:
@@ -91,6 +94,11 @@ jobs:
             - name: Setup FFmpegKit
               run: ./scripts/setup-ffmpegkit.sh
 
+            - name: Verify SDK 26.5 and source contract
+              run: |
+                test -f "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
+                python3 scripts/validate-source.py
+
             - name: Build package
               run: |
                 export THEOS="${{ github.workspace }}/theos"
@@ -100,8 +108,18 @@ jobs:
                 [ -n "$DEB" ] && mv "$DEB" "$PACKAGE_NAME"
                 ls -la
 
+            - name: Validate release dylib with LIEF and Capstone
+              run: |
+                STAGE="$(mktemp -d)"
+                dpkg-deb -x "packages/${PACKAGE_NAME}" "$STAGE"
+                DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
+                test -n "$DYLIB"
+                python3 scripts/validate-macho.py "$DYLIB"
+                test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+                rm -rf "$STAGE"
+
             - name: Upload artifact
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v4
               with:
                 name: RyukGram_${{ steps.version.outputs.branch_name }}_v${{ steps.version.outputs.build_version }}
                 path: packages/${{ steps.version.outputs.package_name }}

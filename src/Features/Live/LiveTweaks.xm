@@ -7,7 +7,7 @@
 
 // MARK: - Anonymous viewing
 
-static void sciDisableViewerCountPuller(id feedbackController) {
+static void rygDisableViewerCountPuller(id feedbackController) {
     Ivar pullerIvar = class_getInstanceVariable([feedbackController class], "_viewCountPuller");
     if (!pullerIvar) return;
     id puller = object_getIvar(feedbackController, pullerIvar);
@@ -36,8 +36,8 @@ static void sciDisableViewerCountPuller(id feedbackController) {
 %hook IGLiveFeedbackController
 - (void)start {
     %orig;
-    if ([SCIUtils getBoolPref:@"live_anonymous_view"]) {
-        sciDisableViewerCountPuller(self);
+    if ([RYGUtils getBoolPref:@"live_anonymous_view"]) {
+        rygDisableViewerCountPuller(self);
     }
 }
 %end
@@ -47,10 +47,10 @@ static void sciDisableViewerCountPuller(id feedbackController) {
 // Session-only — state resets on each new comments VC appearance.
 static __weak UIViewController *gActiveLiveCommentsVC = nil;
 static BOOL gCommentsHidden = NO;
-static const void *kSCIHeartAttachedKey = &kSCIHeartAttachedKey;
+static const void *kRYGHeartAttachedKey = &kRYGHeartAttachedKey;
 
 // Only hide the scrolling collection — keep input + like usable.
-static void sciHideCommentCollections(UIView *root, BOOL hide, int depth) {
+static void rygHideCommentCollections(UIView *root, BOOL hide, int depth) {
     if (!root || depth > 8) return;
     for (UIView *sub in root.subviews) {
         if ([sub isKindOfClass:[UICollectionView class]]) {
@@ -58,20 +58,20 @@ static void sciHideCommentCollections(UIView *root, BOOL hide, int depth) {
             sub.userInteractionEnabled = !hide;
             continue;
         }
-        sciHideCommentCollections(sub, hide, depth + 1);
+        rygHideCommentCollections(sub, hide, depth + 1);
     }
 }
 
-static void sciApplyCommentsStateTo(UIViewController *vc) {
+static void rygApplyCommentsStateTo(UIViewController *vc) {
     if (!vc || !vc.isViewLoaded) return;
-    sciHideCommentCollections(vc.view, gCommentsHidden, 0);
+    rygHideCommentCollections(vc.view, gCommentsHidden, 0);
 }
 
-extern "C" void sciRefreshLiveCommentsHidden(void) {
-    sciApplyCommentsStateTo(gActiveLiveCommentsVC);
+extern "C" void rygRefreshLiveCommentsHidden(void) {
+    rygApplyCommentsStateTo(gActiveLiveCommentsVC);
 }
 
-static void sciAttachLongPressToView(UIView *v);
+static void rygAttachLongPressToView(UIView *v);
 
 // Heart lives in the footer's _likeButton ivar.
 %hook IGLiveFooterButtonsView
@@ -81,7 +81,7 @@ static void sciAttachLongPressToView(UIView *v);
     Ivar iv = class_getInstanceVariable([obj class], "_likeButton");
     if (!iv) return;
     UIView *btn = object_getIvar(obj, iv);
-    if (btn) sciAttachLongPressToView(btn);
+    if (btn) rygAttachLongPressToView(btn);
 }
 %end
 
@@ -90,7 +90,7 @@ static void sciAttachLongPressToView(UIView *v);
     %orig;
     gActiveLiveCommentsVC = self;
     gCommentsHidden = NO;
-    sciApplyCommentsStateTo(self);
+    rygApplyCommentsStateTo(self);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -101,36 +101,36 @@ static void sciAttachLongPressToView(UIView *v);
 
 // MARK: - Long-press heart → toggle comments
 
-@interface SCILiveLikeLongPress : NSObject
+@interface RYGLiveLikeLongPress : NSObject
 + (instancetype)shared;
 - (void)fired:(UILongPressGestureRecognizer *)g;
 @end
 
-@implementation SCILiveLikeLongPress
+@implementation RYGLiveLikeLongPress
 + (instancetype)shared {
-    static SCILiveLikeLongPress *s;
+    static RYGLiveLikeLongPress *s;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ s = [SCILiveLikeLongPress new]; });
+    dispatch_once(&once, ^{ s = [RYGLiveLikeLongPress new]; });
     return s;
 }
 - (void)fired:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
-    if (![SCIUtils getBoolPref:@"live_hide_comments"]) return;
+    if (![RYGUtils getBoolPref:@"live_hide_comments"]) return;
     gCommentsHidden = !gCommentsHidden;
-    sciRefreshLiveCommentsHidden();
-    [SCIUtils showToastForDuration:1.0
-                              title:gCommentsHidden ? SCILocalized(@"Comments hidden")
-                                                    : SCILocalized(@"Comments shown")];
+    rygRefreshLiveCommentsHidden();
+    RYGNotifySuccess(RYG_NOTIF_LIVE_TOGGLE,
+                     gCommentsHidden ? RYGLocalized(@"Comments hidden") : RYGLocalized(@"Comments shown"),
+                     nil);
 }
 @end
 
-static void sciAttachLongPressToView(UIView *v) {
-    if (!v || objc_getAssociatedObject(v, kSCIHeartAttachedKey)) return;
+static void rygAttachLongPressToView(UIView *v) {
+    if (!v || objc_getAssociatedObject(v, kRYGHeartAttachedKey)) return;
     UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc]
-        initWithTarget:[SCILiveLikeLongPress shared] action:@selector(fired:)];
+        initWithTarget:[RYGLiveLikeLongPress shared] action:@selector(fired:)];
     g.minimumPressDuration = 0.5;
     // Swallow the tap so the reactions sheet doesn't open.
     g.cancelsTouchesInView = YES;
     [v addGestureRecognizer:g];
-    objc_setAssociatedObject(v, kSCIHeartAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(v, kRYGHeartAttachedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }

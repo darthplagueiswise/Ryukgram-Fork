@@ -4,9 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Compile tweak and deploy to LiveContainer",
+            "label": "Build RyukGram dylib",
             "type": "shell",
-            "command": "./build-dev.sh",
+            "command": "./build.sh dylib --fast",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -22,9 +22,9 @@
             }
         },
         {
-            "label": "Build SCInsta and deploy with IPA",
+            "label": "Build RyukGram dogfood IPA",
             "type": "shell",
-            "command": "./build-dev.sh true",
+            "command": "./build.sh sideload --dev",
             "group": {
                 "kind": "build",
             },
@@ -56,4 +56,3 @@
         }
     ]
   }
-  

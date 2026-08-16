@@ -4,84 +4,64 @@
 %hook IGStoryEyedropperToggleButton
 - (void)didMoveToWindow {
     %orig;
-
-    if ([SCIUtils getBoolPref:@"detailed_color_picker"]) {
-        [self addLongPressGestureRecognizer];
-    }
-
-    return;
+    if ([RYGUtils getBoolPref:@"detailed_color_picker"]) [self addLongPressGestureRecognizer];
 }
 
 %new - (void)addLongPressGestureRecognizer {
-    if ([self.gestureRecognizers count] == 0) {
-        NSLog(@"[SCInsta] Adding color eyedroppper long press gesture recognizer");
-
-        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
-        longPress.minimumPressDuration = 0.25;
-        [self addGestureRecognizer:longPress];
-    }
+    if (self.gestureRecognizers.count) return;
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleLongPress:)];
+    lp.minimumPressDuration = 0.25;
+    [self addGestureRecognizer:lp];
 }
+
 %new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
     if (sender.state != UIGestureRecognizerStateBegan) return;
-    
-    UIColorPickerViewController *colorPickerController = [[UIColorPickerViewController alloc] init];
+    UIViewController *host = [RYGUtils nearestViewControllerForView:self];
+    if (!host) return;
 
-    colorPickerController.delegate = (id<UIColorPickerViewControllerDelegate>)self; // cast to suppress warnings
-    colorPickerController.title = SCILocalized(@"Select color");
-    colorPickerController.modalPresentationStyle = UIModalPresentationPopover;
-    colorPickerController.supportsAlpha = NO;
-    colorPickerController.selectedColor = self.color;
-    
-    UIViewController *presentingVC = [SCIUtils nearestViewControllerForView:self];
-    
-    if (presentingVC != nil) {
-        [presentingVC presentViewController:colorPickerController animated:YES completion:nil];
-    }
+    UIColorPickerViewController *picker = [UIColorPickerViewController new];
+    picker.delegate = (id<UIColorPickerViewControllerDelegate>)self;
+    picker.title = RYGLocalized(@"Select color");
+    picker.modalPresentationStyle = UIModalPresentationPopover;
+    picker.supportsAlpha = NO;
+    picker.selectedColor = self.color;
+    [host presentViewController:picker animated:YES completion:nil];
 }
 
-// UIColorPickerViewControllerDelegate Protocol
 %new - (void)colorPickerViewController:(UIColorPickerViewController *)viewController
                         didSelectColor:(UIColor *)color
-                          continuously:(BOOL)continuously
-{
-    NSLog(@"[SCInsta] Selected text color: %@", color);
-
-    UIColor *opaque = [color colorWithAlphaComponent:1.0];
-    self.color = opaque;
-
+                          continuously:(BOOL)continuously {
+    self.color = [color colorWithAlphaComponent:1.0];
     [self setPushedDown:YES];
 
-    // Trigger change for text color
-    id presentingVC = [SCIUtils nearestViewControllerForView:self];
+    id host = [RYGUtils nearestViewControllerForView:self];
+    Class drawStory = NSClassFromString(@"_TtC25IGStoryPostCaptureDrawing36IGStoryCreationDrawingViewController")
+                    ?: NSClassFromString(@"IGStoryCreationDrawingViewController");
 
-    if ([presentingVC isKindOfClass:%c(IGStoryTextEntryViewController)]) {
-        [presentingVC textViewControllerDidUpdateWithColor:color colorSource:0];
+    if ([host isKindOfClass:%c(IGStoryTextEntryViewController)]) {
+        if ([host respondsToSelector:@selector(textViewControllerDidUpdateWithColor:colorSource:)])
+            [host textViewControllerDidUpdateWithColor:color colorSource:0];
+        else if ([host respondsToSelector:@selector(textEntryControls:didSelectColor:)])
+            [host textEntryControls:nil didSelectColor:color];
+    } else if ([host isKindOfClass:drawStory] || [host isKindOfClass:%c(IGDirectThreadViewDrawingViewController)]) {
+        if ([host respondsToSelector:@selector(drawingControls:didSelectColor:)])
+            [host drawingControls:nil didSelectColor:color];
     }
-    else if (
-        [presentingVC isKindOfClass:%c(IGStoryCreationDrawingViewController)]
-        || [presentingVC isKindOfClass:%c(IGDirectThreadViewDrawingViewController)]
-    ) {
-        [presentingVC drawingControls:nil didSelectColor:color];
-    }
-
-};
+}
 %end
 
 %hook IGStoryColorPaletteView
 - (CGFloat)collectionView:(id)view didSelectItemAtIndexPath:(id)index {
-    UIView *colorPickingControls = [self superview];
-
-    if (
-        [colorPickingControls isKindOfClass:%c(IGStoryColorPickingControls)]
-        || [colorPickingControls isKindOfClass:%c(IGDirectThreadColorPickingControls)]
-    ) {
-        IGStoryEyedropperToggleButton *_eyedropperToggleButton = MSHookIvar<IGStoryEyedropperToggleButton *>(colorPickingControls, "_eyedropperToggleButton");
-
-        if (_eyedropperToggleButton != nil) {
-            [_eyedropperToggleButton setPushedDown:NO];
-        }
+    UIView *controls = self.superview;
+    Class drawControls = NSClassFromString(@"_TtC33IGStoryPostCaptureDrawingControls27IGStoryColorPickingControls")
+                       ?: NSClassFromString(@"IGStoryColorPickingControls");
+    if ([controls isKindOfClass:drawControls] || [controls isKindOfClass:%c(IGDirectThreadColorPickingControls)]) {
+        Ivar iv = class_getInstanceVariable(controls.class, "eyedropperToggleButton")
+                ?: class_getInstanceVariable(controls.class, "_eyedropperToggleButton");
+        IGStoryEyedropperToggleButton *eyedropper = iv ? object_getIvar(controls, iv) : nil;
+        [eyedropper setPushedDown:NO];
     }
-
     return %orig;
 }
 %end

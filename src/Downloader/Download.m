@@ -1,497 +1,508 @@
 #import "Download.h"
+#import "RYGDownloadCenter.h"
 #import "../PhotoAlbum.h"
+#import "../Gallery/RYGGalleryFile.h"
+#import "../Gallery/RYGGallerySaveMetadata.h"
 #import <Photos/Photos.h>
+#import <AVFoundation/AVFoundation.h>
 
-#pragma mark - Ticket slot
+// Compat shim — forwards the legacy ticket / non-ticket API to RYGNotificationCenter.
+// Each ticket gets its own RYGNotificationHandle; the non-ticket API drives one
+// shared ad-hoc handle. New code should call RYGNotifyProgress directly.
 
-@interface SCIDownloadSlot : NSObject
-@property (nonatomic, copy) NSString *ticketId;
-@property (nonatomic, copy) NSString *title;
-@property (nonatomic, assign) float progress;
-@property (nonatomic, copy) void (^onCancel)(void);
-@property (nonatomic, assign) BOOL finished;
+static inline float RYGClamp(float v) {
+	return MAX(0.0f, MIN(v, 1.0f));
+}
+
+static NSString *rygDownloadKindWord(NSString *ext) {
+	NSString *e = ext.lowercaseString;
+	if ([@[@"mp4", @"mov", @"m4v"] containsObject:e]) return RYGLocalized(@"Video");
+	if ([@[@"m4a", @"mp3", @"aac", @"wav"] containsObject:e]) return RYGLocalized(@"Audio");
+	if ([@[@"jpg", @"jpeg", @"png", @"heic", @"webp", @"gif"] containsObject:e]) return RYGLocalized(@"Photo");
+	return RYGLocalized(@"File");
+}
+
+// Manager card labels: "@username" + kind, or just the kind word when anonymous.
+static NSString *rygJobTitle(id meta, NSString *ext, NSString **outSubtitle) {
+	RYGGallerySaveMetadata *gm = [meta isKindOfClass:[RYGGallerySaveMetadata class]] ? meta : nil;
+	NSString *kindWord = rygDownloadKindWord(ext);
+	if (outSubtitle) *outSubtitle = kindWord;
+	return gm.sourceUsername.length ? [@"@" stringByAppendingString:gm.sourceUsername] : kindWord;
+}
+
+static NSString *const kRYGRetryKindURL = @"url";
+
+static NSDictionary *rygURLRetryInfo(NSURL *url, NSString *ext, NSString *label,
+                                     DownloadAction action, BOOL showProgress, id meta) {
+	if (!url.absoluteString.length) return nil;
+	NSMutableDictionary *info = [NSMutableDictionary dictionary];
+	info[@"kind"] = kRYGRetryKindURL;
+	info[@"url"] = url.absoluteString;
+	info[@"action"] = @(action);
+	info[@"showProgress"] = @(showProgress);
+	if (ext.length) info[@"ext"] = ext;
+	if (label.length) info[@"label"] = label;
+	RYGGallerySaveMetadata *gm = [meta isKindOfClass:[RYGGallerySaveMetadata class]] ? meta : nil;
+	if (gm) info[@"meta"] = [gm dictionaryRepresentation];
+	return info;
+}
+
+@interface RYGDownloadPillView ()
+@property (nonatomic, strong) NSMutableDictionary<NSString *, RYGNotificationHandle *> *ticketHandles;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *ticketTitles;
+@property (nonatomic, strong) RYGNotificationHandle *adHocHandle;
+@property (nonatomic, copy)   NSString *adHocTitle;
+@property (nonatomic, copy)   NSString *adHocSubtitle;
 @end
-@implementation SCIDownloadSlot @end
 
-#pragma mark - SCIDownloadPillView
-
-@interface SCIDownloadPillView ()
-@property (nonatomic, strong) NSMutableArray<SCIDownloadSlot *> *slots;
-@end
-
-@implementation SCIDownloadPillView
+@implementation RYGDownloadPillView
 
 + (instancetype)shared {
-    static SCIDownloadPillView *s;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ s = [[SCIDownloadPillView alloc] init]; });
-    return s;
+	static RYGDownloadPillView *shared;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ shared = [RYGDownloadPillView new]; });
+	return shared;
 }
 
 - (instancetype)init {
-    self = [super initWithFrame:CGRectZero];
-    if (self) {
-        _slots = [NSMutableArray array];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-            selector:@selector(_sciAppDidBecomeActive)
-            name:UIApplicationDidBecomeActiveNotification object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-            selector:@selector(_sciAppDidEnterBackground)
-            name:UIApplicationDidEnterBackgroundNotification object:nil];
-        UIBlurEffect *blur = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
-        UIVisualEffectView *blurView = [[UIVisualEffectView alloc] initWithEffect:blur];
-        blurView.translatesAutoresizingMaskIntoConstraints = NO;
-        blurView.layer.cornerRadius = 16;
-        blurView.clipsToBounds = YES;
-        [self addSubview:blurView];
-        [NSLayoutConstraint activateConstraints:@[
-            [blurView.topAnchor constraintEqualToAnchor:self.topAnchor],
-            [blurView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
-            [blurView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
-            [blurView.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-        ]];
-
-        self.layer.cornerRadius = 16;
-        self.clipsToBounds = YES;
-        self.alpha = 0;
-
-        // Icon
-        _iconView = [[UIImageView alloc] init];
-        _iconView.translatesAutoresizingMaskIntoConstraints = NO;
-        _iconView.tintColor = [UIColor whiteColor];
-        _iconView.contentMode = UIViewContentModeScaleAspectFit;
-        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-        _iconView.image = [UIImage systemImageNamed:@"arrow.down.circle" withConfiguration:cfg];
-        [self addSubview:_iconView];
-
-        // Text
-        _textLabel = [[UILabel alloc] init];
-        _textLabel.text = SCILocalized(@"Downloading...");
-        _textLabel.textColor = [UIColor whiteColor];
-        _textLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
-        _textLabel.textAlignment = NSTextAlignmentCenter;
-        _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_textLabel];
-
-        // Subtitle
-        _subtitleLabel = [[UILabel alloc] init];
-        _subtitleLabel.text = SCILocalized(@"Tap to cancel");
-        _subtitleLabel.textColor = [UIColor colorWithWhite:0.7 alpha:1.0];
-        _subtitleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
-        _subtitleLabel.textAlignment = NSTextAlignmentCenter;
-        _subtitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:_subtitleLabel];
-
-        // Progress bar
-        _progressBar = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
-        _progressBar.progressTintColor = [UIColor systemBlueColor];
-        _progressBar.trackTintColor = [UIColor colorWithWhite:0.3 alpha:0.5];
-        _progressBar.translatesAutoresizingMaskIntoConstraints = NO;
-        _progressBar.layer.cornerRadius = 1.5;
-        _progressBar.clipsToBounds = YES;
-        [self addSubview:_progressBar];
-
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap)];
-        [self addGestureRecognizer:tap];
-
-        [NSLayoutConstraint activateConstraints:@[
-            [_iconView.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
-            [_iconView.centerYAnchor constraintEqualToAnchor:self.centerYAnchor constant:-2],
-            [_iconView.widthAnchor constraintEqualToConstant:22],
-            [_iconView.heightAnchor constraintEqualToConstant:22],
-
-            [_textLabel.topAnchor constraintEqualToAnchor:self.topAnchor constant:10],
-            [_textLabel.leadingAnchor constraintEqualToAnchor:_iconView.trailingAnchor constant:10],
-            [_textLabel.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-14],
-
-            [_subtitleLabel.topAnchor constraintEqualToAnchor:_textLabel.bottomAnchor constant:1],
-            [_subtitleLabel.leadingAnchor constraintEqualToAnchor:_textLabel.leadingAnchor],
-            [_subtitleLabel.trailingAnchor constraintEqualToAnchor:_textLabel.trailingAnchor],
-
-            [_progressBar.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
-            [_progressBar.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
-            [_progressBar.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-            [_progressBar.heightAnchor constraintEqualToConstant:3],
-
-            [_subtitleLabel.bottomAnchor constraintEqualToAnchor:_progressBar.topAnchor constant:-8],
-        ]];
-    }
-    return self;
+	self = [super initWithFrame:CGRectZero];
+	if (!self) return nil;
+	_ticketHandles = [NSMutableDictionary new];
+	_ticketTitles = [NSMutableDictionary new];
+	return self;
 }
 
-- (void)handleTap {
-    if (self.slots.count > 0) {
-        SCIDownloadSlot *top = self.slots.lastObject;
-        void (^cb)(void) = top.onCancel;
-        top.onCancel = nil;
-        if (cb) cb();
-        return;
-    }
-    void (^cb)(void) = self.onCancel;
-    self.onCancel = nil;
-    if (cb) cb();
+- (void)rygOnMain:(dispatch_block_t)block {
+	if (!block) return;
+	NSThread.isMainThread ? block() : dispatch_async(dispatch_get_main_queue(), block);
 }
+
+- (void)rygEnsureAdHocStarted {
+	if (self.adHocHandle && !self.adHocHandle.isFinished) return;
+	__weak typeof(self) weakSelf = self;
+	self.adHocHandle = RYGNotifyProgress(RYG_NOTIF_DOWNLOAD,
+	                                     self.adHocTitle ?: RYGLocalized(@"Downloading…"),
+	                                     ^{
+		void (^cb)(void) = weakSelf.onCancel;
+		weakSelf.onCancel = nil;
+		if (cb) cb();
+	});
+}
+
+#pragma mark - Legacy non-ticket API (forwards to a single ad-hoc handle)
 
 - (void)resetState {
-    self.progressBar.progress = 0;
-    self.progressBar.hidden = NO;
-    self.subtitleLabel.hidden = NO;
-    self.subtitleLabel.text = SCILocalized(@"Tap to cancel");
-    self.textLabel.text = SCILocalized(@"Downloading...");
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    self.iconView.image = [UIImage systemImageNamed:@"arrow.down.circle" withConfiguration:cfg];
-    self.iconView.tintColor = [UIColor whiteColor];
+	[self rygOnMain:^{
+		[self.adHocHandle dismiss];
+		self.adHocHandle = nil;
+		self.adHocTitle = RYGLocalized(@"Downloading…");
+		self.adHocSubtitle = nil;
+	}];
 }
 
 - (void)showInView:(UIView *)view {
-    [self removeFromSuperview];
-    self.translatesAutoresizingMaskIntoConstraints = NO;
-    [view addSubview:self];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [self.topAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.topAnchor constant:8],
-        [self.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],
-        [self.widthAnchor constraintGreaterThanOrEqualToConstant:200],
-        [self.widthAnchor constraintLessThanOrEqualToConstant:300],
-    ]];
-
-    [UIView animateWithDuration:0.3 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5
-                        options:UIViewAnimationOptionCurveEaseOut animations:^{
-        self.alpha = 1;
-    } completion:nil];
+	(void)view; // Center handles host view internally.
+	[self rygOnMain:^{ [self rygEnsureAdHocStarted]; }];
 }
 
 - (void)dismiss {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        // A new ticket raced in — keep the pill alive.
-        if (self.slots.count > 0) return;
-        if (self.alpha <= 0.01 && !self.superview) return;
-        self.onCancel = nil;
-        [UIView animateWithDuration:0.25 animations:^{
-            self.alpha = 0;
-            self.transform = CGAffineTransformMakeScale(0.9, 0.9);
-        } completion:^(BOOL finished) {
-            [self removeFromSuperview];
-            self.transform = CGAffineTransformIdentity;
-        }];
-    });
+	[self rygOnMain:^{
+		[self.adHocHandle dismiss];
+		self.adHocHandle = nil;
+		self.onCancel = nil;
+	}];
 }
 
 - (void)dismissAfterDelay:(NSTimeInterval)delay {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self dismiss];
-    });
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		[self dismiss];
+	});
 }
 
 - (void)setProgress:(float)progress {
-    self.progressBar.hidden = NO;
-    [self.progressBar setProgress:progress animated:YES];
+	[self rygOnMain:^{
+		[self rygEnsureAdHocStarted];
+		[self.adHocHandle setProgress:RYGClamp(progress)];
+	}];
 }
 
 - (void)setText:(NSString *)text {
-    self.textLabel.text = text;
+	[self rygOnMain:^{
+		self.adHocTitle = text;
+		if (self.adHocHandle && !self.adHocHandle.isFinished) {
+			[self.adHocHandle setTitle:text ?: @""];
+		}
+	}];
 }
 
 - (void)setSubtitle:(NSString *)text {
-    self.subtitleLabel.text = text;
-    self.subtitleLabel.hidden = (text.length == 0);
+	[self rygOnMain:^{
+		self.adHocSubtitle = text;
+		if (self.adHocHandle && !self.adHocHandle.isFinished) {
+			[self.adHocHandle setSubtitle:text];
+		}
+	}];
 }
 
 - (void)showSuccess:(NSString *)text {
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    self.iconView.image = [UIImage systemImageNamed:@"checkmark.circle.fill" withConfiguration:cfg];
-    self.iconView.tintColor = [UIColor systemGreenColor];
-    self.textLabel.text = text;
-    self.subtitleLabel.hidden = YES;
-    self.progressBar.hidden = YES;
-    self.onCancel = nil;
+	[self rygOnMain:^{
+		[self rygEnsureAdHocStarted];
+		[self.adHocHandle success:text ?: RYGLocalized(@"Done")];
+		self.adHocHandle = nil;
+		self.onCancel = nil;
+	}];
 }
 
 - (void)showError:(NSString *)text {
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    self.iconView.image = [UIImage systemImageNamed:@"xmark.circle.fill" withConfiguration:cfg];
-    self.iconView.tintColor = [UIColor systemRedColor];
-    self.textLabel.text = text;
-    self.subtitleLabel.hidden = YES;
-    self.progressBar.hidden = YES;
-    self.onCancel = nil;
+	[self rygOnMain:^{
+		[self rygEnsureAdHocStarted];
+		[self.adHocHandle error:text ?: RYGLocalized(@"Failed")];
+		self.adHocHandle = nil;
+		self.onCancel = nil;
+	}];
 }
 
-- (void)showBulkProgress:(NSUInteger)completed total:(NSUInteger)total {
-    self.textLabel.text = [NSString stringWithFormat:@"Downloading %lu of %lu", (unsigned long)completed + 1, (unsigned long)total];
-    self.subtitleLabel.text = SCILocalized(@"Tap to cancel");
-    self.subtitleLabel.hidden = NO;
-    self.progressBar.hidden = NO;
-    [self.progressBar setProgress:(float)completed / (float)total animated:YES];
-}
-
-#pragma mark - Ticket API
-
-- (void)_onMain:(dispatch_block_t)block {
-    if ([NSThread isMainThread]) block();
-    else dispatch_async(dispatch_get_main_queue(), block);
-}
-
-- (SCIDownloadSlot *)_slotForId:(NSString *)ticketId {
-    if (!ticketId) return nil;
-    for (SCIDownloadSlot *s in self.slots) {
-        if ([s.ticketId isEqualToString:ticketId]) return s;
-    }
-    return nil;
-}
-
-- (void)_renderTop {
-    SCIDownloadSlot *top = self.slots.lastObject;
-    if (!top) return;
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    self.iconView.image = [UIImage systemImageNamed:@"arrow.down.circle" withConfiguration:cfg];
-    self.iconView.tintColor = [UIColor whiteColor];
-    self.textLabel.text = top.title ?: @"Downloading...";
-    self.progressBar.hidden = NO;
-    [self.progressBar setProgress:top.progress animated:YES];
-    self.subtitleLabel.hidden = NO;
-    if (self.slots.count > 1) {
-        self.subtitleLabel.text = [NSString stringWithFormat:@"%lu active — tap to cancel",
-                                   (unsigned long)self.slots.count];
-    } else {
-        self.subtitleLabel.text = SCILocalized(@"Tap to cancel");
-    }
-}
+#pragma mark - Ticket API (one handle per ticket)
 
 - (NSString *)beginTicketWithTitle:(NSString *)title onCancel:(void (^)(void))cancel {
-    NSString *ticketId = [[NSUUID UUID] UUIDString];
-    void (^cancelCopy)(void) = [cancel copy];
-    [self _onMain:^{
-        SCIDownloadSlot *slot = [SCIDownloadSlot new];
-        slot.ticketId = ticketId;
-        slot.title = title ?: @"Downloading...";
-        slot.progress = 0;
-        slot.onCancel = cancelCopy;
-        [self.slots addObject:slot];
-
-        // Reset visual state so the prior download's final frame doesn't leak in.
-        [self.progressBar setProgress:0 animated:NO];
-        self.alpha = 1;
-        self.transform = CGAffineTransformIdentity;
-        if (!self.superview) {
-            UIView *host = [UIApplication sharedApplication].keyWindow ?: topMostController().view;
-            if (host) [self showInView:host];
-        }
-        [self _renderTop];
-    }];
-    return ticketId;
-}
-
-- (void)_sciAppDidBecomeActive {
-    [self _onMain:^{
-        if (self.slots.count == 0 && (self.superview || self.alpha > 0.01)) {
-            self.alpha = 0;
-            self.transform = CGAffineTransformIdentity;
-            [self removeFromSuperview];
-        } else if (self.slots.count > 0) {
-            [self _renderTop];
-        }
-    }];
-}
-
-// iOS suspends networking + ffmpeg on background — cancel active tickets so the
-// pill clears cleanly on return. User re-initiates the download.
-- (void)_sciAppDidEnterBackground {
-    [self _onMain:^{
-        for (SCIDownloadSlot *slot in [self.slots copy]) {
-            void (^cb)(void) = slot.onCancel;
-            slot.onCancel = nil;
-            if (cb) cb();
-        }
-    }];
-}
-
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+	NSString *ticketId = NSUUID.UUID.UUIDString;
+	NSString *resolvedTitle = title ?: RYGLocalized(@"Downloading…");
+	void (^cancelCopy)(void) = [cancel copy];
+	[self rygOnMain:^{
+		RYGNotificationHandle *h = RYGNotifyProgress(RYG_NOTIF_DOWNLOAD, resolvedTitle, cancelCopy);
+		if (h) self.ticketHandles[ticketId] = h;
+		self.ticketTitles[ticketId] = resolvedTitle;
+	}];
+	return ticketId;
 }
 
 - (void)updateTicket:(NSString *)ticketId progress:(float)progress {
-    [self _onMain:^{
-        SCIDownloadSlot *s = [self _slotForId:ticketId];
-        if (!s || s.finished) return;
-        s.progress = progress;
-        if (self.slots.lastObject == s) [self.progressBar setProgress:progress animated:YES];
-    }];
+	if (!ticketId.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] setProgress:RYGClamp(progress)];
+	}];
 }
 
 - (void)updateTicket:(NSString *)ticketId text:(NSString *)text {
-    [self _onMain:^{
-        SCIDownloadSlot *s = [self _slotForId:ticketId];
-        if (!s || s.finished) return;
-        s.title = text ?: s.title;
-        if (self.slots.lastObject == s) self.textLabel.text = s.title;
-    }];
-}
-
-- (void)_removeSlot:(SCIDownloadSlot *)slot
-        finalText:(NSString *)finalText
-        finalIcon:(NSString *)finalIcon
-        iconColor:(UIColor *)iconColor {
-    if (!slot || slot.finished) return;
-    slot.finished = YES;
-    slot.onCancel = nil;
-    [self.slots removeObject:slot];
-
-    if (self.slots.count > 0) {
-        [self _renderTop];
-        return;
-    }
-
-    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
-    self.iconView.image = [UIImage systemImageNamed:finalIcon withConfiguration:cfg];
-    self.iconView.tintColor = iconColor;
-    self.textLabel.text = finalText;
-    self.subtitleLabel.hidden = YES;
-    self.progressBar.hidden = YES;
-    [self dismissAfterDelay:1.2];
+	if (!ticketId.length || !text.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] setTitle:text];
+		self.ticketTitles[ticketId] = text;
+	}];
 }
 
 - (void)finishTicket:(NSString *)ticketId successMessage:(NSString *)message {
-    [self _onMain:^{
-        SCIDownloadSlot *s = [self _slotForId:ticketId];
-        [self _removeSlot:s
-                finalText:message ?: @"Done"
-                finalIcon:@"checkmark.circle.fill"
-                iconColor:[UIColor systemGreenColor]];
-    }];
+	if (!ticketId.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] success:message ?: RYGLocalized(@"Done")];
+		[self.ticketHandles removeObjectForKey:ticketId];
+		[self.ticketTitles removeObjectForKey:ticketId];
+	}];
 }
 
 - (void)finishTicket:(NSString *)ticketId errorMessage:(NSString *)message {
-    [self _onMain:^{
-        SCIDownloadSlot *s = [self _slotForId:ticketId];
-        [self _removeSlot:s
-                finalText:message ?: @"Failed"
-                finalIcon:@"xmark.circle.fill"
-                iconColor:[UIColor systemRedColor]];
-    }];
+	if (!ticketId.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] error:message ?: RYGLocalized(@"Failed")];
+		[self.ticketHandles removeObjectForKey:ticketId];
+		[self.ticketTitles removeObjectForKey:ticketId];
+	}];
 }
 
 - (void)finishTicket:(NSString *)ticketId cancelled:(NSString *)message {
-    [self _onMain:^{
-        SCIDownloadSlot *s = [self _slotForId:ticketId];
-        [self _removeSlot:s
-                finalText:message ?: @"Cancelled"
-                finalIcon:@"xmark.circle.fill"
-                iconColor:[UIColor systemOrangeColor]];
-    }];
+	if (!ticketId.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] cancelled:message ?: RYGLocalized(@"Cancelled")];
+		[self.ticketHandles removeObjectForKey:ticketId];
+		[self.ticketTitles removeObjectForKey:ticketId];
+	}];
+}
+
+- (void)dismissTicket:(NSString *)ticketId {
+	if (!ticketId.length) return;
+	[self rygOnMain:^{
+		[self.ticketHandles[ticketId] dismiss];
+		[self.ticketHandles removeObjectForKey:ticketId];
+		[self.ticketTitles removeObjectForKey:ticketId];
+	}];
 }
 
 @end
 
+@implementation RYGDownloadDelegate
 
-#pragma mark - SCIDownloadDelegate
++ (void)load {
+	[RYGDownloadCenter registerRetryBuilder:^(NSDictionary *info) {
+		NSURL *url = [NSURL URLWithString:info[@"url"] ?: @""];
+		if (!url) return;
+		RYGDownloadDelegate *fresh = [[RYGDownloadDelegate alloc] initWithAction:(DownloadAction)[info[@"action"] unsignedIntegerValue]
+		                                                            showProgress:[info[@"showProgress"] boolValue]];
+		fresh.pendingGallerySaveMetadata = [RYGGallerySaveMetadata metadataFromDictionary:info[@"meta"]];
+		[fresh downloadFileWithURL:url fileExtension:info[@"ext"] hudLabel:info[@"label"]];
+	} forKind:kRYGRetryKindURL];
+}
 
-@implementation SCIDownloadDelegate
+// RYGDownloadManager.delegate is weak — self-pin while a download is in flight.
++ (NSMutableSet *)rygActiveSet {
+	static NSMutableSet *s; static dispatch_once_t once;
+	dispatch_once(&once, ^{ s = [NSMutableSet new]; });
+	return s;
+}
+
+- (void)rygPin {
+	NSMutableSet *s = [RYGDownloadDelegate rygActiveSet];
+	@synchronized (s) { [s addObject:self]; }
+}
+
+- (void)rygUnpin {
+	NSMutableSet *s = [RYGDownloadDelegate rygActiveSet];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		@synchronized (s) { [s removeObject:self]; }
+	});
+}
 
 - (instancetype)initWithAction:(DownloadAction)action showProgress:(BOOL)showProgress {
-    self = [super init];
+	self = [super init];
 
-    if (self) {
-        _action = action;
-        _showProgress = showProgress;
-        self.downloadManager = [[SCIDownloadManager alloc] initWithDelegate:self];
-    }
+	if (self) {
+		_action = action;
+		_showProgress = showProgress;
+		self.downloadManager = [[RYGDownloadManager alloc] initWithDelegate:self];
+	}
 
-    return self;
+	return self;
 }
 
 - (void)downloadFileWithURL:(NSURL *)url fileExtension:(NSString *)fileExtension hudLabel:(NSString *)hudLabel {
-    SCIDownloadPillView *pill = [SCIDownloadPillView shared];
-    self.pill = pill;
+	__weak typeof(self) weakSelf = self;
 
-    __weak typeof(self) weakSelf = self;
-    self.ticketId = [pill beginTicketWithTitle:hudLabel ?: @"Downloading..." onCancel:^{
-        [weakSelf.downloadManager cancelDownload];
-    }];
+	[self rygPin];
 
-    NSLog(@"[SCInsta] Download: Will start download for url \"%@\" with file extension: \".%@\"", url, fileExtension);
-    [self.downloadManager downloadFileWithURL:url fileExtension:fileExtension];
+	// Capture inputs so a failed/finished job can be rebuilt from scratch.
+	NSString *ext = fileExtension;
+	NSString *label = hudLabel ?: RYGLocalized(@"Downloading…");
+	DownloadAction act = self.action;
+	BOOL prog = self.showProgress;
+	id meta = self.pendingGallerySaveMetadata;
+
+	NSString *subtitle = nil;
+	NSString *jobTitle = rygJobTitle(meta, ext, &subtitle);
+
+	RYGDownloadJob *job = [[RYGDownloadCenter shared] enqueueJobWithTitle:jobTitle
+	                                                                kind:RYGDownloadJobKindSimpleURL
+	                                                               start:^{
+		[weakSelf.downloadManager downloadFileWithURL:url fileExtension:ext];
+	}
+	                                                              cancel:^{
+		[weakSelf.downloadManager cancelDownload];
+	}];
+	job.subtitle = subtitle;
+	job.mediaKind = RYGDownloadMediaKindForExtension(ext);
+	job.retryBlock = ^{
+		RYGDownloadDelegate *fresh = [[RYGDownloadDelegate alloc] initWithAction:act showProgress:prog];
+		fresh.pendingGallerySaveMetadata = meta;
+		[fresh downloadFileWithURL:url fileExtension:ext hudLabel:label];
+	};
+	job.retryInfo = rygURLRetryInfo(url, ext, label, act, prog, meta);
+	self.job = job;
+}
+
+// Already-on-disk file (e.g. cached media): no network step, just run the save
+// through a center job so it surfaces in the pill + manager like any download.
+- (void)saveLocalFileURL:(NSURL *)fileURL hudLabel:(NSString *)hudLabel {
+	(void)hudLabel;
+	__weak typeof(self) weakSelf = self;
+	[self rygPin];
+
+	NSString *subtitle = nil;
+	NSString *jobTitle = rygJobTitle(self.pendingGallerySaveMetadata, fileURL.pathExtension, &subtitle);
+
+	RYGDownloadJob *job = [[RYGDownloadCenter shared] enqueueJobWithTitle:jobTitle
+	                                                                kind:RYGDownloadJobKindSimpleURL
+	                                                               start:^{
+		[weakSelf downloadDidFinishWithFileURL:fileURL];
+	}
+	                                                              cancel:nil];
+	job.subtitle = subtitle;
+	job.mediaKind = RYGDownloadMediaKindForExtension(fileURL.pathExtension);
+	self.job = job;
 }
 
 - (void)downloadDidStart {
-    NSLog(@"[SCInsta] Download: Download started");
 }
 
 - (void)downloadDidCancel {
-    [self.pill finishTicket:self.ticketId cancelled:@"Cancelled"];
-    NSLog(@"[SCInsta] Download: Download cancelled");
+	[[RYGDownloadCenter shared] markJobCancelled:self.job];
+	[self rygUnpin];
 }
 
 - (void)downloadDidProgress:(float)progress {
-    if (!self.showProgress) return;
-    [self.pill updateTicket:self.ticketId progress:progress];
-    [self.pill updateTicket:self.ticketId text:[NSString stringWithFormat:@"Downloading %d%%", (int)(progress * 100)]];
+	[self downloadDidProgress:progress received:0 total:0];
+}
+
+- (void)downloadDidProgress:(float)progress received:(int64_t)received total:(int64_t)total {
+	float safeProgress = RYGClamp(progress);
+	NSString *text = [NSString stringWithFormat:RYGLocalized(@"Downloading %d%%"), (int)(safeProgress * 100.0f)];
+	[[RYGDownloadCenter shared] job:self.job didProgress:safeProgress received:received total:total stage:text];
 }
 
 - (void)downloadDidFinishWithError:(NSError *)error {
-    if (error && error.code != NSURLErrorCancelled) {
-        NSLog(@"[SCInsta] Download: Download failed with error: \"%@\"", error);
-        [self.pill finishTicket:self.ticketId errorMessage:SCILocalized(@"Download failed")];
-    }
+	if (!error || error.code == NSURLErrorCancelled) {
+		[self rygUnpin];
+		return;
+	}
+
+	NSLog(@"[RyukGram] Download: Download failed with error: \"%@\"", error);
+
+	[[RYGDownloadCenter shared] markJob:self.job failedWithError:error];
+	[self rygUnpin];
 }
 
-- (void)downloadDidFinishWithFileURL:(NSURL *)fileURL {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NSLog(@"[SCInsta] Download: Finished with url: \"%@\"", [fileURL absoluteString]);
-        // saveToPhotos finishes the ticket after the PH completion fires.
-        if (self.action != saveToPhotos) {
-            [self.pill finishTicket:self.ticketId successMessage:SCILocalized(@"Done")];
-        }
+- (void)downloadDidFinishWithFileURL:(NSURL *)inputFileURL {
+	NSURL *fileURL = [RYGUtils photoSafeImageFileURL:inputFileURL];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		self.job.resultFileURL = fileURL;
 
-        switch (self.action) {
-            case share:
-                [SCIUtils showShareVC:fileURL];
-                break;
+		NSString *galleryMode = [RYGUtils getStringPref:@"gallery_save_mode"];
+		BOOL isAudio = RYGGalleryExtensionIsAudio(fileURL.pathExtension);
 
-            case quickLook:
-                [SCIUtils showQuickLookVC:@[fileURL]];
-                break;
+		switch (self.action) {
+			case share:
+				self.job.successText = RYGLocalized(@"Done");
+				[RYGUtils showShareVC:[self rygShareReadyURL:fileURL]];
+				if ([galleryMode isEqualToString:@"mirror"] && self.pendingGallerySaveMetadata) {
+					[self logFileToGalleryQuiet:fileURL];
+				}
+				[[RYGDownloadCenter shared] markJobFinished:self.job];
+				break;
 
-            case saveToPhotos: {
-                [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
-                    if (status != PHAuthorizationStatusAuthorized) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            [SCIUtils showErrorHUDWithDescription:SCILocalized(@"Photo library access denied")];
-                        });
-                        return;
-                    }
+			case quickLook:
+				self.job.successText = RYGLocalized(@"Done");
+				[RYGUtils showQuickLookVC:@[fileURL]];
+				[[RYGDownloadCenter shared] markJobFinished:self.job];
+				break;
 
-                    BOOL useAlbum = [SCIUtils getBoolPref:@"save_to_ryukgram_album"];
-                    void (^onDone)(BOOL, NSError *) = ^(BOOL success, NSError *error) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            if (success) {
-                                [self.pill finishTicket:self.ticketId
-                                         successMessage:useAlbum ? SCILocalized(@"Saved to RyukGram") : SCILocalized(@"Saved to Photos")];
-                            } else {
-                                [self.pill finishTicket:self.ticketId errorMessage:SCILocalized(@"Failed to save")];
-                            }
-                        });
-                    };
+			case saveToPhotos:
+				// Photos library rejects audio — fall back to gallery / share.
+				if (isAudio) {
+					if ([galleryMode isEqualToString:@"off"] || galleryMode.length == 0) {
+						self.job.successText = RYGLocalized(@"Done");
+						[[RYGDownloadCenter shared] markJobFinished:self.job];
+						[RYGUtils showShareVC:fileURL];
+					} else {
+						[self saveFileToGallery:fileURL];
+					}
+					break;
+				}
+				if ([galleryMode isEqualToString:@"gallery_only"]) {
+					[self saveFileToGallery:fileURL];
+				} else {
+					[self saveFileToPhotos:fileURL];
+					if ([galleryMode isEqualToString:@"mirror"] && self.pendingGallerySaveMetadata) {
+						[self logFileToGalleryQuiet:fileURL];
+					}
+				}
+				break;
 
-                    if (useAlbum) {
-                        [SCIPhotoAlbum saveFileToAlbum:fileURL completion:onDone];
-                    } else {
-                        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-                            NSString *ext = [[fileURL pathExtension] lowercaseString];
-                            BOOL isVideo = [@[@"mp4", @"mov", @"m4v"] containsObject:ext];
-                            PHAssetCreationRequest *req = [PHAssetCreationRequest creationRequestForAsset];
-                            PHAssetResourceCreationOptions *opts = [[PHAssetResourceCreationOptions alloc] init];
-                            opts.shouldMoveFile = YES;
-                            [req addResourceWithType:(isVideo ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto)
-                                             fileURL:fileURL options:opts];
-                            req.creationDate = [NSDate date];
-                        } completionHandler:onDone];
-                    }
-                }];
-                break;
-            }
-        }
-    });
+			case saveToGallery:
+				[self saveFileToGallery:fileURL];
+				break;
+		}
+		[self rygUnpin];
+	});
 }
 
+- (void)saveFileToGallery:(NSURL *)fileURL {
+	NSError *err = nil;
+	RYGGalleryFile *file = [self saveFileURL:fileURL toGalleryWithError:&err];
+	if (file && !err) {
+		self.job.successText = RYGLocalized(@"Saved to Gallery");
+		[[RYGDownloadCenter shared] markJobFinished:self.job];
+	} else {
+		NSLog(@"[RyukGram] Gallery save failed: %@", err);
+		[[RYGDownloadCenter shared] markJob:self.job failedWithError:err];
+	}
+}
+
+// Mirror mode: fire-and-forget gallery log alongside the Photos save.
+- (void)logFileToGalleryQuiet:(NSURL *)fileURL {
+	NSError *err = nil;
+	[self saveFileURL:fileURL toGalleryWithError:&err];
+	if (err) NSLog(@"[RyukGram] Gallery mirror log failed: %@", err);
+}
+
+// Copies (not moves) so share/Photos flow can still use the source file.
+- (RYGGalleryFile *)saveFileURL:(NSURL *)fileURL toGalleryWithError:(NSError **)error {
+	RYGGalleryMediaType mediaType = RYGGalleryMediaTypeForExtension(fileURL.pathExtension);
+	RYGGallerySaveMetadata *metadata = [self.pendingGallerySaveMetadata isKindOfClass:[RYGGallerySaveMetadata class]]
+		? self.pendingGallerySaveMetadata
+		: nil;
+	RYGGallerySource source = metadata ? (RYGGallerySource)metadata.source : RYGGallerySourceOther;
+	return [RYGGalleryFile saveFileToGallery:fileURL
+	                                  source:source
+	                               mediaType:mediaType
+	                              folderPath:nil
+	                                metadata:metadata
+	                                   error:error];
+}
+// Gallery-scheme filename with the real extension kept, so a scratch fileURL never leaks its name.
+- (NSString *)rygCleanFilenameForURL:(NSURL *)fileURL {
+	RYGGallerySaveMetadata *md = [self.pendingGallerySaveMetadata isKindOfClass:[RYGGallerySaveMetadata class]]
+		? self.pendingGallerySaveMetadata : nil;
+	RYGGalleryMediaType mediaType = RYGGalleryMediaTypeForExtension(fileURL.pathExtension);
+	NSString *ext = fileURL.pathExtension;
+	NSString *name = RYGFileNameForMedia(fileURL, mediaType, md);
+	return ext.length ? [[name stringByDeletingPathExtension] stringByAppendingPathExtension:ext] : name;
+}
+
+// Scratch files get a clean-named hardlink for share (no data copy); clean names pass through.
+- (NSURL *)rygShareReadyURL:(NSURL *)fileURL {
+	NSString *name = fileURL.lastPathComponent;
+	if (![name hasPrefix:@"ryuk_tmp_"] && ![name hasPrefix:@"ryg_tmp_"]) return fileURL;
+	NSURL *dst = [RYGTempFiles claimNamedFile:[self rygCleanFilenameForURL:fileURL] ttl:600 tag:@"share"];
+	NSFileManager *fm = NSFileManager.defaultManager;
+	if ([fm linkItemAtURL:fileURL toURL:dst error:nil] || [fm copyItemAtURL:fileURL toURL:dst error:nil]) return dst;
+	[RYGTempFiles releaseURL:dst];
+	return fileURL;
+}
+
+- (void)saveFileToPhotos:(NSURL *)fileURL {
+	NSString *cleanName = [self rygCleanFilenameForURL:fileURL];
+	[PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus status) {
+		if (status != PHAuthorizationStatusAuthorized && status != PHAuthorizationStatusLimited) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[RYGUtils showErrorHUDWithDescription:RYGLocalized(@"Photo library access denied")];
+				[[RYGDownloadCenter shared] markJob:self.job failedWithError:nil];
+			});
+
+			return;
+		}
+		BOOL useAlbum = [RYGUtils getBoolPref:@"save_to_ryukgram_album"];
+		void (^done)(BOOL, NSError *) = ^(BOOL success, NSError *error) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				if (success) {
+					self.job.successText = useAlbum ? RYGLocalized(@"Saved to RyukGram") : RYGLocalized(@"Saved to Photos");
+					[[RYGDownloadCenter shared] markJobFinished:self.job];
+				} else {
+					NSLog(@"[RyukGram] Download: Save to Photos failed: %@", error);
+					[[RYGDownloadCenter shared] markJob:self.job failedWithError:error];
+				}
+			});
+		};
+		if (useAlbum) {
+			[RYGPhotoAlbum saveFileToAlbum:fileURL originalFilename:cleanName completion:done];
+			return;
+		}
+		[[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+			NSString *ext = fileURL.pathExtension.lowercaseString;
+			BOOL isVideo = [@[@"mp4", @"mov", @"m4v"] containsObject:ext];
+			PHAssetCreationRequest *request = [PHAssetCreationRequest creationRequestForAsset];
+			PHAssetResourceCreationOptions *options = PHAssetResourceCreationOptions.new;
+			options.shouldMoveFile = YES;
+			if (cleanName.length) options.originalFilename = cleanName;
+			[request addResourceWithType:(isVideo ? PHAssetResourceTypeVideo : PHAssetResourceTypePhoto) fileURL:fileURL options:options];
+			request.creationDate = NSDate.date;
+		} completionHandler:done];
+	}];
+}
 @end

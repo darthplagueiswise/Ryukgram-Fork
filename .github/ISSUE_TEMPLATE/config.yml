@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: '💬 Browse Q&A'
+    url: https://github.com/darthplagueiswise/Ryukgram-Fork/wiki/FAQ
+    about: Find answers to the most commonly asked questions
+  - name: '❓ Need Help?'
+    url: https://github.com/darthplagueiswise/Ryukgram-Fork/discussions
+    about: Visit the RyukGram discussions form to get support

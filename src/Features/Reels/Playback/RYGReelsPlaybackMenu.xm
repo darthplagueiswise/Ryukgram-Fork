@@ -1,0 +1,341 @@
+#import "RYGReelsPlaybackMenu.h"
+#import "../../../Utils.h"
+#import "../../../InstagramHeaders.h"
+#import <objc/runtime.h>
+
+static const void *kRYGReelsPlaybackLPRKey = &kRYGReelsPlaybackLPRKey;
+static const NSInteger kRYGReelsPlaybackPanelTag = 988422;
+
+#pragma mark - Module registry
+
+typedef struct {
+	NSString *moduleID;
+	RYGReelsModuleIsOn isOn;
+	RYGReelsModuleBuildSection build;
+} RYGReelsModuleEntry;
+
+static NSMutableArray *rygModuleEntries(void) {
+	static NSMutableArray *arr;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ arr = [NSMutableArray array]; });
+	return arr;
+}
+
+@implementation RYGReelsPlaybackMenu
+
++ (void)registerModuleWithID:(NSString *)moduleID
+                        isOn:(RYGReelsModuleIsOn)isOn
+                buildSection:(RYGReelsModuleBuildSection)buildSection {
+	if (!moduleID || !isOn || !buildSection) return;
+	NSMutableArray *list = rygModuleEntries();
+	@synchronized (list) {
+		[list addObject:@{ @"id": moduleID, @"isOn": [isOn copy], @"build": [buildSection copy] }];
+	}
+}
+
+static __weak UIView *sCapturedReelCell;
+
++ (void)captureReelContextFromAnchor:(UIView *)anchor {
+	UIView *cell = nil;
+	for (UIView *node = anchor; node; node = node.superview) {
+		if ([NSStringFromClass([node class]) hasSuffix:@"IGSundialViewerVideoCell"]) {
+			cell = node; break;
+		}
+	}
+	sCapturedReelCell = cell;
+}
+
++ (UIView *)capturedReelCell {
+	return sCapturedReelCell;
+}
+
++ (BOOL)anyModuleEnabled {
+	NSArray *snapshot;
+	NSMutableArray *list = rygModuleEntries();
+	@synchronized (list) { snapshot = [list copy]; }
+	for (NSDictionary *entry in snapshot) {
+		RYGReelsModuleIsOn isOn = entry[@"isOn"];
+		if (isOn && isOn()) return YES;
+	}
+	return NO;
+}
+
++ (NSArray<UIView *> *)buildSections {
+	NSMutableArray<UIView *> *out = [NSMutableArray array];
+	NSArray *snapshot;
+	NSMutableArray *list = rygModuleEntries();
+	@synchronized (list) { snapshot = [list copy]; }
+	for (NSDictionary *entry in snapshot) {
+		RYGReelsModuleIsOn isOn = entry[@"isOn"];
+		RYGReelsModuleBuildSection build = entry[@"build"];
+		if (!isOn || !isOn() || !build) continue;
+		UIView *v = build();
+		if (v) [out addObject:v];
+	}
+	return out;
+}
+
+@end
+
+#pragma mark - Section card
+
+@implementation RYGReelsPlaybackSection
+
+- (instancetype)initWithTitle:(NSString *)title content:(UIView *)content {
+	if ((self = [super initWithFrame:CGRectZero])) {
+		self.translatesAutoresizingMaskIntoConstraints = NO;
+
+		UILabel *header = [UILabel new];
+		header.translatesAutoresizingMaskIntoConstraints = NO;
+		header.text = [title uppercaseString];
+		header.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+		header.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+		[self addSubview:header];
+
+		content.translatesAutoresizingMaskIntoConstraints = NO;
+		[self addSubview:content];
+
+		[NSLayoutConstraint activateConstraints:@[
+			[header.topAnchor constraintEqualToAnchor:self.topAnchor],
+			[header.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:18],
+			[header.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor constant:-18],
+
+			[content.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:8],
+			[content.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+			[content.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+			[content.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
+		]];
+	}
+	return self;
+}
+
+@end
+
+#pragma mark - Panel
+
+@interface RYGReelsPlaybackPanel : UIView
+- (void)present;
+@end
+
+@implementation RYGReelsPlaybackPanel {
+	UIView *_card;
+	UIStackView *_stack;
+}
+
+- (instancetype)init {
+	if ((self = [super initWithFrame:UIScreen.mainScreen.bounds])) {
+		self.tag = kRYGReelsPlaybackPanelTag;
+		self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.0];
+
+		UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
+			initWithTarget:self action:@selector(_onBackdropTap:)];
+		tap.cancelsTouchesInView = NO;
+		[self addGestureRecognizer:tap];
+
+		_card = [UIView new];
+		_card.translatesAutoresizingMaskIntoConstraints = NO;
+		_card.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.96];
+		_card.layer.cornerRadius = 22;
+		_card.layer.cornerCurve = kCACornerCurveContinuous;
+		_card.layer.masksToBounds = YES;
+		_card.layer.borderWidth = 0.5;
+		_card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.10].CGColor;
+		[self addSubview:_card];
+
+		UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
+			initWithTarget:self action:@selector(_onCardPan:)];
+		[_card addGestureRecognizer:pan];
+
+		UILabel *title = [UILabel new];
+		title.translatesAutoresizingMaskIntoConstraints = NO;
+		title.text = RYGLocalized(@"Playback");
+		title.textColor = [UIColor whiteColor];
+		title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+		[_card addSubview:title];
+
+		UIButton *close = [UIButton buttonWithType:UIButtonTypeSystem];
+		close.translatesAutoresizingMaskIntoConstraints = NO;
+		UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration
+			configurationWithPointSize:15 weight:UIImageSymbolWeightSemibold];
+		[close setImage:[UIImage systemImageNamed:@"xmark" withConfiguration:cfg]
+				forState:UIControlStateNormal];
+		close.tintColor = [UIColor colorWithWhite:1 alpha:0.85];
+		close.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+		close.layer.cornerRadius = 14;
+		[close addTarget:self action:@selector(_dismiss) forControlEvents:UIControlEventTouchUpInside];
+		[_card addSubview:close];
+
+		_stack = [UIStackView new];
+		_stack.translatesAutoresizingMaskIntoConstraints = NO;
+		_stack.axis = UILayoutConstraintAxisVertical;
+		_stack.spacing = 14;
+		_stack.alignment = UIStackViewAlignmentFill;
+		[_card addSubview:_stack];
+
+		NSArray<UIView *> *sections = [RYGReelsPlaybackMenu buildSections];
+		for (NSUInteger i = 0; i < sections.count; i++) {
+			[_stack addArrangedSubview:sections[i]];
+			if (i + 1 < sections.count) {
+				UIView *divider = [UIView new];
+				divider.translatesAutoresizingMaskIntoConstraints = NO;
+				divider.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+				[divider.heightAnchor constraintEqualToConstant:0.5].active = YES;
+				[_stack addArrangedSubview:divider];
+			}
+		}
+
+		[NSLayoutConstraint activateConstraints:@[
+			[_card.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
+			[_card.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-14],
+			[_card.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
+
+			[title.topAnchor constraintEqualToAnchor:_card.topAnchor constant:14],
+			[title.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor constant:18],
+
+			[close.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
+			[close.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor constant:-10],
+			[close.widthAnchor constraintEqualToConstant:28],
+			[close.heightAnchor constraintEqualToConstant:28],
+
+			[_stack.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:14],
+			[_stack.leadingAnchor constraintEqualToAnchor:_card.leadingAnchor],
+			[_stack.trailingAnchor constraintEqualToAnchor:_card.trailingAnchor],
+			[_stack.bottomAnchor constraintEqualToAnchor:_card.bottomAnchor constant:-16],
+		]];
+	}
+	return self;
+}
+
+- (void)_onBackdropTap:(UITapGestureRecognizer *)gr {
+	CGPoint pt = [gr locationInView:self];
+	if (CGRectContainsPoint(_card.frame, pt)) return;
+	[self _dismiss];
+}
+
+- (void)_onCardPan:(UIPanGestureRecognizer *)gr {
+	CGFloat ty = [gr translationInView:self].y;
+	switch (gr.state) {
+		case UIGestureRecognizerStateChanged: {
+			CGFloat y = ty > 0 ? ty : ty * 0.2;
+			_card.transform = CGAffineTransformMakeTranslation(0, y);
+			CGFloat p = ty > 0 ? MAX(0, 1 - ty / 400.0) : 1;
+			self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18 * p];
+			break;
+		}
+		case UIGestureRecognizerStateEnded:
+		case UIGestureRecognizerStateCancelled: {
+			CGFloat vy = [gr velocityInView:self].y;
+			if (ty > 90 || vy > 800) { [self _dismiss]; return; }
+			[UIView animateWithDuration:0.25 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0.5
+								options:UIViewAnimationOptionCurveEaseOut animations:^{
+				_card.transform = CGAffineTransformIdentity;
+				self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
+			} completion:nil];
+			break;
+		}
+		default: break;
+	}
+}
+
+- (void)present {
+	UIWindow *win = nil;
+	for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+		if (![s isKindOfClass:[UIWindowScene class]]) continue;
+		for (UIWindow *w in ((UIWindowScene *)s).windows) {
+			if (w.isKeyWindow) { win = w; break; }
+		}
+		if (win) break;
+		win = ((UIWindowScene *)s).windows.firstObject;
+	}
+	if (!win) return;
+
+	[[win viewWithTag:kRYGReelsPlaybackPanelTag] removeFromSuperview];
+
+	self.frame = win.bounds;
+	self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+	[win addSubview:self];
+
+	_card.transform = CGAffineTransformMakeTranslation(0, 140);
+	_card.alpha = 0;
+	[UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.85 initialSpringVelocity:0.6
+						options:UIViewAnimationOptionCurveEaseOut animations:^{
+		self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.18];
+		_card.transform = CGAffineTransformIdentity;
+		_card.alpha = 1.0;
+	} completion:nil];
+}
+
+- (void)_dismiss {
+	[UIView animateWithDuration:0.20 animations:^{
+		self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.0];
+		_card.transform = CGAffineTransformMakeTranslation(0, 140);
+		_card.alpha = 0;
+	} completion:^(BOOL fin) {
+		[self removeFromSuperview];
+	}];
+}
+
+@end
+
+#pragma mark - Long-press target
+
+@interface RYGReelsPlaybackLPTarget : NSObject
++ (instancetype)shared;
+- (void)longPress:(UILongPressGestureRecognizer *)gr;
+@end
+
+@implementation RYGReelsPlaybackLPTarget
+
++ (instancetype)shared {
+	static RYGReelsPlaybackLPTarget *t;
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{ t = [RYGReelsPlaybackLPTarget new]; });
+	return t;
+}
+
+- (void)longPress:(UILongPressGestureRecognizer *)gr {
+	if (gr.state != UIGestureRecognizerStateBegan) return;
+	if (![RYGReelsPlaybackMenu anyModuleEnabled]) return;
+
+	UIView *anchor = gr.view;
+	[RYGReelsPlaybackMenu captureReelContextFromAnchor:anchor];
+	if ([anchor isKindOfClass:[UIControl class]]) {
+		UIControl *c = (UIControl *)anchor;
+		[c cancelTrackingWithEvent:nil];
+		c.highlighted = NO;
+	}
+
+	UIImpactFeedbackGenerator *h = [[UIImpactFeedbackGenerator alloc]
+		initWithStyle:UIImpactFeedbackStyleMedium];
+	[h impactOccurred];
+
+	[[RYGReelsPlaybackPanel new] present];
+}
+
+@end
+
+#pragma mark - Hooks
+
+static void rygAttachPlaybackLongPress(id ufi, NSString *key) {
+	UIButton *btn = nil;
+	@try { btn = [ufi valueForKey:key]; } @catch (__unused id e) {}
+	if (!btn || objc_getAssociatedObject(btn, kRYGReelsPlaybackLPRKey)) return;
+
+	UILongPressGestureRecognizer *lpr = [[UILongPressGestureRecognizer alloc]
+		initWithTarget:[RYGReelsPlaybackLPTarget shared] action:@selector(longPress:)];
+	lpr.minimumPressDuration = 0.32;
+	lpr.cancelsTouchesInView = YES;
+	[btn addGestureRecognizer:lpr];
+	objc_setAssociatedObject(btn, kRYGReelsPlaybackLPRKey, lpr, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
+
+- (void)layoutSubviews {
+	%orig;
+	if (![RYGReelsPlaybackMenu anyModuleEnabled]) return;
+	rygAttachPlaybackLongPress(self, @"moreOptionsButton");
+	rygAttachPlaybackLongPress(self, @"audioAttributionButton");
+}
+
+%end

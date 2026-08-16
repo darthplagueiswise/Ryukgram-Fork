@@ -1,107 +1,131 @@
-name: Build RyukGram tweak (manual rootless + rootful)
+name: Build RyukGram dogfood · SDK 26.5
 
 on:
-    workflow_dispatch:
+  push:
+    branches: [dogfood]
+  pull_request:
+    branches: [dogfood]
+  workflow_dispatch:
 
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}
-    cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-    build:
-        name: Build RyukGram
-        runs-on: macos-latest
-        permissions:
-            contents: write
+  build:
+    name: Rootless + rootful · arm64
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      THEOS: ${{ github.workspace }}/theos
 
-        steps:
-            - name: Checkout Main
-              uses: actions/checkout@v6
-              with:
-                path: main
+    steps:
+      - name: Checkout dogfood source
+        uses: actions/checkout@v4
+        with:
+          path: main
+          fetch-depth: 0
 
-            - name: Clean Homebrew runner taps
-              run: |
-                brew untap aws/tap || true
-                brew untap azure/bicep || true
+      - name: Install build and binary-analysis dependencies
+        run: |
+          brew untap aws/tap || true
+          brew untap azure/bicep || true
+          brew install ldid dpkg make
+          python3 -m pip install --upgrade capstone lief
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
-            - name: Install Dependencies
-              run: brew install ldid dpkg make
+      - name: Setup Theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
 
-            - name: Set PATH environment variable
-              run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+      - name: Cache iPhoneOS 26.5 SDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/theos/sdks/iPhoneOS26.5.sdk
+          key: ${{ runner.os }}-iPhoneOS26.5.sdk-v1
 
-            - name: Setup Theos
-              uses: actions/checkout@v6
-              with:
-                repository: theos/theos
-                ref: master
-                path: ${{ github.workspace }}/theos
-                submodules: recursive
+      - name: Download iPhoneOS 26.5 SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs sdk-source
+          cd sdk-source
+          git sparse-checkout set --no-cone iPhoneOS26.5.sdk
+          git checkout
+          mv iPhoneOS26.5.sdk "$THEOS/sdks/"
 
-            - name: SDK Caching
-              id: SDK
-              uses: actions/cache@v5
-              env:
-                cache-name: iPhoneOS26.2.sdk
-              with:
-                path: ${{ github.workspace }}/theos/sdks/
-                key: ${{ runner.os }}-${{ env.cache-name }}
-                restore-keys: |
-                  ${{ runner.os }}-${{ env.cache-name }}
+      - name: Verify SDK and migration contract
+        working-directory: main
+        run: |
+          test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
+          test -f "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
+          grep -q 'UIGlassEffectStyleClear' "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
+          grep -q 'glassButtonConfiguration' "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h"
+          python3 scripts/validate-source.py
+          bash -n build.sh build-fast.sh scripts/setup-ffmpegkit.sh
 
-            - name: Download iOS SDK
-              if: steps.SDK.outputs.cache-hit != 'true'
-              run: |
-                git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
-                cd iOS-SDKs
-                git sparse-checkout set --no-cone iPhoneOS26.2.sdk
-                git checkout
-                mv *.sdk $THEOS/sdks
-              env:
-                THEOS: ${{ github.workspace }}/theos
+      - name: Setup FFmpegKit
+        working-directory: main
+        run: ./scripts/setup-ffmpegkit.sh
 
-            - name: Get Version
-              id: version
-              run: |
-                VERSION=$(awk '/Version:/ {print $2}' main/control)
-                echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-                echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Build rootless package
+        working-directory: main
+        run: ./build.sh rootless
 
-            - name: Setup FFmpegKit
-              run: cd main && ./scripts/setup-ffmpegkit.sh
+      - name: Validate rootless dylib with LIEF and Capstone
+        working-directory: main
+        run: |
+          DEB="$(ls -t packages/*_rootless.deb | head -n1)"
+          test -n "$DEB"
+          STAGE="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$STAGE"
+          DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
+          test -n "$DYLIB"
+          python3 scripts/validate-macho.py "$DYLIB"
+          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+          rm -rf "$STAGE"
 
-            - name: Build rootless
-              run: |
-                cd main
-                ./build.sh rootless
-                cd packages
-                DEB="$(ls -t *-rootless.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "com.faroukbmiled.ryukgram_${VERSION}+debug-rootless.deb"
-                ls -la
-              env:
-                THEOS: ${{ github.workspace }}/theos
+      - name: Name rootless artifact
+        working-directory: main
+        run: |
+          VERSION="$(awk '/^Version:/ {print $2}' control)"
+          DEB="$(ls -t packages/*_rootless.deb | head -n1)"
+          mv "$DEB" "packages/RyukGram_${VERSION}+dogfood.${GITHUB_RUN_NUMBER}_rootless.deb"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-            - name: Build rootful
-              run: |
-                cd main
-                ./build.sh rootful
-                cd packages
-                DEB="$(ls -t *-rootful.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "com.faroukbmiled.ryukgram_${VERSION}+debug-rootful.deb"
-                ls -la
-              env:
-                THEOS: ${{ github.workspace }}/theos
+      - name: Build rootful package
+        working-directory: main
+        run: ./build.sh rootful
 
-            - name: Upload rootless artifact
-              uses: actions/upload-artifact@v6
-              with:
-                name: com.faroukbmiled.ryukgram_${{ env.VERSION }}+debug-rootless.deb
-                path: ${{ github.workspace }}/main/packages/com.faroukbmiled.ryukgram_${{ env.VERSION }}+debug-rootless.deb
-                if-no-files-found: error
+      - name: Validate rootful dylib with LIEF and Capstone
+        working-directory: main
+        run: |
+          DEB="$(ls -t packages/*_rootful.deb | head -n1)"
+          test -n "$DEB"
+          STAGE="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$STAGE"
+          DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
+          test -n "$DYLIB"
+          python3 scripts/validate-macho.py "$DYLIB"
+          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+          rm -rf "$STAGE"
 
-            - name: Upload rootful artifact
-              uses: actions/upload-artifact@v6
-              with:
-                name: com.faroukbmiled.ryukgram_${{ env.VERSION }}+debug-rootful.deb
-                path: ${{ github.workspace }}/main/packages/com.faroukbmiled.ryukgram_${{ env.VERSION }}+debug-rootful.deb
-                if-no-files-found: error
+      - name: Name rootful artifact
+        working-directory: main
+        run: |
+          DEB="$(ls -t packages/*_rootful.deb | head -n1)"
+          mv "$DEB" "packages/RyukGram_${VERSION}+dogfood.${GITHUB_RUN_NUMBER}_rootful.deb"
+
+      - name: Upload dogfood packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: RyukGram_dogfood_${{ env.VERSION }}_${{ github.run_number }}
+          path: |
+            main/packages/RyukGram_*_rootless.deb
+            main/packages/RyukGram_*_rootful.deb
+          if-no-files-found: error

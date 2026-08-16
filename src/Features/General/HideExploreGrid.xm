@@ -9,8 +9,8 @@
 #import "../../InstagramHeaders.h"
 #import <objc/runtime.h>
 
-static BOOL sciHideGrid(void)   { return [SCIUtils getBoolPref:@"hide_explore_grid"]; }
-static BOOL sciHideSearch(void) { return [SCIUtils getBoolPref:@"hide_trending_searches"]; }
+static BOOL rygHideGrid(void)   { return [RYGUtils getBoolPref:@"hide_explore_grid"] || [RYGUtils getBoolPref:@"messages_only"]; }
+static BOOL rygHideSearch(void) { return [RYGUtils getBoolPref:@"hide_trending_searches"] || [RYGUtils getBoolPref:@"messages_only"]; }
 
 static __weak UIViewController *gActiveExploreVC = nil;
 static BOOL gSearchFocused = NO;
@@ -21,25 +21,26 @@ static BOOL gUserEngaged = NO;
 // Alpha + userInteraction instead of .hidden keeps IG's data fetch and the
 // shimmer animation alive, so toggling the pref back on shows fresh content
 // instantly without a restart.
-static void sciSetViewVisuallyHidden(UIView *v, BOOL hidden) {
+static void rygSetViewVisuallyHidden(UIView *v, BOOL hidden) {
     if (!v) return;
     v.alpha = hidden ? 0.0 : 1.0;
     v.userInteractionEnabled = !hidden;
 }
 
-static void sciSetIvarViewHidden(id host, const char *name, BOOL hidden) {
+static void rygSetIvarViewHidden(id host, const char *name, BOOL hidden) {
     Ivar iv = class_getInstanceVariable([host class], name);
     if (!iv) return;
     @try {
         UIView *v = object_getIvar(host, iv);
-        if ([v isKindOfClass:[UIView class]]) sciSetViewVisuallyHidden(v, hidden);
+        if ([v isKindOfClass:[UIView class]]) rygSetViewVisuallyHidden(v, hidden);
     } @catch (__unused id e) {}
 }
 
-static void sciApplyExploreHide(id vc) {
+static void rygApplyExploreHide(id vc) {
     // Chips stay visible while search is focused (they act as filters then).
-    BOOL hideChips = sciHideSearch() && !gSearchFocused;
-    sciSetIvarViewHidden(vc, "_nidoChipBar", hideChips);
+    BOOL hideChips = rygHideSearch() && !gSearchFocused;
+    rygSetIvarViewHidden(vc, "_chipBar", hideChips);      // IG 433+
+    rygSetIvarViewHidden(vc, "_nidoChipBar", hideChips);  // pre-433
 
     // Force re-layout so pref flips reflect on re-entry.
     Ivar stvIvar = class_getInstanceVariable([vc class], "_searchTitleView");
@@ -54,27 +55,29 @@ static void sciApplyExploreHide(id vc) {
     }
 
     // Grid reveals on chip tap or search focus.
-    BOOL hideGrid = sciHideGrid() && !gUserEngaged && !gSearchFocused;
-    sciSetIvarViewHidden(vc, "_shimmeringGridView", hideGrid);
+    BOOL hideGrid = rygHideGrid() && !gUserEngaged && !gSearchFocused;
+    rygSetIvarViewHidden(vc, "_shimmeringGridView", hideGrid);
 
     Ivar gvcIvar = class_getInstanceVariable([vc class], "_gridViewController");
-    if (!gvcIvar) return;
-    @try {
-        UIViewController *grid = object_getIvar(vc, gvcIvar);
-        if (![grid isKindOfClass:[UIViewController class]] || !grid.isViewLoaded) return;
-        sciSetViewVisuallyHidden(grid.view, hideGrid);
-        Ivar cvIvar = class_getInstanceVariable([grid class], "_collectionView");
-        if (cvIvar) {
-            UIView *cv = object_getIvar(grid, cvIvar);
-            if ([cv isKindOfClass:[UIView class]]) sciSetViewVisuallyHidden(cv, hideGrid);
-        }
-    } @catch (__unused id e) {}
+    if (gvcIvar) {
+        @try {
+            UIViewController *grid = object_getIvar(vc, gvcIvar);
+            if ([grid isKindOfClass:[UIViewController class]] && grid.isViewLoaded) {
+                rygSetViewVisuallyHidden(grid.view, hideGrid);
+                Ivar cvIvar = class_getInstanceVariable([grid class], "_collectionView");
+                if (cvIvar) {
+                    UIView *cv = object_getIvar(grid, cvIvar);
+                    if ([cv isKindOfClass:[UIView class]]) rygSetViewVisuallyHidden(cv, hideGrid);
+                }
+            }
+        } @catch (__unused id e) {}
+    }
 }
 
 // Algo button vs Cancel: both are IGTapButton siblings of the search bar.
 // Cancel has a UIButtonLabel (the "Cancel" text); the algo button is square
 // with just an icon child.
-static BOOL sciIsAlgoButton(UIView *btn) {
+static BOOL rygIsAlgoButton(UIView *btn) {
     if (btn.bounds.size.width != btn.bounds.size.height) return NO;
     for (UIView *sub in btn.subviews) {
         if ([sub isKindOfClass:[UILabel class]]) return NO;
@@ -86,16 +89,66 @@ static BOOL sciIsAlgoButton(UIView *btn) {
 
 %group HideExploreGroup
 
+// Subtract the chip bar's height from contentInset.top when chips are hidden,
+// so the grid sits flush under the header. Class + ivar lookups are cached.
+static Class rygExploreGridVCClass(void) {
+    static Class c = Nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ c = NSClassFromString(@"IGExploreGridViewController"); });
+    return c;
+}
+
+// Returns the chip bar if `cv` belongs to the explore grid, else nil.
+static inline UIView *rygExploreChipBarFor(UIView *cv) {
+    Class targetCls = rygExploreGridVCClass();
+    if (!targetCls) return nil;
+    UIResponder *r = [cv nextResponder];
+    while (r && [r class] != targetCls) r = [r nextResponder];
+    if (!r) return nil;
+    UIViewController *parent = [(UIViewController *)r parentViewController];
+    if (!parent) return nil;
+    static Ivar cbIvar = NULL;
+    static Class parentCls = Nil;
+    if (parentCls != [parent class]) {
+        parentCls = [parent class];
+        cbIvar = class_getInstanceVariable(parentCls, "_chipBar") ?:
+                 class_getInstanceVariable(parentCls, "_nidoChipBar");
+    }
+    if (!cbIvar) return nil;
+    UIView *cb = object_getIvar(parent, cbIvar);
+    return [cb isKindOfClass:[UIView class]] ? cb : nil;
+}
+
+static inline UIEdgeInsets rygAdjustInset(UIView *cv, UIEdgeInsets inset) {
+    if (!rygHideSearch() || gSearchFocused) return inset;
+    UIView *cb = rygExploreChipBarFor(cv);
+    if (!cb) return inset;
+    CGFloat gap = cb.frame.size.height;
+    if (gap > 0 && inset.top >= CGRectGetMaxY(cb.frame) - 0.5) {
+        inset.top -= gap;
+    }
+    return inset;
+}
+
+%hook IGListCollectionView
+- (void)setContentInset:(UIEdgeInsets)inset {
+    %orig(rygAdjustInset((UIView *)self, inset));
+}
+- (void)setScrollIndicatorInsets:(UIEdgeInsets)inset {
+    %orig(rygAdjustInset((UIView *)self, inset));
+}
+%end
+
 %hook IGExploreViewController
 - (void)viewDidLayoutSubviews {
     %orig;
     gActiveExploreVC = self;
-    sciApplyExploreHide(self);
+    rygApplyExploreHide(self);
 }
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
     gActiveExploreVC = self;
-    sciApplyExploreHide(self);
+    rygApplyExploreHide(self);
 }
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
@@ -105,7 +158,7 @@ static BOOL sciIsAlgoButton(UIView *btn) {
 - (void)exploreChipBarView:(id)bar didSelectChipAtIndex:(NSInteger)idx {
     %orig;
     gUserEngaged = YES;
-    sciApplyExploreHide(self);
+    rygApplyExploreHide(self);
     [self.view setNeedsLayout];
 }
 %end
@@ -115,7 +168,7 @@ static BOOL sciIsAlgoButton(UIView *btn) {
     BOOL r = %orig;
     gSearchFocused = YES;
     if (gActiveExploreVC) {
-        sciApplyExploreHide(gActiveExploreVC);
+        rygApplyExploreHide(gActiveExploreVC);
         [gActiveExploreVC.view setNeedsLayout];
     }
     return r;
@@ -124,7 +177,7 @@ static BOOL sciIsAlgoButton(UIView *btn) {
     BOOL r = %orig;
     gSearchFocused = NO;
     if (gActiveExploreVC) {
-        sciApplyExploreHide(gActiveExploreVC);
+        rygApplyExploreHide(gActiveExploreVC);
         [gActiveExploreVC.view setNeedsLayout];
     }
     return r;
@@ -136,7 +189,7 @@ static BOOL sciIsAlgoButton(UIView *btn) {
 %hook IGExploreSearchTitleView
 - (void)layoutSubviews {
     %orig;
-    BOOL hide = sciHideSearch();
+    BOOL hide = rygHideSearch();
     Class tapBtnCls = NSClassFromString(@"IGTapButton");
     Class dotCls    = NSClassFromString(@"IGDSDotView");
     Class searchCls = NSClassFromString(@"IGSearchBar");
@@ -145,7 +198,7 @@ static BOOL sciIsAlgoButton(UIView *btn) {
     for (UIView *sub in self.subviews) {
         if (searchCls && [sub isKindOfClass:searchCls]) {
             searchBar = sub;
-        } else if (tapBtnCls && [sub isKindOfClass:tapBtnCls] && sciIsAlgoButton(sub)) {
+        } else if (tapBtnCls && [sub isKindOfClass:tapBtnCls] && rygIsAlgoButton(sub)) {
             sub.hidden = hide;
         } else if (dotCls && [sub isKindOfClass:dotCls]) {
             sub.hidden = hide;
@@ -165,8 +218,10 @@ static BOOL sciIsAlgoButton(UIView *btn) {
 %end // HideExploreGroup
 
 %ctor {
-    if ([SCIUtils getBoolPref:@"hide_explore_grid"] ||
-        [SCIUtils getBoolPref:@"hide_trending_searches"]) {
+    if ([RYGUtils getBoolPref:@"hide_explore_grid"] ||
+        [RYGUtils getBoolPref:@"hide_trending_searches"] ||
+        [RYGUtils getBoolPref:@"messages_only"] ||
+        [RYGUtils getBoolPref:@"messages_only_schedule_enabled"]) {
         %init(HideExploreGroup);
     }
 }

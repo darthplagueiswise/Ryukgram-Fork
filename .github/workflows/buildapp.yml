@@ -28,13 +28,15 @@ jobs:
         runs-on: macos-latest
         permissions:
             contents: write
+        env:
+            THEOS: ${{ github.workspace }}/theos
 
         steps:
-            - name: Checkout Main
-              uses: actions/checkout@v6
+            - name: Checkout dogfood source
+              uses: actions/checkout@v4
               with:
                 path: main
-                submodules: recursive
+                fetch-depth: 0
 
             - name: Clean Homebrew runner taps
               run: |
@@ -42,13 +44,15 @@ jobs:
                 brew untap azure/bicep || true
 
             - name: Install Dependencies
-              run: brew install ldid dpkg make
+              run: |
+                brew install ldid dpkg make
+                python3 -m pip install --upgrade capstone lief
 
             - name: Set PATH environment variable
               run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
             - name: Setup Theos
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
                 repository: theos/theos
                 ref: master
@@ -57,9 +61,9 @@ jobs:
 
             - name: SDK Caching
               id: SDK
-              uses: actions/cache@v5
+              uses: actions/cache@v4
               env:
-                cache-name: iPhoneOS26.2.sdk
+                cache-name: iPhoneOS26.5.sdk
               with:
                 path: ${{ github.workspace }}/theos/sdks/
                 key: ${{ runner.os }}-${{ env.cache-name }}
@@ -71,7 +75,7 @@ jobs:
               run: |
                 git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
                 cd iOS-SDKs
-                git sparse-checkout set --no-cone iPhoneOS26.2.sdk
+                git sparse-checkout set --no-cone iPhoneOS26.5.sdk
                 git checkout
                 mv *.sdk $THEOS/sdks
               env:
@@ -97,12 +101,17 @@ jobs:
             - name: Setup FFmpegKit
               run: cd main && ./scripts/setup-ffmpegkit.sh
 
+            - name: Verify SDK 26.5 and source contract
+              run: |
+                test -f "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
+                cd main
+                python3 scripts/validate-source.py
+
             - name: Build sideloaded IPA (rootless deb → cyan inject)
               run: |
                 pip install --force-reinstall https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
                 cd main
-                # ipapatch disabled — upstream issues.
                 ./build.sh sideload
                 ls -la packages
               env:
@@ -113,6 +122,16 @@ jobs:
                 cd main/packages
                 IPA=$(ls -t *.ipa | grep -iv instagram | head -n1)
                 [ -n "$IPA" ] && mv "$IPA" "RyukGram_sideloaded_v${VERSION}.ipa"
+
+            - name: Validate the single injected RyukGram dylib
+              run: |
+                STAGE="$(mktemp -d)"
+                unzip -q "main/packages/RyukGram_sideloaded_v${VERSION}.ipa" -d "$STAGE"
+                DYLIB="$(find "$STAGE/Payload" -type f -name RyukGram.dylib | head -n1)"
+                test -n "$DYLIB"
+                python3 main/scripts/validate-macho.py "$DYLIB"
+                test "$(find "$STAGE/Payload" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+                rm -rf "$STAGE"
 
             - name: Duplicate as .tipa
               if: ${{ inputs.build_tipa }}
@@ -127,7 +146,7 @@ jobs:
 
             - name: Upload IPA Artifact
               if: ${{ inputs.upload_artifact }}
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v4
               with:
                 name: RyukGram_sideloaded_v${{ steps.version.outputs.version }}
                 path: ${{ github.workspace }}/main/packages/${{ steps.package_name.outputs.package }}
@@ -135,7 +154,7 @@ jobs:
 
             - name: Upload TIPA Artifact
               if: ${{ inputs.upload_artifact && inputs.build_tipa }}
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v4
               with:
                 name: RyukGram_trollstore_v${{ steps.version.outputs.version }}
                 path: ${{ github.workspace }}/main/packages/RyukGram_trollstore_v*.tipa

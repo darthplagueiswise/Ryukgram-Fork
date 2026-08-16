@@ -2,8 +2,8 @@
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
-#import "../../ActionButton/SCIMediaActions.h"
-#import "../../ActionButton/SCIMediaViewer.h"
+#import "../../ActionButton/RYGMediaActions.h"
+#import "../../ActionButton/RYGMediaViewer.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -11,12 +11,12 @@
 
 static const void *kZoomGestureKey = &kZoomGestureKey;
 
-static BOOL sciZoomEnabled(void) {
-    return [SCIUtils getBoolPref:@"feed_media_zoom"];
+static BOOL rygZoomEnabled(void) {
+    return [RYGUtils getBoolPref:@"feed_media_zoom"];
 }
 
 // Walk up to the feed's outer collection view (skip carousel inner CVs)
-static UICollectionView *sciFeedCollectionView(UIView *view) {
+static UICollectionView *rygFeedCollectionView(UIView *view) {
     UIView *v = view;
     while (v) {
         if ([v isKindOfClass:[UICollectionView class]]) {
@@ -29,7 +29,7 @@ static UICollectionView *sciFeedCollectionView(UIView *view) {
     return nil;
 }
 
-static NSInteger sciFeedSectionForView(UIView *view, UICollectionView *cv) {
+static NSInteger rygFeedSectionForView(UIView *view, UICollectionView *cv) {
     UIView *v = view;
     while (v) {
         if ([v isKindOfClass:[UICollectionViewCell class]]) {
@@ -41,15 +41,14 @@ static NSInteger sciFeedSectionForView(UIView *view, UICollectionView *cv) {
     return -1;
 }
 
-// Extract IGMedia from sibling cells in the same section
-static IGMedia *sciZoomFeedMedia(UIView *view) {
+static IGMedia *rygZoomFeedMedia(UIView *view) {
     Class mediaClass = NSClassFromString(@"IGMedia");
     if (!mediaClass) return nil;
 
-    UICollectionView *cv = sciFeedCollectionView(view);
+    UICollectionView *cv = rygFeedCollectionView(view);
     if (!cv) return nil;
 
-    NSInteger section = sciFeedSectionForView(view, cv);
+    NSInteger section = rygFeedSectionForView(view, cv);
     if (section < 0) return nil;
 
     for (UICollectionViewCell *cell in cv.visibleCells) {
@@ -84,12 +83,11 @@ static IGMedia *sciZoomFeedMedia(UIView *view) {
     return nil;
 }
 
-// Carousel page index from the horizontal scroll view in the Page cell
-static NSInteger sciZoomPageIndex(UIView *view) {
-    UICollectionView *cv = sciFeedCollectionView(view);
+static NSInteger rygZoomPageIndex(UIView *view) {
+    UICollectionView *cv = rygFeedCollectionView(view);
     if (!cv) return 0;
 
-    NSInteger section = sciFeedSectionForView(view, cv);
+    NSInteger section = rygFeedSectionForView(view, cv);
     if (section < 0) return 0;
 
     for (UICollectionViewCell *cell in cv.visibleCells) {
@@ -113,52 +111,52 @@ static NSInteger sciZoomPageIndex(UIView *view) {
     return 0;
 }
 
-static void sciZoomFired(UILongPressGestureRecognizer *g) {
+static void rygZoomFired(UILongPressGestureRecognizer *g) {
     if (g.state != UIGestureRecognizerStateBegan) return;
-    if (!sciZoomEnabled()) return;
+    if (!rygZoomEnabled()) return;
 
     UIView *view = g.view;
-    IGMedia *media = sciZoomFeedMedia(view);
+    IGMedia *media = rygZoomFeedMedia(view);
     if (!media) return;
 
-    NSString *caption = [SCIMediaActions captionForMedia:media];
+    NSString *caption = [RYGMediaActions captionForMedia:media];
 
-    if ([SCIMediaActions isCarouselMedia:media]) {
-        NSArray *children = [SCIMediaActions carouselChildrenForMedia:media];
+    if ([RYGMediaActions isCarouselMedia:media]) {
+        NSArray *children = [RYGMediaActions carouselChildrenForMedia:media];
         NSMutableArray *items = [NSMutableArray array];
         for (id child in children) {
-            NSURL *v = [SCIUtils getVideoUrlForMedia:(IGMedia *)child];
-            NSURL *p = [SCIUtils getPhotoUrlForMedia:(IGMedia *)child];
-            if (!v && !p) p = [SCIMediaActions bestURLForMedia:child];
-            if (v || p) [items addObject:[SCIMediaViewerItem itemWithVideoURL:v photoURL:p caption:caption]];
+            NSURL *v = [RYGUtils getVideoUrlForMedia:(IGMedia *)child];
+            NSURL *p = [RYGUtils getPhotoUrlForMedia:(IGMedia *)child];
+            if (!v && !p) p = [RYGMediaActions bestURLForMedia:child];
+            if (v || p) [items addObject:[RYGMediaViewerItem itemWithVideoURL:v photoURL:p caption:caption]];
         }
         if (items.count) {
-            NSInteger idx = sciZoomPageIndex(view);
+            NSInteger idx = rygZoomPageIndex(view);
             if (idx < 0 || idx >= (NSInteger)items.count) idx = 0;
-            [SCIMediaViewer showItems:items startIndex:idx];
+            [RYGMediaViewer showItems:items startIndex:idx];
             return;
         }
     }
 
-    NSURL *videoUrl = [SCIUtils getVideoUrlForMedia:media];
-    NSURL *photoUrl = [SCIUtils getPhotoUrlForMedia:media];
-    if (!videoUrl && !photoUrl) photoUrl = [SCIMediaActions bestURLForMedia:media];
+    NSURL *videoUrl = [RYGUtils getVideoUrlForMedia:media];
+    NSURL *photoUrl = [RYGUtils getPhotoUrlForMedia:media];
+    if (!videoUrl && !photoUrl) photoUrl = [RYGMediaActions bestURLForMedia:media];
     if (!videoUrl && !photoUrl) return;
 
-    [SCIMediaViewer showWithVideoURL:videoUrl photoURL:photoUrl caption:caption];
+    [RYGMediaViewer showWithVideoURL:videoUrl photoURL:photoUrl caption:caption];
 }
 
 // MARK: - Gesture setup
 
-@interface _SCIZoomTarget : NSObject @end
-@implementation _SCIZoomTarget
-- (void)fired:(UILongPressGestureRecognizer *)g { sciZoomFired(g); }
+@interface _RYGZoomTarget : NSObject @end
+@implementation _RYGZoomTarget
+- (void)fired:(UILongPressGestureRecognizer *)g { rygZoomFired(g); }
 @end
 
-static void sciAddZoomGesture(UIView *view) {
+static void rygAddZoomGesture(UIView *view) {
     if (objc_getAssociatedObject(view, kZoomGestureKey)) return;
 
-    _SCIZoomTarget *target = [_SCIZoomTarget new];
+    _RYGZoomTarget *target = [_RYGZoomTarget new];
     objc_setAssociatedObject(view, kZoomGestureKey, target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc]
@@ -172,27 +170,32 @@ static void sciAddZoomGesture(UIView *view) {
 %hook IGFeedPhotoView
 - (void)didMoveToSuperview {
     %orig;
-    if (self.superview) sciAddZoomGesture(self);
+    if (self.superview) rygAddZoomGesture(self);
 }
 %end
 
 %hook IGModernFeedVideoCell.IGModernFeedVideoCell
 - (void)didMoveToSuperview {
     %orig;
-    if (((UIView *)self).superview) sciAddZoomGesture((UIView *)self);
+    if (((UIView *)self).superview) rygAddZoomGesture((UIView *)self);
 }
 %end
 
 %hook IGFeedItemPagePhotoCell
 - (void)didMoveToSuperview {
     %orig;
-    if (self.superview) sciAddZoomGesture((UIView *)self);
+    if (((UIView *)self).superview) rygAddZoomGesture((UIView *)self);
 }
 %end
 
 %hook IGFeedItemPageVideoCell
 - (void)didMoveToSuperview {
+    RYGProbeOnce(@"hook.mediazoom.videocell", @"IGFeedItemPageVideoCell fired");
     %orig;
-    if (self.superview) sciAddZoomGesture((UIView *)self);
+    if (self.superview) rygAddZoomGesture((UIView *)self);
 }
 %end
+
+%ctor {
+    %init(IGFeedItemPagePhotoCell = NSClassFromString(@"_TtC18IGFeedItemPageCell23IGFeedItemPagePhotoCell") ?: NSClassFromString(@"IGFeedItemPagePhotoCell"));
+}

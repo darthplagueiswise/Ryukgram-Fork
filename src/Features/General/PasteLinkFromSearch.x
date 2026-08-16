@@ -1,6 +1,7 @@
 // Long-press the Explore/search tab to open an IG link from the clipboard.
 
 #import "../../Utils.h"
+#import "../../RYGURLOpener.h"
 #import "../../InstagramHeaders.h"
 #import <objc/runtime.h>
 
@@ -10,7 +11,7 @@ static const void *kPasteGestureKey = &kPasteGestureKey;
 // hostnames, canonical IG hosts, and fix-embed mirrors (any host with
 // "instagram" in it — ddinstagram, eeinstagram, vxinstagram, etc.) which
 // get rewritten to www.instagram.com.
-static NSURL *sciNormalizeIGURL(NSString *raw) {
+static NSURL *rygNormalizeIGURL(NSString *raw) {
     if (!raw.length) return nil;
     raw = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (![raw containsString:@"://"]) raw = [@"https://" stringByAppendingString:raw];
@@ -40,63 +41,39 @@ static NSURL *sciNormalizeIGURL(NSString *raw) {
     return nil;
 }
 
-@interface SCIPasteLinkHandler : NSObject <UIGestureRecognizerDelegate>
+@interface RYGPasteLinkHandler : NSObject <UIGestureRecognizerDelegate>
 + (instancetype)shared;
 - (void)longPressed:(UILongPressGestureRecognizer *)g;
 @end
 
-@implementation SCIPasteLinkHandler
+@implementation RYGPasteLinkHandler
 + (instancetype)shared {
-    static SCIPasteLinkHandler *s;
+    static RYGPasteLinkHandler *s;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ s = [SCIPasteLinkHandler new]; });
+    dispatch_once(&once, ^{ s = [RYGPasteLinkHandler new]; });
     return s;
 }
 
 // Gate the gesture on the pref. When off, IG's default long-press falls through.
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
-    return [SCIUtils getBoolPref:@"paste_link_from_search"];
+    return [RYGUtils getBoolPref:@"paste_link_from_search"];
 }
 
 - (void)longPressed:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
 
-    NSURL *url = sciNormalizeIGURL([[UIPasteboard generalPasteboard] string]);
+    NSURL *url = rygNormalizeIGURL([[UIPasteboard generalPasteboard] string]);
     if (!url) {
-        [SCIUtils showToastForDuration:2.0 title:SCILocalized(@"Clipboard is not an Instagram URL")];
+        RYGNotifyWarning(RYG_NOTIF_PASTE_LINK_INVALID, RYGLocalized(@"Clipboard is not an Instagram URL"), nil);
         return;
     }
-
-    // https URLs route through universal-link handling, not openURL:options:.
-    UIApplication *app = [UIApplication sharedApplication];
-    id<UIApplicationDelegate> delegate = app.delegate;
-
-    if ([url.scheme.lowercaseString isEqualToString:@"instagram"]) {
-        if ([delegate respondsToSelector:@selector(application:openURL:options:)]) {
-            [delegate application:app openURL:url options:@{}];
-        }
-        return;
-    }
-
-    NSUserActivity *activity = [[NSUserActivity alloc] initWithActivityType:NSUserActivityTypeBrowsingWeb];
-    activity.webpageURL = url;
-    SEL contSel = @selector(application:continueUserActivity:restorationHandler:);
-    if ([delegate respondsToSelector:contSel]) {
-        BOOL handled = [delegate application:app
-                        continueUserActivity:activity
-                          restorationHandler:^(NSArray<id<UIUserActivityRestoring>> *_Nullable _) {}];
-        if (handled) return;
-    }
-
-    if ([delegate respondsToSelector:@selector(application:openURL:options:)]) {
-        [delegate application:app openURL:url options:@{}];
-    }
+    [RYGURLOpener openURL:url];
 }
 @end
 
-static void sciAttachPasteGesture(UIButton *btn) {
+static void rygAttachPasteGesture(UIButton *btn) {
     if (!btn || objc_getAssociatedObject(btn, kPasteGestureKey)) return;
-    SCIPasteLinkHandler *handler = [SCIPasteLinkHandler shared];
+    RYGPasteLinkHandler *handler = [RYGPasteLinkHandler shared];
     UILongPressGestureRecognizer *g = [[UILongPressGestureRecognizer alloc]
         initWithTarget:handler action:@selector(longPressed:)];
     g.minimumPressDuration = 0.5;
@@ -113,6 +90,6 @@ static void sciAttachPasteGesture(UIButton *btn) {
     Ivar iv = class_getInstanceVariable([self class], "_exploreButton");
     if (!iv) return;
     id btn = object_getIvar(self, iv);
-    if ([btn isKindOfClass:[UIButton class]]) sciAttachPasteGesture(btn);
+    if ([btn isKindOfClass:[UIButton class]]) rygAttachPasteGesture(btn);
 }
 %end

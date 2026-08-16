@@ -1,19 +1,18 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 
-// Channels dms tab (header)
 %hook IGDirectInboxHeaderSectionController
 - (id)viewModel {
-    if ([[%orig title] isEqualToString:@"Suggested"]) {
-
-        if ([SCIUtils getBoolPref:@"no_suggested_chats"]) {
-            NSLog(@"[SCInsta] Hiding suggested chats (header: channels tab)");
-
-            return nil;
-        }
-
+    id vm = %orig;
+    if ([RYGUtils getBoolPref:@"no_suggested_chats"] && [[vm title] isEqualToString:@"Suggested"]) {
+        return nil;
     }
-
-    return %orig;
+    return vm;
 }
 %end
+
+%ctor {
+    Class cls = NSClassFromString(@"_TtC32IGDirectInboxViewControllerSwift36IGDirectInboxHeaderSectionController")
+        ?: NSClassFromString(@"IGDirectInboxHeaderSectionController");
+    %init(IGDirectInboxHeaderSectionController = cls);
+}

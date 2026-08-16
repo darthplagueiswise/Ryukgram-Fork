@@ -3,11 +3,6 @@
 %hook IGSundialViewerNavigationBarOld
 - (void)didMoveToWindow {
     %orig;
-
-    if ([SCIUtils getBoolPref:@"hide_reels_header"]) {
-        NSLog(@"[SCInsta] Hiding reels header");
-
-        [self removeFromSuperview];
-    }
+    if ([RYGUtils getBoolPref:@"hide_reels_header"]) [self removeFromSuperview];
 }
 %end

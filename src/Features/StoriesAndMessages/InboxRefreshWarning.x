@@ -1,20 +1,18 @@
-// Pull-to-refresh in the DMs tab silently clears preserved (locally retained)
-// unsent messages. This hook intercepts _pullToRefreshIfPossible to show a
-// confirmation dialog when both keep_deleted_message and
-// warn_refresh_clears_preserved are on.
+// Confirmation dialog before pull-to-refresh wipes preserved unsent
+// messages. Gated by keep_deleted_message + warn_refresh_clears_preserved.
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <substrate.h>
 
-extern NSMutableSet *sciGetPreservedIds(void);
-extern void sciClearPreservedIds(void);
+extern NSMutableSet *rygGetPreservedIds(void);
+extern void rygClearPreservedIds(void);
 
-static BOOL sciRefreshConfirmInFlight = NO;
-static BOOL sciRefreshAlertVisible = NO;
+static BOOL rygRefreshConfirmInFlight = NO;
+static BOOL rygRefreshAlertVisible = NO;
 
-static UIRefreshControl *sciFindRefreshControl(UIViewController *vc) {
+static UIRefreshControl *rygFindRefreshControl(UIViewController *vc) {
     Class igRC = NSClassFromString(@"IGRefreshControl");
     NSMutableArray *stack = [NSMutableArray arrayWithObject:vc.view];
     while (stack.count > 0) {
@@ -28,12 +26,10 @@ static UIRefreshControl *sciFindRefreshControl(UIViewController *vc) {
     return nil;
 }
 
-// On cancel, the IGRefreshControl's state machine is already idle by the time
-// our handler runs — but the scroll view's contentInset stays expanded, leaving
-// the spinner area visually exposed. We grab the idle inset via the inbox VC's
-// idleTopContentInsetForRefreshControl: helper and animate the inset back.
-static void sciCancelRefresh(UIViewController *vc) {
-    UIRefreshControl *rc = sciFindRefreshControl(vc);
+// Cancel path resets the refresh control's state and animates the scroll
+// view's contentInset back to its idle value (IG leaves it expanded otherwise).
+static void rygCancelRefresh(UIViewController *vc) {
+    UIRefreshControl *rc = rygFindRefreshControl(vc);
     if (!rc) return;
 
     Ivar stateIvar = class_getInstanceVariable([rc class], "_refreshState");
@@ -75,51 +71,51 @@ static void sciCancelRefresh(UIViewController *vc) {
 
 static void (*orig_pullToRefresh)(id self, SEL _cmd);
 static void new_pullToRefresh(id self, SEL _cmd) {
-    if (sciRefreshConfirmInFlight ||
-        ![SCIUtils getBoolPref:@"keep_deleted_message"] ||
-        ![SCIUtils getBoolPref:@"warn_refresh_clears_preserved"]) {
+    if (rygRefreshConfirmInFlight ||
+        ![RYGUtils getBoolPref:@"keep_deleted_message"] ||
+        ![RYGUtils getBoolPref:@"warn_refresh_clears_preserved"]) {
         orig_pullToRefresh(self, _cmd);
         return;
     }
 
-    // IG fires _pullToRefreshIfPossible repeatedly while the user holds the
-    // pull gesture — drop re-entrant calls until the alert is dismissed.
-    if (sciRefreshAlertVisible) return;
+    // Drop re-entrant calls — IG fires this repeatedly during the gesture.
+    if (rygRefreshAlertVisible) return;
 
-    NSUInteger count = sciGetPreservedIds().count;
+    NSUInteger count = rygGetPreservedIds().count;
     if (count == 0) {
         orig_pullToRefresh(self, _cmd);
         return;
     }
 
     UIViewController *vc = (UIViewController *)self;
-    NSString *msg = [NSString stringWithFormat:
-        @"Refreshing the DMs tab will clear %lu preserved unsent message%@. This cannot be undone.",
-        (unsigned long)count, count == 1 ? @"" : @"s"];
+    NSString *fmt = (count == 1)
+        ? RYGLocalized(@"Refreshing the DMs tab will clear %lu preserved unsent message. This cannot be undone.")
+        : RYGLocalized(@"Refreshing the DMs tab will clear %lu preserved unsent messages. This cannot be undone.");
+    NSString *msg = [NSString stringWithFormat:fmt, (unsigned long)count];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Clear preserved messages?")
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:RYGLocalized(@"Clear preserved messages?")
                                                                   message:msg
                                                            preferredStyle:UIAlertControllerStyleAlert];
 
     __weak UIViewController *weakSelf = vc;
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Cancel") style:UIAlertActionStyleCancel
+    [alert addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Cancel") style:UIAlertActionStyleCancel
                                             handler:^(UIAlertAction *a) {
-        sciCancelRefresh(weakSelf);
-        sciRefreshAlertVisible = NO;
+        rygCancelRefresh(weakSelf);
+        rygRefreshAlertVisible = NO;
     }]];
 
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Refresh") style:UIAlertActionStyleDestructive
+    [alert addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Refresh") style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction *a) {
-        sciRefreshAlertVisible = NO;
+        rygRefreshAlertVisible = NO;
         id strongSelf = weakSelf;
         if (!strongSelf) return;
-        sciClearPreservedIds();
-        sciRefreshConfirmInFlight = YES;
+        rygClearPreservedIds();
+        rygRefreshConfirmInFlight = YES;
         ((void(*)(id, SEL))objc_msgSend)(strongSelf, _cmd);
-        sciRefreshConfirmInFlight = NO;
+        rygRefreshConfirmInFlight = NO;
     }]];
 
-    sciRefreshAlertVisible = YES;
+    rygRefreshAlertVisible = YES;
     UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
     [top presentViewController:alert animated:YES completion:nil];
@@ -128,7 +124,9 @@ static void new_pullToRefresh(id self, SEL _cmd) {
 %ctor {
     Class cls = NSClassFromString(@"IGDirectInboxViewController");
     if (!cls) return;
-    SEL sel = NSSelectorFromString(@"_pullToRefreshIfPossible");
+    SEL sel = NSSelectorFromString(@"pullToRefreshIfPossible");
+    if (!class_getInstanceMethod(cls, sel))
+        sel = NSSelectorFromString(@"_pullToRefreshIfPossible");
     if (class_getInstanceMethod(cls, sel))
         MSHookMessageEx(cls, sel, (IMP)new_pullToRefresh, (IMP *)&orig_pullToRefresh);
 }

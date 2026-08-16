@@ -1,0 +1,420 @@
+// Exp flag browser + override editor.
+// Tabs: Browser(native) | Meta(override) | MC(view) | Scanned(view) | Overrides
+
+#import "RYGExpFlagsViewController.h"
+#import "../Features/ExpFlags/RYGExpFlags.h"
+#import "../Utils.h"
+#import <objc/runtime.h>
+#import <objc/message.h>
+
+typedef NS_ENUM(NSInteger, RYGExpTab) {
+    RYGExpTabBrowser = 0,
+    RYGExpTabMeta,
+    RYGExpTabMC,
+    RYGExpTabScanned,
+    RYGExpTabOverrides,
+};
+
+@interface RYGExpFlagsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate>
+@property (nonatomic, strong) UISegmentedControl *seg;
+@property (nonatomic, strong) UISearchBar *searchBar;
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIActivityIndicatorView *spinner;
+@property (nonatomic, strong) UILabel *empty;
+
+@property (nonatomic, assign) RYGExpTab tab;
+@property (nonatomic, copy)   NSString *query;
+
+// Tab data.
+@property (nonatomic, strong) NSArray<RYGExpObservation *>   *metaObs;
+@property (nonatomic, strong) NSArray<RYGExpMCObservation *> *mcObs;
+@property (nonatomic, strong) NSArray<NSString *>            *scannedNames;  // lazy-loaded
+@property (nonatomic, assign) BOOL scannedLoading;
+@property (nonatomic, strong) NSArray<NSString *>            *overriddenNames;
+@end
+
+@implementation RYGExpFlagsViewController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Experimental flags";
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:@"xmark.circle"]
+                style:UIBarButtonItemStylePlain target:self action:@selector(confirmResetAll)];
+
+    self.seg = [[UISegmentedControl alloc] initWithItems:@[@"Browser", @"Meta", @"MC IDs", @"Scanned", @"Overrides"]];
+    self.seg.selectedSegmentIndex = RYGExpTabMeta;
+    self.tab = RYGExpTabMeta;
+    [self.seg addTarget:self action:@selector(segChanged) forControlEvents:UIControlEventValueChanged];
+    self.seg.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.seg];
+
+    self.searchBar = [UISearchBar new];
+    self.searchBar.searchBarStyle = UISearchBarStyleMinimal;
+    self.searchBar.placeholder = @"Search";
+    self.searchBar.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.searchBar.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.searchBar.delegate = self;
+    self.searchBar.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.searchBar];
+
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
+    self.tableView.dataSource = self;
+    self.tableView.delegate = self;
+    self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
+    [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"cell"];
+    [self.view addSubview:self.tableView];
+
+    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    self.spinner.translatesAutoresizingMaskIntoConstraints = NO;
+    self.spinner.hidesWhenStopped = YES;
+    [self.view addSubview:self.spinner];
+
+    self.empty = [UILabel new];
+    self.empty.translatesAutoresizingMaskIntoConstraints = NO;
+    self.empty.textColor = UIColor.secondaryLabelColor;
+    self.empty.textAlignment = NSTextAlignmentCenter;
+    self.empty.numberOfLines = 0;
+    self.empty.font = [UIFont systemFontOfSize:14];
+    [self.view addSubview:self.empty];
+
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [self.seg.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
+        [self.seg.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [self.seg.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+
+        [self.searchBar.topAnchor constraintEqualToAnchor:self.seg.bottomAnchor constant:4],
+        [self.searchBar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
+        [self.searchBar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
+
+        [self.tableView.topAnchor constraintEqualToAnchor:self.searchBar.bottomAnchor],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:g.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:g.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:g.bottomAnchor],
+
+        [self.spinner.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
+        [self.spinner.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
+
+        [self.empty.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
+        [self.empty.centerYAnchor constraintEqualToAnchor:self.tableView.centerYAnchor],
+        [self.empty.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:24],
+        [self.empty.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-24],
+    ]];
+}
+
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self refresh]; }
+
+// tab state
+
+- (void)segChanged {
+    self.tab = (RYGExpTab)self.seg.selectedSegmentIndex;
+    if (self.tab == RYGExpTabScanned && !self.scannedNames && !self.scannedLoading) [self loadScanned];
+    [self refresh];
+}
+
+- (void)loadScanned {
+    self.scannedLoading = YES;
+    [self.spinner startAnimating];
+    [self updateEmpty];
+    [RYGExpFlags scanExecutableNamesWithCompletion:^(NSArray<NSString *> *names) {
+        self.scannedNames = names;
+        self.scannedLoading = NO;
+        [self.spinner stopAnimating];
+        [self refresh];
+    }];
+}
+
+- (void)refresh {
+    self.metaObs = [RYGExpFlags allObservations];
+    self.mcObs = [RYGExpFlags allMCObservations];
+    self.overriddenNames = [[RYGExpFlags allOverriddenNames] sortedArrayUsingSelector:@selector(compare:)];
+    [self.tableView reloadData];
+    [self updateEmpty];
+}
+
+- (void)updateEmpty {
+    NSInteger rows = [self tableView:self.tableView numberOfRowsInSection:0];
+    if (self.tab == RYGExpTabScanned && self.scannedLoading) {
+        self.empty.text = @"Scanning…";
+        self.empty.hidden = NO;
+        return;
+    }
+    if (rows == 0) {
+        switch (self.tab) {
+            case RYGExpTabBrowser:   self.empty.text = @""; break;
+            case RYGExpTabMeta:      self.empty.text = @"Browse IG to populate."; break;
+            case RYGExpTabMC:        self.empty.text = @"Browse IG to populate."; break;
+            case RYGExpTabScanned:   self.empty.text = self.query.length ? @"No match" : @"Empty."; break;
+            case RYGExpTabOverrides: self.empty.text = @"None."; break;
+        }
+        self.empty.hidden = NO;
+        return;
+    }
+    self.empty.hidden = YES;
+}
+
+// filter
+
+- (NSArray *)filteredRows {
+    switch (self.tab) {
+        case RYGExpTabBrowser:   return @[@"Open native list", @"Add override"];
+        case RYGExpTabMeta:      return [self filtered:self.metaObs keyPath:@"experimentName"];
+        case RYGExpTabMC:        return [self filterMC:self.mcObs];
+        case RYGExpTabScanned:   return [self filterStrings:self.scannedNames];
+        case RYGExpTabOverrides: return [self filterStrings:self.overriddenNames];
+    }
+}
+
+- (NSArray *)filtered:(NSArray *)items keyPath:(NSString *)kp {
+    if (!self.query.length) return items ?: @[];
+    NSString *q = self.query.lowercaseString;
+    NSMutableArray *out = [NSMutableArray array];
+    for (id o in items) {
+        NSString *s = [[o valueForKey:kp] lowercaseString];
+        if ([s containsString:q]) [out addObject:o];
+    }
+    return out;
+}
+
+- (NSArray *)filterMC:(NSArray<RYGExpMCObservation *> *)items {
+    if (!self.query.length) return items ?: @[];
+    NSString *q = self.query.lowercaseString;
+    NSMutableArray *out = [NSMutableArray array];
+    for (RYGExpMCObservation *o in items) {
+        NSString *s = [NSString stringWithFormat:@"%llu", o.paramID];
+        if ([s containsString:q]) [out addObject:o];
+    }
+    return out;
+}
+
+- (NSArray *)filterStrings:(NSArray<NSString *> *)items {
+    if (!self.query.length) return items ?: @[];
+    NSString *q = self.query.lowercaseString;
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSString *s in items) if ([s.lowercaseString containsString:q]) [out addObject:s];
+    return out;
+}
+
+// table
+
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)section { return [self filteredRows].count; }
+
+- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"cell" forIndexPath:ip];
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.textLabel.font = [UIFont systemFontOfSize:15];
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.text = nil;
+
+    id row = [self filteredRows][ip.row];
+
+    switch (self.tab) {
+        case RYGExpTabBrowser: {
+            cell.textLabel.text = (NSString *)row;
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+        }
+        case RYGExpTabMeta: {
+            RYGExpObservation *o = row;
+            [self fillCell:cell withName:o.experimentName subtitle:[NSString stringWithFormat:@"group=%@ · ×%lu", o.lastGroup ?: @"nil", (unsigned long)o.hitCount]];
+            break;
+        }
+        case RYGExpTabMC: {
+            RYGExpMCObservation *o = row;
+            NSString *tname = @"?";
+            switch (o.type) {
+                case RYGExpMCTypeBool:   tname = @"bool";   break;
+                case RYGExpMCTypeInt:    tname = @"int64";  break;
+                case RYGExpMCTypeDouble: tname = @"double"; break;
+                case RYGExpMCTypeString: tname = @"string"; break;
+            }
+            cell.textLabel.text = [NSString stringWithFormat:@"%llu", o.paramID];
+            cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · default=%@ · ×%lu", tname, o.lastDefault ?: @"?", (unsigned long)o.hitCount];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+        }
+        case RYGExpTabScanned: {
+            cell.textLabel.text = (NSString *)row;
+            cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+        }
+        case RYGExpTabOverrides: {
+            NSString *name = (NSString *)row;
+            [self fillCell:cell withName:name subtitle:nil];
+            break;
+        }
+    }
+    return cell;
+}
+
+- (void)fillCell:(UITableViewCell *)cell withName:(NSString *)name subtitle:(NSString *)sub {
+    RYGExpFlagOverride o = [RYGExpFlags overrideForName:name];
+    NSString *prefix = o == RYGExpFlagOverrideTrue ? @"● " : o == RYGExpFlagOverrideFalse ? @"○ " : @"";
+    cell.textLabel.text = [prefix stringByAppendingString:name];
+    cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
+    cell.textLabel.textColor = o == RYGExpFlagOverrideOff ? UIColor.labelColor : UIColor.systemOrangeColor;
+
+    NSMutableArray *parts = [NSMutableArray array];
+    if (sub.length) [parts addObject:sub];
+    if (o == RYGExpFlagOverrideTrue)  [parts addObject:@"FORCED ON"];
+    if (o == RYGExpFlagOverrideFalse) [parts addObject:@"FORCED OFF"];
+    cell.detailTextLabel.text = [parts componentsJoinedByString:@" · "];
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+}
+
+- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
+    [tv deselectRowAtIndexPath:ip animated:YES];
+    UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+    id row = [self filteredRows][ip.row];
+    switch (self.tab) {
+        case RYGExpTabBrowser:
+            if (ip.row == 0) [self openNativeBrowser];
+            else [self promptAddByName];
+            break;
+        case RYGExpTabMeta:
+            [self presentOverrideSheetForName:((RYGExpObservation *)row).experimentName fromCell:cell];
+            break;
+        case RYGExpTabMC: {
+            // View-only; offer Copy ID for user convenience.
+            RYGExpMCObservation *o = row;
+            [self presentCopySheetWithText:[NSString stringWithFormat:@"%llu", o.paramID] title:@"MobileConfig param" fromCell:cell];
+            break;
+        }
+        case RYGExpTabScanned:
+            [self presentCopySheetWithText:(NSString *)row title:@"Scanned name" fromCell:cell];
+            break;
+        case RYGExpTabOverrides:
+            [self presentOverrideSheetForName:(NSString *)row fromCell:cell];
+            break;
+    }
+}
+
+// actions
+
+- (void)openNativeBrowser {
+    Class cls = NSClassFromString(@"MetaLocalExperimentListViewController");
+    if (!cls) { [RYGUtils showErrorHUDWithDescription:@"Native browser missing"]; return; }
+    SEL initSel = NSSelectorFromString(@"initWithExperimentConfigs:experimentGenerator:");
+    UIViewController *vc = nil;
+    @try {
+        if ([cls instancesRespondToSelector:initSel]) {
+            id (*send)(id, SEL, id, id) = (id (*)(id, SEL, id, id))objc_msgSend;
+            vc = send([cls alloc], initSel, [self nativeBrowserConfigs], [self nativeBrowserGenerator]);
+        } else {
+            vc = [[cls alloc] init];
+        }
+    } @catch (__unused id e) {}
+    if (!vc) { [RYGUtils showErrorHUDWithDescription:@"Init failed"]; return; }
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+- (NSArray *)nativeBrowserConfigs {
+    Protocol *p = objc_getProtocol("MetaLocalExperimentConfigProtocol");
+    if (!p) return @[];
+    unsigned int n = 0;
+    Class *all = objc_copyClassList(&n);
+    NSMutableArray *out = [NSMutableArray array];
+    for (unsigned int i = 0; i < n; i++) {
+        if (class_conformsToProtocol(all[i], p)) {
+            @try { id x = [[all[i] alloc] init]; if (x) [out addObject:x]; } @catch (__unused id e) {}
+        }
+    }
+    if (all) free(all);
+    return out;
+}
+
+- (id)nativeBrowserGenerator {
+    Class c = NSClassFromString(@"LIDExperimentGenerator");
+    if (!c) return nil;
+    SEL s = NSSelectorFromString(@"initWithDeviceID:logger:");
+    if (![c instancesRespondToSelector:s]) return nil;
+    id (*send)(id, SEL, id, id) = (id (*)(id, SEL, id, id))objc_msgSend;
+    return send([c alloc], s, nil, nil);
+}
+
+- (void)promptAddByName {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Add override" message:@"Substring match, case-insensitive." preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"name (e.g. liquidglass)";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force ON" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        NSString *n = [a.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (n.length) { [RYGExpFlags setOverride:RYGExpFlagOverrideTrue forName:n]; [self refresh]; }
+    }]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Force OFF" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        NSString *n = [a.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (n.length) { [RYGExpFlags setOverride:RYGExpFlagOverrideFalse forName:n]; [self refresh]; }
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)presentOverrideSheetForName:(NSString *)name fromCell:(UITableViewCell *)cell {
+    RYGExpFlagOverride cur = [RYGExpFlags overrideForName:name];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *opts = @[@{@"t": @"No override", @"v": @(RYGExpFlagOverrideOff)},
+                      @{@"t": @"Force ON",    @"v": @(RYGExpFlagOverrideTrue)},
+                      @{@"t": @"Force OFF",   @"v": @(RYGExpFlagOverrideFalse)}];
+    for (NSDictionary *o in opts) {
+        NSString *t = o[@"t"];
+        if (((NSNumber *)o[@"v"]).integerValue == cur) t = [t stringByAppendingString:@"  ✓"];
+        [sheet addAction:[UIAlertAction actionWithTitle:t style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            [RYGExpFlags setOverride:((NSNumber *)o[@"v"]).integerValue forName:name];
+            [self refresh];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy name" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [UIPasteboard generalPasteboard].string = name;
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = cell;
+        sheet.popoverPresentationController.sourceRect = cell.bounds;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)presentCopySheetWithText:(NSString *)text title:(NSString *)title fromCell:(UITableViewCell *)cell {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:title message:text preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [UIPasteboard generalPasteboard].string = text;
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (sheet.popoverPresentationController) {
+        sheet.popoverPresentationController.sourceView = cell;
+        sheet.popoverPresentationController.sourceRect = cell.bounds;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)confirmResetAll {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Reset all?" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+        [RYGExpFlags resetAllOverrides];
+        [self refresh];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+// search
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)text {
+    self.query = text;
+    [self.tableView reloadData];
+    [self updateEmpty];
+}
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar { [searchBar resignFirstResponder]; }
+
+@end

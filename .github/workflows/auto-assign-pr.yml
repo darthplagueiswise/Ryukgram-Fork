@@ -14,5 +14,5 @@ jobs:
             - name: 'Auto-assign PR'
               uses: pozil/auto-assign-issue@v1
               with:
-                  assignees: faroukbmiled
+                  assignees: darthplagueiswise
                   allowNoAssignees: true
