@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,6 +63,21 @@ for path in active_sources:
             fail(f"bare %orig is nested in an expression or macro in {path.relative_to(ROOT)}")
         if re.search(r"%orig\s*\(\s*\)", code):
             fail(f"no-argument %orig() must use bare %orig in {path.relative_to(ROOT)}")
+
+theos_root = os.environ.get("THEOS")
+logos = Path(theos_root) / "bin/logos.pl" if theos_root else None
+if logos and logos.is_file():
+    for path in sorted(p for p in active_sources if p.suffix in {".x", ".xm"}):
+        result = subprocess.run(
+            ["perl", str(logos), str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
+            fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
 required = (
     ROOT / "src/Compatibility/RYGSideloadCompatibility.xm",

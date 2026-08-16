@@ -19,6 +19,7 @@
 #import "UI/RYGPopupChrome.h"
 #include "../modules/fishhook/fishhook.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 #define RYG_PREF(key) [RYGUtils getBoolPref:key]
 #define RYG_SCREENSHOT_BLOCKED RYG_PREF(@"remove_screenshot_alert")
@@ -30,6 +31,10 @@ static BOOL sLGButtons = NO;
 static BOOL sLGSurfaces = NO;
 static BOOL sLGForceOff = NO;
 static BOOL sLGProgressiveBlur = NO;
+static BOOL sRYGConfirmActionInFlight = NO;
+
+@interface RYGScrollEdgeEffectProxy : NSObject
+@end
 
 static BOOL sRYGRuntimeBrowserPresentationPending;
 static const void *kRYGRuntimeBrowserGestureKey = &kRYGRuntimeBrowserGestureKey;
@@ -251,7 +256,7 @@ static BOOL sDidShowSettings;
 // MARK: - Progressive blur (iOS 26+ scroll-edge effect)
 
 %group RYGProgressiveBlurGroup
-%hook UIScrollEdgeEffect
+%hook RYGScrollEdgeEffectProxy
 + (void)hide {}
 - (BOOL)ig_isHidden {return NO;}
 - (void)ig_setIsHidden:(BOOL)hidden {
@@ -542,26 +547,57 @@ static BOOL sDidShowSettings;
 
 // MARK: - Confirm / button behavior
 
+static void rygRunConfirmedAction(dispatch_block_t action, NSString *title) {
+	if (!action) return;
+	[RYGUtils showConfirmation:^{
+		sRYGConfirmActionInFlight = YES;
+		@try { action(); }
+		@finally { sRYGConfirmActionInFlight = NO; }
+	} title:title];
+}
+
 %group RYGConfirmActionsGroup
 
 %hook IGFeedItemUFICell
 
 - (void)UFIButtonBarDidTapOnLike:(id)arg1 {
-	if (!RYG_PREF(@"like_confirm")) return %orig;
-	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm like: Posts")];
+	if (!RYG_PREF(@"like_confirm") || sRYGConfirmActionInFlight) {
+		%orig;
+		return;
+	}
+	id target = self;
+	SEL selector = _cmd;
+	id argument = arg1;
+	rygRunConfirmedAction(^{
+		((void (*)(id, SEL, id))objc_msgSend)(target, selector, argument);
+	}, RYGLocalized(@"Confirm like: Posts"));
 }
 
 - (void)UFIButtonBarDidTapOnRepost:(id)arg1 {
-	if (!RYG_PREF(@"repost_confirm")) return %orig;
-	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm repost")];
+	if (!RYG_PREF(@"repost_confirm") || sRYGConfirmActionInFlight) {
+		%orig;
+		return;
+	}
+	id target = self;
+	SEL selector = _cmd;
+	id argument = arg1;
+	rygRunConfirmedAction(^{
+		((void (*)(id, SEL, id))objc_msgSend)(target, selector, argument);
+	}, RYGLocalized(@"Confirm repost"));
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 {
-	if (!RYG_PREF(@"repost_confirm")) return %orig;
+	if (!RYG_PREF(@"repost_confirm")) {
+		%orig;
+		return;
+	}
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 withGestureRecognizer:(id)arg2 {
-	if (!RYG_PREF(@"repost_confirm")) return %orig;
+	if (!RYG_PREF(@"repost_confirm")) {
+		%orig;
+		return;
+	}
 }
 
 %end
@@ -579,12 +615,22 @@ static BOOL sDidShowSettings;
 
 %hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
 - (void)didLongPressLikeButton:(id)arg1 {
-	if (!RYG_PREF(@"like_confirm_reels")) return %orig;
+	if (!RYG_PREF(@"like_confirm_reels")) {
+		%orig;
+		return;
+	}
 }
 - (void)didTapRepostButton {
 	if (RYG_PREF(@"hide_reels_repost")) return;
-	if (!RYG_PREF(@"repost_confirm")) return %orig;
-	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm repost")];
+	if (!RYG_PREF(@"repost_confirm") || sRYGConfirmActionInFlight) {
+		%orig;
+		return;
+	}
+	id target = self;
+	SEL selector = _cmd;
+	rygRunConfirmedAction(^{
+		((void (*)(id, SEL))objc_msgSend)(target, selector);
+	}, RYGLocalized(@"Confirm repost"));
 }
 
 - (void)didLongPressRepostButton:(id)arg1 {
@@ -711,6 +757,7 @@ static void rygInstallLiquidGlassHooks(void) {
 	}
 
 	if (sLGProgressiveBlur) {
-		%init(RYGProgressiveBlurGroup);
+		%init(RYGProgressiveBlurGroup,
+			RYGScrollEdgeEffectProxy = objc_getClass("UIScrollEdgeEffect"));
 	}
 }
