@@ -11,15 +11,21 @@ static void rygConfirmThemeChange(void (^apply)(void)) {
 
 %hook IGDirectThreadThemePickerViewController
 - (void)themeNewPickerSectionController:(id)a didSelectTheme:(id)b atIndex:(NSInteger)c {
-    rygConfirmThemeChange(^{ %orig; });
+    rygConfirmThemeChange(^{
+        %orig;
+    });
 }
 - (void)themePickerSectionController:(id)a didSelectThemeId:(id)b {
-    rygConfirmThemeChange(^{ %orig; });
+    rygConfirmThemeChange(^{
+        %orig;
+    });
 }
 %end
 
 %hook IGDirectThreadThemeKitSwift.IGDirectThreadThemePreviewController
 - (void)primaryButtonTapped {
-    rygConfirmThemeChange(^{ %orig; });
+    rygConfirmThemeChange(^{
+        %orig;
+    });
 }
 %end

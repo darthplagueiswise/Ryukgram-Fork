@@ -2,7 +2,12 @@
 
 %hook IGCommentComposer.IGCommentComposerController
 - (void)onSendButtonTap {
-    if (![RYGUtils getBoolPref:@"post_comment_confirm"]) { %orig; return; }
-    [RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm posting comment")];
+    if (![RYGUtils getBoolPref:@"post_comment_confirm"]) {
+        %orig;
+        return;
+    }
+    [RYGUtils showConfirmation:^{
+        %orig;
+    } title:RYGLocalized(@"Confirm posting comment")];
 }
 %end

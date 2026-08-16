@@ -146,7 +146,8 @@ static NSArray *removeShortFeedSpinner(NSArray *list) {
 
 %hook IGMainFeedListAdapterDataSource
 - (NSArray *)objectsForListAdapter:(id)arg1 {
-	return removeShortFeedSpinner(removeItemsInList(%orig, YES, rygHideAds(@"feed")));
+	NSArray *items = %orig;
+	return removeShortFeedSpinner(removeItemsInList(items, YES, rygHideAds(@"feed")));
 }
 %end
 
@@ -409,16 +410,25 @@ static NSArray *rygSundialFilterAndLimit(id dataSource, NSArray *list, id listAd
 }
 
 %hook IGSundialFeedDataSource
-- (NSArray *)objectsForListAdapter:(id)arg1 {return rygSundialFilterAndLimit(self, %orig, arg1);}
+- (NSArray *)objectsForListAdapter:(id)arg1 {
+	NSArray *items = %orig;
+	return rygSundialFilterAndLimit(self, items, arg1);
+}
 %end
 
 %hook _TtC13IGSundialFeed23IGSundialFeedDataSource
-- (NSArray *)objectsForListAdapter:(id)arg1 {return rygSundialFilterAndLimit(self, %orig, arg1);}
+- (NSArray *)objectsForListAdapter:(id)arg1 {
+	NSArray *items = %orig;
+	return rygSundialFilterAndLimit(self, items, arg1);
+}
 %end
 
 // IG 434 renamed the Swift module: IGSundialFeed -> IGSundialFeedDataSource.
 %hook _TtC23IGSundialFeedDataSource23IGSundialFeedDataSource
-- (NSArray *)objectsForListAdapter:(id)arg1 {return rygSundialFilterAndLimit(self, %orig, arg1);}
+- (NSArray *)objectsForListAdapter:(id)arg1 {
+	NSArray *items = %orig;
+	return rygSundialFilterAndLimit(self, items, arg1);
+}
 %end
 
 %hook IGSundialGridVideoViewController

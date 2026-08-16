@@ -37,8 +37,14 @@ static id rygActiveReelCell(void) {
 }
 
 %hook IGSundialViewerVideoCell
-- (void)videoViewDidUnpause:(id)v { %orig; sCurrentReelCell = self; }
-- (void)videoView:(id)v didInitialPlayWithStatus:(id)s { %orig; sCurrentReelCell = self; }
+- (void)videoViewDidUnpause:(id)v {
+	%orig;
+	sCurrentReelCell = self;
+}
+- (void)videoView:(id)v didInitialPlayWithStatus:(id)s {
+	%orig;
+	sCurrentReelCell = self;
+}
 %end
 
 // Accumulate from the last target when currentPlaybackTime hasn't caught up yet.

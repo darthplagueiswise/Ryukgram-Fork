@@ -14,7 +14,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 
 - (void)_didPressFollowButton {
 	if (self.user.followStatus == 2) {
-		rygConfirmFollow(^{ %orig; });
+		rygConfirmFollow(^{
+			%orig;
+		});
 		return;
 	}
 	%orig;
@@ -22,7 +24,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 
 - (void)_performUnfollow {
 	if ([RYGUtils getBoolPref:@"unfollow_confirm"]) {
-		[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm unfollow")];
+		[RYGUtils showConfirmation:^{
+			%orig;
+		} title:RYGLocalized(@"Confirm unfollow")];
 		return;
 	}
 	%orig;
@@ -33,11 +37,15 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGDiscoverPeopleButtonGroupView
 
 - (void)_onFollowButtonTapped:(id)arg1 {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 - (void)_onFollowingButtonTapped:(id)arg1 {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end
@@ -45,7 +53,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGHScrollAYMFCell
 
 - (void)_didTapAYMFActionButton {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end
@@ -53,7 +63,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGHScrollAYMFActionButton
 
 - (void)_didTapTextActionButton {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end
@@ -61,7 +73,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGUnifiedVideoFollowButton
 
 - (void)_hackilyHandleOurOwnButtonTaps:(id)arg1 event:(id)arg2 {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end
@@ -69,7 +83,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGProfileViewController
 
 - (void)navigationItemsControllerDidTapHeaderFollowButton:(id)arg1 {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end
@@ -77,7 +93,9 @@ static void rygConfirmFollow(dispatch_block_t originalAction) {
 %hook IGStorySectionController
 
 - (void)followButtonTapped:(id)arg1 cell:(id)arg2 {
-	rygConfirmFollow(^{ %orig; });
+	rygConfirmFollow(^{
+		%orig;
+	});
 }
 
 %end

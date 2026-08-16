@@ -306,13 +306,34 @@ BOOL RYGMessagesOnlyApplyLive(void) {
 %hook IGTabBarController
 
 // Block tab creation entirely so they never enter the buttons array (no gaps).
-- (void)_createAndConfigureTimelineButtonIfNeeded   { if (rygMsgOnly()) return; %orig; }
-- (void)_createAndConfigureReelsButtonIfNeeded      { if (rygMsgOnly()) return; %orig; }
-- (void)_createAndConfigureExploreButtonIfNeeded    { if (rygMsgOnlyHideSearch()) return; %orig; }
-- (void)_createAndConfigureCameraButtonIfNeeded     { if (rygMsgOnly()) return; %orig; }
-- (void)_createAndConfigureDynamicTabButtonIfNeeded { if (rygMsgOnly()) return; %orig; }
-- (void)_createAndConfigureNewsButtonIfNeeded       { if (rygMsgOnly()) return; %orig; }
-- (void)_createAndConfigureStreamsButtonIfNeeded    { if (rygMsgOnly()) return; %orig; }
+- (void)_createAndConfigureTimelineButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
+- (void)_createAndConfigureReelsButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
+- (void)_createAndConfigureExploreButtonIfNeeded {
+    if (rygMsgOnlyHideSearch()) return;
+    %orig;
+}
+- (void)_createAndConfigureCameraButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
+- (void)_createAndConfigureDynamicTabButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
+- (void)_createAndConfigureNewsButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
+- (void)_createAndConfigureStreamsButtonIfNeeded {
+    if (rygMsgOnly()) return;
+    %orig;
+}
 
 // LaunchTab forces the content; we just sync the indicator once laid out.
 - (void)viewDidAppear:(BOOL)animated {

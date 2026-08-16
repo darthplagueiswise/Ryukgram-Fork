@@ -224,7 +224,10 @@ static void RYGArm(void) {
 
 // Re-arm on login (re)appearance; covers in-session logout where no scene notification fires.
 %hook IGCAANavigationController
-- (void)viewDidAppear:(BOOL)animated { %orig; RYGArm(); }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    RYGArm();
+}
 %end
 
 %ctor {

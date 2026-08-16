@@ -96,8 +96,16 @@ static void ahApply(UIView *tv) {
 
 %group ActivityHeader
 %hook IGDirectLeftAlignedTitleView
-- (void)layoutSubviews { %orig; sCurrentTitleView = self; ahApply(self); }
-- (void)setTitleViewModel:(id)vm { %orig; sCurrentTitleView = self; ahApply(self); }
+- (void)layoutSubviews {
+    %orig;
+    sCurrentTitleView = self;
+    ahApply(self);
+}
+- (void)setTitleViewModel:(id)vm {
+    %orig;
+    sCurrentTitleView = self;
+    ahApply(self);
+}
 %end
 %end
 

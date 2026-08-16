@@ -13,7 +13,10 @@
 %hook IGVideoCallFooterView
 
 - (void)_audioButtonTapped:(id)sender {
-	if (![RYGUtils getBoolPref:@"call_recordings_ghost_mute"]) { %orig; return; }
+	if (![RYGUtils getBoolPref:@"call_recordings_ghost_mute"]) {
+		%orig;
+		return;
+	}
 
 	BOOL nowGhost = ![RYGCallAudioTap isGhostMuted];
 	[RYGCallAudioTap setGhostMuted:nowGhost];

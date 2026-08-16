@@ -198,13 +198,19 @@ static void rygClaimSlot(IGStoryViewersHeaderView *hdr, const char *ivar, SEL ac
 }
 
 - (void)setShowAuraUpsellButton:(BOOL)show {
-    if (!rygVLEnabled()) { %orig; return; }
+    if (!rygVLEnabled()) {
+        %orig;
+        return;
+    }
     %orig(YES);
     [self ryg_claimSlots];
 }
 
 - (void)setShowPromoteButton:(BOOL)show {
-    if (!rygVLEnabled()) { %orig; return; }
+    if (!rygVLEnabled()) {
+        %orig;
+        return;
+    }
     %orig(YES);
     [self ryg_claimSlots];
 }

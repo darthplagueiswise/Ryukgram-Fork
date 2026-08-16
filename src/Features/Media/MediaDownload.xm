@@ -324,8 +324,14 @@ static NSInteger rygCarouselPageIndexForView(UIView *view) {
 %hook IGProfilePhotoCoinFlipUI.IGProfilePhotoCoinFlipView
 
 - (void)viewLongPressedWithGesture:(UILongPressGestureRecognizer *)gesture {
-    if (![RYGUtils getBoolPref:@"zoom_profile_photo"]) { %orig; return; }
-    if (gesture.state != UIGestureRecognizerStateBegan) { %orig; return; }
+    if (![RYGUtils getBoolPref:@"zoom_profile_photo"]) {
+        %orig;
+        return;
+    }
+    if (gesture.state != UIGestureRecognizerStateBegan) {
+        %orig;
+        return;
+    }
 
     UIView *source = gesture.view;
     id user = [RYGProfileHelpers userForView:source];

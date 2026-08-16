@@ -339,10 +339,22 @@ static void rygApplyRateToSelf(id view, id playerArg) {
 
 %hook _TtC11IGVideoView11IGVideoView
 
-- (void)videoPlayerDidInitialPlay:(id)player { %orig; rygApplyRateToSelf(self, player); }
-- (void)videoPlayerDidReadyToDisplay:(id)player { %orig; rygApplyRateToSelf(self, player); }
-- (void)videoPlayerDidFinishPrepare:(id)player { %orig; rygApplyRateToSelf(self, player); }
-- (void)videoPlayerDidUnpause:(id)player { %orig; rygApplyRateToSelf(self, player); }
+- (void)videoPlayerDidInitialPlay:(id)player {
+	%orig;
+	rygApplyRateToSelf(self, player);
+}
+- (void)videoPlayerDidReadyToDisplay:(id)player {
+	%orig;
+	rygApplyRateToSelf(self, player);
+}
+- (void)videoPlayerDidFinishPrepare:(id)player {
+	%orig;
+	rygApplyRateToSelf(self, player);
+}
+- (void)videoPlayerDidUnpause:(id)player {
+	%orig;
+	rygApplyRateToSelf(self, player);
+}
 
 %end
 

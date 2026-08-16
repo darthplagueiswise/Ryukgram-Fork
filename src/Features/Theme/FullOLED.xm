@@ -70,13 +70,19 @@ static const void *kRYGFlattenedOriginalKey = &kRYGFlattenedOriginalKey;
 %hook UIView
 
 - (void)setBackgroundColor:(UIColor *)color {
-	if (!color) { %orig; return; }
+	if (!color) {
+		%orig;
+		return;
+	}
 
 	// Static colors resolve to themselves, so skip the trait resolve on the hot path.
 	UIColor *resolved = RYGColorIsDynamic(color) ? [color resolvedColorWithTraitCollection:self.traitCollection] : color;
 
 	if ([RYGTheme colorIsDarkSurface:resolved] && !RYGOLEDKeepGrey(self, ![RYGTheme colorIsNearBlack:resolved])) {
-		if ([RYGTheme isTweakSurface:self]) { %orig; return; }
+		if ([RYGTheme isTweakSurface:self]) {
+			%orig;
+			return;
+		}
 		// An attached view's verdict is final, so only stash while detached.
 		if (!self.window)
 			objc_setAssociatedObject(self, kRYGFlattenedOriginalKey, color, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

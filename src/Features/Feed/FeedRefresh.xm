@@ -100,7 +100,9 @@ static void rygFeedHandlePTR(id vc, void (^orig)(void)) {
 %group RYGFeedRefreshObjc
 %hook IGMainFeedViewController_objc
 - (void)_refreshWhenPTR {
-	rygFeedHandlePTR(self, ^{ %orig; });
+	rygFeedHandlePTR(self, ^{
+		%orig;
+	});
 }
 %end
 %end
@@ -108,7 +110,9 @@ static void rygFeedHandlePTR(id vc, void (^orig)(void)) {
 %group RYGFeedRefreshSwift
 %hook _TtC15IGMainFeedSwift30IGMainFeedViewController_swift
 - (void)refreshWhenPTR {
-	rygFeedHandlePTR(self, ^{ %orig; });
+	rygFeedHandlePTR(self, ^{
+		%orig;
+	});
 }
 %end
 %end

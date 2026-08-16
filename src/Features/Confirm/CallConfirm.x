@@ -56,7 +56,9 @@ static BOOL rygCallConfirmProceeding = NO;
     NSString *key = isVideo ? @"video_call_confirm" : @"voice_call_confirm";
     if (!rygCallConfirmProceeding && [RYGUtils getBoolPref:key]) {
         [RYGUtils showConfirmation:^(void) {
-            rygCallConfirmProceeding = YES; %orig; rygCallConfirmProceeding = NO;
+            rygCallConfirmProceeding = YES;
+            %orig;
+            rygCallConfirmProceeding = NO;
         } title:RYGLocalized(isVideo ? @"Confirm video call" : @"Confirm voice call")];
     } else {
         return %orig;
@@ -67,7 +69,9 @@ static BOOL rygCallConfirmProceeding = NO;
 - (void)_didTapAudioButton {
     if (!rygCallConfirmProceeding && [RYGUtils getBoolPref:@"voice_call_confirm"]) {
         [RYGUtils showConfirmation:^(void) {
-            rygCallConfirmProceeding = YES; %orig; rygCallConfirmProceeding = NO;
+            rygCallConfirmProceeding = YES;
+            %orig;
+            rygCallConfirmProceeding = NO;
         } title:RYGLocalized(@"Confirm voice call")];
     } else {
         return %orig;
@@ -77,7 +81,9 @@ static BOOL rygCallConfirmProceeding = NO;
 - (void)_didTapVideoButton {
     if (!rygCallConfirmProceeding && [RYGUtils getBoolPref:@"video_call_confirm"]) {
         [RYGUtils showConfirmation:^(void) {
-            rygCallConfirmProceeding = YES; %orig; rygCallConfirmProceeding = NO;
+            rygCallConfirmProceeding = YES;
+            %orig;
+            rygCallConfirmProceeding = NO;
         } title:RYGLocalized(@"Confirm video call")];
     } else {
         return %orig;
@@ -88,7 +94,9 @@ static BOOL rygCallConfirmProceeding = NO;
 - (void)_didTapAudioButton:(id)arg1 {
     if (!rygCallConfirmProceeding && [RYGUtils getBoolPref:@"voice_call_confirm"]) {
         [RYGUtils showConfirmation:^(void) {
-            rygCallConfirmProceeding = YES; %orig; rygCallConfirmProceeding = NO;
+            rygCallConfirmProceeding = YES;
+            %orig;
+            rygCallConfirmProceeding = NO;
         } title:RYGLocalized(@"Confirm voice call")];
     } else {
         return %orig;
@@ -98,7 +106,9 @@ static BOOL rygCallConfirmProceeding = NO;
 - (void)_didTapVideoButton:(id)arg1 {
     if (!rygCallConfirmProceeding && [RYGUtils getBoolPref:@"video_call_confirm"]) {
         [RYGUtils showConfirmation:^(void) {
-            rygCallConfirmProceeding = YES; %orig; rygCallConfirmProceeding = NO;
+            rygCallConfirmProceeding = YES;
+            %orig;
+            rygCallConfirmProceeding = NO;
         } title:RYGLocalized(@"Confirm video call")];
     } else {
         return %orig;

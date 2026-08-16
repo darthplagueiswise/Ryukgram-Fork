@@ -80,13 +80,37 @@ static id rygCoerceSurface(id ctrl, id surface) {
         [self setSelectedTabBarSurface:desired animated:NO animateIndicator:NO];
 }
 
-- (void)_timelineButtonPressed      { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_exploreButtonPressed       { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_discoverVideoButtonPressed { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_directInboxButtonPressed   { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_profileButtonPressed       { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_cameraButtonPressed        { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_newsButtonPressed          { rygReleaseLaunchTabLock(self); %orig; }
-- (void)_streamsButtonPressed       { rygReleaseLaunchTabLock(self); %orig; }
+- (void)_timelineButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_exploreButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_discoverVideoButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_directInboxButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_profileButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_cameraButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_newsButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
+- (void)_streamsButtonPressed {
+    rygReleaseLaunchTabLock(self);
+    %orig;
+}
 
 %end

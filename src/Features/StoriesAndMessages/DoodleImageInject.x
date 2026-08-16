@@ -101,8 +101,17 @@ static void rygPickFromGallery(id drawVC) {
 }
 
 - (void)_send {
-    if (gDoodlePassthrough) { gDoodlePassthrough = NO; %orig; return; }
-    if (gDoodleResending) { %orig; gDoodleResending = NO; gDoodleSource = nil; return; }
+    if (gDoodlePassthrough) {
+        gDoodlePassthrough = NO;
+        %orig;
+        return;
+    }
+    if (gDoodleResending) {
+        %orig;
+        gDoodleResending = NO;
+        gDoodleSource = nil;
+        return;
+    }
 
     __weak typeof(self) ws = self;
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:RYGLocalized(@"Send drawing")

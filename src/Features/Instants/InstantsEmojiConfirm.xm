@@ -41,12 +41,26 @@ static NSString *rygButtonText(UIControl *btn) {
 %hook IGBouncyTextButton
 
 - (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
-    if (!sel_isEqual(action, @selector(didTapToReact:))) { %orig; return; }
-    if (![RYGUtils getBoolPref:@"instants_emoji_reaction_confirm"]) { %orig; return; }
-    if (!rygIsLikelyEmoji(rygButtonText((UIControl *)self))) { %orig; return; }
-    if (!rygResponderHasQuickSnap(self)) { %orig; return; }
+    if (!sel_isEqual(action, @selector(didTapToReact:))) {
+        %orig;
+        return;
+    }
+    if (![RYGUtils getBoolPref:@"instants_emoji_reaction_confirm"]) {
+        %orig;
+        return;
+    }
+    if (!rygIsLikelyEmoji(rygButtonText((UIControl *)self))) {
+        %orig;
+        return;
+    }
+    if (!rygResponderHasQuickSnap(self)) {
+        %orig;
+        return;
+    }
 
-    [RYGUtils showConfirmation:^{ %orig; }
+    [RYGUtils showConfirmation:^{
+        %orig;
+    }
                          title:RYGLocalized(@"Confirm Instants emoji reaction")];
 }
 

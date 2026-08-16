@@ -95,7 +95,10 @@ static BOOL rygConfigIsReplacing(id config) {
 %group RYGGridFeedKill
 %hook IGMainFeedDataController
 - (void)feedNetworkSource:(id)source didReceiveFeedResponse:(id)response forRequestConfig:(id)config {
-	if (![RYGGridFeedInfo visible] || rygFeedVariant(config)) { %orig; return; }
+	if (![RYGGridFeedInfo visible] || rygFeedVariant(config)) {
+		%orig;
+		return;
+	}
 	NSString *next = nil;
 	NSArray<RYGGridFeedPost *> *posts = rygPostsFromResponse(response, &next);
 	if (posts.count) {

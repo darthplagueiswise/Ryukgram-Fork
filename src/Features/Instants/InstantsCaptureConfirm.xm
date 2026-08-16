@@ -56,9 +56,15 @@ static void rygClearCaptureHold(void) {
 %hook AVAssetWriter
 
 - (void)finishWritingWithCompletionHandler:(void (^)(void))handler {
-    if (!sVideoGateArmed) { %orig; return; }
+    if (!sVideoGateArmed) {
+        %orig;
+        return;
+    }
     sVideoGateArmed = NO;
-    if (![RYGUtils getBoolPref:@"instants_capture_confirm"] || !rygQuickSnapActive()) { %orig; return; }
+    if (![RYGUtils getBoolPref:@"instants_capture_confirm"] || !rygQuickSnapActive()) {
+        %orig;
+        return;
+    }
 
     void (^orig)(void) = [handler copy];
     void (^gated)(void) = ^{
@@ -76,11 +82,16 @@ static void rygClearCaptureHold(void) {
 %hook _TtC34IGQuickSnapCameraControlController28IGQuickSnapCameraControlView
 
 - (void)captureButtonDidReleaseBeforeExpandingFinished {
-    if (![RYGUtils getBoolPref:@"instants_capture_confirm"]) { %orig; return; }
+    if (![RYGUtils getBoolPref:@"instants_capture_confirm"]) {
+        %orig;
+        return;
+    }
     if (RYGInstantsShouldSwallowCaptureRelease()) return;
     sVideoGateArmed = NO;
     rygClearCaptureHold();
-    [RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm Instants capture")];
+    [RYGUtils showConfirmation:^{
+        %orig;
+    } title:RYGLocalized(@"Confirm Instants capture")];
 }
 
 %end
@@ -126,16 +137,28 @@ extern "C" void RYGDriveInstantAdvanceForStack(UIView *stack, CGPoint loc) {
 %hook _TtC39IGQuickSnapImmersiveViewerSnapStackView61IGQuickSnapImmersiveViewerAnimatingSnapStackViewTapController
 
 - (void)didPressWithGestureRecognizer:(UIGestureRecognizer *)gr {
-    if ([gr isKindOfClass:[RYGInstantAdvanceGR class]]) { %orig; return; }
-    if (gr.state != UIGestureRecognizerStateEnded) { %orig; return; }
-    if (![RYGUtils getBoolPref:@"instants_advance_confirm"]) { %orig; return; }
+    if ([gr isKindOfClass:[RYGInstantAdvanceGR class]]) {
+        %orig;
+        return;
+    }
+    if (gr.state != UIGestureRecognizerStateEnded) {
+        %orig;
+        return;
+    }
+    if (![RYGUtils getBoolPref:@"instants_advance_confirm"]) {
+        %orig;
+        return;
+    }
 
     UIView *stack = gr.view;
     Ivar psl = class_getInstanceVariable(object_getClass(self), "pressStartLocation");
     CGPoint start = psl ? *(CGPoint *)((char *)(__bridge void *)self + ivar_getOffset(psl)) : CGPointZero;
     CGPoint loc = [gr locationInView:stack];
     CGFloat dx = loc.x - start.x, dy = loc.y - start.y;
-    if ((dx * dx + dy * dy) > (12.0 * 12.0)) { %orig; return; }  // travelled => swipe
+    if ((dx * dx + dy * dy) > (12.0 * 12.0)) {
+        %orig;
+        return;
+    }  // travelled => swipe
 
     [RYGUtils showConfirmation:^{ RYGDriveInstantAdvanceForStack(stack, loc); }
                          title:RYGLocalized(@"Confirm switching Instant")];

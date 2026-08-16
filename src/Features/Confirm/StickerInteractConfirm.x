@@ -57,6 +57,8 @@ static BOOL rygTapIsReactionSticker(id target) {
 
     NSString *title = highlight ? RYGLocalized(@"Confirm sticker interaction (highlights)")
                                 : RYGLocalized(@"Confirm sticker interaction (stories)");
-    [RYGUtils showConfirmation:^(void) { %orig; } title:title];
+    [RYGUtils showConfirmation:^(void) {
+        %orig;
+    } title:title];
 }
 %end

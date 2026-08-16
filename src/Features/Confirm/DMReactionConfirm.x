@@ -31,19 +31,25 @@ static void rygConfirmDMDoubleTap(dispatch_block_t originalAction) {
 
 %hook IGDirectMessageSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    rygConfirmDMDoubleTap(^{ %orig; });
+    rygConfirmDMDoubleTap(^{
+        %orig;
+    });
 }
 %end
 
 %hook IGDirectMessageStickerSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    rygConfirmDMDoubleTap(^{ %orig; });
+    rygConfirmDMDoubleTap(^{
+        %orig;
+    });
 }
 %end
 
 %hook IGDirectMessageThreadedRepliesSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    rygConfirmDMDoubleTap(^{ %orig; });
+    rygConfirmDMDoubleTap(^{
+        %orig;
+    });
 }
 %end
 

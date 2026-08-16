@@ -157,7 +157,10 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
     BOOL noScroll = rygDisableHomeScroll();
     BOOL gridActive = [RYGGridFeedInfo active];
 
-    if (!noRefresh && !noScroll && !gridActive) { %orig; return; }
+    if (!noRefresh && !noScroll && !gridActive) {
+        %orig;
+        return;
+    }
 
     UIViewController *selected = nil;
     if ([self respondsToSelector:@selector(selectedViewController)])
@@ -170,13 +173,17 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
         onFeedTab = [NSStringFromClass([top class]) containsString:@"MainFeed"];
     }
 
-    if (!onFeedTab) { %orig; return; }
+    if (!onFeedTab) {
+        %orig;
+        return;
+    }
 
     // Grid owns the feed: IG's %orig would scroll its hidden collection, so scroll ours.
     if (gridActive) {
         if (noScroll) return;
         if ([RYGHomeGridController handleHomeButtonTap]) return;
-        %orig; return;
+        %orig;
+        return;
     }
     if (noScroll) return;
 
@@ -200,7 +207,10 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 // MARK: - Reels tab refresh
 
 - (void)_discoverVideoButtonPressed {
-    if (!rygDisableReelsRefresh()) { %orig; return; }
+    if (!rygDisableReelsRefresh()) {
+        %orig;
+        return;
+    }
 
     UIViewController *selected = nil;
     if ([self respondsToSelector:@selector(selectedViewController)])
@@ -215,7 +225,10 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
                   || [cls containsString:@"DiscoverVideo"];
     }
 
-    if (!onReelsTab) { %orig; return; }
+    if (!onReelsTab) {
+        %orig;
+        return;
+    }
 }
 
 %end
