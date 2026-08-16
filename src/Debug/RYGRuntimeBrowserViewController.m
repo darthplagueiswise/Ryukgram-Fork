@@ -230,9 +230,12 @@ static NSString *RYGRuntimeImagePersistenceID(NSString *path) {
 	self.scanning = YES;
 	self.navigationItem.rightBarButtonItems.firstObject.enabled = NO;
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-		NSArray *rows = mode == RYGRuntimeBrowserModeBoolMethods
-			? [RYGRuntimeBrowserEngine boolMethodsForImagePath:path scope:scope]
-			: [RYGRuntimeBrowserEngine machOSymbolsForImagePath:path];
+		NSArray *rows;
+		if (mode == RYGRuntimeBrowserModeBoolMethods) {
+			rows = [RYGRuntimeBrowserEngine boolMethodsForImagePath:path scope:scope];
+		} else {
+			rows = [RYGRuntimeBrowserEngine machOSymbolsForImagePath:path];
+		}
 		dispatch_async(dispatch_get_main_queue(), ^{
 			if (generation != self.scanGeneration) return;
 			if (mode == RYGRuntimeBrowserModeBoolMethods) self.boolRows = rows;
@@ -247,7 +250,9 @@ static NSString *RYGRuntimeImagePersistenceID(NSString *path) {
 - (void)applySearchFilter {
 	NSString *query = [self.searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
 	BOOL boolMode = self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeBoolMethods;
-	NSArray *source = boolMode ? self.boolRows : self.symbolRows;
+	NSArray *source;
+	if (boolMode) source = self.boolRows;
+	else source = self.symbolRows;
 	if (!query.length) {
 		self.visibleRows = source;
 	} else if (boolMode) {
