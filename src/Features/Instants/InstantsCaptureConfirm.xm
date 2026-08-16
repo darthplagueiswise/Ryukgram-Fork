@@ -56,9 +56,9 @@ static void rygClearCaptureHold(void) {
 %hook AVAssetWriter
 
 - (void)finishWritingWithCompletionHandler:(void (^)(void))handler {
-    if (!sVideoGateArmed) { %orig(handler); return; }
+    if (!sVideoGateArmed) { %orig; return; }
     sVideoGateArmed = NO;
-    if (![RYGUtils getBoolPref:@"instants_capture_confirm"] || !rygQuickSnapActive()) { %orig(handler); return; }
+    if (![RYGUtils getBoolPref:@"instants_capture_confirm"] || !rygQuickSnapActive()) { %orig; return; }
 
     void (^orig)(void) = [handler copy];
     void (^gated)(void) = ^{
@@ -67,7 +67,8 @@ static void rygClearCaptureHold(void) {
                                  title:RYGLocalized(@"Confirm Instants capture")];
         });
     };
-    %orig(gated);
+    handler = gated;
+    %orig;
 }
 
 %end
