@@ -49,8 +49,10 @@ jobs:
       - name: Install packaging and analysis tools
         run: |
           brew install dpkg
-          python3 -m pip install --upgrade capstone lief
-          python3 -m pip install --force-reinstall https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+          python3 -m venv "$RUNNER_TEMP/ryg-python"
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --upgrade pip capstone lief
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --force-reinstall https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+          echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
 
       - name: Resolve release tag
         env:

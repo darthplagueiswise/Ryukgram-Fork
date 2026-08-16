@@ -32,7 +32,9 @@ jobs:
           brew untap aws/tap || true
           brew untap azure/bicep || true
           brew install ldid dpkg make
-          python3 -m pip install --upgrade capstone lief
+          python3 -m venv "$RUNNER_TEMP/ryg-python"
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --upgrade pip capstone lief
+          echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Setup Theos
