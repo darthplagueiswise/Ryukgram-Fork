@@ -122,27 +122,30 @@ static void RYGLiveObserveMethod(RYGRuntimeBoolMethod *row) {
 
     IMP replacement = NULL;
     switch (row.argumentKind) {
-        case RYGRuntimeArgumentNone:
+        case RYGRuntimeArgumentNone: {
             replacement = imp_implementationWithBlock(^BOOL(id receiver) {
                 BOOL native = *original ? ((BOOL (*)(id, SEL))*original)(receiver, capturedSelector) : NO;
                 RYGLiveRecord(key, native);
                 return native;
             });
             break;
-        case RYGRuntimeArgumentObject:
+        }
+        case RYGRuntimeArgumentObject: {
             replacement = imp_implementationWithBlock(^BOOL(id receiver, id argument) {
                 BOOL native = *original ? ((BOOL (*)(id, SEL, id))*original)(receiver, capturedSelector, argument) : NO;
                 RYGLiveRecord(key, native);
                 return native;
             });
             break;
-        case RYGRuntimeArgumentInteger:
+        }
+        case RYGRuntimeArgumentInteger: {
             replacement = imp_implementationWithBlock(^BOOL(id receiver, uint64_t argument) {
                 BOOL native = *original ? ((BOOL (*)(id, SEL, uint64_t))*original)(receiver, capturedSelector, argument) : NO;
                 RYGLiveRecord(key, native);
                 return native;
             });
             break;
+        }
     }
     if (!replacement) {
         free(original);
