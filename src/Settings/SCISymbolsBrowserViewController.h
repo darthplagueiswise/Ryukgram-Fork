@@ -1,5 +1,6 @@
 // SCISymbolsBrowserViewController.h
-// ABI-aware Mach-O browser for Instagram/FBShared symbols.
+// ABI-aware, on-demand Mach-O browser for the executable and every loaded app
+// framework/dylib. No symbol catalogue or ASLR address is preloaded/persisted.
 
 #import "SCIBaseSettingsListViewController.h"
 

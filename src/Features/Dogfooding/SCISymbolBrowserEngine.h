@@ -1,5 +1,6 @@
 // SCISymbolBrowserEngine.h
-// Runtime ObjC experiment/gating browser for Instagram + FBSharedFramework.
+// Runtime ObjC experiment/gating browser for the app executable and every
+// currently loaded framework/dylib inside the Instagram bundle.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
@@ -33,6 +34,15 @@ typedef NS_ENUM(NSInteger, SCISymbolArgumentKind) {
 @end
 
 @interface SCISymbolBrowserEngine : NSObject
+/// Snapshot of loaded app-owned Mach-O images. Main executable is first;
+/// Frameworks/*.framework and Frameworks/*.dylib follow alphabetically.
++ (NSArray<NSString *> *)runtimeImagePaths;
++ (NSString *)shortNameForImagePath:(NSString *)imagePath;
++ (NSArray<SCISymbolClass *> *)classesForImagePath:(NSString *)imagePath;
++ (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName;
+
+/// Legacy two-image API retained for existing callers. FBShared maps to
+/// FBSharedFramework when loaded, otherwise InstagramSharedFramework.
 + (NSArray<SCISymbolClass *> *)classesForImage:(SCISymbolImage)image;
 + (nullable NSNumber *)liveValueForClass:(NSString *)className selector:(NSString *)selectorName isClassMethod:(BOOL)isClassMethod;
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;

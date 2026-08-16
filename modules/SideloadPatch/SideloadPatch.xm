@@ -52,9 +52,19 @@ static NSString *getAppGroupPathIfExists(void) {
 }
 
 static BOOL createDirectoryIfNotExists(NSString *path) {
+    if (!path.length) return NO;
     NSFileManager *fm = [NSFileManager defaultManager];
     if ([fm fileExistsAtPath:path]) return YES;
     return [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
+}
+
+static NSString *safeGroupIdentifier(id value) {
+    if (![value isKindOfClass:NSString.class]) return @"group.ryukgram.default";
+    NSString *identifier = (NSString *)value;
+    if (!identifier.length) return @"group.ryukgram.default";
+    if ([identifier containsString:@"/"] || [identifier isEqualToString:@"."] ||
+        [identifier isEqualToString:@".."]) return @"group.ryukgram.default";
+    return identifier;
 }
 
 // -- SecItem replacements: set the correct access group on every call --
@@ -115,11 +125,16 @@ static id replaced_CKContainer_init(id self, SEL _cmd, id identifier) {
 // -- NSFileManager: redirect app group container to a local fallback --
 
 static NSURL *replaced_containerURL(id self, SEL _cmd, NSString *groupId) {
-    // --dup installs ask for a nil group; appending nil throws and crashes launch.
-    if (!groupId.length) groupId = @"group.ryukgram.default";
+    // --dup installs and third-party plugin injectors can supply nil or an
+    // object that is not a string; never forward either into path utilities.
+    groupId = safeGroupIdentifier(groupId);
     NSString *groupPath = getAppGroupPathIfExists();
     if (!groupPath) {
         NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).lastObject;
+        if (!docs.length) {
+            NSString *home = NSHomeDirectory();
+            docs = home.length ? [home stringByAppendingPathComponent:@"Documents"] : NSTemporaryDirectory();
+        }
         NSString *fallback = [docs stringByAppendingPathComponent:groupId];
         createDirectoryIfNotExists(fallback);
         return [NSURL fileURLWithPath:fallback];

@@ -63,6 +63,15 @@ static BOOL createDirectoryIfNotExists(NSString *path) {
 	return error == nil;
 }
 
+static NSString *sciSafeGroupIdentifier(id value) {
+	if (![value isKindOfClass:NSString.class]) return @"group.ryukgram.default";
+	NSString *identifier = (NSString *)value;
+	if (!identifier.length) return @"group.ryukgram.default";
+	if ([identifier containsString:@"/"] || [identifier isEqualToString:@"."] ||
+		[identifier isEqualToString:@".."]) return @"group.ryukgram.default";
+	return identifier;
+}
+
 static NSURL *getAppGroupPathIfExists(void) {
 	static NSURL *cached = nil;
 	static dispatch_once_t once;
@@ -246,7 +255,7 @@ static void rebindSecFuncs(void) {
 %hook NSFileManager
 
 - (NSURL *)containerURLForSecurityApplicationGroupIdentifier:(NSString *)groupIdentifier {
-	NSString *group = groupIdentifier.length ? groupIdentifier : @"group";
+	NSString *group = sciSafeGroupIdentifier(groupIdentifier);
 
 	if (NSURL *appGroupURL = getAppGroupPathIfExists()) {
 		NSURL *url = [appGroupURL URLByAppendingPathComponent:group isDirectory:YES];

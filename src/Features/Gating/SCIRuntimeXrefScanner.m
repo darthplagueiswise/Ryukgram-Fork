@@ -81,9 +81,14 @@ static inline int sci_decode_br(uint32_t instr, int *rn) {
 
 static BOOL sci_is_scope_image(const char *path) {
     if (!path) return NO;
-    const char *slash = strrchr(path, '/');
-    const char *base = slash ? slash + 1 : path;
-    return strcmp(base, "Instagram") == 0 || strstr(path, "/FBSharedFramework") != NULL;
+    NSString *candidate = [[NSString stringWithUTF8String:path]
+        stringByStandardizingPath];
+    NSString *executable = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    NSString *frameworkRoot = [[NSBundle.mainBundle.bundlePath
+        stringByAppendingPathComponent:@"Frameworks"] stringByStandardizingPath];
+    if (executable.length && [candidate isEqualToString:executable]) return YES;
+    return frameworkRoot.length &&
+        [candidate hasPrefix:[frameworkRoot stringByAppendingString:@"/"]];
 }
 
 static NSString *sci_short_image_name(const char *path) {

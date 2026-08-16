@@ -105,10 +105,11 @@ static SCISetting *SCITier2EmployeeInternalSwitch(void) {
 	// on iOS 27 that left the code page rw- and the app was SIGKILLed
 	// (CODESIGNING / Invalid Page). Disassembly also proved that thunk never
 	// reaches the imported EasyGating evaluator, so a fishhook could not cover it
-	// either. The only sideload-safe surface is the ObjC identity getters, which
-	// SCIEmployeeConsumers.x swizzles via MSHookMessageEx (__DATA, never __TEXT).
+	// either. This branch uses ObjC identity swizzles plus the version-detected
+	// MobileConfig DATA-descriptor reader (present in Instagram 376); both stay
+	// on writable indirection/data surfaces and never patch __TEXT.
 	return [SCISetting switchCellWithTitle:SCILocalized(@"Tier-2")
-		subtitle:SCILocalized(@"Single master: forces employee/internal ObjC identity + GraphQL dogfooding eligibility + bypasses the production lockout screen. Sideload-safe (__DATA swizzle only). Restart for cached checks.")
+		subtitle:SCILocalized(@"Single master: forces employee MobileConfig descriptors when this runtime exposes them, ObjC identity, GraphQL dogfooding eligibility and the local production-lockout gate. No __TEXT patch. Restart for cached checks.")
 		value:^BOOL {
 			return [SCIUtils getBoolPref:@"sci_force_ig_internal_employee"];
 		} action:^(BOOL on) {
@@ -271,7 +272,7 @@ static void SCIIdNameMapExport(void) {
 		},
 		@{
 			@"header": SCILocalized(@"Employee / Internal, GraphQL Dogfood & Internal Settings"),
-			@"footer": SCILocalized(@"Employee / Internal forces the local ObjC identity getters to YES using a __DATA method swizzle (MSHookMessageEx) — never an inline __TEXT patch, which crashes under sideload on iOS 27. The C-level is_employee thunk is intentionally not hooked. Internal-only content may still require server authorization."),
+			@"footer": SCILocalized(@"Employee / Internal combines local ObjC identity swizzles with a version-detected MobileConfig DATA reader filter. In Instagram 376 the native reader consumes the raw ig_is_employee descriptor in x3; the hook preserves x0–x7, then overrides only those exact descriptors. No inline __TEXT patch. Server-authorized content can still require a valid internal account."),
 			@"rows": @[
 				SCITier2EmployeeInternalSwitch(),
 				SCIInternalSettingsSwitch(
@@ -396,7 +397,7 @@ static void SCIIdNameMapExport(void) {
 		},
 		@{
 			@"header": SCILocalized(@"Current C experiment gates"),
-			@"footer": SCILocalized(@"The removed IGMobileConfigBooleanValueForInternalUse reader is not exposed. Remaining rows map to imports/exports confirmed in Instagram(4) and FBSharedFramework(4); complex readers call the original first, then force YES."),
+			@"footer": SCILocalized(@"Runtime-adaptive C gates. Instagram 376 exposes IGMobileConfigBooleanValueForInternalUse plus ig_is_employee DATA descriptors; builds without that reader automatically disable only the descriptor backend. Every hooked reader calls the original with its full ABI before applying an override."),
 			@"rows": @[
 				[SCISetting switchCellWithTitle:SCILocalized(@"Instagram internal apps installed") subtitle:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18" defaultsKey:@"sci_force_ig_internal_apps_installed_after_ios18" requiresRestart:YES],
 				[SCISetting switchCellWithTitle:SCILocalized(@"Minos dogfood MEK") subtitle:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled" defaultsKey:@"sci_force_minos_dogfood_mek_encryption" requiresRestart:YES],
@@ -547,10 +548,10 @@ static void SCIIdNameMapExport(void) {
 		},
 				@{
 			@"header": SCILocalized(@"Runtime"),
-			@"footer": SCILocalized(@"The ObjC index includes supported BOOL methods with zero or one object/integer argument; GraphQL dogfood uses exact typed hooks instead of a global status hook."),
+			@"footer": SCILocalized(@"Liquid Glass browser with on-demand dyld/ObjC scans. It persists only the selected image/mode/filter and explicit overrides; symbol rows and ASLR addresses are always rebuilt live. Equality, responder, delegate and trivial UIKit BOOL noise is excluded at discovery."),
 			@"rows": @[
 				[SCISetting navigationCellWithTitle:SCILocalized(@"Unified Runtime Browser")
-					subtitle:SCILocalized(@"Exec + FBShared: ObjC, C, DATA and Swift/xrefs")
+					subtitle:SCILocalized(@"Live executable/framework selector: ObjC, C, DATA, Swift and xrefs; no preloaded symbol table")
 					icon:[SCISymbol symbolWithIGName:@"bcn_code_outline_24" fallback:@"square.grid.2x2"]
 					viewController:[[SCISymbolsBrowserViewController alloc] initWithMode:SCICSymbolsBrowserModeObjCMethods]],
 				[SCISetting navigationCellWithTitle:@"IGDSLauncherConfig"

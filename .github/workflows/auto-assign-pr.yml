@@ -13,7 +13,14 @@ jobs:
             pull-requests: write
         steps:
             - name: 'Auto-assign PR'
-              uses: pozil/auto-assign-issue@v1
+              uses: actions/github-script@v9
               with:
-                  assignees: faroukbmiled
-                  allowNoAssignees: true
+                  script: |
+                      const { owner, repo } = context.repo;
+                      const issue_number = context.payload.pull_request.number;
+                      await github.rest.issues.addAssignees({
+                          owner,
+                          repo,
+                          issue_number,
+                          assignees: ['faroukbmiled'],
+                      });

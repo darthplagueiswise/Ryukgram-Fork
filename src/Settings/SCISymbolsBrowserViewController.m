@@ -14,6 +14,7 @@
 @interface SCICSymbolEntry : NSObject
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *image;
+@property (nonatomic, copy) NSString *imagePath;
 @property (nonatomic, copy) NSString *section;
 @property (nonatomic, copy) NSString *kind;
 @property (nonatomic, copy) NSString *abi;
@@ -37,12 +38,47 @@
 @end
 @implementation SCICSymbolGroup @end
 
+// Persist only lightweight UI choices. Runtime images, symbols, addresses and
+// scan results are deliberately rediscovered from dyld/ObjC on demand.
+static NSString *const kSCICBrowserImagePreference = @"sci_runtime_browser_image_v2";
+static NSString *const kSCICBrowserModePreference = @"sci_runtime_browser_mode_v2";
+static NSString *const kSCICBrowserRelevancePreference = @"sci_runtime_browser_relevance_v2";
+
+static NSString *SCICImagePreferenceIdentifier(NSString *imagePath) {
+    if (!imagePath.length) return @"all";
+    NSString *standard = imagePath.stringByStandardizingPath;
+    NSString *executable = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    if (executable.length && [standard isEqualToString:executable]) return @"executable";
+    NSString *bundle = NSBundle.mainBundle.bundlePath.stringByStandardizingPath;
+    NSString *prefix = [bundle stringByAppendingString:@"/"];
+    if (bundle.length && [standard hasPrefix:prefix]) {
+        return [@"bundle:" stringByAppendingString:
+            [standard substringFromIndex:prefix.length]];
+    }
+    return [@"name:" stringByAppendingString:standard.lastPathComponent ?: @""];
+}
+
+static NSString *SCICImagePathForPreferenceIdentifier(
+    NSString *identifier,
+    NSArray<NSString *> *runtimePaths
+) {
+    if (![identifier isKindOfClass:NSString.class] || !identifier.length ||
+        [identifier isEqualToString:@"all"]) return nil;
+    for (NSString *path in runtimePaths ?: @[]) {
+        if ([SCICImagePreferenceIdentifier(path) isEqualToString:identifier]) {
+            return path;
+        }
+    }
+    return nil;
+}
+
 
 static NSDictionary<NSString *, id> *SCICResolverInfoForEntry(SCICSymbolEntry *e) {
     if (!e) return @{};
     return @{
         @"symbol": e.name ?: @"",
         @"image": e.image ?: @"",
+        @"imagePath": e.imagePath ?: @"",
         @"section": e.section ?: @"",
         @"kind": e.kind ?: @"",
         @"abi": e.abi ?: @"",
@@ -88,13 +124,17 @@ static void scic_collect_sections(const struct mach_header_64 *mh, NSMutableArra
 }
 
 static BOOL SCICIsImageWanted(NSString *path) {
-    return [path.lastPathComponent isEqualToString:@"Instagram"] || [path containsString:@"/FBSharedFramework"];
+    NSString *standard = path.stringByStandardizingPath;
+    NSString *executable = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    NSString *frameworkRoot = [[NSBundle.mainBundle.bundlePath
+        stringByAppendingPathComponent:@"Frameworks"] stringByStandardizingPath];
+    if (executable.length && [standard isEqualToString:executable]) return YES;
+    return frameworkRoot.length &&
+        [standard hasPrefix:[frameworkRoot stringByAppendingString:@"/"]];
 }
 
 static NSString *SCICImageShortName(NSString *path) {
-    if ([path containsString:@"/FBSharedFramework"]) return @"FBSharedFramework";
-    if ([path.lastPathComponent isEqualToString:@"Instagram"]) return @"Instagram";
-    return path.lastPathComponent ?: @"Image";
+    return [SCISymbolBrowserEngine shortNameForImagePath:path];
 }
 
 static void SCICCollectImportedSymbolNamesForImage(uint32_t imageIndex, NSMutableSet<NSString *> *out) {
@@ -150,19 +190,6 @@ static void SCICCollectImportedSymbolNamesForImage(uint32_t imageIndex, NSMutabl
         }
     }
 }
-
-static NSSet<NSString *> *SCICImportedSymbolNames(void) {
-    static NSSet<NSString *> *names = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableSet<NSString *> *set = [NSMutableSet set];
-        uint32_t count = _dyld_image_count();
-        for (uint32_t i = 0; i < count; i++) SCICCollectImportedSymbolNamesForImage(i, set);
-        names = set.copy;
-    });
-    return names ?: [NSSet set];
-}
-
 
 static BOOL SCICRuntimeResolveSymbol(NSString *name, void **addrOut) {
     if (!name.length) return NO;
@@ -439,7 +466,7 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
     self.scanState = 1;
     [self.table reloadData];
     __weak typeof(self) ws = self;
-    // Scan all supported images (Instagram + FBShared) because callers/import slots
+    // Scan all loaded app-owned images because callers/import slots
     // can live outside the image defining the symbol. Bounded & off-main.
     [SCIRuntimeXrefScanner findConsumersOfAddress:self.resolvedAddr
                                     imageSubstring:nil
@@ -730,9 +757,9 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
         return cell;
     }
     if (ip.section == 2) {
-        if (self.scanState == 0) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = self.view.tintColor; cell.textLabel.text = @"Resolve consumers (xref scan)"; cell.detailTextLabel.text = @"Bounded, read-only scan of Instagram + FBShared __TEXT,__text for callers/consumers."; return cell; }
-        if (self.scanState == 1) { cell.textLabel.text = @"Scanning…"; cell.detailTextLabel.text = @"Scanning Instagram + FBShared for direct BL callers, GOT loads, ADR/ADRP/ADD/LDR consumers and BLR indirect calls."; return cell; }
-        if (self.xrefHits.count == 0) { cell.textLabel.text = @"No consumer resolved"; cell.detailTextLabel.text = self.scanHitBudget ? @"Budget reached before a hit. Tap to rescan." : @"No direct BL/GOT/ADR consumer found in Instagram/FBShared. Use live capture if the path is lazy, Swift-dispatched or generated."; cell.selectionStyle = UITableViewCellSelectionStyleDefault; return cell; }
+        if (self.scanState == 0) { cell.selectionStyle = UITableViewCellSelectionStyleDefault; cell.textLabel.textColor = self.view.tintColor; cell.textLabel.text = @"Resolve consumers (xref scan)"; cell.detailTextLabel.text = @"Bounded, read-only scan of the executable and loaded app frameworks for callers/consumers."; return cell; }
+        if (self.scanState == 1) { cell.textLabel.text = @"Scanning…"; cell.detailTextLabel.text = @"Scanning app images for direct BL callers, GOT loads, ADR/ADRP/ADD/LDR consumers and BLR indirect calls."; return cell; }
+        if (self.xrefHits.count == 0) { cell.textLabel.text = @"No consumer resolved"; cell.detailTextLabel.text = self.scanHitBudget ? @"Budget reached before a hit. Tap to rescan." : @"No direct BL/GOT/ADR consumer found in loaded app images. Use live capture if the path is lazy, Swift-dispatched or generated."; cell.selectionStyle = UITableViewCellSelectionStyleDefault; return cell; }
         if (self.scanHitBudget && ip.row == (NSInteger)self.xrefHits.count) { cell.textLabel.text = @"⚠ budget reached"; cell.detailTextLabel.text = @"More consumers may exist beyond the scan budget."; return cell; }
         SCIXrefHit *h = self.xrefHits[ip.row];
         cell.textLabel.text = h.calleeSymbol ?: [SCIRuntimeXrefScanner describeAddress:h.calleeAddress];
@@ -760,6 +787,14 @@ static SCICPatchStrategy SCICPatchStrategyFromRuntime(SCICRuntimePatchStrategy s
 static BOOL SCICNameLooksSwiftOrCXX(NSString *name) {
     if (![name isKindOfClass:NSString.class]) return NO;
     return [name hasPrefix:@"$s"] || [name hasPrefix:@"$S"] || [name hasPrefix:@"_T"] || [name hasPrefix:@"_Z"] || [name hasPrefix:@"__Z"] || [name containsString:@"Swift"];
+}
+
+static BOOL SCICNameLooksObjCMethod(NSString *name) {
+    if (![name isKindOfClass:NSString.class]) return NO;
+    // nlist spellings are `-[Class selector]` / `+[Class selector]`; retain
+    // the angle-bracket variants emitted by a few generated thunks as well.
+    return [name hasPrefix:@"-["] || [name hasPrefix:@"+["] ||
+           [name hasPrefix:@"-<"] || [name hasPrefix:@"+<"];
 }
 
 static NSString *SCICABIForName(NSString *name, BOOL function, NSString *section) {
@@ -797,74 +832,12 @@ static NSString *SCICHookPlanForName(NSString *name, BOOL function, NSString *se
     return @"List/diagnose until ABI/callers are known";
 }
 
-// SCI-FIX 2026-08-10 (browser signal/noise):
-// The old gate was a short per-mode ALLOW-list of topic tokens ("Employee",
-// "Dogfood", …) plus literal param descriptor names like "ig_is_employee" —
-// which do not exist in this build at all (0 occurrences as export, import or
-// raw string, in both images), so the DataParams default matched almost
-// nothing. Dropping the gate entirely swung the other way: every zero/one-arg
-// BOOL-ish selector in both images, ~29,240 entries.
-//
-// An allow-list is the wrong tool: plenty of hookable, genuinely useful gates
-// have nothing to do with dogfooding and would be hidden by a topic filter.
-// What actually needs removing is STRUCTURAL noise — selectors that are
-// mechanically present on hundreds of unrelated classes and are never a
-// feature gate. Measured over both images, the 40 most repeated BOOL
-// selectors account for 22.7% of all entries and are entirely of that kind:
-//   isEqualToDiffableObject: (1490 classes), isEqual: (931),
-//   quick_flexibilityFor: (734 — a synthesized layout-priority helper),
-//   canRespondToGesture: (417), prefersNavigationBarHidden (321),
-//   gestureRecognizer*/textField*/textView* delegate callbacks, and plain
-//   UIKit state properties (isHidden/isSelected/isEnabled/isHighlighted…).
-//
-// So this is an EXCLUDE-list, not an allow-list: anything not matched here is
-// shown. A BOOL gate with an unfamiliar name still surfaces in Signal view.
-// The "All" segment disables even this, so nothing is ever unreachable.
-static NSSet<NSString *> *SCICStructuralNoiseSelectors(void) {
-    static NSSet<NSString *> *set = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        set = [NSSet setWithArray:@[
-            // equality / diffing / hashing
-            @"isEqual:", @"isEqualToDiffableObject:", @"isEqualToString:", @"makeImmutable",
-            // synthesized layout helper (734 unrelated classes)
-            @"quick_flexibilityFor:",
-            // UIKit/scroll/gesture/text delegate protocol callbacks
-            @"canRespondToGesture:", @"gestureRecognizerShouldBegin:",
-            @"gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:",
-            @"gestureRecognizer:shouldReceiveTouch:",
-            @"gestureRecognizer:shouldBeRequiredToFailByGestureRecognizer:",
-            @"gestureRecognizer:shouldRequireFailureOfGestureRecognizer:",
-            @"textFieldShouldReturn:", @"textFieldShouldBeginEditing:",
-            @"textFieldShouldEndEditing:", @"textFieldShouldClear:",
-            @"textField:shouldChangeCharactersInRange:replacementString:",
-            @"textViewShouldBeginEditing:", @"textViewShouldEndEditing:",
-            @"textView:shouldChangeTextInRange:replacementText:",
-            @"searchBarShouldBeginEditing:", @"searchBarShouldEndEditing:",
-            @"scrollViewShouldScrollToTop:",
-            // first responder / accessibility plumbing
-            @"becomeFirstResponder", @"resignFirstResponder", @"canBecomeFirstResponder",
-            @"canResignFirstResponder", @"isFirstResponder",
-            @"isAccessibilityElement", @"accessibilityActivate", @"accessibilityPerformEscape",
-            @"accessibilityPerformMagicTap", @"accessibilityScroll:",
-            // plain UIKit view/control state
-            @"isHidden", @"isSelected", @"isEnabled", @"isHighlighted", @"enabled",
-            @"disabled", @"selected", @"userInteractionEnabled", @"isOpaque",
-            @"clipsToBounds", @"isUserInteractionEnabled", @"isFocused",
-            @"canBecomeFocused", @"prefersStatusBarHidden",
-            @"prefersNavigationBarHidden", @"prefersNavigationBarDividerHidden",
-            @"prefersHomeIndicatorAutoHidden", @"shouldAutorotate",
-            // trivial media/loading state
-            @"isLoading", @"isPlaying", @"isMuted", @"isActive", @"isPaused",
-        ]];
-    });
-    return set;
-}
+// Structural BOOL noise is filtered centrally by SCISymbolBrowserEngine while
+// it walks the live runtime, before rows/search indexes are materialized.
 
 // Kept for the runtime-browser compatibility shim
 // (SCIUnifiedRuntimeBrowserCompat.m hooks entryMatchesDefaultFilters: and
-// widens it with experiment keywords; that still works and now widens a
-// noise-exclusion result instead of a topic allow-list).
+// widens it with experiment keywords without restoring excluded runtime noise).
 __attribute__((unused))
 static NSArray<NSString *> *SCICDefaultFiltersForMode(SCICSymbolsBrowserMode mode) {
     (void)mode;
@@ -878,7 +851,14 @@ static NSUInteger SCICKnownDataSizeForSymbol(const struct nlist_64 *nl, uint32_t
     uint64_t cur = nl[idx].n_value;
     if (!sect || !cur) return 0;
     uint64_t best = UINT64_MAX;
-    for (uint32_t j = 0; j < nsyms; j++) {
+    // This is display metadata, not a patch boundary. A full nsyms scan for
+    // every DATA symbol becomes O(n²) on InstagramSharedFramework (hundreds of
+    // thousands of symbols). Mach-O entries belonging to the same local run are
+    // clustered in practice; use a bounded neighbourhood and report unknown
+    // when the next symbol is farther away.
+    uint32_t begin = idx > 256 ? idx - 256 : 0;
+    uint32_t end = MIN(nsyms, idx + 257);
+    for (uint32_t j = begin; j < end; j++) {
         if (j == idx) continue;
         if ((nl[j].n_type & N_STAB) || ((nl[j].n_type & N_TYPE) != N_SECT)) continue;
         if (nl[j].n_sect != sect) continue;
@@ -890,11 +870,17 @@ static NSUInteger SCICKnownDataSizeForSymbol(const struct nlist_64 *nl, uint32_t
     return (delta > 0 && delta <= 256) ? (NSUInteger)delta : 0;
 }
 
-static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex, NSMutableArray<SCICSymbolEntry *> *out) {
+static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex,
+                                             NSSet<NSString *> *selectedPaths,
+                                             NSSet<NSString *> *importedNames,
+                                             SCICSymbolsBrowserMode mode,
+                                             NSMutableArray<SCICSymbolEntry *> *out) {
     const char *imageName = _dyld_get_image_name(imageIndex);
     if (!imageName) return;
     NSString *path = [NSString stringWithUTF8String:imageName];
     if (!SCICIsImageWanted(path)) return;
+    NSString *standardPath = path.stringByStandardizingPath;
+    if (selectedPaths.count && ![selectedPaths containsObject:standardPath]) return;
     const struct mach_header *raw = _dyld_get_image_header(imageIndex);
     if (!raw || raw->magic != MH_MAGIC_64) return;
     const struct mach_header_64 *mh = (const struct mach_header_64 *)raw;
@@ -917,36 +903,44 @@ static void SCICEnumerateImageSymbolsAtIndex(uint32_t imageIndex, NSMutableArray
         if (!rawName || rawName[0] != '_') continue;
         NSString *name = [NSString stringWithUTF8String:rawName + 1];
         if (!name.length || [seen containsObject:name]) continue;
-        if ([name hasPrefix:@"OBJC_"] || [name hasPrefix:@"\001"]) continue;
+        if ([name hasPrefix:@"OBJC_"] || [name hasPrefix:@"\001"] ||
+            SCICNameLooksObjCMethod(name)) continue;
         [seen addObject:name];
         const struct section_64 *sec = NULL;
         uint8_t sectIndex = nl[i].n_sect;
         if (sectIndex > 0 && sectIndex <= sections.count) sec = [sections[sectIndex - 1] pointerValue];
         NSString *section = scic_section_label(sec);
         BOOL isText = sec && strncmp(sec->segname, "__TEXT", 16) == 0 && strncmp(sec->sectname, "__text", 16) == 0;
+        BOOL swiftLike = SCICNameLooksSwiftOrCXX(name);
+        if (mode == SCICSymbolsBrowserModeCFunctions && (!isText || swiftLike)) continue;
+        if (mode == SCICSymbolsBrowserModeDataParams && isText) continue;
+        if (mode == SCICSymbolsBrowserModeSwiftDisassembly && (!isText || !swiftLike)) continue;
         SCICSymbolEntry *e = [SCICSymbolEntry new];
         e.name = name;
         e.image = SCICImageShortName(path);
+        e.imagePath = standardPath;
         e.section = section;
         e.function = isText;
         e.data = !isText;
-        e.swiftLike = SCICNameLooksSwiftOrCXX(name);
+        e.swiftLike = swiftLike;
         e.address = (uintptr_t)nl[i].n_value + (uintptr_t)slide;
         e.dataSize = isText ? 0 : SCICKnownDataSizeForSymbol(nl, symtab->nsyms, i);
         e.kind = isText ? (e.swiftLike ? @"Swift/C++ function" : @"C/function") : @"DATA/const";
         e.abi = SCICABIForName(name, isText, section);
         e.hookPlan = SCICHookPlanForName(name, isText, section);
         e.resolvable = (dlsym(RTLD_DEFAULT, name.UTF8String) != NULL || dlsym(RTLD_DEFAULT, [[@"_" stringByAppendingString:name] UTF8String]) != NULL);
-        e.hasBindPointer = [SCICImportedSymbolNames() containsObject:name];
+        e.hasBindPointer = [importedNames containsObject:name];
         [out addObject:e];
     }
 }
 
 
-static NSArray<SCICSymbolEntry *> *SCICEnumerateObjCEntriesForImage(SCISymbolImage image) {
+static NSArray<SCICSymbolEntry *> *SCICEnumerateObjCEntriesForImagePath(NSString *imagePath) {
     NSMutableArray<SCICSymbolEntry *> *out = [NSMutableArray array];
-    NSString *imgName = image == SCISymbolImageInstagram ? @"Instagram" : @"FBSharedFramework";
-    NSArray<SCISymbolClass *> *classes = [SCISymbolBrowserEngine classesForImage:image] ?: @[];
+    NSString *standardPath = imagePath.stringByStandardizingPath;
+    NSString *imgName = SCICImageShortName(standardPath);
+    NSArray<SCISymbolClass *> *classes =
+        [SCISymbolBrowserEngine classesForImagePath:standardPath] ?: @[];
     for (SCISymbolClass *cls in classes) {
         for (SCISymbolGetter *g in cls.getters ?: @[]) {
             SCICSymbolEntry *e = [SCICSymbolEntry new];
@@ -958,6 +952,7 @@ static NSArray<SCICSymbolEntry *> *SCICEnumerateObjCEntriesForImage(SCISymbolIma
             // prefix is derived separately below and never changes that key.
             e.name = [NSString stringWithFormat:@"%@%@#%@", g.isClassMethod ? @"+" : @"-", cls.className ?: @"", g.selectorName ?: @""];
             e.image = imgName;
+            e.imagePath = standardPath;
             e.section = @"ObjC runtime";
             e.kind = @"ObjC BOOL getter";
             e.function = YES;
@@ -996,11 +991,16 @@ static NSArray<SCICSymbolEntry *> *SCICEnumerateObjCEntriesForImage(SCISymbolIma
 // resolved live through dlsym (which searches every loaded image, so an
 // import defined in another dylib resolves to a real, callable address) and
 // the entry is marked as GOT-rebindable rather than swizzle-able.
-static void SCICEnumerateImportEntriesForImage(uint32_t imageIndex, NSMutableArray<SCICSymbolEntry *> *out) {
+static void SCICEnumerateImportEntriesForImage(uint32_t imageIndex,
+                                               NSSet<NSString *> *selectedPaths,
+                                               SCICSymbolsBrowserMode mode,
+                                               NSMutableArray<SCICSymbolEntry *> *out) {
     const char *imageName = _dyld_get_image_name(imageIndex);
     if (!imageName) return;
     NSString *path = [NSString stringWithUTF8String:imageName];
     if (!SCICIsImageWanted(path)) return;
+    NSString *standardPath = path.stringByStandardizingPath;
+    if (selectedPaths.count && ![selectedPaths containsObject:standardPath]) return;
 
     NSMutableSet<NSString *> *imports = [NSMutableSet set];
     SCICCollectImportedSymbolNamesForImage(imageIndex, imports);
@@ -1009,7 +1009,12 @@ static void SCICEnumerateImportEntriesForImage(uint32_t imageIndex, NSMutableArr
     NSString *shortName = SCICImageShortName(path);
     for (NSString *name in imports) {
         if (!name.length) continue;
-        if ([name hasPrefix:@"OBJC_"] || [name hasPrefix:@"\001"]) continue;
+        if ([name hasPrefix:@"OBJC_"] || [name hasPrefix:@"\001"] ||
+            SCICNameLooksObjCMethod(name)) continue;
+        BOOL swiftLike = SCICNameLooksSwiftOrCXX(name);
+        if (mode == SCICSymbolsBrowserModeDataParams) continue;
+        if (mode == SCICSymbolsBrowserModeCFunctions && swiftLike) continue;
+        if (mode == SCICSymbolsBrowserModeSwiftDisassembly && !swiftLike) continue;
 
         void *resolved = dlsym(RTLD_DEFAULT, name.UTF8String);
         if (!resolved) resolved = dlsym(RTLD_DEFAULT, [[@"_" stringByAppendingString:name] UTF8String]);
@@ -1017,10 +1022,11 @@ static void SCICEnumerateImportEntriesForImage(uint32_t imageIndex, NSMutableArr
         SCICSymbolEntry *e = [SCICSymbolEntry new];
         e.name = name;
         e.image = shortName;
+        e.imagePath = standardPath;
         e.section = @"import (GOT/bind)";
         e.function = YES;          // imports browsed here are call targets
         e.data = NO;
-        e.swiftLike = SCICNameLooksSwiftOrCXX(name);
+        e.swiftLike = swiftLike;
         e.address = (uintptr_t)resolved;
         e.dataSize = 0;
         e.kind = e.swiftLike ? @"Swift/C++ import" : @"C import (fishhook)";
@@ -1032,19 +1038,38 @@ static void SCICEnumerateImportEntriesForImage(uint32_t imageIndex, NSMutableArr
     }
 }
 
-static NSArray<SCICSymbolEntry *> *SCICEnumerateInstagramAndFBSharedSymbols(void) {
+static NSArray<SCICSymbolEntry *> *SCICEnumerateAppRuntimeSymbols(
+    NSArray<NSString *> *selectedImagePaths,
+    SCICSymbolsBrowserMode mode
+) {
     NSMutableArray *out = [NSMutableArray array];
+    NSSet<NSString *> *selectedPaths = [NSSet setWithArray:selectedImagePaths ?: @[]];
     uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; i++) SCICEnumerateImageSymbolsAtIndex(i, out);
+    // Build import facts from the currently loaded images for this scan only.
+    // Nothing is generated at build time or persisted as a symbol catalogue.
+    NSMutableSet<NSString *> *importedNames = [NSMutableSet set];
+    for (uint32_t i = 0; i < count; i++) {
+        SCICCollectImportedSymbolNamesForImage(i, importedNames);
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        SCICEnumerateImageSymbolsAtIndex(i, selectedPaths, importedNames,
+                                         mode, out);
+    }
     // Imports second, de-duplicated against the defined-symbol pass below.
     NSMutableArray *importEntries = [NSMutableArray array];
-    for (uint32_t i = 0; i < count; i++) SCICEnumerateImportEntriesForImage(i, importEntries);
+    if (mode != SCICSymbolsBrowserModeDataParams) {
+        for (uint32_t i = 0; i < count; i++) {
+            SCICEnumerateImportEntriesForImage(i, selectedPaths, mode, importEntries);
+        }
+    }
     NSMutableSet<NSString *> *definedKeys = [NSMutableSet set];
     for (SCICSymbolEntry *e in out) {
-        if (e.name.length) [definedKeys addObject:[NSString stringWithFormat:@"%@|%@", e.image ?: @"", e.name]];
+        if (e.name.length) [definedKeys addObject:[NSString stringWithFormat:
+            @"%@|%@", e.imagePath ?: e.image ?: @"", e.name]];
     }
     for (SCICSymbolEntry *e in importEntries) {
-        NSString *key = [NSString stringWithFormat:@"%@|%@", e.image ?: @"", e.name ?: @""];
+        NSString *key = [NSString stringWithFormat:@"%@|%@",
+            e.imagePath ?: e.image ?: @"", e.name ?: @""];
         if ([definedKeys containsObject:key]) continue;
         [definedKeys addObject:key];
         [out addObject:e];
@@ -1061,6 +1086,11 @@ static char kSCICSymbolSwitchPayloadKey;
 static char kSCICSymbolGroupPayloadKey;
 
 @interface SCISymbolsBrowserViewController () <UISearchResultsUpdating>
+- (void)configureImageMenu;
+- (void)selectRuntimeImagePath:(NSString *)imagePath;
+- (void)refreshRuntimeSymbols;
+- (void)pollLiveRuntime;
+- (SCICRuntimePatchPlan *)resolverPlanForEntry:(SCICSymbolEntry *)entry;
 @end
 
 @implementation SCISymbolsBrowserViewController {
@@ -1068,9 +1098,17 @@ static char kSCICSymbolGroupPayloadKey;
     NSArray<SCICSymbolEntry *> *_allSymbols;
     NSString *_query;
     UIActivityIndicatorView *_spinner;
-    UISegmentedControl *_imageSegment;
+    UIButton *_imageButton;
+    UILabel *_liveStatusLabel;
+    NSArray<NSString *> *_imagePaths;
+    NSString *_selectedImagePath;
     UISegmentedControl *_kindSegment;
     UISegmentedControl *_relevanceSegment;
+    NSTimer *_runtimePollTimer;
+    NSUInteger _scanGeneration;
+    NSUInteger _searchGeneration;
+    BOOL _scanInFlight;
+    BOOL _hasScanned;
 }
 
 - (instancetype)init { return [self initWithMode:SCICSymbolsBrowserModeObjCMethods]; }
@@ -1080,8 +1118,18 @@ static char kSCICSymbolGroupPayloadKey;
     return self;
 }
 
+- (void)dealloc {
+    [_runtimePollTimer invalidate];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
+    NSNumber *savedMode = [NSUserDefaults.standardUserDefaults
+        objectForKey:kSCICBrowserModePreference];
+    if ([savedMode isKindOfClass:NSNumber.class] && savedMode.integerValue >= 0 &&
+        savedMode.integerValue <= SCICSymbolsBrowserModeSwiftDisassembly) {
+        _mode = (SCICSymbolsBrowserMode)savedMode.integerValue;
+    }
     UISearchController *sc = [[UISearchController alloc] initWithSearchResultsController:nil];
     sc.searchResultsUpdater = self;
     sc.obscuresBackgroundDuringPresentation = NO;
@@ -1089,86 +1137,302 @@ static char kSCICSymbolGroupPayloadKey;
     self.navigationItem.searchController = sc;
     SCIUIKit26ConfigureSearchNavigationItem(self.navigationItem);
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshRuntimeSymbols)];
+    _imagePaths = [SCISymbolBrowserEngine runtimeImagePaths];
+    NSString *mainPath = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    NSString *savedImage = [NSUserDefaults.standardUserDefaults
+        stringForKey:kSCICBrowserImagePreference];
+    if ([savedImage isEqualToString:@"all"]) {
+        _selectedImagePath = nil;
+    } else {
+        _selectedImagePath = SCICImagePathForPreferenceIdentifier(savedImage,
+                                                                   _imagePaths);
+        if (!_selectedImagePath) {
+            _selectedImagePath = [_imagePaths containsObject:mainPath]
+                ? mainPath : _imagePaths.firstObject;
+        }
+        [NSUserDefaults.standardUserDefaults
+            setObject:SCICImagePreferenceIdentifier(_selectedImagePath)
+            forKey:kSCICBrowserImagePreference];
+    }
     [self configureUnifiedTabs];
     _spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
     _spinner.center = self.view.center;
     _spinner.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin|UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;
     [self.view addSubview:_spinner];
-    [_spinner startAnimating];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSMutableArray *symbols = [SCICEnumerateInstagramAndFBSharedSymbols() mutableCopy];
-        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageInstagram)];
-        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageFBShared)];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self->_allSymbols = symbols;
-            [self->_spinner stopAnimating];
-            [self rebuildSections];
-        });
-    });
+    _allSymbols = @[];
+    [self rebuildSections];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (!_runtimePollTimer) {
+        __weak typeof(self) weakSelf = self;
+        _runtimePollTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+            repeats:YES
+            block:^(__unused NSTimer *timer) {
+                [weakSelf pollLiveRuntime];
+            }];
+    }
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    [_runtimePollTimer invalidate];
+    _runtimePollTimer = nil;
 }
 
 
 
 - (void)configureUnifiedTabs {
-    _imageSegment = [[UISegmentedControl alloc] initWithItems:@[@"All", @"Exec", @"FBShared"]];
-    _imageSegment.selectedSegmentIndex = 0;
-    [_imageSegment addTarget:self action:@selector(unifiedTabChanged:) forControlEvents:UIControlEventValueChanged];
-    SCIUIKit26ConfigureSegmentedControl(_imageSegment);
+    _imageButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _imageButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+    _imageButton.showsMenuAsPrimaryAction = YES;
+    SCIUIKit26ConfigureMenuButton(_imageButton);
+
+    _liveStatusLabel = [UILabel new];
+    _liveStatusLabel.font = [UIFont systemFontOfSize:11.0
+                                             weight:UIFontWeightSemibold];
+    _liveStatusLabel.textColor = UIColor.secondaryLabelColor;
+    _liveStatusLabel.adjustsFontForContentSizeCategory = YES;
+    _liveStatusLabel.adjustsFontSizeToFitWidth = YES;
+    _liveStatusLabel.minimumScaleFactor = 0.75;
 
     _kindSegment = [[UISegmentedControl alloc] initWithItems:@[@"ObjC", @"C", @"DATA", @"Swift"]];
     _kindSegment.selectedSegmentIndex = MAX(0, MIN(3, (NSInteger)_mode));
     [_kindSegment addTarget:self action:@selector(unifiedTabChanged:) forControlEvents:UIControlEventValueChanged];
     SCIUIKit26ConfigureSegmentedControl(_kindSegment);
 
-    // Signal (structural noise excluded) vs All (literally every live entry).
-    // Signal is NOT topic-filtered: any hookable gate shows, dogfood-related
-    // or not — only mechanically-repeated UIKit/equality/gesture selectors are
-    // dropped. Search always bypasses both; this controls the EMPTY-query view.
+    // Structural NSObject/UIKit BOOL noise is rejected before this point and
+    // cannot reappear in either view. Signal keeps entries with useful runtime
+    // patch state; All exposes the remaining live, non-structural surface.
     _relevanceSegment = [[UISegmentedControl alloc] initWithItems:@[@"Signal", @"All"]];
-    _relevanceSegment.selectedSegmentIndex = 0;
+    NSInteger relevance = [NSUserDefaults.standardUserDefaults
+        integerForKey:kSCICBrowserRelevancePreference];
+    _relevanceSegment.selectedSegmentIndex = relevance == 1 ? 1 : 0;
     [_relevanceSegment addTarget:self action:@selector(unifiedTabChanged:) forControlEvents:UIControlEventValueChanged];
     SCIUIKit26ConfigureSegmentedControl(_relevanceSegment);
+    [self configureImageMenu];
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_imageSegment, _kindSegment, _relevanceSegment]];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        _liveStatusLabel, _imageButton, _kindSegment, _relevanceSegment
+    ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 8.0;
-    stack.layoutMargins = UIEdgeInsetsMake(8, 16, 8, 16);
-    stack.layoutMarginsRelativeArrangement = YES;
-    UIView *wrap = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 138)];
+    SCIUIKit26GlassPanelView *panel = [[SCIUIKit26GlassPanelView alloc]
+        initWithRadius:22.0];
+    panel.sciGlassClearStyle = YES;
+    panel.sciGlassInteractive = NO;
+    [panel applyLiquidGlassStyle];
+    UIView *wrap = [[UIView alloc] initWithFrame:
+        CGRectMake(0, 0, self.view.bounds.size.width, 184)];
     wrap.backgroundColor = UIColor.clearColor;
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [wrap addSubview:stack];
+    [wrap addSubview:panel];
+    [panel.contentView addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
-        [stack.topAnchor constraintEqualToAnchor:wrap.topAnchor],
-        [stack.leadingAnchor constraintEqualToAnchor:wrap.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:wrap.trailingAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor],
+        [panel.topAnchor constraintEqualToAnchor:wrap.topAnchor constant:8.0],
+        [panel.leadingAnchor constraintEqualToAnchor:wrap.leadingAnchor constant:12.0],
+        [panel.trailingAnchor constraintEqualToAnchor:wrap.trailingAnchor constant:-12.0],
+        [panel.bottomAnchor constraintEqualToAnchor:wrap.bottomAnchor constant:-8.0],
+        [stack.topAnchor constraintEqualToAnchor:panel.contentView.topAnchor constant:12.0],
+        [stack.leadingAnchor constraintEqualToAnchor:panel.contentView.leadingAnchor constant:12.0],
+        [stack.trailingAnchor constraintEqualToAnchor:panel.contentView.trailingAnchor constant:-12.0],
+        [stack.bottomAnchor constraintEqualToAnchor:panel.contentView.bottomAnchor constant:-12.0],
     ]];
     self.tableView.tableHeaderView = wrap;
 }
 
+- (void)configureImageMenu {
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray<UIMenuElement *> *rootItems = [NSMutableArray array];
+    UIAction *all = [UIAction actionWithTitle:
+        [NSString stringWithFormat:@"All loaded app images (%lu)",
+            (unsigned long)_imagePaths.count]
+        image:[UIImage systemImageNamed:@"square.stack.3d.up"]
+        identifier:nil
+        handler:^(__unused UIAction *action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf selectRuntimeImagePath:nil];
+        }];
+    all.state = _selectedImagePath ? UIMenuElementStateOff : UIMenuElementStateOn;
+    [rootItems addObject:all];
+
+    NSString *mainPath = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    NSMutableArray<UIMenuElement *> *frameworkItems = [NSMutableArray array];
+    for (NSString *path in _imagePaths) {
+        BOOL isMain = mainPath.length && [path isEqualToString:mainPath];
+        NSString *shortName = [SCISymbolBrowserEngine shortNameForImagePath:path];
+        NSString *title = isMain
+            ? [NSString stringWithFormat:@"%@ (executable)", shortName]
+            : shortName;
+        UIAction *select = [UIAction actionWithTitle:title
+            image:[UIImage systemImageNamed:isMain ? @"app" : @"shippingbox"]
+            identifier:nil
+            handler:^(__unused UIAction *action) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf selectRuntimeImagePath:path];
+            }];
+        select.state = [_selectedImagePath isEqualToString:path]
+            ? UIMenuElementStateOn : UIMenuElementStateOff;
+        if (isMain) [rootItems addObject:select];
+        else [frameworkItems addObject:select];
+    }
+    if (frameworkItems.count) {
+        UIMenu *frameworks = [UIMenu menuWithTitle:
+            [NSString stringWithFormat:@"Frameworks & dylibs (%lu)",
+                (unsigned long)frameworkItems.count]
+            image:[UIImage systemImageNamed:@"shippingbox"]
+            identifier:nil
+            options:0
+            children:frameworkItems];
+        [rootItems addObject:frameworks];
+    }
+    _imageButton.menu = [UIMenu menuWithTitle:@"Loaded runtime images"
+                                      children:rootItems];
+    NSString *selected = _selectedImagePath
+        ? [SCISymbolBrowserEngine shortNameForImagePath:_selectedImagePath]
+        : [NSString stringWithFormat:@"All images (%lu)",
+            (unsigned long)_imagePaths.count];
+    NSString *buttonTitle = [NSString stringWithFormat:@"Analyze: %@", selected];
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *configuration = _imageButton.configuration ?:
+            [UIButtonConfiguration tintedButtonConfiguration];
+        configuration.title = buttonTitle;
+        configuration.image = [UIImage systemImageNamed:
+            _selectedImagePath ? @"scope" : @"square.stack.3d.up"];
+        configuration.imagePadding = 7.0;
+        configuration.contentInsets = NSDirectionalEdgeInsetsMake(8, 12, 8, 12);
+        _imageButton.configuration = configuration;
+    } else {
+        [_imageButton setTitle:buttonTitle forState:UIControlStateNormal];
+    }
+    _liveStatusLabel.text = [NSString stringWithFormat:
+        @"● LIVE DYLD  ·  %lu app images  ·  on-demand scan",
+        (unsigned long)_imagePaths.count];
+}
+
+- (void)selectRuntimeImagePath:(NSString *)imagePath {
+    if (imagePath.length && ![_imagePaths containsObject:imagePath]) return;
+    _selectedImagePath = imagePath;
+    [NSUserDefaults.standardUserDefaults
+        setObject:SCICImagePreferenceIdentifier(imagePath)
+        forKey:kSCICBrowserImagePreference];
+    [self configureImageMenu];
+    [self refreshRuntimeSymbols];
+}
+
 - (void)unifiedTabChanged:(__unused id)sender {
-    _mode = (SCICSymbolsBrowserMode)_kindSegment.selectedSegmentIndex;
-    [self rebuildSections];
+    SCICSymbolsBrowserMode next =
+        (SCICSymbolsBrowserMode)_kindSegment.selectedSegmentIndex;
+    [NSUserDefaults.standardUserDefaults setInteger:next
+                                             forKey:kSCICBrowserModePreference];
+    [NSUserDefaults.standardUserDefaults
+        setInteger:_relevanceSegment.selectedSegmentIndex
+        forKey:kSCICBrowserRelevancePreference];
+    if (next != _mode) {
+        _mode = next;
+        [self refreshRuntimeSymbols];
+    } else {
+        [self rebuildSections];
+    }
 }
 
 - (void)refreshRuntimeSymbols {
+    NSArray<NSString *> *latest = [SCISymbolBrowserEngine runtimeImagePaths];
+    if (_selectedImagePath && ![latest containsObject:_selectedImagePath]) {
+        NSString *mainPath = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+        _selectedImagePath = [latest containsObject:mainPath]
+            ? mainPath : latest.firstObject;
+        [NSUserDefaults.standardUserDefaults
+            setObject:SCICImagePreferenceIdentifier(_selectedImagePath)
+            forKey:kSCICBrowserImagePreference];
+    }
+    _imagePaths = latest;
+    [self configureImageMenu];
+    NSArray<NSString *> *selectedPaths = _selectedImagePath
+        ? @[_selectedImagePath] : _imagePaths;
+    SCICSymbolsBrowserMode mode = _mode;
+    NSUInteger generation = ++_scanGeneration;
+    _scanInFlight = YES;
+    _hasScanned = NO;
+    _allSymbols = @[];
+    [self rebuildSections];
     [_spinner startAnimating];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSMutableArray *symbols = [SCICEnumerateInstagramAndFBSharedSymbols() mutableCopy];
-        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageInstagram)];
-        [symbols addObjectsFromArray:SCICEnumerateObjCEntriesForImage(SCISymbolImageFBShared)];
+        NSMutableArray *symbols = [NSMutableArray array];
+        if (mode == SCICSymbolsBrowserModeObjCMethods) {
+            for (NSString *path in selectedPaths) {
+                [symbols addObjectsFromArray:
+                    SCICEnumerateObjCEntriesForImagePath(path)];
+            }
+        } else {
+            [symbols addObjectsFromArray:
+                SCICEnumerateAppRuntimeSymbols(selectedPaths, mode)];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
+            // Ignore a stale async result if the user switched tabs/images while
+            // this live Mach-O snapshot was being built.
+            if (generation != self->_scanGeneration || mode != self->_mode) return;
+            NSArray *currentPaths = self->_selectedImagePath
+                ? @[self->_selectedImagePath] : self->_imagePaths;
+            if (![currentPaths isEqualToArray:selectedPaths]) return;
             self->_allSymbols = symbols;
+            self->_scanInFlight = NO;
+            self->_hasScanned = YES;
             [self->_spinner stopAnimating];
             [self rebuildSections];
         });
     });
 }
 
+- (void)pollLiveRuntime {
+    NSArray<NSString *> *latest = [SCISymbolBrowserEngine runtimeImagePaths];
+    if (![latest isEqualToArray:_imagePaths]) {
+        BOOL wasAll = _selectedImagePath == nil;
+        BOOL selectionDisappeared = _selectedImagePath &&
+            ![latest containsObject:_selectedImagePath];
+        _imagePaths = latest;
+        if (selectionDisappeared) {
+            NSString *mainPath = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+            _selectedImagePath = [latest containsObject:mainPath]
+                ? mainPath : latest.firstObject;
+            [NSUserDefaults.standardUserDefaults
+                setObject:SCICImagePreferenceIdentifier(_selectedImagePath)
+                forKey:kSCICBrowserImagePreference];
+        }
+        [self configureImageMenu];
+        if ((_hasScanned || _scanInFlight) &&
+            (wasAll || selectionDisappeared)) {
+            [self refreshRuntimeSymbols];
+        }
+        return;
+    }
+    if (!_hasScanned || _scanInFlight) return;
+    NSArray<NSIndexPath *> *visible = self.tableView.indexPathsForVisibleRows;
+    if (!visible.count) return;
+    [UIView performWithoutAnimation:^{
+        [self.tableView reloadRowsAtIndexPaths:visible
+                              withRowAnimation:UITableViewRowAnimationNone];
+    }];
+}
+
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     _query = searchController.searchBar.text ?: @"";
     [self rebuildSections];
+    NSUInteger generation = ++_searchGeneration;
+    NSString *trimmed = [_query stringByTrimmingCharactersInSet:
+        NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!trimmed.length) return;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || generation != strongSelf->_searchGeneration) return;
+        [strongSelf refreshRuntimeSymbols];
+    });
 }
 
 - (NSArray<NSString *> *)queryTokens {
@@ -1180,8 +1444,7 @@ static char kSCICSymbolGroupPayloadKey;
 }
 
 - (BOOL)entryMatchesMode:(SCICSymbolEntry *)e {
-    if (_imageSegment.selectedSegmentIndex == 1 && ![e.image isEqualToString:@"Instagram"]) return NO;
-    if (_imageSegment.selectedSegmentIndex == 2 && ![e.image isEqualToString:@"FBSharedFramework"]) return NO;
+    if (_selectedImagePath && ![e.imagePath isEqualToString:_selectedImagePath]) return NO;
     if (_mode == SCICSymbolsBrowserModeObjCMethods) return e.objcSelectorName.length > 0;
     if (_mode == SCICSymbolsBrowserModeCFunctions) return e.function && !e.swiftLike && e.objcSelectorName.length == 0;
     if (_mode == SCICSymbolsBrowserModeDataParams) return e.data;
@@ -1199,16 +1462,30 @@ static char kSCICSymbolGroupPayloadKey;
     if (e.objcSelectorName.length) { NSString *k=[NSString stringWithFormat:@"%@%@", e.objcClassMethod?@"+":@"", [NSString stringWithFormat:@"%@#%@", e.objcClassName?:@"", e.objcSelectorName?:@""]]; if ([SCISymbolBrowserEngine overrideForKey:k] != nil) return YES; }
     if ([SCICRuntimePatchResolver persistedPatchForSymbol:e.name] != nil || [SCICSymbolStub forceForSymbol:e.name] != nil || [SCICSymbolStub typedForceForSymbol:e.name] != nil || [SCICSymbolStub forceForParamDescriptorSymbol:e.name] != nil || [SCICSymbolStub observeForParamDescriptorSymbol:e.name] || [SCICSymbolStub observeForSymbol:e.name] || [SCICSymbolStub hookInstalledForSymbol:e.name]) return YES;
 
-    // Signal view = exclude structural noise, keep everything else. This is
-    // deliberately NOT topic-based: a hookable gate unrelated to dogfooding
-    // still shows. See SCICStructuralNoiseSelectors() for the rationale and
-    // the measured selector frequencies behind each exclusion.
+    // Structural noise is rejected by the engine before row construction, so
+    // search and All cannot resurrect it. Keep this defensive check for older
+    // compatibility-produced ObjC entries.
     if (e.objcSelectorName.length) {
-        if ([SCICStructuralNoiseSelectors() containsObject:e.objcSelectorName]) return NO;
+        if ([SCISymbolBrowserEngine
+                isStructuralNoiseSelectorName:e.objcSelectorName]) return NO;
         // Swift protocol-witness / accessor thunks carry no independent gate.
         if ([e.objcSelectorName hasPrefix:@"__"]) return NO;
+        return YES;
     }
-    return YES;
+
+    // For raw Mach-O rows, Signal means actionable or gate-related. All and
+    // explicit search still expose every non-ObjC symbol from the live scan.
+    SCICRuntimePatchPlan *plan = [self resolverPlanForEntry:e];
+    if (plan.strategy != SCICRuntimePatchStrategyNone) return YES;
+    NSString *name = e.name.lowercaseString ?: @"";
+    for (NSString *needle in @[
+        @"mobileconfig", @"easygating", @"gating", @"experiment",
+        @"employee", @"dogfood", @"internal", @"minos", @"ig_is_",
+        @"xav_", @"mc_team_"
+    ]) {
+        if ([name containsString:needle]) return YES;
+    }
+    return NO;
 }
 
 - (NSString *)subtitleForEntry:(SCICSymbolEntry *)e {
@@ -1224,8 +1501,8 @@ static char kSCICSymbolGroupPayloadKey;
 
 
 - (NSString *)detailForEntry:(SCICSymbolEntry *)e {
-    if (e.objcSelectorName.length) return [NSString stringWithFormat:@"%@\n\nImage: %@\nKind: %@\nClass: %@\nSelector: %@\nClass method: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.kind?:@"", e.objcClassName?:@"", e.objcSelectorName?:@"", e.objcClassMethod?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
-    return [NSString stringWithFormat:@"%@\n\nImage: %@\nSection: %@\nAddress: 0x%llx\nKind: %@\nResolvable: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.section?:@"", (unsigned long long)e.address, e.kind?:@"", e.resolvable?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
+    if (e.objcSelectorName.length) return [NSString stringWithFormat:@"%@\n\nImage: %@\nLive path: %@\nKind: %@\nClass: %@\nSelector: %@\nClass method: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.imagePath?:@"", e.kind?:@"", e.objcClassName?:@"", e.objcSelectorName?:@"", e.objcClassMethod?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
+    return [NSString stringWithFormat:@"%@\n\nImage: %@\nLive path: %@\nSection: %@\nAddress: 0x%llx\nKind: %@\nResolvable: %@\n\nABI: %@\n\nHook plan: %@", e.name?:@"", e.image?:@"", e.imagePath?:@"", e.section?:@"", (unsigned long long)e.address, e.kind?:@"", e.resolvable?@"YES":@"NO", e.abi?:@"", e.hookPlan?:@""];
 }
 
 - (void)pushRealtimeDetailForEntry:(SCICSymbolEntry *)entry {
@@ -1516,12 +1793,30 @@ static char kSCICSymbolGroupPayloadKey;
 }
 
 - (void)rebuildSections {
-    if (!_allSymbols) return;
+    if (!_hasScanned) {
+        __weak typeof(self) weakSelf = self;
+        NSString *title = _scanInFlight
+            ? @"Analyzing the live process…"
+            : @"No symbol table is preloaded";
+        NSString *subtitle = _scanInFlight
+            ? @"Reading the selected dyld image and Objective-C runtime now."
+            : @"Choose an executable/framework or type a search, then run an on-demand live scan.";
+        SCIBaseSettingsRow *row = [SCIBaseSettingsRow rowWithTitle:title
+            subtitle:subtitle
+            action:_scanInFlight ? nil : ^(__unused UIViewController *vc) {
+                [weakSelf refreshRuntimeSymbols];
+            }];
+        self.sections = @[[SCIBaseSettingsSection
+            sectionWithHeader:@"Live runtime"
+            footer:@"Only interface choices and explicit hook overrides persist. Image paths, ASLR addresses and symbol rows are rediscovered from the current process."
+            rows:@[row]]];
+        [self reloadSettings];
+        return;
+    }
     NSArray *tokens = [self queryTokens];
     BOOL showAll = tokens.count > 0 || _relevanceSegment.selectedSegmentIndex == 1;
-    // Signal view drops ~23% of entries (the measured structural-noise share)
-    // and is still large by design — nothing topical is hidden. Both views are
-    // capped high enough to reach the whole live surface (~29,240 entries).
+    // Structural protocol/property noise was removed by runtime discovery.
+    // Keep a high rendering bound while retaining the transient scan for search.
     NSUInteger limit = 20000;
     NSUInteger shown = 0;
     NSMutableArray<NSString *> *order = [NSMutableArray array];
@@ -1532,9 +1827,8 @@ static char kSCICSymbolGroupPayloadKey;
         if (tokens.count) {
             if (![self entry:e matchesTokens:tokens]) continue;
         } else if (!showAll && ![self entryMatchesDefaultFilters:e]) continue;
-        // Signal view: structural-noise exclusion only (see
-        // entryMatchesDefaultFilters:). Switch to "All" or type a search to
-        // include even the mechanical selectors.
+        // All can widen the useful live surface but cannot restore structural
+        // NSObject/UIKit noise removed during discovery.
         if (shown++ >= limit) break;
 
         NSString *entity = [self entityKeyForEntry:e] ?: @"Runtime";
