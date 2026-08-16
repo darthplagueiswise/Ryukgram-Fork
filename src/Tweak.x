@@ -228,7 +228,10 @@ static BOOL sDidShowSettings;
 %hook UIScrollEdgeEffect
 + (void)hide {}
 - (BOOL)ig_isHidden {return NO;}
-- (void)ig_setIsHidden:(BOOL)hidden {%orig(NO);}
+- (void)ig_setIsHidden:(BOOL)hidden {
+	hidden = NO;
+	%orig;
+}
 %end
 %end
 
