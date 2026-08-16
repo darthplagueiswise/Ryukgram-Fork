@@ -56,6 +56,11 @@ for path in active_sources:
     match = legacy_symbol.search(code)
     if match:
         fail(f"unmigrated code symbol {match.group(0)!r} in {path.relative_to(ROOT)}")
+    if path.suffix in {".x", ".xm"}:
+        if re.search(r"%orig\s*\)", code):
+            fail(f"bare %orig is nested in an expression or macro in {path.relative_to(ROOT)}")
+        if re.search(r"%orig\s*\(\s*\)", code):
+            fail(f"no-argument %orig() must use bare %orig in {path.relative_to(ROOT)}")
 
 required = (
     ROOT / "src/Compatibility/RYGSideloadCompatibility.xm",

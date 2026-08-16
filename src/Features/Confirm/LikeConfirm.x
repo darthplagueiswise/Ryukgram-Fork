@@ -50,113 +50,121 @@ __attribute__((constructor)) static void _rygHookReelsLikeHandler(void) {
         MSHookMessageEx(meta, s2, (IMP)new_rygHandleTapComp, (IMP *)&orig_rygHandleTapComp);
 }
 
-#define CONFIRMPOSTLIKE(orig)                                                                    \
-    if ([RYGUtils getBoolPref:@"like_confirm"])                                                  \
-        [RYGUtils showConfirmation:^(void) { orig; } title:RYGLocalized(@"Confirm like: Posts")]; \
-    else return orig;
-
-#define CONFIRMREELSLIKE(orig)                                                                    \
-    if ([RYGUtils getBoolPref:@"like_confirm_reels"])                                             \
-        [RYGUtils showConfirmation:^(void) { orig; } title:RYGLocalized(@"Confirm like: Reels")]; \
-    else return orig;
+static void rygConfirmLike(BOOL reels, dispatch_block_t originalAction) {
+    if (!originalAction) return;
+    NSString *key = reels ? @"like_confirm_reels" : @"like_confirm";
+    if (![RYGUtils getBoolPref:key]) {
+        originalAction();
+        return;
+    }
+    NSString *title = reels ? RYGLocalized(@"Confirm like: Reels") : RYGLocalized(@"Confirm like: Posts");
+    [RYGUtils showConfirmation:originalAction title:title];
+}
 
 // Feed double-tap-to-like has several entry points across surfaces / A-B; confirm on
 // all of them, guarded so one gesture through more than one only prompts once.
 static BOOL rygDblTapInFlight = NO;
-#define CONFIRMDBLTAP(orig)                                                                       \
-    if ([RYGUtils getBoolPref:@"like_confirm"] && !rygDblTapInFlight) {                            \
-        rygDblTapInFlight = YES;                                                                   \
-        [RYGUtils showConfirmation:^(void) { orig; rygDblTapInFlight = NO; }                       \
-                     cancelHandler:^(void) { rygDblTapInFlight = NO; }                             \
-                             title:RYGLocalized(@"Confirm like: Posts")];                          \
-    } else return orig;
+static void rygConfirmDoubleTapLike(dispatch_block_t originalAction) {
+    if (!originalAction) return;
+    if (![RYGUtils getBoolPref:@"like_confirm"] || rygDblTapInFlight) {
+        originalAction();
+        return;
+    }
+    rygDblTapInFlight = YES;
+    [RYGUtils showConfirmation:^{
+        originalAction();
+        rygDblTapInFlight = NO;
+    } cancelHandler:^{
+        rygDblTapInFlight = NO;
+    } title:RYGLocalized(@"Confirm like: Posts")];
+}
 
 // Liking posts
 %hook IGUFIButtonBarView
 - (void)_onLikeButtonPressed:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 - (void)_onLikeButtonPressed {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 %end
 %hook IGFeedPhotoView
 - (void)_onDoubleTap:(id)arg1 {
-    CONFIRMDBLTAP(%orig);
+    rygConfirmDoubleTapLike(^{ %orig; });
 }
 - (void)_onDoubleTap {
-    CONFIRMDBLTAP(%orig);
+    rygConfirmDoubleTapLike(^{ %orig; });
 }
 %end
 %hook IGFeedItemPhotoCell
 - (void)feedPhotoDidDoubleTapToLike:(id)arg1 locationInfo:(id)arg2 {
-    CONFIRMDBLTAP(%orig);
+    rygConfirmDoubleTapLike(^{ %orig; });
 }
 %end
 %hook _TtC33IGFeedCaptionDoubleTapLikeHandler33IGFeedCaptionDoubleTapLikeHandler
 - (void)animateHeartAndPerformDoubleTapLikeForMediaCell:(id)cell locationInMediaCell:(CGPoint)loc {
-    CONFIRMDBLTAP(%orig);
+    rygConfirmDoubleTapLike(^{ %orig; });
 }
 %end
 %hook _TtC25IGModernFeedVideoOverlays33IGVideoPlayerOverlayContainerView
 - (void)handleDoubleTapGesture:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 %end
 
 // Liking reels
 %hook IGSundialViewerVideoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 %end
 %hook IGSundialViewerPhotoCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 - (void)swift_photoCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 %end
 %hook IGSundialViewerCarouselCell
 - (void)controlsOverlayControllerDidTapLikeButton:(id)arg1 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 - (void)gestureController:(id)arg1 didObserveDoubleTap:(id)arg2 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 - (void)carouselCell:(id)arg1 didObserveDoubleTapWithLocationInfo:(id)arg2 gestureRecognizer:(id)arg3 {
-    CONFIRMREELSLIKE(%orig);
+    rygConfirmLike(YES, ^{ %orig; });
 }
 %end
 
 // Liking comments
 %hook IGCommentCellController
 - (void)commentCell:(id)arg1 didTapLikeButton:(id)arg2 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 - (void)commentCell:(id)arg1 didTapLikedByButtonForUser:(id)arg2 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 - (void)commentCellDidLongPressOnLikeButton:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 - (void)commentCellDidEndLongPressOnLikeButton:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 - (void)commentCellDidDoubleTap:(id)arg1 {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 %end
 %hook IGFeedItemPreviewCommentCell
 - (void)didTapLikeButton {
-    CONFIRMPOSTLIKE(%orig);
+    rygConfirmLike(NO, ^{ %orig; });
 }
 %end
 

@@ -22,8 +22,6 @@
 
 #define RYG_PREF(key) [RYGUtils getBoolPref:key]
 #define RYG_SCREENSHOT_BLOCKED RYG_PREF(@"remove_screenshot_alert")
-#define VOID_HANDLESCREENSHOT(orig) do { if (!RYG_SCREENSHOT_BLOCKED) { orig; } } while (0)
-#define NONVOID_HANDLESCREENSHOT(orig) do { if (RYG_SCREENSHOT_BLOCKED) return nil; return orig; } while (0)
 
 NSString *RYGVersionString = @"v1.3.4";
 BOOL dmVisualMsgsViewedButtonEnabled = false;
@@ -211,13 +209,41 @@ static BOOL sDidShowSettings;
 %group RYGLiquidGlassGroup
 
 %hook IGDSLauncherConfig
-- (_Bool)isLiquidGlassInAppNotificationEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassToastEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassToastPeekEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassIconBarButtonEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassNavigationContentStylePinningEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassEaseInOutBlurEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
-- (_Bool)isLiquidGlassCGContextBlurEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassInAppNotificationEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassToastEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassToastPeekEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassIconBarButtonEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassNavigationContentStylePinningEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassEaseInOutBlurEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
+- (_Bool)isLiquidGlassCGContextBlurEnabled {
+	if (sLGForceOff) return NO;
+	if (sLGButtons) return YES;
+	return %orig;
+}
 %end
 
 %end
@@ -251,16 +277,29 @@ static BOOL sDidShowSettings;
 
 %group RYGScreenshotBlockGroup
 %hook IGStoryViewerContainerView
-- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 %hook IGDirectVisualMessageViewerSession
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {NONVOID_HANDLESCREENSHOT(%orig);}
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
+	if (RYG_SCREENSHOT_BLOCKED) return nil;
+	return %orig;
+}
 %end
 %hook IGDirectVisualMessageReplayService
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {NONVOID_HANDLESCREENSHOT(%orig);}
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
+	if (RYG_SCREENSHOT_BLOCKED) return nil;
+	return %orig;
+}
 %end
 %hook IGDirectVisualMessageReportService
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {RYGProbeOnce(@"hook.ssblock.vmreport", @"IGDirectVisualMessageReportService fired (legacy)");NONVOID_HANDLESCREENSHOT(%orig);}
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
+	RYGProbeOnce(@"hook.ssblock.vmreport", @"IGDirectVisualMessageReportService fired (legacy)");
+	if (RYG_SCREENSHOT_BLOCKED) return nil;
+	return %orig;
+}
 %end
 
 %hook IGDirectVisualMessageScreenshotSafetyLogger
@@ -273,37 +312,78 @@ static BOOL sDidShowSettings;
 %end
 
 %hook IGScreenshotObserver
-- (id)initForController:(id)arg1 {RYGProbeOnce(@"hook.ssblock.observer", @"IGScreenshotObserver fired (current)");NONVOID_HANDLESCREENSHOT(%orig);}
+- (id)initForController:(id)arg1 {
+	RYGProbeOnce(@"hook.ssblock.observer", @"IGScreenshotObserver fired (current)");
+	if (RYG_SCREENSHOT_BLOCKED) return nil;
+	return %orig;
+}
 %end
 
 %hook IGScreenshotObserverDelegate
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {RYGProbeOnce(@"hook.ssblock.observerdelegate", @"IGScreenshotObserverDelegate fired (legacy)");VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	RYGProbeOnce(@"hook.ssblock.observerdelegate", @"IGScreenshotObserverDelegate fired (legacy)");
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 
 %hook IGDirectMediaViewerViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 
 %hook IGStoryViewerViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 
 %hook IGSundialFeedViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 
 %hook IGDirectVisualMessageViewerController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 
 %hook _TtC27IGDirectMediaViewerKitSwift33IGDirectMediaViewerViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+	if (RYG_SCREENSHOT_BLOCKED) return;
+	%orig;
+}
 %end
 %end
 
@@ -314,7 +394,7 @@ static BOOL sDidShowSettings;
 %hook IGDirectInboxSearchListAdapterDataSource
 
 - (id)objectsForListAdapter:(id)arg1 {
-	NSArray *items = %orig();
+	NSArray *items = %orig;
 	BOOL hideMeta = RYG_PREF(@"hide_meta_ai");
 	BOOL hideChats = RYG_PREF(@"no_suggested_chats");
 
@@ -346,7 +426,7 @@ static BOOL sDidShowSettings;
 %hook IGDirectThreadCreationViewController
 
 - (id)objectsForListAdapter:(id)arg1 {
-	NSArray *items = %orig();
+	NSArray *items = %orig;
 	BOOL hideMeta = RYG_PREF(@"hide_meta_ai"), hideUsers = RYG_PREF(@"no_suggested_users");
 	if (!hideMeta && !hideUsers) return items;
 
@@ -369,7 +449,7 @@ static BOOL sDidShowSettings;
 %hook _TtC34IGDirectInboxListAdapterDataSource34IGDirectInboxListAdapterDataSource
 
 - (id)objectsForListAdapter:(id)arg1 {
-	NSArray *items = %orig();
+	NSArray *items = %orig;
 	BOOL hideUsers = RYG_PREF(@"no_suggested_users"), hideNotes = RYG_PREF(@"hide_notes_tray");
 	BOOL hideLockedChats = RYG_PREF(@"lock_chats_hide_from_inbox")
 		&& [[RYGLockManager shared] isGroupLocked:RYGLockGroupChats];
@@ -406,7 +486,7 @@ static BOOL sDidShowSettings;
 
 %hook IGSearchListKitDataSource
 - (id)objectsForListAdapter:(id)arg1 {
-	NSArray *items = %orig();
+	NSArray *items = %orig;
 	BOOL hideMeta = RYG_PREF(@"hide_meta_ai");
 	BOOL hideUsers = RYG_PREF(@"no_suggested_users");
 
@@ -515,7 +595,8 @@ static BOOL sDidShowSettings;
 
 %hook IGSundialViewerUFIViewModel
 - (BOOL)shouldShowRepostButton {
-	return RYG_PREF(@"hide_reels_repost") ? NO : %orig;
+	if (RYG_PREF(@"hide_reels_repost")) return NO;
+	return %orig;
 }
 %end
 %end
@@ -527,11 +608,13 @@ static BOOL sDidShowSettings;
 %hook IGSafeModeChecker
 
 - (id)initWithInstacrashCounterProvider:(void *)provider crashThreshold:(unsigned long long)threshold {
-	return RYG_PREF(@"disable_safe_mode") ? nil : %orig(provider, threshold);
+	if (RYG_PREF(@"disable_safe_mode")) return nil;
+	return %orig;
 }
 
 - (unsigned long long)crashCount {
-	return RYG_PREF(@"disable_safe_mode") ? 0 : %orig;
+	if (RYG_PREF(@"disable_safe_mode")) return 0;
+	return %orig;
 }
 
 %end

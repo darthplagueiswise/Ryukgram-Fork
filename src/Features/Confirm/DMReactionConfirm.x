@@ -16,29 +16,34 @@ static BOOL rygDMReactModeOn(void) {
 
 // Section components hold the Swift reaction controller as a concrete type, so its
 // double-tap entry is statically dispatched. Their own is a protocol method.
-#define RYGCONFIRMDBLTAP(orig)                                        \
-    if (!rygDMReactModeOn() || rygDMReactInFlight) return orig;        \
-    [RYGUtils showConfirmation:^{                                      \
-        rygDMReactInFlight = YES;                                      \
-        @try { orig; } @catch (__unused id e) {}                       \
-        rygDMReactInFlight = NO;                                       \
+static void rygConfirmDMDoubleTap(dispatch_block_t originalAction) {
+    if (!originalAction) return;
+    if (!rygDMReactModeOn() || rygDMReactInFlight) {
+        originalAction();
+        return;
+    }
+    [RYGUtils showConfirmation:^{
+        rygDMReactInFlight = YES;
+        @try { originalAction(); } @catch (__unused id e) {}
+        rygDMReactInFlight = NO;
     } title:RYGLocalized(@"Confirm reaction")];
+}
 
 %hook IGDirectMessageSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    RYGCONFIRMDBLTAP(%orig);
+    rygConfirmDMDoubleTap(^{ %orig; });
 }
 %end
 
 %hook IGDirectMessageStickerSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    RYGCONFIRMDBLTAP(%orig);
+    rygConfirmDMDoubleTap(^{ %orig; });
 }
 %end
 
 %hook IGDirectMessageThreadedRepliesSectionComponents
 - (void)performDoubleTapActionForCell:(id)cell withViewModel:(id)model {
-    RYGCONFIRMDBLTAP(%orig);
+    rygConfirmDMDoubleTap(^{ %orig; });
 }
 %end
 

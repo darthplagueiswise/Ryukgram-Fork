@@ -1,18 +1,20 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 
-#define RYG_CONFIRM_FOLLOW(origCall) \
-	if ([RYGUtils getBoolPref:@"follow_confirm"]) { \
-		[RYGUtils showConfirmation:^{ origCall; } title:RYGLocalized(@"Confirm follow")]; \
-		return; \
-	} \
-	origCall;
+static void rygConfirmFollow(dispatch_block_t originalAction) {
+	if (!originalAction) return;
+	if ([RYGUtils getBoolPref:@"follow_confirm"]) {
+		[RYGUtils showConfirmation:originalAction title:RYGLocalized(@"Confirm follow")];
+		return;
+	}
+	originalAction();
+}
 
 %hook IGFollowController
 
 - (void)_didPressFollowButton {
 	if (self.user.followStatus == 2) {
-		RYG_CONFIRM_FOLLOW(%orig);
+		rygConfirmFollow(^{ %orig; });
 		return;
 	}
 	%orig;
@@ -31,11 +33,11 @@
 %hook IGDiscoverPeopleButtonGroupView
 
 - (void)_onFollowButtonTapped:(id)arg1 {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 - (void)_onFollowingButtonTapped:(id)arg1 {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end
@@ -43,7 +45,7 @@
 %hook IGHScrollAYMFCell
 
 - (void)_didTapAYMFActionButton {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end
@@ -51,7 +53,7 @@
 %hook IGHScrollAYMFActionButton
 
 - (void)_didTapTextActionButton {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end
@@ -59,7 +61,7 @@
 %hook IGUnifiedVideoFollowButton
 
 - (void)_hackilyHandleOurOwnButtonTaps:(id)arg1 event:(id)arg2 {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end
@@ -67,7 +69,7 @@
 %hook IGProfileViewController
 
 - (void)navigationItemsControllerDidTapHeaderFollowButton:(id)arg1 {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end
@@ -75,7 +77,7 @@
 %hook IGStorySectionController
 
 - (void)followButtonTapped:(id)arg1 cell:(id)arg2 {
-	RYG_CONFIRM_FOLLOW(%orig);
+	rygConfirmFollow(^{ %orig; });
 }
 
 %end

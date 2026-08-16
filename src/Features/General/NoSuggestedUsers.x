@@ -65,7 +65,7 @@ static BOOL RYGIsSuggestedActivityObject(id obj) {
 %hook IGProfileHeaderView
 
 - (id)objectsForListAdapter:(id)arg1 {
-	NSArray *originalObjs = %orig();
+	NSArray *originalObjs = %orig;
 	if (![originalObjs isKindOfClass:NSArray.class]) return originalObjs;
 
 	NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:originalObjs.count];
