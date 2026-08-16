@@ -1,15 +1,18 @@
 #import "RYGLiquidGlass.h"
 
-// Most tweak controllers already call super from viewWillAppear:. Keeping the
-// hook at UIViewController avoids coupling the design system to dozens of
-// individual screens while the ownership guard leaves Instagram untouched.
+// Keep the design pass tied to RyukGram-owned controller trees. viewWillAppear
+// configures navigation-layer glass; viewDidLayoutSubviews catches menu source
+// buttons/cells created by a later table reload without touching Instagram UI.
 %hook UIViewController
 
 - (void)viewWillAppear:(BOOL)animated {
-	%orig;
-	if (RYGIsOwnedViewController(self)) {
-		RYGLiquidGlassApplyToViewController(self);
-	}
+    %orig;
+    if (RYGIsOwnedViewController(self)) RYGLiquidGlassApplyToViewController(self);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (RYGIsOwnedViewController(self)) RYGLiquidGlassApplyToViewController(self);
 }
 
 %end
