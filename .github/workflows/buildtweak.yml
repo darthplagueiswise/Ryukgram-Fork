@@ -37,7 +37,7 @@ jobs:
           echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
           r2 -v
-          python3 - <<'PY'
+          "$RUNNER_TEMP/ryg-python/bin/python" - <<'PY'
           import capstone, lief, r2pipe
           print('capstone', capstone.__version__)
           print('lief', lief.__version__)
