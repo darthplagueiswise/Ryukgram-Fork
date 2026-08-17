@@ -5,14 +5,12 @@
 
 /// Central presentation fix for every RYGTableCellMenu row.
 ///
-/// The base table renderer builds the UIMenu correctly, but it historically
-/// mixed the legacy UIButton title API with a later UIButtonConfiguration and
-/// fixed contentInsets. On iOS 26 that can leave the selected value rendered as
-/// loose blue text over the cell while also preventing the menu-source control
-/// from using UIKit's native Liquid Glass capsule/morph geometry.
-///
-/// Keep the existing menu semantics/actions intact and normalize only the final
-/// button presentation after the base renderer has populated its UIMenu.
+/// menuForButton: resolves the selected command first. The base cell renderer
+/// then used to reapply fixed contentInsets after that menu-source button had
+/// already been configured, which constrained the iOS 26/27 Liquid Glass source
+/// capsule and could leave its selected title drawing over the cell text.
+/// Normalize the FINAL button configuration here, after the base renderer, so
+/// every expandable settings menu gets the same system-owned geometry.
 @interface RYGSettingsViewController (RYGSettingsMenuLiquidGlass)
 - (UIListContentConfiguration *)ryg_menuGlass_configuredContent:(UIListContentConfiguration *)config
                                                        forCell:(UITableViewCell *)cell
@@ -37,26 +35,32 @@
     if (!selectedTitle.length) selectedTitle = button.configuration.title;
     if (!selectedTitle.length) selectedTitle = @"•••";
 
-    // These RyukGram menus may contain nested choices for more than one pref.
-    // Keep their existing command state model instead of asking UIButton to
-    // reinterpret the whole tree as one single-selection pop-up.
+    // Several RyukGram menu trees contain independent nested preferences. Do
+    // not make UIButton reinterpret the entire tree as one single-selection
+    // pop-up; command states/defaults remain the source of truth.
     button.showsMenuAsPrimaryAction = YES;
     button.changesSelectionAsPrimaryAction = NO;
     button.enabled = !row.disabled;
     button.tintColor = UIColor.labelColor;
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
 
-    UIButtonConfiguration *presentation = UIButtonConfiguration.borderedButtonConfiguration;
+    UIButtonConfiguration *presentation = nil;
+    if (@available(iOS 26.0, *)) {
+        if (RYGLiquidGlassIsAvailable()) {
+            presentation = UIButtonConfiguration.glassButtonConfiguration;
+        }
+    }
+    if (!presentation) presentation = UIButtonConfiguration.borderedButtonConfiguration;
+
     presentation.title = selectedTitle;
     presentation.baseForegroundColor = UIColor.labelColor;
     presentation.image = [UIImage systemImageNamed:@"chevron.down"];
     presentation.imagePlacement = NSDirectionalRectEdgeTrailing;
     presentation.imagePadding = 5.0;
-    // Intentionally do not set contentInsets. UIKit owns the source capsule's
-    // geometry so iOS 26 can expand/morph it into the presented menu.
+    // No custom contentInsets: UIKit owns the menu-source capsule size and its
+    // Liquid Glass morph into the expanded UIMenu.
     button.configuration = presentation;
 
-    RYGLiquidGlassConfigureButton(button, NO);
     [button sizeToFit];
     cell.accessoryView = button;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
