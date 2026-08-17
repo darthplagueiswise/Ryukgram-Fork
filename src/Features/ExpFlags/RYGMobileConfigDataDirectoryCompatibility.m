@@ -42,8 +42,6 @@ static NSString *RYGResolveActualDataDirectory(NSString *candidate) {
     }
     if (best.length) return best;
 
-    // getOverridesTablePath can also resolve to a file inside the active .data
-    // directory. Walk upward until the first *.data container is found.
     NSString *cursor = path;
     while (cursor.length > 1) {
         if ([cursor.lastPathComponent.lowercaseString hasSuffix:@".data"] &&
@@ -55,6 +53,27 @@ static NSString *RYGResolveActualDataDirectory(NSString *candidate) {
     return nil;
 }
 
+static BOOL RYGWriteIfChanged(NSData *data, NSString *path) {
+    if (!data.length || !path.length) return NO;
+    NSData *existing = [NSData dataWithContentsOfFile:path options:0 error:nil];
+    if ([existing isEqualToData:data]) return YES;
+    return [data writeToFile:path options:NSDataWritingAtomic error:nil];
+}
+
+static void RYGMirrorCachedArtifacts(RYGMobileConfig *mc, NSString *dataDirectory) {
+    if (!mc || !dataDirectory.length) return;
+    NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *cacheRoot = [support stringByAppendingPathComponent:@"RyukGram"];
+    NSData *mapping = [NSData dataWithContentsOfFile:[cacheRoot stringByAppendingPathComponent:@"id_name_mapping.json"] options:0 error:nil];
+    if (mapping.length) RYGWriteIfChanged(mapping, [dataDirectory stringByAppendingPathComponent:@"id_name_mapping.json"]);
+
+    if (mc.overrideCount) {
+        NSError *error = nil;
+        NSData *overrides = [mc ryg_exportOverridesData:&error];
+        if (overrides.length) RYGWriteIfChanged(overrides, [dataDirectory stringByAppendingPathComponent:@"mc_overrides.json"]);
+    }
+}
+
 @implementation RYGMobileConfig (RYGDataDirectoryCompatibility)
 
 - (NSString *)ryg_dataDirectory_nativeDataDirectory {
@@ -63,7 +82,9 @@ static NSString *RYGResolveActualDataDirectory(NSString *candidate) {
     // the contract required by Instagram persistence: the result must be the
     // actual Documents/mobileconfig/*.data directory, never its parent.
     NSString *candidate = [self ryg_dataDirectory_nativeDataDirectory];
-    return RYGResolveActualDataDirectory(candidate);
+    NSString *dataDirectory = RYGResolveActualDataDirectory(candidate);
+    if (dataDirectory.length) RYGMirrorCachedArtifacts(self, dataDirectory);
+    return dataDirectory;
 }
 
 @end
