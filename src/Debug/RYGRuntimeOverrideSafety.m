@@ -1,5 +1,6 @@
 #import "RYGRuntimeBrowserEngine.h"
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <substrate.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -8,12 +9,17 @@
 static NSString *const kRYGSafeRuntimeOverridesKey = @"ryg_runtime_bool_overrides";
 static NSMutableSet<NSString *> *gRYGSafeInstalledKeys;
 static NSLock *gRYGSafeOverrideLock;
+// Process-local only. For helpers that expose an official override setter, keep
+// the value observed immediately before the first override so "Use native" can
+// restore it without installing a getter hook.
+static NSMutableDictionary<NSString *, NSNumber *> *gRYGNativeHelperOriginalValues;
 
 static void RYGSafeOverrideEnsureStorage(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         gRYGSafeInstalledKeys = [NSMutableSet set];
         gRYGSafeOverrideLock = [NSLock new];
+        gRYGNativeHelperOriginalValues = [NSMutableDictionary dictionary];
     });
 }
 
@@ -89,9 +95,117 @@ static BOOL RYGSafeOverrideMethodMatches(Method method) {
     return ret && *ret == 'B' && RYGSafeOverrideArgumentKind(method) >= 0;
 }
 
+#pragma mark - Verified native helper overrides
+
+// The supplied FBSharedFramework exposes these exact BOOL getter/setter pairs on
+// IGLiquidGlassNavigationExperimentHelper and IGThrowbackChromeExperimentHelper.
+// Prefer their native override API; hooking the getter is unnecessary and loses
+// the framework's own state-management path.
+static NSString *RYGNativeHelperSetterFor(NSString *className, NSString *selectorName) {
+    if (!className.length || !selectorName.length) return nil;
+    BOOL navigation = [className hasSuffix:@"IGLiquidGlassNavigationExperimentHelper"];
+    BOOL throwback = [className hasSuffix:@"IGThrowbackChromeExperimentHelper"];
+    if (throwback && [selectorName isEqualToString:@"isEnabled"]) return @"overrideIsEnabled:";
+    if (!navigation) return nil;
+
+    static NSDictionary<NSString *, NSString *> *map;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            @"isEnabled": @"overrideIsEnabled:",
+            @"isGlassRenderingOptimizationEnabled": @"overrideIsGlassRenderingOptimizationEnabled:",
+            @"isProfileSegmentedTabsGlassDisabled": @"overrideIsProfileSegmentedTabsGlassDisabled:",
+            @"isProfileOtherNavBarHeightMatchSelf": @"overrideIsProfileOtherNavBarHeightMatchSelf:",
+            @"isLegibilityBlurEnabled": @"overrideIsLegibilityBlurEnabled:",
+        };
+    });
+    return map[selectorName];
+}
+
+static BOOL RYGNativeHelperKeyInfo(NSString *key,
+                                   NSString **classNameOut,
+                                   NSString **getterNameOut,
+                                   NSString **setterNameOut) {
+    NSString *className = nil;
+    NSString *selectorName = nil;
+    BOOL classMethod = NO;
+    if (!RYGSafeParseKey(key, &className, &selectorName, &classMethod) || classMethod) return NO;
+    NSString *setter = RYGNativeHelperSetterFor(className, selectorName);
+    if (!setter.length) return NO;
+    if (classNameOut) *classNameOut = className;
+    if (getterNameOut) *getterNameOut = selectorName;
+    if (setterNameOut) *setterNameOut = setter;
+    return YES;
+}
+
+static id RYGNativeHelperSharedInstance(Class cls) {
+    if (!cls) return nil;
+    SEL sharedSelector = NSSelectorFromString(@"shared");
+    Class meta = object_getClass(cls);
+    Method sharedMethod = meta ? RYGSafeDeclaredMethodInHierarchy(meta, sharedSelector) : NULL;
+    if (!sharedMethod) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)((id)cls, sharedSelector);
+}
+
+static BOOL RYGApplyNativeHelperValueForKey(NSString *key, NSNumber *forced, BOOL restoring) {
+    NSString *className = nil;
+    NSString *getterName = nil;
+    NSString *setterName = nil;
+    if (!RYGNativeHelperKeyInfo(key, &className, &getterName, &setterName)) return NO;
+
+    Class cls = objc_lookUpClass(className.UTF8String);
+    if (!cls) return NO; // persisted value will be retried by the dyld callback
+    id instance = RYGNativeHelperSharedInstance(cls);
+    if (!instance) return NO;
+
+    SEL getter = NSSelectorFromString(getterName);
+    SEL setter = NSSelectorFromString(setterName);
+    Method getterMethod = RYGSafeDeclaredMethodInHierarchy(cls, getter);
+    Method setterMethod = RYGSafeDeclaredMethodInHierarchy(cls, setter);
+    if (!getterMethod || !setterMethod) return NO;
+
+    if (!restoring) {
+        [gRYGSafeOverrideLock lock];
+        BOOL hasOriginal = gRYGNativeHelperOriginalValues[key] != nil;
+        [gRYGSafeOverrideLock unlock];
+        if (!hasOriginal) {
+            BOOL native = ((BOOL (*)(id, SEL))objc_msgSend)(instance, getter);
+            [gRYGSafeOverrideLock lock];
+            if (!gRYGNativeHelperOriginalValues[key]) gRYGNativeHelperOriginalValues[key] = @(native);
+            [gRYGSafeOverrideLock unlock];
+        }
+    }
+
+    NSNumber *value = forced;
+    if (restoring) {
+        [gRYGSafeOverrideLock lock];
+        value = gRYGNativeHelperOriginalValues[key];
+        [gRYGSafeOverrideLock unlock];
+        if (!value) return NO;
+    }
+
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(instance, setter, value.boolValue);
+    if (restoring) {
+        [gRYGSafeOverrideLock lock];
+        [gRYGNativeHelperOriginalValues removeObjectForKey:key];
+        [gRYGSafeOverrideLock unlock];
+    }
+    return YES;
+}
+
+#pragma mark - Generic BOOL method override
+
 static BOOL RYGSafeInstallOverrideKey(NSString *key) {
     if (!key.length) return NO;
     RYGSafeOverrideEnsureStorage();
+
+    // Native helper override setters are authoritative. If the owning image is
+    // not loaded yet, keep the persisted key and retry from the dyld callback;
+    // do not fall through to a competing MSHookMessageEx getter hook.
+    if (RYGNativeHelperKeyInfo(key, NULL, NULL, NULL)) {
+        NSNumber *value = RYGSafeOverrideForKey(key);
+        return value ? RYGApplyNativeHelperValueForKey(key, value, NO) : YES;
+    }
 
     [gRYGSafeOverrideLock lock];
     BOOL installed = [gRYGSafeInstalledKeys containsObject:key];
@@ -177,6 +291,13 @@ static BOOL RYGSafeInstallOverrideKey(NSString *key) {
 + (void)ryg_safeSetOverride:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method {
     NSString *key = method.overrideKey;
     if (!key.length) return;
+
+    BOOL nativeHelper = RYGNativeHelperKeyInfo(key, NULL, NULL, NULL);
+    if (nativeHelper && !value) {
+        // Restore while the persisted forced value is still available and before
+        // removing the key. This uses the original captured before the setter.
+        RYGApplyNativeHelperValueForKey(key, nil, YES);
+    }
 
     NSMutableDictionary<NSString *, NSNumber *> *overrides = [RYGSafePersistedOverrides() mutableCopy];
     if (value) overrides[key] = @([value boolValue]);
