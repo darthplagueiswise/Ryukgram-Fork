@@ -61,14 +61,28 @@
     }
 }
 
++ (void)dismissMetaLocalExperiment:(__unused id)sender {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *top = [self topViewController];
+        UINavigationController *navigation = [top isKindOfClass:UINavigationController.class]
+            ? (UINavigationController *)top : top.navigationController;
+        UIViewController *target = navigation ?: top;
+        if (target.presentingViewController && !target.isBeingDismissed) {
+            [target dismissViewControllerAnimated:YES completion:nil];
+        } else if (navigation.viewControllers.count > 1) {
+            [navigation popViewControllerAnimated:YES];
+        }
+    });
+}
+
 + (void)installCloseButton:(UIViewController *)controller {
     if (!controller) return;
-    UIAction *close = [UIAction actionWithHandler:^(__kindof UIAction *action) {
-        UIViewController *target = controller.navigationController ?: controller;
-        [target dismissViewControllerAnimated:YES completion:nil];
-    }];
+    UIImage *image = [UIImage systemImageNamed:@"chevron.left"];
     controller.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
-        initWithTitle:@"Back" image:[UIImage systemImageNamed:@"chevron.left"] primaryAction:close menu:nil];
+        initWithImage:image
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(dismissMetaLocalExperiment:)];
 }
 
 + (void)presentFromCurrentViewController {
