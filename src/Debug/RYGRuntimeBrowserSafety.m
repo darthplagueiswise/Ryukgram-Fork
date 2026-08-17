@@ -3,7 +3,6 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <mach-o/dyld.h>
-#import <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,10 +31,10 @@ static BOOL RYGSafePathsEqual(NSString *left, NSString *right) {
     return aOwned && bOwned && [a.lastPathComponent isEqualToString:b.lastPathComponent];
 }
 
-/// objc_copyClassNamesForImage is image-scoped and fast, but it is deliberately
-/// given dyld's exact registered path instead of a reconstructed Foundation path.
-/// This avoids the empty scan seen with sideloaded bundles whose launch path and
-/// canonical dyld path are not byte-identical.
+/// Resolve a persisted/display path back to dyld's exact registered image name.
+/// objc_copyClassNamesForImage is intentionally fed this raw dyld string so a
+/// sideload container path mismatch cannot silently turn a valid image into an
+/// empty scan.
 static const char *RYGSafeExactDyldImageName(NSString *requestedPath, NSString **resolvedPath) {
     if (resolvedPath) *resolvedPath = nil;
     if (!requestedPath.length) return NULL;
@@ -77,9 +76,8 @@ static BOOL RYGSafeSupportedBool(Method method) {
     char encoded[16] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGSafeSkipQualifiers(encoded);
-    // Current Instagram / FBSharedFramework BOOL getters verified in the shipped
-    // Mach-O metadata use B (for example B16@0:8). Do not treat arbitrary chars
-    // as Objective-C BOOL and accidentally expose unsafe methods as gates.
+    // The supplied Instagram / FBSharedFramework binaries use B for the live
+    // BOOL getters verified in __objc_methlist (for example B16@0:8).
     return type && *type == 'B' && RYGSafeArgumentKind(method) >= 0;
 }
 
@@ -130,16 +128,6 @@ static BOOL RYGSafeRelevant(NSString *className, NSString *selectorName, RYGRunt
     return NO;
 }
 
-static BOOL RYGSafeMethodImplementedInImage(Method method, NSString *wanted) {
-    if (!method || !wanted.length) return NO;
-    IMP implementation = method_getImplementation(method);
-    if (!implementation) return NO;
-    Dl_info info = {0};
-    if (!dladdr((const void *)implementation, &info) || !info.dli_fname) return NO;
-    NSString *methodImage = [NSString stringWithUTF8String:info.dli_fname];
-    return RYGSafePathsEqual(methodImage, wanted);
-}
-
 static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> *rows,
                                          NSMutableSet<NSString *> *dedupe,
                                          Class cls,
@@ -169,11 +157,6 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
                 || !RYGSafeSupportedBool(method)
                 || !RYGSafeRelevant(className, selectorName, scope)) continue;
 
-            // class_copyMethodList can include category additions to a class that
-            // originated in this image. Attribute a row only when its live IMP
-            // actually resolves back to the selected dyld image.
-            if (!RYGSafeMethodImplementedInImage(method, wanted)) continue;
-
             RYGRuntimeBoolMethod *row = [RYGRuntimeBoolMethod new];
             row.imagePath = wanted;
             row.className = className;
@@ -199,11 +182,10 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
     const char *rawImageName = RYGSafeExactDyldImageName(imagePath, &resolvedPath);
     if (!rawImageName || !resolvedPath.length) return @[];
 
-    // The old implementation copied EVERY registered class in the Instagram
-    // process and then made a second pass over every foreign class, including
-    // instance + metaclass method lists and dladdr checks. That is quadratic-ish
-    // work at Instagram scale and is why the Runtime Browser could spin forever.
-    // Ask the Objective-C runtime for only the selected dyld image instead.
+    // Image-scoped enumeration only. The previous implementation copied every
+    // class registered in Instagram, built a foreign-class index, then scanned
+    // those classes a second time and called dladdr from the hot path. On the
+    // supplied binaries that turns a single-image query into process-wide work.
     unsigned int classCount = 0;
     const char **classNames = objc_copyClassNamesForImage(rawImageName, &classCount);
     if (!classNames || !classCount) {
@@ -236,7 +218,7 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
 @end
 
 // Single authoritative scanner replacement. Runtime Browser and developer
-// surfaces now share the same image-scoped live enumeration path.
+// surfaces consume the same image-scoped runtime path.
 __attribute__((constructor(65480))) static void RYGInstallRuntimeBrowserSafety(void) {
     @autoreleasepool {
         Class meta = object_getClass(RYGRuntimeBrowserEngine.class);
