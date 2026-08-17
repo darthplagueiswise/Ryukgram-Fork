@@ -1,6 +1,6 @@
 #import "RYGSettingsSections.h"
 #import "../../Debug/RYGDeveloperFeatureViewController.h"
-#import "../../Debug/RYGRuntimeBrowserViewController.h"
+#import "../../Debug/RYGDeveloperRuntimeBrowserViewController.h"
 #import "../../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
 
 @implementation RYGTweakSettings (Section_Debug)
@@ -111,9 +111,9 @@
                                                     viewController:[RYGMobileConfigToolsViewController new]];
 
     RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live"
-                                                     subtitle:@"Select executable/framework, inspect BOOL gates and Mach-O symbols"
+                                                     subtitle:@"Select executable/framework, observe original BOOL values and hook explicitly"
                                                          icon:[RYGSymbol symbolWithName:@"search"]
-                                               viewController:[RYGRuntimeBrowserViewController new]];
+                                               viewController:[RYGDeveloperRuntimeBrowserViewController new]];
 
     return [RYGSetting navigationCellWithTitle:@"Developer"
                                       subtitle:@"Internal surfaces, MobileConfig and live runtime browser"
@@ -123,7 +123,7 @@
                                               footer:@"These pages scan only the currently loaded Instagram executable and FBSharedFramework. Opening a page does not install runtime hooks."
                                                 rows:@[wordmark, internal, prism, glass, stories, throwback, igOnly, bugReport, hiddenRows, dogfood, localExperiment]],
         [RYGSettingsViewController sectionWithHeader:@"Runtime & configuration"
-                                              footer:@"The runtime browser can inspect every loaded app-owned image; MobileConfig works against Instagram's active native override table."
+                                              footer:@"The runtime browser can inspect every loaded app-owned image; observation and forcing are explicit per method. MobileConfig works against Instagram's active native override table."
                                                 rows:@[mobileConfig, runtime]],
     ]];
 }
