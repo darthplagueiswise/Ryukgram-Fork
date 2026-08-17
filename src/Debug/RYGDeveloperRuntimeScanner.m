@@ -1,5 +1,15 @@
 #import "RYGDeveloperRuntimeScanner.h"
 #import "RYGRuntimeBrowserEngine.h"
+#import <objc/runtime.h>
+#include <string.h>
+
+typedef NS_ENUM(NSInteger, RYGDevVerifiedSurface) {
+    RYGDevVerifiedSurfaceGeneric = 0,
+    RYGDevVerifiedSurfaceWordmark,
+    RYGDevVerifiedSurfacePrism,
+    RYGDevVerifiedSurfaceLiquidGlass,
+    RYGDevVerifiedSurfaceThrowback,
+};
 
 static NSString *RYGDevScanNormalize(NSString *value) {
     if (!value.length) return @"";
@@ -12,6 +22,26 @@ static NSString *RYGDevScanNormalize(NSString *value) {
     return result;
 }
 
+static BOOL RYGDevKeywordSetContains(NSArray<NSString *> *keywords, NSString *needle) {
+    NSString *wanted = RYGDevScanNormalize(needle);
+    for (NSString *keyword in keywords) {
+        NSString *normalized = RYGDevScanNormalize(keyword);
+        if (normalized.length && [normalized containsString:wanted]) return YES;
+    }
+    return NO;
+}
+
+static RYGDevVerifiedSurface RYGDevSurfaceForKeywords(NSArray<NSString *> *keywords) {
+    if (RYGDevKeywordSetContains(keywords, @"wordmark")) return RYGDevVerifiedSurfaceWordmark;
+    if (RYGDevKeywordSetContains(keywords, @"prism")) return RYGDevVerifiedSurfacePrism;
+    if (RYGDevKeywordSetContains(keywords, @"throwback")) return RYGDevVerifiedSurfaceThrowback;
+    if (RYGDevKeywordSetContains(keywords, @"liquidglass")
+        || RYGDevKeywordSetContains(keywords, @"igdsglass")
+        || RYGDevKeywordSetContains(keywords, @"glassbutton")
+        || RYGDevKeywordSetContains(keywords, @"lucent")) return RYGDevVerifiedSurfaceLiquidGlass;
+    return RYGDevVerifiedSurfaceGeneric;
+}
+
 static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *> *needles) {
     if (!needles.count) return YES;
     NSString *hay = RYGDevScanNormalize([NSString stringWithFormat:@"%@ %@ %@",
@@ -21,6 +51,72 @@ static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *>
     for (NSString *needle in needles) {
         NSString *normalized = RYGDevScanNormalize(needle);
         if (normalized.length && [hay containsString:normalized]) return YES;
+    }
+    return NO;
+}
+
+// The two supplied binaries each contain a distinct Objective-C protocol object
+// named IGDSLauncherConfigProtocol. Comparing Protocol pointers is therefore the
+// wrong ownership test. Compare protocol names on the class hierarchy instead.
+static BOOL RYGDevClassConformsToNamedProtocol(Class cls, const char *wantedName) {
+    if (!cls || !wantedName || !*wantedName) return NO;
+    for (Class cursor = cls; cursor; cursor = class_getSuperclass(cursor)) {
+        unsigned int protocolCount = 0;
+        Protocol *__unsafe_unretained *protocols = class_copyProtocolList(cursor, &protocolCount);
+        BOOL found = NO;
+        for (unsigned int index = 0; index < protocolCount; index++) {
+            Protocol *protocol = protocols[index];
+            const char *name = protocol ? protocol_getName(protocol) : NULL;
+            if (name && strcmp(name, wantedName) == 0) {
+                found = YES;
+                break;
+            }
+        }
+        if (protocols) free(protocols);
+        if (found) return YES;
+    }
+    return NO;
+}
+
+static BOOL RYGDevRowOwnedByLauncherProtocol(RYGRuntimeBoolMethod *row) {
+    if (!row.className.length) return NO;
+    Class cls = objc_lookUpClass(row.className.UTF8String);
+    return RYGDevClassConformsToNamedProtocol(cls, "IGDSLauncherConfigProtocol");
+}
+
+static BOOL RYGDevClassNameHasSuffix(NSString *className, NSString *suffix) {
+    return className.length && suffix.length && [className hasSuffix:suffix];
+}
+
+static BOOL RYGDevMatchesVerifiedSurface(RYGRuntimeBoolMethod *row, RYGDevVerifiedSurface surface) {
+    NSString *selector = row.selectorName.lowercaseString ?: @"";
+    NSString *className = row.className ?: @"";
+    BOOL launcher = RYGDevRowOwnedByLauncherProtocol(row);
+
+    switch (surface) {
+        case RYGDevVerifiedSurfaceWordmark:
+            // Verified in both supplied Mach-O files as B16@0:8 members of
+            // IGDSLauncherConfigProtocol, implemented by IGDSLauncherConfig and
+            // _TtC11BSLDSConfig11BSLDSConfig.
+            return launcher && [selector hasPrefix:@"isigwordmark"];
+
+        case RYGDevVerifiedSurfacePrism:
+            return launcher && [selector containsString:@"prism"];
+
+        case RYGDevVerifiedSurfaceLiquidGlass: {
+            if (launcher && ([selector containsString:@"liquidglass"]
+                             || [selector isEqualToString:@"canuseinternalliquidglassdebugger"])) return YES;
+            // These exact helpers and BOOL signatures are present in the supplied
+            // FBSharedFramework. They are not launcher-protocol implementations.
+            return RYGDevClassNameHasSuffix(className, @"IGLiquidGlassNavigationExperimentHelper")
+                || RYGDevClassNameHasSuffix(className, @"IGLiquidGlassSwizzleToggle");
+        }
+
+        case RYGDevVerifiedSurfaceThrowback:
+            return RYGDevClassNameHasSuffix(className, @"IGThrowbackChromeExperimentHelper");
+
+        case RYGDevVerifiedSurfaceGeneric:
+            return YES;
     }
     return NO;
 }
@@ -45,16 +141,17 @@ static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *>
                                                     keywords:(NSArray<NSString *> *)keywords {
     if (!imagePaths.count) return @[];
 
+    RYGDevVerifiedSurface surface = RYGDevSurfaceForKeywords(keywords);
     NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
     NSMutableSet<NSString *> *dedupe = [NSMutableSet set];
     for (NSString *imagePath in imagePaths) {
-        // One source of truth: the same scanner used by Runtime Browser. This
-        // prevents Prism / Liquid Glass / WordMark from disagreeing with the
-        // runtime browser because of separate objc_copyClassNamesForImage logic.
         NSArray<RYGRuntimeBoolMethod *> *imageRows =
             [RYGRuntimeBrowserEngine boolMethodsForImagePath:imagePath scope:RYGRuntimeBrowserScopeAll];
         for (RYGRuntimeBoolMethod *row in imageRows) {
-            if (!RYGDevMatchesKeywords(row, keywords)) continue;
+            BOOL matches = surface == RYGDevVerifiedSurfaceGeneric
+                ? RYGDevMatchesKeywords(row, keywords)
+                : RYGDevMatchesVerifiedSurface(row, surface);
+            if (!matches) continue;
             NSString *key = row.overrideKey;
             if (!key.length || [dedupe containsObject:key]) continue;
             [dedupe addObject:key];
