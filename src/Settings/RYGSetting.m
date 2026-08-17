@@ -1,4 +1,5 @@
 #import "RYGSetting.h"
+#import "../UI/RYGLiquidGlass.h"
 
 @interface RYGSetting ()
 
@@ -263,7 +264,17 @@
 // MARK: -  Instance methods
 
 - (UIMenu *)menuForButton:(UIButton *)button {
-	return [self submenuForButton:button submenu:self.baseMenu];
+	UIMenu *menu = [self submenuForButton:button submenu:self.baseMenu];
+	// The selected value belongs inside the menu source control. On iOS 26+
+	// this turns the accessory into a native Liquid Glass capsule rather than a
+	// bare system-blue title floating over the cell's primary/secondary text.
+	// Configure after submenuForButton: has resolved and assigned the selected
+	// title so the glass configuration preserves the real value.
+	if (button) {
+		button.showsMenuAsPrimaryAction = YES;
+		RYGLiquidGlassConfigureButton(button, NO);
+	}
+	return menu;
 }
 
 - (UIMenu *)submenuForButton:(UIButton *)button submenu:(UIMenu*)submenu {
