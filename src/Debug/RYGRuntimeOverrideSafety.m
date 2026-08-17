@@ -50,6 +50,16 @@ static BOOL RYGSafeParseKey(NSString *key, NSString **className, NSString **sele
     return YES;
 }
 
+static Class RYGSafeResolveClass(NSString *className) {
+    if (!className.length) return Nil;
+    // Runtime rows use NSStringFromClass(), which can be module-qualified for
+    // Swift classes. NSClassFromString resolves that representation while
+    // objc_lookUpClass remains the fallback for raw ObjC/mangled names.
+    Class cls = NSClassFromString(className);
+    if (!cls) cls = objc_lookUpClass(className.UTF8String);
+    return cls;
+}
+
 static Method RYGSafeDeclaredMethodInHierarchy(Class owner, SEL selector) {
     if (!owner || !selector) return NULL;
     for (Class cursor = owner; cursor; cursor = class_getSuperclass(cursor)) {
@@ -153,7 +163,7 @@ static BOOL RYGApplyNativeHelperValueForKey(NSString *key, NSNumber *forced, BOO
     NSString *setterName = nil;
     if (!RYGNativeHelperKeyInfo(key, &className, &getterName, &setterName)) return NO;
 
-    Class cls = objc_lookUpClass(className.UTF8String);
+    Class cls = RYGSafeResolveClass(className);
     if (!cls) return NO; // persisted value will be retried by the dyld callback
     id instance = RYGNativeHelperSharedInstance(cls);
     if (!instance) return NO;
@@ -224,7 +234,7 @@ static BOOL RYGSafeInstallOverrideKey(NSString *key) {
         return NO;
     }
 
-    Class cls = objc_lookUpClass(className.UTF8String);
+    Class cls = RYGSafeResolveClass(className);
     SEL selector = NSSelectorFromString(selectorName);
     Class owner = classMethod ? object_getClass(cls) : cls;
     Method method = owner ? RYGSafeDeclaredMethodInHierarchy(owner, selector) : NULL;
