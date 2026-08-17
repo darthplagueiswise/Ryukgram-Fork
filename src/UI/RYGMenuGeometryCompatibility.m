@@ -4,52 +4,34 @@
 
 static UIMenu *RYGMenuByRemovingSelectionGutter(UIMenu *menu) {
     if (!menu) return nil;
-    NSMutableArray<UIMenuElement *> *children = [NSMutableArray arrayWithCapacity:menu.children.count];
     for (UIMenuElement *element in menu.children) {
         if ([element isKindOfClass:UIMenu.class]) {
-            [children addObject:RYGMenuByRemovingSelectionGutter((UIMenu *)element)];
+            RYGMenuByRemovingSelectionGutter((UIMenu *)element);
+            continue;
+        }
+        // RYGSetting builds pickers with UIAction. The previous compatibility
+        // layer only handled UICommand, so the actual selected UIAction still
+        // requested UIKit's dedicated leading-state column. Clearing the state
+        // in place preserves the action's native handler and lets the popover
+        // use its intrinsic Liquid Glass geometry with no synthetic gutter.
+        if ([element isKindOfClass:UIAction.class]) {
+            ((UIAction *)element).state = UIMenuElementStateOff;
             continue;
         }
         if ([element isKindOfClass:UICommand.class]) {
-            UICommand *source = (UICommand *)element;
-            BOOL selected = source.state == UIMenuElementStateOn;
-            NSString *title = selected ? [NSString stringWithFormat:@"✓  %@", source.title ?: @""] : (source.title ?: @"");
-            UICommand *copy = [UICommand commandWithTitle:title
-                                                   image:source.image
-                                                  action:source.action
-                                            propertyList:source.propertyList];
-            // Do not set UIMenuElementStateOn here. That state asks UIKit to
-            // reserve a dedicated leading selection column for every row,
-            // which is the giant preselected gutter visible in the expanded
-            // Liquid Glass menu. The checkmark above conveys selection without
-            // changing the system menu geometry.
-            copy.state = UIMenuElementStateOff;
-            [children addObject:copy];
-            continue;
+            ((UICommand *)element).state = UIMenuElementStateOff;
         }
-        [children addObject:element];
     }
-
-    UIMenu *copy = [UIMenu menuWithTitle:menu.title ?: @""
-                                   image:menu.image
-                              identifier:menu.identifier
-                                 options:menu.options
-                                children:children];
     if (@available(iOS 17.0, *)) {
-        // Automatic is UIKit's context-aware default on modern systems. Do not
-        // force the full-width `large` geometry during a Liquid Glass morph.
-        copy.preferredElementSize = UIMenuElementSizeAutomatic;
+        menu.preferredElementSize = UIMenuElementSizeAutomatic;
     }
-    return copy;
+    return menu;
 }
 
 @implementation RYGSettingsViewController (RYGMenuGeometryCompatibility)
 
 - (void)ryg_nativeMenu_setupTableView {
     [self ryg_nativeMenu_setupTableView];
-    // The former -30/-10 top inset moved rows underneath the glass navigation
-    // title. A zero additional inset lets UIKit's safe-area/scroll-edge system
-    // determine the correct content origin.
     self.tableView.contentInset = UIEdgeInsetsZero;
     self.tableView.scrollIndicatorInsets = UIEdgeInsetsZero;
 }
@@ -59,9 +41,6 @@ static UIMenu *RYGMenuByRemovingSelectionGutter(UIMenu *menu) {
     UIButton *oldButton = [cell.accessoryView isKindOfClass:UIButton.class] ? (UIButton *)cell.accessoryView : nil;
     if (!oldButton || !oldButton.showsMenuAsPrimaryAction || !oldButton.menu) return cell;
 
-    // Recreate the accessory without copying the base implementation's fixed
-    // 8pt configuration or its sizeToFit result. UIKit owns both the closed
-    // Glass capsule and the expanded morph geometry.
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     NSString *title = [oldButton titleForState:UIControlStateNormal] ?: @"•••";
     [button setTitle:title forState:UIControlStateNormal];
