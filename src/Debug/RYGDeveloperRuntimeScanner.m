@@ -1,5 +1,6 @@
 #import "RYGDeveloperRuntimeScanner.h"
 #import "RYGRuntimeBrowserEngine.h"
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,9 +45,10 @@ static BOOL RYGDevSupportedBool(Method method) {
 
 static BOOL RYGDevStructuralState(Class cls, NSString *selectorName) {
     if (!cls || !selectorName.length) return YES;
+    Class layerClass = NSClassFromString(@"CALayer");
     BOOL viewLike = [cls isSubclassOfClass:UIView.class]
         || [cls isSubclassOfClass:UIViewController.class]
-        || [cls isSubclassOfClass:NSClassFromString(@"CALayer")];
+        || (layerClass && [cls isSubclassOfClass:layerClass]);
     if (!viewLike) return NO;
     static NSSet<NSString *> *names;
     static dispatch_once_t once;
