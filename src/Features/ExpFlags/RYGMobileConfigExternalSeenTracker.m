@@ -8,6 +8,7 @@
 #import <pthread.h>
 #import <mach-o/dyld.h>
 #include <stdint.h>
+#include <string.h>
 
 static NSMutableDictionary<NSNumber *, NSString *> *gRYGExternalMCCallSites;
 static pthread_mutex_t gRYGExternalMCLock = PTHREAD_MUTEX_INITIALIZER;
@@ -32,10 +33,6 @@ static BOOL RYGPathBelongsToInstagramApp(NSString *path) {
     return [standard hasPrefix:[bundle stringByAppendingString:@"/"]];
 }
 
-// Return the nearest caller that is not RyukGram itself. A genuine Instagram
-// MobileConfig read reaches us from the executable/one of its bundled images.
-// A browser-triggered liveValueFor: call instead exits RyukGram into UIKit or
-// another system image first, so it is deliberately not counted as runtime use.
 static NSString *RYGExternalCallerDescription(void) {
     void *frames[16] = {0};
     int count = backtrace(frames, 16);
@@ -130,10 +127,41 @@ static id new_ext_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id 
     return orig_ext_getStringOptsDef ? orig_ext_getStringOptsDef(self, cmd, pid, opts, def) : def;
 }
 
-static BOOL RYGExternalHook(Class cls, NSString *name, IMP replacement, IMP *original) {
+static const char *RYGExternalSkipQualifiers(const char *type) {
+    while (type && strchr("rnNoORV", *type)) type++;
+    return type;
+}
+
+static BOOL RYGExternalTypeMatches(const char *raw, char expected) {
+    const char *type = RYGExternalSkipQualifiers(raw);
+    if (!type || !*type) return NO;
+    switch (expected) {
+        case 'P': return *type == 'Q' || *type == 'q' || (*type == '{' && (strstr(type, "=Q}") || strstr(type, "=q}")));
+        case 'B': return *type == 'B' || *type == 'c' || *type == 'C';
+        case 'Q': return *type == 'q' || *type == 'Q';
+        case 'D': return *type == 'd';
+        case '@': return *type == '@';
+        default: return NO;
+    }
+}
+
+static BOOL RYGExternalMethodMatches(Method method, char returnType, const char *arguments) {
+    if (!method || !arguments || method_getNumberOfArguments(method) != strlen(arguments) + 2) return NO;
+    char encoded[128] = {0};
+    method_getReturnType(method, encoded, sizeof(encoded));
+    if (!RYGExternalTypeMatches(encoded, returnType)) return NO;
+    for (unsigned int index = 0; arguments[index]; index++) {
+        memset(encoded, 0, sizeof(encoded));
+        method_getArgumentType(method, index + 2, encoded, sizeof(encoded));
+        if (!RYGExternalTypeMatches(encoded, arguments[index])) return NO;
+    }
+    return YES;
+}
+
+static BOOL RYGExternalHook(Class cls, NSString *name, IMP replacement, IMP *original, char returnType, const char *arguments) {
     if (!cls || !replacement || !original || *original) return original && *original;
     Method method = class_getInstanceMethod(cls, NSSelectorFromString(name));
-    if (!method) return NO;
+    if (!RYGExternalMethodMatches(method, returnType, arguments)) return NO;
     MSHookMessageEx(cls, method_getName(method), replacement, original);
     return *original != NULL;
 }
@@ -153,22 +181,22 @@ static void RYGInstallExternalMobileConfigSeenHooks(void) {
     Class cls = RYGExternalManagerScore(fb) >= RYGExternalManagerScore(ig) ? fb : ig;
     if (!cls) return;
 
-    RYGExternalHook(cls, @"getBool:", (IMP)new_ext_getBool, (IMP *)&orig_ext_getBool);
-    RYGExternalHook(cls, @"getBool:withDefault:", (IMP)new_ext_getBoolDef, (IMP *)&orig_ext_getBoolDef);
-    RYGExternalHook(cls, @"getBool:withOptions:", (IMP)new_ext_getBoolOpts, (IMP *)&orig_ext_getBoolOpts);
-    RYGExternalHook(cls, @"getBool:withOptions:withDefault:", (IMP)new_ext_getBoolOptsDef, (IMP *)&orig_ext_getBoolOptsDef);
-    RYGExternalHook(cls, @"getInt64:", (IMP)new_ext_getInt, (IMP *)&orig_ext_getInt);
-    RYGExternalHook(cls, @"getInt64:withDefault:", (IMP)new_ext_getIntDef, (IMP *)&orig_ext_getIntDef);
-    RYGExternalHook(cls, @"getInt64:withOptions:", (IMP)new_ext_getIntOpts, (IMP *)&orig_ext_getIntOpts);
-    RYGExternalHook(cls, @"getInt64:withOptions:withDefault:", (IMP)new_ext_getIntOptsDef, (IMP *)&orig_ext_getIntOptsDef);
-    RYGExternalHook(cls, @"getDouble:", (IMP)new_ext_getDouble, (IMP *)&orig_ext_getDouble);
-    RYGExternalHook(cls, @"getDouble:withDefault:", (IMP)new_ext_getDoubleDef, (IMP *)&orig_ext_getDoubleDef);
-    RYGExternalHook(cls, @"getDouble:withOptions:", (IMP)new_ext_getDoubleOpts, (IMP *)&orig_ext_getDoubleOpts);
-    RYGExternalHook(cls, @"getDouble:withOptions:withDefault:", (IMP)new_ext_getDoubleOptsDef, (IMP *)&orig_ext_getDoubleOptsDef);
-    RYGExternalHook(cls, @"getString:", (IMP)new_ext_getString, (IMP *)&orig_ext_getString);
-    RYGExternalHook(cls, @"getString:withDefault:", (IMP)new_ext_getStringDef, (IMP *)&orig_ext_getStringDef);
-    RYGExternalHook(cls, @"getString:withOptions:", (IMP)new_ext_getStringOpts, (IMP *)&orig_ext_getStringOpts);
-    RYGExternalHook(cls, @"getString:withOptions:withDefault:", (IMP)new_ext_getStringOptsDef, (IMP *)&orig_ext_getStringOptsDef);
+    RYGExternalHook(cls, @"getBool:", (IMP)new_ext_getBool, (IMP *)&orig_ext_getBool, 'B', "P");
+    RYGExternalHook(cls, @"getBool:withDefault:", (IMP)new_ext_getBoolDef, (IMP *)&orig_ext_getBoolDef, 'B', "PB");
+    RYGExternalHook(cls, @"getBool:withOptions:", (IMP)new_ext_getBoolOpts, (IMP *)&orig_ext_getBoolOpts, 'B', "P@");
+    RYGExternalHook(cls, @"getBool:withOptions:withDefault:", (IMP)new_ext_getBoolOptsDef, (IMP *)&orig_ext_getBoolOptsDef, 'B', "P@B");
+    RYGExternalHook(cls, @"getInt64:", (IMP)new_ext_getInt, (IMP *)&orig_ext_getInt, 'Q', "P");
+    RYGExternalHook(cls, @"getInt64:withDefault:", (IMP)new_ext_getIntDef, (IMP *)&orig_ext_getIntDef, 'Q', "PQ");
+    RYGExternalHook(cls, @"getInt64:withOptions:", (IMP)new_ext_getIntOpts, (IMP *)&orig_ext_getIntOpts, 'Q', "P@");
+    RYGExternalHook(cls, @"getInt64:withOptions:withDefault:", (IMP)new_ext_getIntOptsDef, (IMP *)&orig_ext_getIntOptsDef, 'Q', "P@Q");
+    RYGExternalHook(cls, @"getDouble:", (IMP)new_ext_getDouble, (IMP *)&orig_ext_getDouble, 'D', "P");
+    RYGExternalHook(cls, @"getDouble:withDefault:", (IMP)new_ext_getDoubleDef, (IMP *)&orig_ext_getDoubleDef, 'D', "PD");
+    RYGExternalHook(cls, @"getDouble:withOptions:", (IMP)new_ext_getDoubleOpts, (IMP *)&orig_ext_getDoubleOpts, 'D', "P@");
+    RYGExternalHook(cls, @"getDouble:withOptions:withDefault:", (IMP)new_ext_getDoubleOptsDef, (IMP *)&orig_ext_getDoubleOptsDef, 'D', "P@D");
+    RYGExternalHook(cls, @"getString:", (IMP)new_ext_getString, (IMP *)&orig_ext_getString, '@', "P");
+    RYGExternalHook(cls, @"getString:withDefault:", (IMP)new_ext_getStringDef, (IMP *)&orig_ext_getStringDef, '@', "P@");
+    RYGExternalHook(cls, @"getString:withOptions:", (IMP)new_ext_getStringOpts, (IMP *)&orig_ext_getStringOpts, '@', "P@");
+    RYGExternalHook(cls, @"getString:withOptions:withDefault:", (IMP)new_ext_getStringOptsDef, (IMP *)&orig_ext_getStringOptsDef, '@', "P@@");
 }
 
 static void RYGScheduleExternalSeenInstall(void) {
