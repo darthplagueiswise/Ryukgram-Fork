@@ -1,3 +1,4 @@
-#import <UIKit/UIKit.h>
-@interface RYGMobileConfigToolsViewController : UITableViewController
+#import "../../Settings/RYGSettingsViewController.h"
+
+@interface RYGMobileConfigToolsViewController : RYGSettingsViewController
 @end
