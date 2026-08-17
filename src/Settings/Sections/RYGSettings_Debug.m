@@ -1,6 +1,7 @@
 #import "RYGSettingsSections.h"
 #import "../../Debug/RYGDeveloperGateViewController.h"
 #import "../../Debug/RYGDeveloperRuntimeBrowserViewController.h"
+#import "../../Debug/RYGMetaLocalExperimentBrowser.h"
 #import "../../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
 
 @implementation RYGTweakSettings (Section_Debug)
@@ -30,6 +31,11 @@
                                              viewController:[[RYGDeveloperGateViewController alloc]
                                                  initWithSurface:RYGDeveloperGateSurfaceLiquidGlass]];
 
+    RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment"
+                                                   subtitle:@"Open Instagram's native MetaLocalExperiment list controller"
+                                                       icon:[RYGSymbol symbolWithName:@"insights"]
+                                                     action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
+
     RYGSetting *mobileConfig = [RYGSetting navigationCellWithTitle:@"MobileConfig"
                                                           subtitle:@"Live table, id_name_mapping.json and mc_overrides.json"
                                                               icon:[RYGSymbol symbolWithName:@"sliders"]
@@ -41,14 +47,14 @@
                                                viewController:[RYGDeveloperRuntimeBrowserViewController new]];
 
     return [RYGSetting navigationCellWithTitle:@"Developer"
-                                      subtitle:@"Exact internal gates, MobileConfig and the live runtime browser"
+                                      subtitle:@"Exact internal gates, native experiments, MobileConfig and live runtime"
                                           icon:[RYGSymbol symbolWithName:@"toolbox"]
                                    navSections:@[
         [RYGSettingsViewController sectionWithHeader:@"Developer surfaces"
-                                              footer:@"These pages are selector-backed. They do not fall back to unrelated MobileConfig rows when a gate is absent. Opening them installs no runtime hook."
-                                                rows:@[wordmark, internal, prism, glass]],
+                                              footer:@"Gate pages are backed by methods that exist in the loaded Instagram images. MetaLocalExperiment opens Instagram's native list controller."
+                                                rows:@[wordmark, internal, prism, glass, metaLocal]],
         [RYGSettingsViewController sectionWithHeader:@"Runtime & configuration"
-                                              footer:@"Runtime observation/forcing is explicit per method. MobileConfig import/export is independent from the feature pages above."
+                                              footer:@"Runtime observation/forcing is explicit per supported ABI. MobileConfig applies through Instagram's native overrides table and persists the canonical JSON separately."
                                                 rows:@[mobileConfig, runtime]],
     ]];
 }
