@@ -2,28 +2,59 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
-#import <mach/mach.h>
-#import <mach/mach_vm.h>
+#import <mach-o/loader.h>
+#import <mach/vm_prot.h>
 #include <stdint.h>
 #include <string.h>
 
 static BOOL RYGMCReadableRange(const void *pointer, size_t length) {
     if (!pointer || !length) return NO;
-    mach_vm_address_t wanted = (mach_vm_address_t)(uintptr_t)pointer;
-    if (wanted > UINT64_MAX - length) return NO;
+    uintptr_t start = (uintptr_t)pointer;
+    if (start > UINTPTR_MAX - length) return NO;
+    uintptr_t end = start + length;
 
-    mach_vm_address_t region = wanted;
-    mach_vm_size_t regionSize = 0;
-    vm_region_basic_info_data_64_t info = {0};
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object = MACH_PORT_NULL;
-    kern_return_t kr = mach_vm_region(mach_task_self(), &region, &regionSize,
-                                      VM_REGION_BASIC_INFO_64,
-                                      (vm_region_info_t)&info, &count, &object);
-    if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
-    if (kr != KERN_SUCCESS || !(info.protection & VM_PROT_READ)) return NO;
-    if (wanted < region || wanted - region > regionSize) return NO;
-    return length <= regionSize - (wanted - region);
+    Dl_info info = {0};
+    if (!dladdr(pointer, &info) || !info.dli_fbase) return NO;
+    const struct mach_header *raw = (const struct mach_header *)info.dli_fbase;
+    if (raw->magic != MH_MAGIC_64) return NO;
+    const struct mach_header_64 *header = (const struct mach_header_64 *)raw;
+    if (!header->sizeofcmds || header->sizeofcmds > 16 * 1024 * 1024 || header->ncmds > 65535) return NO;
+
+    const uint8_t *cursor = (const uint8_t *)(header + 1);
+    const uint8_t *commandsEnd = cursor + header->sizeofcmds;
+    uint64_t textVMAddr = UINT64_MAX;
+    for (uint32_t index = 0; index < header->ncmds; index++) {
+        if (cursor > commandsEnd || (size_t)(commandsEnd - cursor) < sizeof(struct load_command)) return NO;
+        const struct load_command *command = (const struct load_command *)cursor;
+        if (command->cmdsize < sizeof(*command) || command->cmdsize > (size_t)(commandsEnd - cursor)) return NO;
+        if (command->cmd == LC_SEGMENT_64) {
+            const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
+            if (segment->cmdsize < sizeof(*segment)) return NO;
+            if (strncmp(segment->segname, SEG_TEXT, sizeof(segment->segname)) == 0) textVMAddr = segment->vmaddr;
+        }
+        cursor += command->cmdsize;
+    }
+    if (textVMAddr == UINT64_MAX || (uintptr_t)header < (uintptr_t)textVMAddr) return NO;
+    uintptr_t slide = (uintptr_t)header - (uintptr_t)textVMAddr;
+
+    cursor = (const uint8_t *)(header + 1);
+    for (uint32_t index = 0; index < header->ncmds; index++) {
+        if (cursor > commandsEnd || (size_t)(commandsEnd - cursor) < sizeof(struct load_command)) return NO;
+        const struct load_command *command = (const struct load_command *)cursor;
+        if (command->cmdsize < sizeof(*command) || command->cmdsize > (size_t)(commandsEnd - cursor)) return NO;
+        if (command->cmd == LC_SEGMENT_64) {
+            const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
+            if ((segment->initprot & VM_PROT_READ) && segment->vmaddr <= UINTPTR_MAX - slide) {
+                uintptr_t segmentStart = slide + (uintptr_t)segment->vmaddr;
+                if ((uintptr_t)segment->vmsize <= UINTPTR_MAX - segmentStart) {
+                    uintptr_t segmentEnd = segmentStart + (uintptr_t)segment->vmsize;
+                    if (start >= segmentStart && end <= segmentEnd) return YES;
+                }
+            }
+        }
+        cursor += command->cmdsize;
+    }
+    return NO;
 }
 
 static uintptr_t RYGMCComparablePointer(const void *pointer) {
