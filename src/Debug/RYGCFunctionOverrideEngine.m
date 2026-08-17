@@ -15,8 +15,8 @@ typedef struct {
     char name[160];
     void *original;
     RYGCFunctionProfile profile;
-    atomic_int force;      // -1 native, 0 false, 1 true
-    atomic_int observed;   // -1 unknown, 0 false, 1 true
+    atomic_int force;
+    atomic_int observed;
     atomic_uint hits;
 } RYGCFunctionSlot;
 
@@ -32,9 +32,10 @@ static NSString *RYGNormalizeCSymbol(NSString *symbol) {
 
 static RYGCFunctionProfile RYGProfileForName(NSString *name) {
     NSString *n = RYGNormalizeCSymbol(name);
+    // These profiles are copied from the experimental4 ABI allowlist. Do not
+    // widen this list by name heuristics; unknown C symbols stay inspect-only.
     if ([n isEqualToString:@"EasyGatingGetBoolean_Internal_DoNotUseOrMock"] ||
-        [n isEqualToString:@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock"] ||
-        [n isEqualToString:@"MCQEasyGatingGetBooleanInternalDoNotUseOrMock"]) return RYGCFunctionProfileEasyGatingBool8;
+        [n isEqualToString:@"EasyGatingGetBooleanUsingAuthDataContext_Internal_DoNotUseOrMock"]) return RYGCFunctionProfileEasyGatingBool8;
     if ([n isEqualToString:@"MSGCSessionedMobileConfigGetBoolean"]) return RYGCFunctionProfileMSGCSessionedBool3;
     if ([n isEqualToString:@"MEBIsMinosDogfoodMekEncryptionVersionEnabled"] ||
         [n isEqualToString:@"IGAppIsInstagramInternalAppsInstalledAndNotHiddenAfteriOS18"]) return RYGCFunctionProfileNoArgBool;
@@ -128,53 +129,36 @@ static BOOL RYGEnsureCFunctionInstalled(NSString *symbol) {
 }
 
 @implementation RYGCFunctionOverrideEngine
-
-+ (BOOL)isKnownBoolFunctionSymbol:(NSString *)symbol {
-    return RYGProfileForName(symbol) != RYGCFunctionProfileUnknown;
-}
-
++ (BOOL)isKnownBoolFunctionSymbol:(NSString *)symbol { return RYGProfileForName(symbol) != RYGCFunctionProfileUnknown; }
 + (NSNumber *)forceForSymbol:(NSString *)symbol {
     NSString *name = RYGNormalizeCSymbol(symbol);
     RYGCFunctionSlot *slot = RYGSlotForName(name.UTF8String);
     if (slot) { int value = atomic_load(&slot->force); return value < 0 ? nil : @(value != 0); }
     return RYGStoredCOverrides()[name];
 }
-
 + (NSNumber *)observedValueForSymbol:(NSString *)symbol {
     RYGCFunctionSlot *slot = RYGSlotForName(RYGNormalizeCSymbol(symbol).UTF8String);
     if (!slot) return nil;
     int value = atomic_load(&slot->observed);
     return value < 0 ? nil : @(value != 0);
 }
-
 + (NSUInteger)callCountForSymbol:(NSString *)symbol {
     RYGCFunctionSlot *slot = RYGSlotForName(RYGNormalizeCSymbol(symbol).UTF8String);
     return slot ? atomic_load(&slot->hits) : 0;
 }
-
 + (BOOL)setForce:(NSNumber *)value forSymbol:(NSString *)symbol {
     NSString *name = RYGNormalizeCSymbol(symbol);
-    if (![self isKnownBoolFunctionSymbol:name]) return NO;
-    if (!RYGEnsureCFunctionInstalled(name)) return NO;
+    if (![self isKnownBoolFunctionSymbol:name] || !RYGEnsureCFunctionInstalled(name)) return NO;
     RYGCFunctionSlot *slot = RYGSlotForName(name.UTF8String);
     if (!slot) return NO;
-
     NSMutableDictionary *stored = [RYGStoredCOverrides() mutableCopy];
-    if (value) {
-        stored[name] = @([value boolValue]);
-        atomic_store(&slot->force, value.boolValue ? 1 : 0);
-    } else {
-        [stored removeObjectForKey:name];
-        atomic_store(&slot->force, -1);
-    }
+    if (value) { stored[name] = @([value boolValue]); atomic_store(&slot->force, value.boolValue ? 1 : 0); }
+    else { [stored removeObjectForKey:name]; atomic_store(&slot->force, -1); }
     [NSUserDefaults.standardUserDefaults setObject:stored.copy forKey:kRYGCFunctionOverridesKey];
     return YES;
 }
-
 @end
 
 __attribute__((constructor(118))) static void RYGReinstallPersistedCFunctionOverrides(void) {
-    @autoreleasepool {
-        for (NSString *name in RYGStoredCOverrides()) RYGEnsureCFunctionInstalled(name);
-    }
+    @autoreleasepool { for (NSString *name in RYGStoredCOverrides()) RYGEnsureCFunctionInstalled(name); }
 }
