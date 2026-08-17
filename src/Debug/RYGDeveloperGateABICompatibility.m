@@ -5,67 +5,34 @@
 
 static const void *kRYGDeveloperGateScanGenerationKey = &kRYGDeveloperGateScanGenerationKey;
 
-static NSArray<NSDictionary<NSString *, NSString *> *> *RYGCompatGateDescriptors(RYGDeveloperGateSurface surface) {
-    switch (surface) {
-        case RYGDeveloperGateSurfaceWordMark:
-            return @[
-                @{@"selector":@"isIGWordmark1aEnabled"},
-                @{@"selector":@"isIGWordmark1aAltEnabled"},
-                @{@"selector":@"isIGWordmark1bEnabled"},
-                @{@"selector":@"isIGWordmark1bAltEnabled"},
-            ];
-        case RYGDeveloperGateSurfaceInternal:
-            return @[
-                @{@"selector":@"isEmployee"}, @{@"selector":@"isEmployeeBuild"},
-                @{@"selector":@"is_employee"}, @{@"selector":@"is_employee_value_set"},
-                @{@"selector":@"isIGInternal"}, @{@"selector":@"isInternal"},
-                @{@"selector":@"isInternalBuild"}, @{@"selector":@"isInternalOnly"},
-                @{@"selector":@"is_internal_build"}, @{@"selector":@"is_internal_only"},
-                @{@"selector":@"is_internal_toggle_on"}, @{@"selector":@"is_dogfooding_option_enabled"},
-                @{@"selector":@"shouldSendEmployeeTag"}, @{@"selector":@"shouldShowInternalBadge"},
-                @{@"selector":@"shouldShowIgOnlyUserDisclosureIn3dotMenu"},
-                @{@"selector":@"shouldShowIgOnlyUserDisclosureThroughCtaClick"},
-            ];
-        case RYGDeveloperGateSurfacePrism:
-            return @[
-                @{@"selector":@"isPrismEnabled"}, @{@"selector":@"isIGBPrismEnabled"},
-                @{@"selector":@"isPrismAlertDialogEnabled"}, @{@"selector":@"isPrismAllUserAssetsEnabled"},
-                @{@"selector":@"isPrismAvatarRingEnabled"}, @{@"selector":@"isPrismBottomSheetEnabled"},
-                @{@"selector":@"isPrismButtonEnabled"}, @{@"selector":@"isPrismContextMenuEnabled"},
-                @{@"selector":@"isPrismControlsEnabled"}, @{@"selector":@"isPrismCreationIconsEnabled"},
-                @{@"selector":@"isPrismDefaultTooltipEnabled"}, @{@"selector":@"isPrismDividersUpdateEnabled"},
-                @{@"selector":@"isPrismIndigoButtonEnabled"}, @{@"selector":@"isPrismMediaButtonsEnabled"},
-                @{@"selector":@"isPrismOverflowMenuEnabled"}, @{@"selector":@"isPrismSaveIconM4Enabled"},
-                @{@"selector":@"isPrismToastsEnabled"}, @{@"selector":@"isRevertedPrismColorEnabled"},
-                @{@"selector":@"shouldRenderPrismStyle"}, @{@"selector":@"usePrismColors"},
-            ];
-        case RYGDeveloperGateSurfaceLiquidGlass:
-            return @[
-                @{@"selector":@"isLiquidGlassEnabled"}, @{@"selector":@"isLiquidGlassBlurEnabled"},
-                @{@"selector":@"isLiquidGlassCGContextBlurEnabled"}, @{@"selector":@"isLiquidGlassEaseInOutBlurEnabled"},
-                @{@"selector":@"isLiquidGlassIconBarButtonEnabled"}, @{@"selector":@"isLiquidGlassInAppNotificationEnabled"},
-                @{@"selector":@"isLiquidGlassNavigationContentStylePinningEnabled"}, @{@"selector":@"isLiquidGlassToastEnabled"},
-                @{@"selector":@"isLiquidGlassToastPeekEnabled"}, @{@"selector":@"isLiquidGlassToggleEnabled"},
-                @{@"selector":@"isGlassBackgroundEnabled"}, @{@"selector":@"isGlassEnabled"},
-                @{@"selector":@"isGlassRenderingOptimizationEnabled"}, @{@"selector":@"isInlineComposerGlassEnabled"},
-                @{@"selector":@"shouldMitigateLiquidGlassYOffset"}, @{@"selector":@"shouldUseGlassEffect"},
-                @{@"selector":@"useGlassEffect"},
-                @{@"selector":@"isEnabled", @"class":@"IGLiquidGlassNavigationExperimentHelper"},
-                @{@"selector":@"isHomeFeedHeaderEnabled", @"class":@"IGLiquidGlassNavigationExperimentHelper"},
-                @{@"selector":@"isProfileSegmentedTabsGlassDisabled", @"class":@"IGLiquidGlassNavigationExperimentHelper"},
-                @{@"selector":@"isEnabled", @"class":@"IGThrowbackChromeExperimentHelper"},
-            ];
-    }
-    return @[];
+static NSSet<NSString *> *RYGWordMarkSelectors(void) {
+    return [NSSet setWithArray:@[@"isIGWordmark1aEnabled", @"isIGWordmark1aAltEnabled", @"isIGWordmark1bEnabled", @"isIGWordmark1bAltEnabled"]];
+}
+
+static BOOL RYGHaysContainsAny(NSString *haystack, NSArray<NSString *> *needles) {
+    NSString *lower = haystack.lowercaseString ?: @"";
+    for (NSString *needle in needles) if ([lower containsString:needle]) return YES;
+    return NO;
 }
 
 static BOOL RYGCompatGateMatches(RYGRuntimeBoolMethod *row, RYGDeveloperGateSurface surface) {
     if (!row.selectorName.length) return NO;
-    for (NSDictionary<NSString *, NSString *> *descriptor in RYGCompatGateDescriptors(surface)) {
-        if (![descriptor[@"selector"] isEqualToString:row.selectorName]) continue;
-        NSString *needle = descriptor[@"class"];
-        if (needle.length && [row.className rangeOfString:needle options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
-        return YES;
+    NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.className ?: @"", row.selectorName ?: @""];
+    switch (surface) {
+        case RYGDeveloperGateSurfaceWordMark:
+            return [RYGWordMarkSelectors() containsObject:row.selectorName];
+        case RYGDeveloperGateSurfaceInternal:
+            return RYGHaysContainsAny(haystack, @[@"employee", @"internal", @"dogfood", @"igonly", @"ig-only", @"metamate", @"staff"]);
+        case RYGDeveloperGateSurfacePrism:
+            // Prism surfaces in the current Instagram/FBShared binaries expose
+            // the Prism token in either the helper class or the selector. This
+            // discovers all safe BOOL variants instead of maintaining a stale
+            // hand-curated selector list.
+            return RYGHaysContainsAny(haystack, @[@"prism"]);
+        case RYGDeveloperGateSurfaceLiquidGlass:
+            // Include the native Throwback chrome experiment as a single Glass
+            // option; everything else is discovered by Liquid/Glass naming.
+            return RYGHaysContainsAny(haystack, @[@"liquidglass", @"liquid glass", @"glasseffect", @"glass", @"throwbackchrome"]);
     }
     return NO;
 }
@@ -101,8 +68,7 @@ static NSArray<NSString *> *RYGCompatDeveloperImages(void) {
         for (NSString *path in RYGCompatDeveloperImages()) {
             NSArray<RYGRuntimeBoolMethod *> *rows = [RYGRuntimeBrowserEngine boolMethodsForImagePath:path scope:RYGRuntimeBrowserScopeAll];
             for (RYGRuntimeBoolMethod *row in rows) {
-                if (!RYGCompatGateMatches(row, surface)) continue;
-                if ([dedupe containsObject:row.overrideKey]) continue;
+                if (!RYGCompatGateMatches(row, surface) || [dedupe containsObject:row.overrideKey]) continue;
                 [dedupe addObject:row.overrideKey];
                 [matches addObject:row];
             }
