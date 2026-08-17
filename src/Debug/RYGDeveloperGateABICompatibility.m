@@ -18,21 +18,20 @@ static BOOL RYGHaysContainsAny(NSString *haystack, NSArray<NSString *> *needles)
 static BOOL RYGCompatGateMatches(RYGRuntimeBoolMethod *row, RYGDeveloperGateSurface surface) {
     if (!row.selectorName.length) return NO;
     NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.className ?: @"", row.selectorName ?: @""];
+    NSString *lower = haystack.lowercaseString;
     switch (surface) {
         case RYGDeveloperGateSurfaceWordMark:
             return [RYGWordMarkSelectors() containsObject:row.selectorName];
         case RYGDeveloperGateSurfaceInternal:
             return RYGHaysContainsAny(haystack, @[@"employee", @"internal", @"dogfood", @"igonly", @"ig-only", @"metamate", @"staff"]);
         case RYGDeveloperGateSurfacePrism:
-            // Prism surfaces in the current Instagram/FBShared binaries expose
-            // the Prism token in either the helper class or the selector. This
-            // discovers all safe BOOL variants instead of maintaining a stale
-            // hand-curated selector list.
-            return RYGHaysContainsAny(haystack, @[@"prism"]);
-        case RYGDeveloperGateSurfaceLiquidGlass:
-            // Include the native Throwback chrome experiment as a single Glass
-            // option; everything else is discovered by Liquid/Glass naming.
-            return RYGHaysContainsAny(haystack, @[@"liquidglass", @"liquid glass", @"glasseffect", @"glass", @"throwbackchrome"]);
+            return [lower containsString:@"prism"];
+        case RYGDeveloperGateSurfaceLiquidGlass: {
+            // Keep wearable/AI "glasses" features out of this UIKit surface.
+            if (RYGHaysContainsAny(lower, @[@"glasses", @"rayban", @"wearable", @"smartglass"])) return NO;
+            if ([lower containsString:@"throwbackchrome"]) return YES;
+            return RYGHaysContainsAny(lower, @[@"liquidglass", @"liquid glass", @"glasseffect", @"igglass", @"igdsglass"]);
+        }
     }
     return NO;
 }
