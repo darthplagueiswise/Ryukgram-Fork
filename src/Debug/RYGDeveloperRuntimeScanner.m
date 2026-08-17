@@ -55,6 +55,16 @@ static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *>
     return NO;
 }
 
+static Class RYGDevResolveClass(NSString *className) {
+    if (!className.length) return Nil;
+    // NSStringFromClass() returns module-qualified names for Swift classes on
+    // current runtimes. NSClassFromString resolves that form; objc_lookUpClass
+    // remains the fallback for raw Objective-C/mangled runtime names.
+    Class cls = NSClassFromString(className);
+    if (!cls) cls = objc_lookUpClass(className.UTF8String);
+    return cls;
+}
+
 // The two supplied binaries each contain a distinct Objective-C protocol object
 // named IGDSLauncherConfigProtocol. Comparing Protocol pointers is therefore the
 // wrong ownership test. Compare protocol names on the class hierarchy instead.
@@ -79,8 +89,7 @@ static BOOL RYGDevClassConformsToNamedProtocol(Class cls, const char *wantedName
 }
 
 static BOOL RYGDevRowOwnedByLauncherProtocol(RYGRuntimeBoolMethod *row) {
-    if (!row.className.length) return NO;
-    Class cls = objc_lookUpClass(row.className.UTF8String);
+    Class cls = RYGDevResolveClass(row.className);
     return RYGDevClassConformsToNamedProtocol(cls, "IGDSLauncherConfigProtocol");
 }
 
