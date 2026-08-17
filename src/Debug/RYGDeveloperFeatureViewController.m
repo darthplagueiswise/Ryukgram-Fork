@@ -197,6 +197,10 @@ static NSNumber *RYGRecommendedBoolForName(NSString *name) {
 
         UIVisualEffectView *glass = RYGLiquidGlassView(NO, NO, nil);
         glass.translatesAutoresizingMaskIntoConstraints = NO;
+        // The generic glass helper is non-interactive when used as a background.
+        // This preview owns a segmented control inside contentView, so it must
+        // participate in hit-testing without enabling UIGlassEffect's morph mode.
+        glass.userInteractionEnabled = YES;
         glass.layer.cornerCurve = kCACornerCurveContinuous;
         glass.layer.cornerRadius = 22.0;
         glass.clipsToBounds = YES;
@@ -338,41 +342,28 @@ static NSNumber *RYGRecommendedBoolForName(NSString *name) {
                          row.imagePath.lastPathComponent,
                          native ? (native.boolValue ? @"true" : @"false") : @"not observed yet",
                          forced ? (forced.boolValue ? @"forced true" : @"forced false") : @"native"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:row.selectorName
-                                                                    message:message
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:row.selectorName message:message preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe original live value"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe original live value" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         RYGRuntimeBeginLiveObservation(@[row]);
         [RYGUtils showToastForDuration:1.4 title:@"Live observer installed" subtitle:@"Waiting for Instagram to call this method"];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force true"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@YES forMethod:row];
         [weakSelf rebuildSections];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force false"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force false" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@NO forMethod:row];
         [weakSelf rebuildSections];
     }]];
     if (row.overrideValue) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value"
-                                                  style:UIAlertActionStyleDestructive
-                                                handler:^(__unused UIAlertAction *action) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
             [RYGRuntimeBrowserEngine setOverride:nil forMethod:row];
             [weakSelf rebuildSections];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy method details"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@[%@ %@] %@",
-                                                 row.classMethod ? @"+" : @"-", row.className, row.selectorName, row.typeEncoding];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy method details" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@[%@ %@] %@", row.classMethod ? @"+" : @"-", row.className, row.selectorName, row.typeEncoding];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
@@ -391,9 +382,7 @@ static NSNumber *RYGRecommendedBoolForName(NSString *name) {
     __weak typeof(self) weakSelf = self;
 
     if (param.type == RYGMCTypeBool) {
-        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:param.name ?: @"BOOL"
-                                                                        message:config.displayName
-                                                                 preferredStyle:UIAlertControllerStyleActionSheet];
+        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:param.name ?: @"BOOL" message:config.displayName preferredStyle:UIAlertControllerStyleActionSheet];
         [sheet addAction:[UIAlertAction actionWithTitle:@"Force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
             [mc setOverride:@YES for:param];
             [weakSelf rebuildSections];
@@ -417,9 +406,7 @@ static NSNumber *RYGRecommendedBoolForName(NSString *name) {
         return;
     }
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:param.name ?: @"MobileConfig"
-                                                                    message:[NSString stringWithFormat:@"%@ · %@", config.displayName, param.typeName]
-                                                             preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:param.name ?: @"MobileConfig" message:[NSString stringWithFormat:@"%@ · %@", config.displayName, param.typeName] preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         id current = [mc overrideValueFor:param] ?: [mc liveValueFor:param];
         field.text = current ? [current description] : @"";
