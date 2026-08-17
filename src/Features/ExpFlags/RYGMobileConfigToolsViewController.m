@@ -17,9 +17,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 @implementation RYGMobileConfigToolsViewController
 
-- (instancetype)init {
-    return [super initWithTitle:@"MobileConfig"];
-}
+- (instancetype)init { return [super initWithTitle:@"MobileConfig"]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -33,55 +31,56 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     NSString *path = [mc ryg_nativeDataDirectory];
 
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Open live MobileConfig browser"
-                                                     subtitle:@"Runtime configs, original values and overrides"
+                                                     subtitle:@"Full config/parameter IDs, native values, runtime-seen state and overrides"
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
                                                viewController:[RYGMobileConfigViewController new]];
     RYGSetting *reapply = [RYGSetting buttonCellWithTitle:@"Reapply active overrides"
-                                                 subtitle:@"Write RyukGram's current override set back to Instagram's native table"
+                                                 subtitle:@"Retry every RyukGram value against Instagram's currently captured native overrides tables"
                                                      icon:[RYGSymbol symbolWithName:@"arrow_cw"]
                                                    action:^{
         RYGMobileConfig *strongMC = [RYGMobileConfig shared];
         [strongMC reapplyOverridesToNativeTable];
-        [RYGUtils showToastForDuration:1.4 title:@"Reapplied" subtitle:[NSString stringWithFormat:@"%lu overrides", (unsigned long)strongMC.overrideCount]];
+        [RYGUtils showToastForDuration:1.4 title:@"Reapply issued"
+                             subtitle:[NSString stringWithFormat:@"%lu override%@", (unsigned long)strongMC.overrideCount, strongMC.overrideCount == 1 ? @"" : @"s"]];
         [weakSelf rebuildSections];
     }];
 
     RYGSetting *importMapping = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
-                                                       subtitle:@"Validate, install in the active *.data directory and reload names"
+                                                       subtitle:@"Validate and cache immediately; mirror into the active *.data directory when Instagram exposes it"
                                                            icon:[RYGSymbol symbolWithName:@"download"]
                                                          action:^{ [weakSelf presentJSONPickerForOperation:RYGMCImportOperationNameMapping]; }];
     RYGSetting *exportMapping = [RYGSetting buttonCellWithTitle:@"Export id_name_mapping.json"
-                                                       subtitle:@"Share the mapping currently resolved from Instagram's native data directory"
+                                                       subtitle:@"Share the imported/resolved mapping even when the native *.data directory is not available yet"
                                                            icon:[RYGSymbol symbolWithName:@"share"]
                                                          action:^{ [weakSelf exportNameMapping]; }];
 
     RYGSetting *importOverrides = [RYGSetting buttonCellWithTitle:@"Import & apply mc_overrides.json"
-                                                         subtitle:@"Apply immediately and persist using Instagram's config/param JSON grammar"
+                                                         subtitle:@"Parse the native config:param grammar, apply through MobileConfig and persist the canonical JSON"
                                                              icon:[RYGSymbol symbolWithName:@"circle_check"]
                                                            action:^{ [weakSelf presentJSONPickerForOperation:RYGMCImportOperationOverrides]; }];
     RYGSetting *exportOverrides = [RYGSetting buttonCellWithTitle:@"Export mc_overrides.json"
-                                                         subtitle:@"Share the currently active RyukGram overrides"
+                                                         subtitle:@"Share the canonical JSON generated from RyukGram's current override set"
                                                              icon:[RYGSymbol symbolWithName:@"share"]
                                                            action:^{ [weakSelf exportOverrides]; }];
     RYGSetting *clearOverrides = [RYGSetting buttonCellWithTitle:@"Clear RyukGram overrides"
-                                                        subtitle:@"Return every RyukGram MobileConfig override to Instagram's original value"
+                                                        subtitle:@"Remove native-table values, runtime forcing and the canonical persisted set"
                                                             icon:[RYGSymbol symbolWithName:@"history"]
                                                           action:^{ [weakSelf confirmClearOverrides]; }];
     clearOverrides.titleColor = UIColor.systemRedColor;
 
     NSString *runtimeFooter = path.length
-        ? [NSString stringWithFormat:@"Active native data directory\n%@", path]
-        : @"The active directory is resolved from Instagram's live getOverridesTablePath. No user-id path is guessed.";
+        ? [NSString stringWithFormat:@"Resolved native data directory\n%@", path]
+        : @"The runtime manager and the disk path are independent. This page never invents a user-id path; it waits for an actual Documents/mobileconfig/*.data directory.";
 
     NSArray *sections = @[
         [RYGSettingsViewController sectionWithHeader:@"Live MobileConfig"
                                               footer:runtimeFooter
                                                 rows:@[browser, reapply]],
         [RYGSettingsViewController sectionWithHeader:@"id_name_mapping.json"
-                                              footer:@"Import and export use the mapping inside the currently active native *.data directory."
+                                              footer:@"The mapping is useful immediately from RyukGram's cache. When the native *.data directory appears, the same canonical file is mirrored there automatically."
                                                 rows:@[importMapping, exportMapping]],
         [RYGSettingsViewController sectionWithHeader:@"mc_overrides.json"
-                                              footer:@"Imports are applied through Instagram's native override table and persisted in the active *.data directory."
+                                              footer:@"Runtime application uses Instagram's native FBMobileConfigOverridesTable when captured. JSON persistence is a separate step targeting the actual active *.data directory."
                                                 rows:@[importOverrides, exportOverrides, clearOverrides]],
     ];
     [self applySettingSections:sections];
@@ -95,9 +94,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     [self presentViewController:picker animated:YES completion:nil];
 }
 
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
-    self.pendingImportOperation = RYGMCImportOperationNone;
-}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { self.pendingImportOperation = RYGMCImportOperationNone; }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject;
@@ -121,14 +118,17 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Import failed"];
             return;
         }
-        [RYGUtils showToastForDuration:1.5 title:@"Imported" subtitle:@"id_name_mapping.json reloaded"];
+        NSString *nativePath = [mc ryg_nativeNameMappingPath];
+        [RYGUtils showToastForDuration:1.7 title:@"Mapping imported"
+                             subtitle:nativePath.length ? @"Cached and mirrored to native *.data" : @"Cached; native *.data will be mirrored when available"];
     } else if (operation == RYGMCImportOperationOverrides) {
         NSUInteger count = 0;
         if (![mc ryg_importAndApplyOverridesData:data appliedCount:&count error:&error]) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Import failed"];
             return;
         }
-        [RYGUtils showToastForDuration:1.7 title:@"Applied" subtitle:[NSString stringWithFormat:@"%lu MobileConfig values", (unsigned long)count]];
+        [RYGUtils showToastForDuration:1.7 title:@"Overrides imported"
+                             subtitle:[NSString stringWithFormat:@"%lu value%@ parsed/applied", (unsigned long)count, count == 1 ? @"" : @"s"]];
     }
     [self rebuildSections];
 }
@@ -171,7 +171,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 - (void)confirmClearOverrides {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear MobileConfig overrides?"
-                                                                    message:@"Every RyukGram MobileConfig override will return to Instagram's original value."
+                                                                    message:@"Every RyukGram MobileConfig override will return to Instagram's original value and the canonical JSON will be regenerated."
                                                              preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
