@@ -52,6 +52,13 @@ static void RYGLiveRecord(NSString *key, BOOL native) {
     });
 }
 
+static Class RYGLiveResolveClass(NSString *className) {
+    if (!className.length) return Nil;
+    Class cls = NSClassFromString(className);
+    if (!cls) cls = objc_lookUpClass(className.UTF8String);
+    return cls;
+}
+
 // Do not ask the Objective-C runtime to resolve missing methods. Pando and
 // GraphQL classes use custom resolution paths; walking declared lists avoids
 // invoking them while the developer browser is merely inspecting metadata.
@@ -107,7 +114,7 @@ static void RYGLiveObserveMethod(RYGRuntimeBoolMethod *row) {
     [gRYGLiveLock unlock];
     if (installed) return;
 
-    Class cls = objc_lookUpClass(row.className.UTF8String);
+    Class cls = RYGLiveResolveClass(row.className);
     SEL selector = NSSelectorFromString(row.selectorName);
     Class owner = row.classMethod ? object_getClass(cls) : cls;
     Method method = owner ? RYGLiveDeclaredMethodInHierarchy(owner, selector) : NULL;
