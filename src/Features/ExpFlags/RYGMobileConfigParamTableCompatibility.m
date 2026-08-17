@@ -60,7 +60,7 @@ static BOOL RYGMCReadableRange(const void *pointer, size_t length) {
 static uintptr_t RYGMCComparablePointer(const void *pointer) {
     // Current Instagram app addresses are below the 48-bit userspace boundary.
     // Comparing only the canonical address lets two dyld/PAC encodings of the
-    // same target compare equal without ever dereferencing a stripped pointer.
+    // same target compare equal without ever dereferencing a signed pointer.
     return ((uintptr_t)pointer) & 0x0000FFFFFFFFFFFFULL;
 }
 
@@ -101,7 +101,8 @@ static size_t RYGMCExportedCount(void *sizeSymbol) {
     void *candidates[8] = {0};
     memcpy(candidates, listSymbol, sizeof(candidates));
     for (NSUInteger candidateIndex = 0; candidateIndex < 8; candidateIndex++) {
-        const char *table = (const char *)candidates[candidateIndex];
+        uintptr_t tableAddress = RYGMCComparablePointer(candidates[candidateIndex]);
+        const char *table = tableAddress ? (const char *)tableAddress : NULL;
         if (!RYGMCReadableRange(table, 160)) continue;
 
         uintptr_t firstA = 0, firstB = 0;
