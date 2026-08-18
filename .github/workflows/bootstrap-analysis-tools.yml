@@ -10,10 +10,11 @@ jobs:
   package-tools:
     runs-on: ubuntu-latest
     steps:
-      - name: Download Python analysis wheels
+      - name: Download Python analysis packages
         run: |
           mkdir -p bundle/wheels bundle/radare2
-          python3 -m pip download --only-binary=:all: lief capstone r2pipe -d bundle/wheels
+          python3 -m pip download --only-binary=:all: lief capstone -d bundle/wheels
+          python3 -m pip download --no-binary=:all: --no-deps r2pipe -d bundle/wheels
       - name: Download radare2 Linux package
         run: |
           wget -q https://github.com/radareorg/radare2/releases/download/6.1.8/radare2_6.1.8_amd64.deb -O bundle/radare2/radare2_6.1.8_amd64.deb
