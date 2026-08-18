@@ -1,14 +1,10 @@
 name: Bootstrap analysis tools
 
 on:
-  push:
-    branches: [dogfood]
+  pull_request:
     paths:
       - '.github/workflows/bootstrap-analysis-tools.yml'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   package-tools:
@@ -32,11 +28,3 @@ jobs:
           name: ryg-analysis-tools-linux-x86_64
           path: ryg-analysis-tools-linux-x86_64.tar.xz
           if-no-files-found: error
-      - name: Publish stable tool bundle release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete analysis-tools-linux --cleanup-tag --yes || true
-          git tag -f analysis-tools-linux
-          git push origin -f refs/tags/analysis-tools-linux
-          gh release create analysis-tools-linux ryg-analysis-tools-linux-x86_64.tar.xz --title 'RyukGram analysis tools bootstrap' --notes 'Offline Linux x86_64 bundle for local LIEF, Capstone, r2pipe and radare2 analysis.'
