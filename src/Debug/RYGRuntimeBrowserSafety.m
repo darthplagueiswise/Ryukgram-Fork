@@ -3,12 +3,12 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <mach-o/dyld.h>
+#import <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
 
 static NSString *RYGSafeNormalize(NSString *value) {
-    if (!value.length) return @"";
-    return value.lowercaseString;
+    return value.length ? value.lowercaseString : @"";
 }
 
 static NSString *RYGSafeCanonicalPath(NSString *path) {
@@ -24,31 +24,26 @@ static BOOL RYGSafePathsEqual(NSString *left, NSString *right) {
     NSString *b = RYGSafeCanonicalPath(right);
     if ([a isEqualToString:b]) return YES;
 
+    // Sideload signing can relocate an otherwise identical bundle image. Only
+    // relax the comparison when both paths still belong to the current bundle.
     NSString *bundle = RYGSafeCanonicalPath(NSBundle.mainBundle.bundlePath);
-    NSString *bundlePrefix = bundle.length ? [bundle stringByAppendingString:@"/"] : @"";
-    BOOL aOwned = bundlePrefix.length && [a hasPrefix:bundlePrefix];
-    BOOL bOwned = bundlePrefix.length && [b hasPrefix:bundlePrefix];
+    NSString *prefix = bundle.length ? [bundle stringByAppendingString:@"/"] : @"";
+    BOOL aOwned = prefix.length && [a hasPrefix:prefix];
+    BOOL bOwned = prefix.length && [b hasPrefix:prefix];
     return aOwned && bOwned && [a.lastPathComponent isEqualToString:b.lastPathComponent];
 }
 
-/// Resolve a persisted/display path back to dyld's exact registered image name.
-/// objc_copyClassNamesForImage is intentionally fed this raw dyld string so a
-/// sideload container path mismatch cannot silently turn a valid image into an
-/// empty scan.
-static const char *RYGSafeExactDyldImageName(NSString *requestedPath, NSString **resolvedPath) {
-    if (resolvedPath) *resolvedPath = nil;
-    if (!requestedPath.length) return NULL;
-
-    uint32_t imageCount = _dyld_image_count();
-    for (uint32_t index = 0; index < imageCount; index++) {
+static NSString *RYGSafeExactDyldImagePath(NSString *requestedPath) {
+    if (!requestedPath.length) return nil;
+    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
         const char *raw = _dyld_get_image_name(index);
         if (!raw || !*raw) continue;
         NSString *candidate = [NSString stringWithUTF8String:raw];
-        if (!candidate.length || !RYGSafePathsEqual(candidate, requestedPath)) continue;
-        if (resolvedPath) *resolvedPath = candidate.stringByStandardizingPath;
-        return raw;
+        if (candidate.length && RYGSafePathsEqual(candidate, requestedPath)) {
+            return candidate.stringByStandardizingPath;
+        }
     }
-    return NULL;
+    return nil;
 }
 
 static const char *RYGSafeSkipQualifiers(const char *type) {
@@ -71,14 +66,27 @@ static RYGRuntimeArgumentKind RYGSafeArgumentKind(Method method) {
     return -1;
 }
 
-static BOOL RYGSafeSupportedBool(Method method) {
+static BOOL RYGSafeLooksBooleanSelector(NSString *selectorName) {
+    NSString *lower = selectorName.lowercaseString ?: @"";
+    for (NSString *prefix in @[@"is", @"has", @"can", @"should", @"supports", @"allows", @"allow", @"enable", @"enabled", @"use", @"uses", @"needs", @"requires", @"prefers"]) {
+        if ([lower hasPrefix:prefix]) return YES;
+    }
+    return NO;
+}
+
+static BOOL RYGSafeSupportedBool(Method method, NSString *selectorName) {
     if (!method) return NO;
     char encoded[16] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGSafeSkipQualifiers(encoded);
-    // The supplied Instagram / FBSharedFramework binaries use B for the live
-    // BOOL getters verified in __objc_methlist (for example B16@0:8).
-    return type && *type == 'B' && RYGSafeArgumentKind(method) >= 0;
+    if (!type || !*type || RYGSafeArgumentKind(method) < 0) return NO;
+
+    // The supplied Instagram/FBShared build uses B16@0:8 for the verified
+    // IGDSLauncherConfig Prism/LiquidGlass/Wordmark getters. Keep c/C support
+    // only for boolean-shaped legacy selectors so plain character accessors do
+    // not pollute the runtime browser.
+    if (*type == 'B') return YES;
+    return (*type == 'c' || *type == 'C') && RYGSafeLooksBooleanSelector(selectorName);
 }
 
 static BOOL RYGSafeClassInheritsFrom(Class cls, Class ancestor) {
@@ -128,15 +136,36 @@ static BOOL RYGSafeRelevant(NSString *className, NSString *selectorName, RYGRunt
     return NO;
 }
 
+static BOOL RYGSafeMethodIMPBelongsToImage(Method method, NSString *wanted) {
+    if (!method || !wanted.length) return NO;
+    IMP imp = method_getImplementation(method);
+    if (!imp) return NO;
+    Dl_info info = {0};
+    if (!dladdr((const void *)imp, &info) || !info.dli_fname) return NO;
+    NSString *implementationImage = [NSString stringWithUTF8String:info.dli_fname];
+    return implementationImage.length && RYGSafePathsEqual(implementationImage, wanted);
+}
+
+static BOOL RYGSafeClassBelongsToImage(Class cls, NSString *wanted) {
+    if (!cls || !wanted.length) return NO;
+    const char *raw = class_getImageName(cls);
+    if (!raw || !*raw) return NO;
+    NSString *classImage = [NSString stringWithUTF8String:raw];
+    return classImage.length && RYGSafePathsEqual(classImage, wanted);
+}
+
 static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> *rows,
                                          NSMutableSet<NSString *> *dedupe,
                                          Class cls,
                                          NSString *wanted,
                                          RYGRuntimeBrowserScope scope) {
     if (!cls || !wanted.length) return;
-    NSString *className = NSStringFromClass(cls);
+    const char *rawClassName = class_getName(cls);
+    if (!rawClassName || !*rawClassName) return;
+    NSString *className = [NSString stringWithUTF8String:rawClassName];
     if (!className.length) return;
 
+    BOOL classOwned = RYGSafeClassBelongsToImage(cls, wanted);
     for (NSInteger pass = 0; pass < 2; pass++) {
         BOOL classMethod = pass == 1;
         Class owner = classMethod ? object_getClass(cls) : cls;
@@ -154,8 +183,16 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
                 || [selectorName hasPrefix:@"init"]
                 || [RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:selectorName]
                 || RYGSafeStructuralState(cls, selectorName)
-                || !RYGSafeSupportedBool(method)
+                || !RYGSafeSupportedBool(method, selectorName)
                 || !RYGSafeRelevant(className, selectorName, scope)) continue;
+
+            // Objective-C categories are merged into the host class at runtime.
+            // class_getImageName(host) therefore cannot tell which image owns a
+            // category method. Keep a method when either the host class belongs
+            // to the selected image or the current IMP resolves into it. The IMP
+            // test is what recovers FBShared/Instagram category methods that the
+            // previous objc_copyClassNamesForImage scanner silently dropped.
+            if (!classOwned && !RYGSafeMethodIMPBelongsToImage(method, wanted)) continue;
 
             RYGRuntimeBoolMethod *row = [RYGRuntimeBoolMethod new];
             row.imagePath = wanted;
@@ -178,31 +215,25 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
 
 + (NSArray<RYGRuntimeBoolMethod *> *)ryg_safeBoolMethodsForImagePath:(NSString *)imagePath
                                                                scope:(RYGRuntimeBrowserScope)scope {
-    NSString *resolvedPath = nil;
-    const char *rawImageName = RYGSafeExactDyldImageName(imagePath, &resolvedPath);
-    if (!rawImageName || !resolvedPath.length) return @[];
+    NSString *wanted = RYGSafeExactDyldImagePath(imagePath);
+    if (!wanted.length) return @[];
 
-    // Image-scoped enumeration only. The previous implementation copied every
-    // class registered in Instagram, built a foreign-class index, then scanned
-    // those classes a second time and called dladdr from the hot path. On the
-    // supplied binaries that turns a single-image query into process-wide work.
+    // Use C runtime storage only. Do not retain Class objects in NSArray and do
+    // not invoke private getters while scanning. This also lets category IMP
+    // ownership participate in the image match.
     unsigned int classCount = 0;
-    const char **classNames = objc_copyClassNamesForImage(rawImageName, &classCount);
-    if (!classNames || !classCount) {
-        if (classNames) free(classNames);
+    Class *classes = objc_copyClassList(&classCount);
+    if (!classes || !classCount) {
+        if (classes) free(classes);
         return @[];
     }
 
     NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
     NSMutableSet<NSString *> *dedupe = [NSMutableSet set];
     for (unsigned int index = 0; index < classCount; index++) {
-        const char *rawClassName = classNames[index];
-        if (!rawClassName || !*rawClassName) continue;
-        Class cls = objc_lookUpClass(rawClassName);
-        if (!cls) continue;
-        RYGSafeAppendMethodsForClass(rows, dedupe, cls, resolvedPath, scope);
+        RYGSafeAppendMethodsForClass(rows, dedupe, classes[index], wanted, scope);
     }
-    free(classNames);
+    free(classes);
 
     [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
         NSComparisonResult classOrder = [left.className localizedCaseInsensitiveCompare:right.className];
@@ -217,8 +248,8 @@ static void RYGSafeAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> 
 
 @end
 
-// Single authoritative scanner replacement. Runtime Browser and developer
-// surfaces consume the same image-scoped runtime path.
+// Single authoritative scanner replacement. Runtime Browser and every developer
+// feature surface consume this same real-time image scanner.
 __attribute__((constructor(65480))) static void RYGInstallRuntimeBrowserSafety(void) {
     @autoreleasepool {
         Class meta = object_getClass(RYGRuntimeBrowserEngine.class);
