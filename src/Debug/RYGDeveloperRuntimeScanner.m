@@ -1,7 +1,6 @@
 #import "RYGDeveloperRuntimeScanner.h"
 #import "RYGRuntimeBrowserEngine.h"
 #import <objc/runtime.h>
-#include <string.h>
 
 typedef NS_ENUM(NSInteger, RYGDevVerifiedSurface) {
     RYGDevVerifiedSurfaceGeneric = 0,
@@ -55,74 +54,39 @@ static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *>
     return NO;
 }
 
-static Class RYGDevResolveClass(NSString *className) {
-    if (!className.length) return Nil;
-    // NSStringFromClass() returns module-qualified names for Swift classes on
-    // current runtimes. NSClassFromString resolves that form; objc_lookUpClass
-    // remains the fallback for raw Objective-C/mangled runtime names.
-    Class cls = NSClassFromString(className);
-    if (!cls) cls = objc_lookUpClass(className.UTF8String);
-    return cls;
-}
-
-// The two supplied binaries each contain a distinct Objective-C protocol object
-// named IGDSLauncherConfigProtocol. Comparing Protocol pointers is therefore the
-// wrong ownership test. Compare protocol names on the class hierarchy instead.
-static BOOL RYGDevClassConformsToNamedProtocol(Class cls, const char *wantedName) {
-    if (!cls || !wantedName || !*wantedName) return NO;
-    for (Class cursor = cls; cursor; cursor = class_getSuperclass(cursor)) {
-        unsigned int protocolCount = 0;
-        Protocol *__unsafe_unretained *protocols = class_copyProtocolList(cursor, &protocolCount);
-        BOOL found = NO;
-        for (unsigned int index = 0; index < protocolCount; index++) {
-            Protocol *protocol = protocols[index];
-            const char *name = protocol ? protocol_getName(protocol) : NULL;
-            if (name && strcmp(name, wantedName) == 0) {
-                found = YES;
-                break;
-            }
-        }
-        if (protocols) free(protocols);
-        if (found) return YES;
-    }
-    return NO;
-}
-
-static BOOL RYGDevRowOwnedByLauncherProtocol(RYGRuntimeBoolMethod *row) {
-    Class cls = RYGDevResolveClass(row.className);
-    return RYGDevClassConformsToNamedProtocol(cls, "IGDSLauncherConfigProtocol");
-}
-
-static BOOL RYGDevClassNameHasSuffix(NSString *className, NSString *suffix) {
-    return className.length && suffix.length && [className hasSuffix:suffix];
+static BOOL RYGDevClassNameContains(NSString *className, NSString *needle) {
+    return className.length && needle.length
+        && [className rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
 static BOOL RYGDevMatchesVerifiedSurface(RYGRuntimeBoolMethod *row, RYGDevVerifiedSurface surface) {
     NSString *selector = row.selectorName.lowercaseString ?: @"";
     NSString *className = row.className ?: @"";
-    BOOL launcher = RYGDevRowOwnedByLauncherProtocol(row);
 
     switch (surface) {
         case RYGDevVerifiedSurfaceWordmark:
-            // Verified in both supplied Mach-O files as B16@0:8 members of
-            // IGDSLauncherConfigProtocol, implemented by IGDSLauncherConfig and
-            // _TtC11BSLDSConfig11BSLDSConfig.
-            return launcher && [selector hasPrefix:@"isigwordmark"];
+            // Verified directly in the supplied FBSharedFramework with radare2
+            // and Capstone: IGDSLauncherConfig implements all four no-argument
+            // BOOL getters isIGWordmark1a/1aAlt/1b/1bAltEnabled.
+            return [selector hasPrefix:@"isigwordmark"];
 
         case RYGDevVerifiedSurfacePrism:
-            return launcher && [selector containsString:@"prism"];
+            // Do not require runtime protocol metadata. The current binary puts
+            // dozens of Prism BOOL getters directly on IGDSLauncherConfig and
+            // other IGDS classes; the selector itself is the stable surface key.
+            return [selector containsString:@"prism"];
 
-        case RYGDevVerifiedSurfaceLiquidGlass: {
-            if (launcher && ([selector containsString:@"liquidglass"]
-                             || [selector isEqualToString:@"canuseinternalliquidglassdebugger"])) return YES;
-            // These exact helpers and BOOL signatures are present in the supplied
-            // FBSharedFramework. They are not launcher-protocol implementations.
-            return RYGDevClassNameHasSuffix(className, @"IGLiquidGlassNavigationExperimentHelper")
-                || RYGDevClassNameHasSuffix(className, @"IGLiquidGlassSwizzleToggle");
-        }
+        case RYGDevVerifiedSurfaceLiquidGlass:
+            if ([selector containsString:@"liquidglass"]
+                || [selector containsString:@"glassrendering"]
+                || [selector isEqualToString:@"canuseinternalliquidglassdebugger"])
+                return YES;
+            return RYGDevClassNameContains(className, @"IGLiquidGlassNavigationExperimentHelper")
+                || RYGDevClassNameContains(className, @"IGLiquidGlassSwizzleToggle");
 
         case RYGDevVerifiedSurfaceThrowback:
-            return RYGDevClassNameHasSuffix(className, @"IGThrowbackChromeExperimentHelper");
+            return RYGDevClassNameContains(className, @"IGThrowbackChromeExperimentHelper")
+                || [selector containsString:@"throwback"];
 
         case RYGDevVerifiedSurfaceGeneric:
             return YES;
