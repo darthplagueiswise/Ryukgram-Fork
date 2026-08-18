@@ -7,6 +7,9 @@ on:
       - '.github/workflows/bootstrap-analysis-tools.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   package-tools:
     runs-on: ubuntu-latest
@@ -19,9 +22,21 @@ jobs:
         run: |
           wget -q https://github.com/radareorg/radare2/releases/download/6.1.8/radare2_6.1.8_amd64.deb -O bundle/radare2/radare2_6.1.8_amd64.deb
           sha256sum bundle/radare2/radare2_6.1.8_amd64.deb
-      - name: Upload offline analysis tool bundle
+      - name: Pack offline analysis tool bundle
+        run: |
+          tar -C bundle -cJf ryg-analysis-tools-linux-x86_64.tar.xz .
+          sha256sum ryg-analysis-tools-linux-x86_64.tar.xz
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ryg-analysis-tools-linux-x86_64
-          path: bundle
+          path: ryg-analysis-tools-linux-x86_64.tar.xz
           if-no-files-found: error
+      - name: Publish stable tool bundle release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete analysis-tools-linux --cleanup-tag --yes || true
+          git tag -f analysis-tools-linux
+          git push origin -f refs/tags/analysis-tools-linux
+          gh release create analysis-tools-linux ryg-analysis-tools-linux-x86_64.tar.xz --title 'RyukGram analysis tools bootstrap' --notes 'Offline Linux x86_64 bundle for local LIEF, Capstone, r2pipe and radare2 analysis.'
