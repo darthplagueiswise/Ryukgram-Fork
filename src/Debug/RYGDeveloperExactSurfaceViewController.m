@@ -5,83 +5,36 @@
 #import "../UI/RYGPopupChrome.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
-#import <dlfcn.h>
+#import <objc/message.h>
 #include <string.h>
 
-static const void *kRYGExactSurfaceRowKey = &kRYGExactSurfaceRowKey;
+static const void *kRYGExactSurfaceMethodKey = &kRYGExactSurfaceMethodKey;
 
 @interface RYGDeveloperExactRow : NSObject
-@property (nonatomic, copy) NSString *displayTitle;
+@property (nonatomic, copy) NSString *title;
 @property (nonatomic, strong) RYGRuntimeBoolMethod *method;
 @end
 @implementation RYGDeveloperExactRow @end
+
+@interface RYGDeveloperExactGroup : NSObject
+@property (nonatomic, copy) NSString *className;
+@property (nonatomic, copy) NSArray<RYGDeveloperExactRow *> *rows;
+@end
+@implementation RYGDeveloperExactGroup @end
 
 static NSString *RYGExactSurfaceTitle(RYGDeveloperExactSurface surface) {
     switch (surface) {
         case RYGDeveloperExactSurfaceStories: return @"Stories · Tray & Grid";
         case RYGDeveloperExactSurfaceBugReport: return @"Bug Report";
-        case RYGDeveloperExactSurfaceSettingsVisibility: return @"Settings Rows";
+        case RYGDeveloperExactSurfaceSettingsVisibility: return @"Hidden Settings Rows";
         case RYGDeveloperExactSurfaceDirectDogfood: return @"Direct Dogfooding";
     }
     return @"Developer";
 }
 
-// These are not keyword searches. Every selector below was found verbatim in
-// the current Instagram/FBShared binaries supplied for this build. At runtime
-// we still require an actual loaded Objective-C method and a verified BOOL ABI;
-// a stale selector simply produces no row.
-static NSArray<NSDictionary<NSString *, NSString *> *> *RYGExactDescriptors(RYGDeveloperExactSurface surface) {
-    switch (surface) {
-        case RYGDeveloperExactSurfaceStories:
-            return @[
-                @{@"selector":@"isStoriesTraySkipped", @"title":@"Stories tray skipped"},
-                @{@"selector":@"isOverlayStoriesTrayEnabled", @"title":@"Overlay stories tray"},
-                @{@"selector":@"isPortableStoryTrayHidden", @"title":@"Portable story tray hidden"},
-                @{@"selector":@"isStoriesTrayDecouplingEnabled", @"title":@"Stories tray decoupling"},
-                @{@"selector":@"isStoriesTrayTapPrefetchEnabled", @"title":@"Stories tray tap prefetch"},
-                @{@"selector":@"isStoryMultiAdsGrid", @"title":@"Story multi-ads grid"},
-                @{@"selector":@"isDynamicTabStoryGridEnabled", @"title":@"Dynamic-tab story grid"},
-                @{@"selector":@"hideStoriesTrayOnClassicFeed", @"title":@"Hide tray on classic feed"},
-                @{@"selector":@"isStoriesTrayOnAllTabsEnabled", @"title":@"Stories tray on all tabs"},
-            ];
-        case RYGDeveloperExactSurfaceBugReport:
-            return @[
-                @{@"selector":@"isSandboxCreatorAgentEnabled", @"title":@"Sandbox creator agent"},
-                @{@"selector":@"shouldRequestDebugConfig", @"title":@"Request debug config"},
-                @{@"selector":@"isDebugModeEnabled", @"title":@"Debug mode"},
-                @{@"selector":@"isInternalDebugEnabled:", @"title":@"Internal debug"},
-                @{@"selector":@"isAdSpecificDebugInformationEnabled", @"title":@"Ad debug information"},
-                @{@"selector":@"isDebugOverlayEnabled", @"title":@"Debug overlay"},
-                @{@"selector":@"isJSDebugEnabled", @"title":@"JavaScript debug"},
-                @{@"selector":@"isDebugIndicatorAllowed", @"title":@"Debug indicator"},
-            ];
-        case RYGDeveloperExactSurfaceSettingsVisibility:
-            return @[
-                @{@"selector":@"isNavigationToSettingDisabled", @"title":@"Navigation-to-setting disabled"},
-                @{@"selector":@"isEligibleForCreatorSettingsReview", @"title":@"Creator settings review"},
-                @{@"selector":@"shouldShowHighQualityUploadSetting", @"title":@"High-quality upload row"},
-                @{@"selector":@"canShowHQUploadSetting", @"title":@"High-quality upload eligibility"},
-                @{@"selector":@"shouldShowSettingEntryPointButton", @"title":@"Settings entry-point button"},
-                @{@"selector":@"shouldLeftAlignSettingsEntrypointButton", @"title":@"Settings entry-point alignment"},
-                @{@"selector":@"shouldShowBirthdayVisibilitySettingsButton", @"title":@"Birthday visibility row"},
-                @{@"selector":@"canSeeTranslationSettings", @"title":@"Translation settings"},
-                @{@"selector":@"isEligibleForMusicTabSettings", @"title":@"Music-tab settings"},
-                @{@"selector":@"isShoppingSettingsEnabled", @"title":@"Shopping settings"},
-                @{@"selector":@"isHiddenWordsSettingLinkToIgEnabled", @"title":@"Hidden-words settings link"},
-                @{@"selector":@"shouldShowReuseSettingForOwner", @"title":@"Reuse setting"},
-                @{@"selector":@"showInSettings", @"title":@"Show in settings"},
-            ];
-        case RYGDeveloperExactSurfaceDirectDogfood:
-            return @[
-                @{@"selector":@"is_dogfooding_option_enabled", @"title":@"Dogfooding option"},
-                @{@"selector":@"isFbAcquisitionEpDogfoodModeEnabled", @"title":@"Acquisition dogfood mode"},
-                @{@"selector":@"isInternalBuild", @"title":@"Internal build"},
-                @{@"selector":@"isIGInternal", @"title":@"IG internal"},
-                @{@"selector":@"isInternalOnly", @"title":@"Internal only"},
-                @{@"selector":@"isInternalToggleOn", @"title":@"Internal toggle"},
-            ];
-    }
-    return @[];
+static BOOL RYGExactContains(NSString *value, NSString *needle) {
+    return value.length && needle.length &&
+        [value rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
 }
 
 static const char *RYGExactSkipQualifiers(const char *type) {
@@ -94,6 +47,7 @@ static RYGRuntimeArgumentKind RYGExactArgumentKind(Method method) {
     unsigned int count = method_getNumberOfArguments(method);
     if (count == 2) return RYGRuntimeArgumentNone;
     if (count != 3) return (RYGRuntimeArgumentKind)-1;
+
     char encoded[64] = {0};
     method_getArgumentType(method, 2, encoded, sizeof(encoded));
     const char *type = RYGExactSkipQualifiers(encoded);
@@ -103,104 +57,276 @@ static RYGRuntimeArgumentKind RYGExactArgumentKind(Method method) {
     return (RYGRuntimeArgumentKind)-1;
 }
 
-static BOOL RYGExactSupportedBool(Method method) {
+static BOOL RYGExactSupportedBOOL(Method method) {
     if (!method) return NO;
     char encoded[32] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
-    const char *ret = RYGExactSkipQualifiers(encoded);
-    return ret && *ret == 'B' && RYGExactArgumentKind(method) >= 0;
+    const char *result = RYGExactSkipQualifiers(encoded);
+    RYGRuntimeArgumentKind argument = RYGExactArgumentKind(method);
+    return result && *result == 'B'
+        && argument >= RYGRuntimeArgumentNone
+        && argument <= RYGRuntimeArgumentInteger;
 }
 
-static NSDictionary<NSString *, NSString *> *RYGExactDescriptorForSelector(NSString *selector,
-                                                                            RYGDeveloperExactSurface surface) {
-    for (NSDictionary *descriptor in RYGExactDescriptors(surface)) {
-        if ([descriptor[@"selector"] isEqualToString:selector]) return descriptor;
+static NSArray<NSString *> *RYGExactPrimaryImages(void) {
+    NSArray<NSString *> *images = RYGRuntimeBrowserEngine.runtimeImagePaths;
+    NSMutableOrderedSet<NSString *> *selected = [NSMutableOrderedSet orderedSet];
+    NSString *main = NSBundle.mainBundle.executablePath;
+    for (NSString *path in images) {
+        if ([path isEqualToString:main] ||
+            [path.stringByResolvingSymlinksInPath isEqualToString:main.stringByResolvingSymlinksInPath]) {
+            [selected addObject:path];
+            break;
+        }
     }
-    return nil;
+    for (NSString *path in images) {
+        if (RYGExactContains(path.lastPathComponent, @"FBShared")) [selected addObject:path];
+    }
+    return selected.array;
 }
 
-static BOOL RYGExactClassBelongsToAppImage(Class cls, NSSet<NSString *> *imagePaths) {
-    if (!cls) return NO;
-    const char *raw = class_getImageName(cls);
-    if (!raw) return NO;
-    NSString *path = [[NSString stringWithUTF8String:raw] stringByStandardizingPath];
-    if ([imagePaths containsObject:path]) return YES;
-    NSString *name = path.lastPathComponent;
-    for (NSString *candidate in imagePaths) {
-        if (name.length && [candidate.lastPathComponent isEqualToString:name]) return YES;
+static const char **RYGExactCopyClassNames(NSString *imagePath, unsigned int *count) {
+    if (count) *count = 0;
+    const char **names = objc_copyClassNamesForImage(imagePath.fileSystemRepresentation, count);
+    if (names) return names;
+    NSString *resolved = imagePath.stringByResolvingSymlinksInPath;
+    if (![resolved isEqualToString:imagePath])
+        return objc_copyClassNamesForImage(resolved.fileSystemRepresentation, count);
+    return NULL;
+}
+
+static BOOL RYGExactBugReportSelector(NSString *selector) {
+    static NSSet<NSString *> *exact;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        exact = [NSSet setWithArray:@[
+            @"showDogfoodingAssistant",
+            @"showInternalSettings",
+            @"showLoggedOutInternalSettings",
+            @"showShakeToReportPreferenceToggle",
+            @"isSandboxCreatorAgentEnabled",
+        ]];
+    });
+    return [exact containsObject:selector];
+}
+
+static BOOL RYGExactMatchesSurface(RYGDeveloperExactSurface surface,
+                                   NSString *className,
+                                   NSString *selector) {
+    switch (surface) {
+        case RYGDeveloperExactSurfaceStories:
+            return RYGExactContains(className, @"StoriesTray")
+                || RYGExactContains(className, @"StoryTray")
+                || RYGExactContains(className, @"StoryGrid")
+                || RYGExactContains(selector, @"StoriesTray")
+                || RYGExactContains(selector, @"StoryTray")
+                || RYGExactContains(selector, @"StoryGrid");
+
+        case RYGDeveloperExactSurfaceBugReport:
+            if (RYGExactBugReportSelector(selector)) return YES;
+            if (!RYGExactContains(className, @"BugReport")) return NO;
+            return RYGExactContains(selector, @"show")
+                || RYGExactContains(selector, @"internal")
+                || RYGExactContains(selector, @"loggedOut")
+                || RYGExactContains(selector, @"dogfood")
+                || RYGExactContains(selector, @"sandbox")
+                || RYGExactContains(selector, @"shake");
+
+        case RYGDeveloperExactSurfaceSettingsVisibility:
+            if (!RYGExactContains(className, @"Settings")) return NO;
+            return [selector hasPrefix:@"shouldShow"]
+                || [selector hasPrefix:@"canShow"]
+                || [selector hasPrefix:@"showInSettings"]
+                || [selector hasPrefix:@"isVisible"]
+                || [selector hasPrefix:@"isHidden"]
+                || [selector hasPrefix:@"isDisabled"]
+                || [selector hasPrefix:@"isEnabled"]
+                || [selector hasPrefix:@"isEligible"]
+                || [selector hasPrefix:@"canSee"];
+
+        case RYGDeveloperExactSurfaceDirectDogfood:
+            return RYGExactContains(className, @"DogfoodingSettings")
+                || RYGExactContains(className, @"DogfoodingAssistant")
+                || RYGExactContains(selector, @"dogfood");
     }
     return NO;
 }
 
-static NSArray<RYGDeveloperExactRow *> *RYGExactScanSurface(RYGDeveloperExactSurface surface) {
-    NSArray<NSDictionary<NSString *, NSString *> *> *descriptors = RYGExactDescriptors(surface);
-    NSMutableSet<NSString *> *wantedSelectors = [NSMutableSet setWithCapacity:descriptors.count];
-    for (NSDictionary *descriptor in descriptors) [wantedSelectors addObject:descriptor[@"selector"]];
-
-    NSMutableSet<NSString *> *images = [NSMutableSet set];
-    for (NSString *path in [RYGRuntimeBrowserEngine runtimeImagePaths]) {
-        if (path.length) [images addObject:path.stringByStandardizingPath];
+static NSString *RYGExactPrettySelector(NSString *selector) {
+    if (!selector.length) return @"Option";
+    NSMutableString *result = [NSMutableString string];
+    for (NSUInteger index = 0; index < selector.length; index++) {
+        unichar character = [selector characterAtIndex:index];
+        if (character == ':' || character == '_') {
+            if (result.length && ![[result substringFromIndex:result.length - 1] isEqualToString:@" "]) [result appendString:@" "];
+            continue;
+        }
+        if (index > 0 && [[NSCharacterSet uppercaseLetterCharacterSet] characterIsMember:character]) [result appendString:@" "];
+        [result appendFormat:@"%C", character];
     }
+    return [result stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+}
 
-    unsigned int classCount = 0;
-    Class *classes = objc_copyClassList(&classCount);
-    if (!classes) return @[];
-    NSMutableArray<RYGDeveloperExactRow *> *rows = [NSMutableArray array];
+static NSArray<RYGDeveloperExactGroup *> *RYGExactScanSurface(RYGDeveloperExactSurface surface) {
+    NSMutableDictionary<NSString *, NSMutableArray<RYGDeveloperExactRow *> *> *byClass = [NSMutableDictionary dictionary];
     NSMutableSet<NSString *> *dedupe = [NSMutableSet set];
 
-    for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
-        Class cls = classes[classIndex];
-        if (!RYGExactClassBelongsToAppImage(cls, images)) continue;
-        NSString *className = NSStringFromClass(cls);
-        if (!className.length) continue;
+    for (NSString *imagePath in RYGExactPrimaryImages()) {
+        unsigned int classCount = 0;
+        const char **classNames = RYGExactCopyClassNames(imagePath, &classCount);
+        if (!classNames) continue;
 
-        for (NSInteger pass = 0; pass < 2; pass++) {
-            BOOL classMethod = pass == 1;
-            Class owner = classMethod ? object_getClass(cls) : cls;
-            if (!owner) continue;
-            unsigned int methodCount = 0;
-            Method *methods = class_copyMethodList(owner, &methodCount);
-            for (unsigned int methodIndex = 0; methodIndex < methodCount; methodIndex++) {
-                Method method = methods[methodIndex];
-                SEL selector = method_getName(method);
-                if (!selector) continue;
-                NSString *selectorName = NSStringFromSelector(selector);
-                if (![wantedSelectors containsObject:selectorName] || !RYGExactSupportedBool(method)) continue;
+        for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
+            const char *rawClassName = classNames[classIndex];
+            if (!rawClassName || !*rawClassName) continue;
+            Class cls = objc_lookUpClass(rawClassName);
+            if (!cls) continue;
+            NSString *className = [NSString stringWithUTF8String:rawClassName];
 
-                RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
-                runtimeMethod.className = className;
-                runtimeMethod.selectorName = selectorName;
-                runtimeMethod.classMethod = classMethod;
-                runtimeMethod.argumentKind = RYGExactArgumentKind(method);
-                const char *types = method_getTypeEncoding(method);
-                runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
-                const char *rawImage = class_getImageName(cls);
-                runtimeMethod.imagePath = rawImage ? [NSString stringWithUTF8String:rawImage] : @"";
-                if (!runtimeMethod.overrideKey.length || [dedupe containsObject:runtimeMethod.overrideKey]) continue;
-                [dedupe addObject:runtimeMethod.overrideKey];
+            for (NSUInteger pass = 0; pass < 2; pass++) {
+                BOOL classMethod = pass == 1;
+                Class owner = classMethod ? object_getClass(cls) : cls;
+                unsigned int methodCount = 0;
+                Method *methods = owner ? class_copyMethodList(owner, &methodCount) : NULL;
+                for (unsigned int methodIndex = 0; methodIndex < methodCount; methodIndex++) {
+                    Method method = methods[methodIndex];
+                    if (!RYGExactSupportedBOOL(method)) continue;
+                    SEL selectorValue = method_getName(method);
+                    if (!selectorValue) continue;
+                    NSString *selector = NSStringFromSelector(selectorValue);
+                    if (!RYGExactMatchesSurface(surface, className, selector)) continue;
 
-                NSDictionary *descriptor = RYGExactDescriptorForSelector(selectorName, surface);
-                RYGDeveloperExactRow *row = [RYGDeveloperExactRow new];
-                row.displayTitle = descriptor[@"title"] ?: selectorName;
-                row.method = runtimeMethod;
-                [rows addObject:row];
+                    RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
+                    runtimeMethod.imagePath = imagePath;
+                    runtimeMethod.className = className ?: @"";
+                    runtimeMethod.selectorName = selector ?: @"";
+                    runtimeMethod.classMethod = classMethod;
+                    runtimeMethod.argumentKind = RYGExactArgumentKind(method);
+                    const char *types = method_getTypeEncoding(method);
+                    runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+                    if (!runtimeMethod.overrideKey.length || [dedupe containsObject:runtimeMethod.overrideKey]) continue;
+                    [dedupe addObject:runtimeMethod.overrideKey];
+
+                    RYGDeveloperExactRow *row = [RYGDeveloperExactRow new];
+                    row.title = RYGExactPrettySelector(selector);
+                    row.method = runtimeMethod;
+                    NSMutableArray *bucket = byClass[className];
+                    if (!bucket) { bucket = [NSMutableArray array]; byClass[className] = bucket; }
+                    [bucket addObject:row];
+                }
+                if (methods) free(methods);
             }
-            if (methods) free(methods);
+        }
+        free(classNames);
+    }
+
+    NSArray<NSString *> *classNames = [byClass.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    NSMutableArray<RYGDeveloperExactGroup *> *groups = [NSMutableArray arrayWithCapacity:classNames.count];
+    for (NSString *className in classNames) {
+        NSArray *rows = [byClass[className] sortedArrayUsingComparator:^NSComparisonResult(RYGDeveloperExactRow *left, RYGDeveloperExactRow *right) {
+            return [left.title localizedCaseInsensitiveCompare:right.title];
+        }];
+        RYGDeveloperExactGroup *group = [RYGDeveloperExactGroup new];
+        group.className = className;
+        group.rows = rows;
+        [groups addObject:group];
+    }
+    return groups.copy;
+}
+
+static UIViewController *RYGExactTopController(UIViewController *controller) {
+    if (!controller) return nil;
+    if (controller.presentedViewController) return RYGExactTopController(controller.presentedViewController);
+    if ([controller isKindOfClass:UINavigationController.class])
+        return RYGExactTopController(((UINavigationController *)controller).visibleViewController);
+    if ([controller isKindOfClass:UITabBarController.class])
+        return RYGExactTopController(((UITabBarController *)controller).selectedViewController);
+    return controller;
+}
+
+static NSArray<UIWindow *> *RYGExactApplicationWindows(void) {
+    NSMutableArray<UIWindow *> *windows = [NSMutableArray array];
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (![scene isKindOfClass:UIWindowScene.class]) continue;
+            [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+        }
+    } else if (UIApplication.sharedApplication.keyWindow) {
+        [windows addObject:UIApplication.sharedApplication.keyWindow];
+    }
+    return windows.copy;
+}
+
+static id RYGExactCurrentUserSession(void) {
+    SEL selector = NSSelectorFromString(@"userSession");
+    for (UIWindow *window in RYGExactApplicationWindows()) {
+        if ([window respondsToSelector:selector]) {
+            id session = ((id (*)(id, SEL))objc_msgSend)(window, selector);
+            if (session) return session;
         }
     }
-    free(classes);
+    return nil;
+}
 
-    [rows sortUsingComparator:^NSComparisonResult(RYGDeveloperExactRow *left, RYGDeveloperExactRow *right) {
-        NSComparisonResult title = [left.displayTitle localizedCaseInsensitiveCompare:right.displayTitle];
-        if (title != NSOrderedSame) return title;
-        return [left.method.className localizedCaseInsensitiveCompare:right.method.className];
-    }];
-    return rows.copy;
+static UIViewController *RYGExactCurrentPresenter(void) {
+    UIWindow *key = nil;
+    for (UIWindow *window in RYGExactApplicationWindows()) {
+        if (window.isKeyWindow) { key = window; break; }
+        if (!key && !window.hidden && window.alpha > 0.0) key = window;
+    }
+    return RYGExactTopController(key.rootViewController);
+}
+
+static BOOL RYGExactValidateTwoObjectVoidMethod(Method method) {
+    if (!method || method_getNumberOfArguments(method) != 4) return NO;
+    char returnType[16] = {0};
+    method_getReturnType(method, returnType, sizeof(returnType));
+    if (*RYGExactSkipQualifiers(returnType) != 'v') return NO;
+    for (unsigned int index = 2; index < 4; index++) {
+        char argument[32] = {0};
+        method_getArgumentType(method, index, argument, sizeof(argument));
+        if (*RYGExactSkipQualifiers(argument) != '@') return NO;
+    }
+    return YES;
+}
+
+static BOOL RYGExactCanOpenDirectNotesDogfood(void) {
+    NSArray<NSString *> *classNames = @[
+        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"IGDirectNotesDogfoodingSettingsStaticFuncs",
+    ];
+    SEL selector = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        Method method = cls ? class_getClassMethod(cls, selector) : NULL;
+        if (RYGExactValidateTwoObjectVoidMethod(method)) return YES;
+    }
+    return NO;
+}
+
+static BOOL RYGExactOpenDirectNotesDogfood(void) {
+    UIViewController *presenter = RYGExactCurrentPresenter();
+    id userSession = RYGExactCurrentUserSession();
+    if (!presenter || !userSession) return NO;
+
+    NSArray<NSString *> *classNames = @[
+        @"_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs",
+        @"IGDirectNotesDogfoodingSettingsStaticFuncs",
+    ];
+    SEL selector = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    for (NSString *className in classNames) {
+        Class cls = NSClassFromString(className);
+        Method method = cls ? class_getClassMethod(cls, selector) : NULL;
+        if (!RYGExactValidateTwoObjectVoidMethod(method)) continue;
+        ((void (*)(id, SEL, id, id))objc_msgSend)(cls, selector, presenter, userSession);
+        return YES;
+    }
+    return NO;
 }
 
 @interface RYGDeveloperExactSurfaceViewController ()
 @property (nonatomic, assign) RYGDeveloperExactSurface surface;
-@property (nonatomic, copy) NSArray<RYGDeveloperExactRow *> *rows;
+@property (nonatomic, copy) NSArray<RYGDeveloperExactGroup *> *groups;
 @property (nonatomic, assign) NSUInteger scanGeneration;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @end
@@ -208,10 +334,9 @@ static NSArray<RYGDeveloperExactRow *> *RYGExactScanSurface(RYGDeveloperExactSur
 @implementation RYGDeveloperExactSurfaceViewController
 
 - (instancetype)initWithSurface:(RYGDeveloperExactSurface)surface {
-    self = [super initWithStyle:UITableViewStyleInsetGrouped];
-    if (self) {
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
         _surface = surface;
-        _rows = @[];
+        _groups = @[];
     }
     return self;
 }
@@ -222,13 +347,18 @@ static NSArray<RYGDeveloperExactRow *> *RYGExactScanSurface(RYGDeveloperExactSur
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 54.0;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"]
-                style:UIBarButtonItemStylePlain
-               target:self
-               action:@selector(refreshSurface)];
+    self.tableView.estimatedRowHeight = 48.0;
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+
+    UIBarButtonItem *refresh = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshSurface)];
+    __weak typeof(self) weakSelf = self;
+    UIAction *native = [UIAction actionWithTitle:@"Use Native Values" image:[UIImage systemImageNamed:@"arrow.uturn.backward"] identifier:nil handler:^(__unused UIAction *action) {
+        [weakSelf resetAllOverrides];
+    }];
+    UIBarButtonItem *more = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithChildren:@[native]]];
+    self.navigationItem.rightBarButtonItems = @[refresh, more];
+
     [NSNotificationCenter.defaultCenter addObserver:self
                                            selector:@selector(runtimeValueChanged:)
                                                name:RYGRuntimeNativeValueDidChangeNotification
@@ -237,9 +367,7 @@ static NSArray<RYGDeveloperExactRow *> *RYGExactScanSurface(RYGDeveloperExactSur
     [self refreshSurface];
 }
 
-- (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
-}
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 
 - (void)refreshSurface {
     NSUInteger generation = ++self.scanGeneration;
@@ -248,110 +376,113 @@ static NSArray<RYGDeveloperExactRow *> *RYGExactScanSurface(RYGDeveloperExactSur
     RYGDeveloperExactSurface surface = self.surface;
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *rows = RYGExactScanSurface(surface);
+        NSArray<RYGDeveloperExactGroup *> *groups = RYGExactScanSurface(surface);
+        NSMutableArray<RYGRuntimeBoolMethod *> *methods = [NSMutableArray array];
+        for (RYGDeveloperExactGroup *group in groups)
+            for (RYGDeveloperExactRow *row in group.rows) [methods addObject:row.method];
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self || generation != self.scanGeneration) return;
-            self.rows = rows;
+            self.groups = groups;
             [self.spinner stopAnimating];
-            if (!rows.count) {
-                UILabel *empty = [UILabel new];
-                empty.text = @"No verified runtime gate from this surface is loaded.";
-                empty.textAlignment = NSTextAlignmentCenter;
-                empty.numberOfLines = 0;
-                empty.textColor = UIColor.secondaryLabelColor;
-                self.tableView.backgroundView = empty;
-            } else {
-                self.tableView.backgroundView = nil;
-            }
+            self.tableView.backgroundView = nil;
             [self.tableView reloadData];
+            if (methods.count) RYGRuntimeBeginLiveObservation(methods);
         });
     });
 }
 
-- (void)runtimeValueChanged:(NSNotification *)notification {
-    NSString *key = notification.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
-    if (!key.length) return;
-    for (RYGDeveloperExactRow *row in self.rows) {
-        if ([row.method.overrideKey isEqualToString:key]) {
-            [self.tableView reloadData];
-            break;
-        }
-    }
+- (void)runtimeValueChanged:(NSNotification *)notification { (void)notification; [self.tableView reloadData]; }
+
+- (void)resetAllOverrides {
+    for (RYGDeveloperExactGroup *group in self.groups)
+        for (RYGDeveloperExactRow *row in group.rows)
+            [RYGRuntimeBrowserEngine setOverride:nil forMethod:row.method];
+    [self.tableView reloadData];
+}
+
+- (BOOL)hasDirectDogfoodAction {
+    return self.surface == RYGDeveloperExactSurfaceDirectDogfood && RYGExactCanOpenDirectNotesDogfood();
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    (void)tableView;
+    return self.groups.count + (self.hasDirectDogfoodAction ? 1 : 0);
+}
+
+- (BOOL)isActionSection:(NSInteger)section {
+    return self.hasDirectDogfoodAction && section == 0;
+}
+
+- (RYGDeveloperExactGroup *)groupForSection:(NSInteger)section {
+    NSInteger index = section - (self.hasDirectDogfoodAction ? 1 : 0);
+    if (index < 0 || index >= (NSInteger)self.groups.count) return nil;
+    return self.groups[(NSUInteger)index];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    return self.rows.count;
+    (void)tableView;
+    if ([self isActionSection:section]) return 1;
+    return [self groupForSection:section].rows.count;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    (void)tableView;
+    if ([self isActionSection:section]) return nil;
+    return [self groupForSection:section].className;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    (void)tableView;
-    RYGDeveloperExactRow *row = self.rows[(NSUInteger)indexPath.row];
-    RYGRuntimeBoolMethod *method = row.method;
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    cell.textLabel.text = row.displayTitle;
-    cell.textLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ %@", method.classMethod ? @"+" : @"-", method.selectorName];
-    cell.detailTextLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightRegular];
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.detailTextLabel.numberOfLines = 1;
+    static NSString *identifier = @"RYGExactDeveloperCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
 
+    if ([self isActionSection:indexPath.section]) {
+        cell.textLabel.text = @"Open Direct Notes Dogfooding Settings";
+        cell.textLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightMedium];
+        cell.detailTextLabel.text = nil;
+        cell.imageView.image = [UIImage systemImageNamed:@"pawprint.fill"];
+        cell.imageView.tintColor = [RYGUtils RYGColor_Primary];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        return cell;
+    }
+
+    RYGDeveloperExactRow *row = [self groupForSection:indexPath.section].rows[indexPath.row];
+    RYGRuntimeBoolMethod *method = row.method;
+    cell.textLabel.text = row.title;
+    cell.textLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightRegular];
     NSNumber *forced = method.overrideValue;
-    NSNumber *native = method.liveValue;
+    NSNumber *live = method.liveValue;
+    cell.detailTextLabel.text = forced
+        ? [NSString stringWithFormat:@"forced %@", forced.boolValue ? @"true" : @"false"]
+        : (live ? [NSString stringWithFormat:@"native %@", live.boolValue ? @"true" : @"false"] : nil);
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightRegular];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+
     UISwitch *toggle = [UISwitch new];
-    toggle.on = forced ? forced.boolValue : (native ? native.boolValue : NO);
-    objc_setAssociatedObject(toggle, kRYGExactSurfaceRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    toggle.on = forced ? forced.boolValue : (live ? live.boolValue : NO);
+    toggle.onTintColor = [RYGUtils RYGColor_Primary];
+    objc_setAssociatedObject(toggle, kRYGExactSurfaceMethodKey, method, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
     cell.accessoryView = toggle;
-    cell.imageView.image = [UIImage systemImageNamed:forced ? @"slider.horizontal.3" : @"switch.2"];
-    cell.imageView.tintColor = forced ? [RYGUtils RYGColor_Primary] : UIColor.secondaryLabelColor;
     return cell;
 }
 
 - (void)toggleChanged:(UISwitch *)toggle {
-    RYGDeveloperExactRow *row = objc_getAssociatedObject(toggle, kRYGExactSurfaceRowKey);
-    if (!row.method) return;
-    [RYGRuntimeBrowserEngine setOverride:@(toggle.isOn) forMethod:row.method];
+    RYGRuntimeBoolMethod *method = objc_getAssociatedObject(toggle, kRYGExactSurfaceMethodKey);
+    if (!method) return;
+    [RYGRuntimeBrowserEngine setOverride:@(toggle.isOn) forMethod:method];
     [self.tableView reloadData];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    RYGDeveloperExactRow *row = self.rows[(NSUInteger)indexPath.row];
-    RYGRuntimeBoolMethod *method = row.method;
-    NSNumber *native = method.liveValue;
-    NSNumber *forced = method.overrideValue;
-    NSString *message = [NSString stringWithFormat:@"%@\n%@\nNative: %@\nOverride: %@",
-                         method.className ?: @"",
-                         method.typeEncoding ?: @"",
-                         native ? (native.boolValue ? @"true" : @"false") : @"not observed",
-                         forced ? (forced.boolValue ? @"true" : @"false") : @"native"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:row.displayTitle
-                                                                    message:message
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe Native" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        RYGRuntimeBeginLiveObservation(@[method]);
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force On" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force Off" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData];
-    }]];
-    if (forced) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-            [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData];
-        }]];
+    if (![self isActionSection:indexPath.section]) return;
+    if (!RYGExactOpenDirectNotesDogfood()) {
+        [RYGUtils showErrorHUDWithDescription:@"The verified Direct Notes dogfooding launcher is not available in the current runtime session."];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = cell ?: self.view;
-        sheet.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 @end
