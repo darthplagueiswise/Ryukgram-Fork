@@ -47,6 +47,121 @@ static id RYGMCParseJSONValue(NSString *text, RYGMCType type) {
     return nil;
 }
 
+#pragma mark - id_name_mapping canonical model
+
+static NSNumber *RYGMCStrictUnsignedNumber(NSString *text, BOOL allowZero) {
+    if (![text isKindOfClass:NSString.class] || !text.length) return nil;
+    const char *raw = text.UTF8String;
+    if (!raw || !*raw || *raw == '-') return nil;
+    char *end = NULL;
+    unsigned long long value = strtoull(raw, &end, 10);
+    if (end == raw || *end != '\0' || value > UINT32_MAX || (!allowZero && value == 0)) return nil;
+    return @(value);
+}
+
+static NSDictionary<NSNumber *, NSDictionary *> *RYGMCNameCatalogFromJSONData(NSData *data, NSError **error) {
+    if (!data.length) {
+        if (error) *error = RYGMCJSONError(@"The id_name_mapping.json file is empty.");
+        return nil;
+    }
+
+    NSError *jsonError = nil;
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+    if (![json isKindOfClass:NSArray.class]) {
+        if (error) *error = jsonError ?: RYGMCJSONError(@"id_name_mapping.json must be an array of colon-delimited strings.");
+        return nil;
+    }
+
+    NSMutableDictionary<NSNumber *, NSMutableDictionary *> *catalog = [NSMutableDictionary dictionary];
+    for (id rawEntry in (NSArray *)json) {
+        if (![rawEntry isKindOfClass:NSString.class]) {
+            if (error) *error = RYGMCJSONError(@"id_name_mapping.json contains a non-string entry.");
+            return nil;
+        }
+
+        NSArray<NSString *> *parts = [(NSString *)rawEntry componentsSeparatedByString:@":"];
+        if (parts.count < 2) {
+            if (error) *error = RYGMCJSONError(@"id_name_mapping.json contains an invalid config entry.");
+            return nil;
+        }
+
+        NSNumber *configNumber = RYGMCStrictUnsignedNumber(parts[0], NO);
+        if (!configNumber) {
+            if (error) *error = RYGMCJSONError(@"id_name_mapping.json contains an invalid config id.");
+            return nil;
+        }
+
+        NSMutableDictionary *record = catalog[configNumber];
+        if (!record) {
+            record = [@{
+                @"name": @"",
+                @"params": [NSMutableDictionary dictionary],
+            } mutableCopy];
+            catalog[configNumber] = record;
+        }
+
+        NSString *configName = parts[1];
+        if (configName.length) record[@"name"] = configName;
+        NSMutableDictionary<NSNumber *, NSString *> *params = record[@"params"];
+
+        for (NSUInteger index = 2; index + 1 < parts.count; index += 2) {
+            NSNumber *paramIndex = RYGMCStrictUnsignedNumber(parts[index], YES);
+            NSString *paramName = parts[index + 1];
+            if (!paramIndex || !paramName.length) continue;
+            params[paramIndex] = paramName;
+        }
+    }
+
+    NSMutableDictionary<NSNumber *, NSDictionary *> *immutable = [NSMutableDictionary dictionaryWithCapacity:catalog.count];
+    [catalog enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, NSMutableDictionary *record, BOOL *stop) {
+        NSDictionary *params = [record[@"params"] copy] ?: @{};
+        immutable[key] = @{
+            @"name": [record[@"name"] isKindOfClass:NSString.class] ? record[@"name"] : @"",
+            @"params": params,
+        };
+    }];
+    return immutable.copy;
+}
+
+static void RYGMCMergeNameCatalog(NSMutableDictionary<NSNumber *, NSDictionary *> *base,
+                                  NSDictionary<NSNumber *, NSDictionary *> *incoming) {
+    [incoming enumerateKeysAndObjectsUsingBlock:^(NSNumber *configNumber, NSDictionary *incomingInfo, BOOL *stop) {
+        NSDictionary *existingInfo = [base[configNumber] isKindOfClass:NSDictionary.class] ? base[configNumber] : nil;
+        NSMutableDictionary<NSNumber *, NSString *> *params = [NSMutableDictionary dictionary];
+        NSDictionary *existingParams = [existingInfo[@"params"] isKindOfClass:NSDictionary.class] ? existingInfo[@"params"] : nil;
+        NSDictionary *incomingParams = [incomingInfo[@"params"] isKindOfClass:NSDictionary.class] ? incomingInfo[@"params"] : nil;
+        if (existingParams.count) [params addEntriesFromDictionary:existingParams];
+        if (incomingParams.count) [params addEntriesFromDictionary:incomingParams];
+
+        NSString *existingName = [existingInfo[@"name"] isKindOfClass:NSString.class] ? existingInfo[@"name"] : @"";
+        NSString *incomingName = [incomingInfo[@"name"] isKindOfClass:NSString.class] ? incomingInfo[@"name"] : @"";
+        base[configNumber] = @{
+            @"name": incomingName.length ? incomingName : existingName,
+            @"params": params.copy,
+        };
+    }];
+}
+
+static NSData *RYGMCNameCatalogJSONData(NSDictionary<NSNumber *, NSDictionary *> *catalog, NSError **error) {
+    NSArray<NSNumber *> *configNumbers = [catalog.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    NSMutableArray<NSString *> *entries = [NSMutableArray arrayWithCapacity:configNumbers.count];
+
+    for (NSNumber *configNumber in configNumbers) {
+        NSDictionary *info = catalog[configNumber];
+        NSString *name = [info[@"name"] isKindOfClass:NSString.class] ? info[@"name"] : @"";
+        NSMutableString *line = [NSMutableString stringWithFormat:@"%@:%@", configNumber, name];
+        NSDictionary<NSNumber *, NSString *> *params = [info[@"params"] isKindOfClass:NSDictionary.class] ? info[@"params"] : @{};
+        NSArray<NSNumber *> *indices = [params.allKeys sortedArrayUsingSelector:@selector(compare:)];
+        for (NSNumber *index in indices) {
+            NSString *paramName = [params[index] isKindOfClass:NSString.class] ? params[index] : @"";
+            if (paramName.length) [line appendFormat:@":%@:%@", index, paramName];
+        }
+        [entries addObject:line];
+    }
+
+    return [NSJSONSerialization dataWithJSONObject:entries options:0 error:error];
+}
+
 @implementation RYGMobileConfig (RYGJSONIO)
 
 - (NSString *)ryg_nativeDataDirectory {
@@ -69,20 +184,53 @@ static id RYGMCParseJSONValue(NSString *text, RYGMCType type) {
 }
 
 - (BOOL)ryg_importNameMappingData:(NSData *)data error:(NSError **)error {
-    if (!data.length) { if (error) *error = RYGMCJSONError(@"The id_name_mapping.json file is empty."); return NO; }
-    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
-    if (![json isKindOfClass:NSArray.class]) { if (error && !*error) *error = RYGMCJSONError(@"id_name_mapping.json must be an array of colon-delimited strings."); return NO; }
-    for (id entry in (NSArray *)json) {
-        if (![entry isKindOfClass:NSString.class]) { if (error) *error = RYGMCJSONError(@"id_name_mapping.json contains a non-string entry."); return NO; }
-        NSArray *parts = [(NSString *)entry componentsSeparatedByString:@":"];
-        if (parts.count < 2 || [parts.firstObject longLongValue] <= 0) { if (error) *error = RYGMCJSONError(@"id_name_mapping.json contains an invalid config entry."); return NO; }
-    }
+    NSDictionary *catalog = RYGMCNameCatalogFromJSONData(data, error);
+    if (!catalog) return NO;
+
+    NSData *canonical = RYGMCNameCatalogJSONData(catalog, error);
+    if (!canonical) return NO;
+
     NSString *path = [self ryg_nativeNameMappingPath];
-    if (!path.length) { if (error) *error = RYGMCJSONError(@"Instagram has not exposed its active MobileConfig data directory yet. Open the app until MobileConfig is read, then retry."); return NO; }
-    NSData *canonical = [NSJSONSerialization dataWithJSONObject:json options:0 error:error];
-    if (!canonical || ![canonical writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
+    if (!path.length) {
+        if (error) *error = RYGMCJSONError(@"Instagram has not exposed its active MobileConfig data directory yet. Open the app until MobileConfig is read, then retry.");
+        return NO;
+    }
+    if (![canonical writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
     [self reloadFromRuntime];
     return YES;
+}
+
+- (BOOL)ryg_importNameMappingData:(NSData *)data
+                             mode:(RYGMCNameMappingImportMode)mode
+                            error:(NSError **)error {
+    NSDictionary<NSNumber *, NSDictionary *> *incoming = RYGMCNameCatalogFromJSONData(data, error);
+    if (!incoming) return NO;
+
+    NSMutableDictionary<NSNumber *, NSDictionary *> *result = [NSMutableDictionary dictionary];
+    if (mode == RYGMCNameMappingImportModeMerge) {
+        NSError *existingError = nil;
+        NSData *existingData = [self ryg_exportNameMappingData:&existingError];
+        if (existingData.length) {
+            NSDictionary *existing = RYGMCNameCatalogFromJSONData(existingData, &existingError);
+            if (!existing && existingError) {
+                if (error) *error = existingError;
+                return NO;
+            }
+            if (existing.count) [result addEntriesFromDictionary:existing];
+        }
+    }
+
+    // Incoming entries deliberately win conflicts in both modes. Replace starts
+    // with an empty result; Merge starts from the currently persisted/effective
+    // mapping and preserves entries the import does not mention.
+    RYGMCMergeNameCatalog(result, incoming);
+    NSData *canonical = RYGMCNameCatalogJSONData(result, error);
+    if (!canonical) return NO;
+
+    // Call the established import selector so the bridge remains the single
+    // owner of cache persistence, native *.data mirroring, model refresh and
+    // RYGMobileConfigNamesDidChange notifications.
+    return [self ryg_importNameMappingData:canonical error:error];
 }
 
 - (NSData *)ryg_exportNameMappingData:(NSError **)error {
