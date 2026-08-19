@@ -627,9 +627,10 @@ static char kRYGRowKey;
 			b.showsMenuAsPrimaryAction = YES;
 			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 8.0, 8.0, 8.0);
-			b.configuration = bc;
+			// Do not impose accessory-specific contentInsets. On iOS 26 the Glass
+			// button and UIMenu transition share geometry; fixed closed-state insets
+			// distort the expanded morph. RYGSetting configures the native Glass
+			// button, and UIKit owns its intrinsic/default content metrics.
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -656,7 +657,6 @@ static char kRYGRowKey;
 - (void)tableView:(UITableView *)tv willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)ip {
 	if ([self isSearching]) return;
 	RYGSetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
-	// Clears this row's own dot once seen; a nav cell's bubble-up dot is separate.
 	if (row) [RYGWhatsNew markSeen:[RYGWhatsNew identifierForRow:row]];
 }
 
