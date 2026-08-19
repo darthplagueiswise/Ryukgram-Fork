@@ -21,7 +21,12 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    b"RYGRuntimeBrowserLiveScan",
+    # Runtime Browser v2 is image-scoped and class-first. Validate the actual
+    # runtime API and live-observation UI contract instead of the deleted
+    # RYGRuntimeBrowserLiveScan accessibility marker from the old flat browser.
+    b"objc_copyClassNamesForImage",
+    b"Class Properties",
+    b"Observe Original Value",
 )
 
 
@@ -102,7 +107,10 @@ def main() -> int:
         die(f"expected a dylib, got {file_type}")
 
     libraries = library_names(binary)
-    forbidden_dependencies = [name for name in libraries if any(token.decode().lower() in name.lower() for token in FORBIDDEN)]
+    forbidden_dependencies = [
+        name for name in libraries
+        if any(token.decode().lower() in name.lower() for token in FORBIDDEN)
+    ]
     if forbidden_dependencies:
         die("forbidden dependency: " + ", ".join(forbidden_dependencies))
 
@@ -117,7 +125,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group hook, UIGlassEffect, runtime browser")
+    print("Integrated markers: sideload compatibility, App Group hook, UIGlassEffect, image-scoped Runtime Browser, live observation")
     return 0
 
 
