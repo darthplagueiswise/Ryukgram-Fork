@@ -21,12 +21,16 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # Runtime Browser v2 is image-scoped and class-first. Validate the actual
-    # runtime API and live-observation UI contract instead of the deleted
-    # RYGRuntimeBrowserLiveScan accessibility marker from the old flat browser.
-    b"objc_copyClassNamesForImage",
-    b"Class Properties",
-    b"Observe Original Value",
+    # The rebuilt Runtime Browser is image-scoped and lists hookable BOOLs
+    # directly. Validate the current user-visible live-observation contract,
+    # not labels from the removed class/property browser.
+    b"Observe visible original values",
+    b"No supported BOOL method is declared in this loaded image",
+    # The Developer surfaces use the real Easy Gating C entry point and the
+    # canonical MobileConfig file formats requested by the app-side workflow.
+    b"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+    b"id_name_mapping.json",
+    b"mc_overrides.json",
 )
 
 
@@ -125,7 +129,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group hook, UIGlassEffect, image-scoped Runtime Browser, live observation")
+    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, Easy Gating, canonical MobileConfig JSON")
     return 0
 
 
