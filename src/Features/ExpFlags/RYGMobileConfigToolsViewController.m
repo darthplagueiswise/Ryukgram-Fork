@@ -32,29 +32,29 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     __weak typeof(self) weakSelf = self;
 
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
-                                                     subtitle:nil
+                                                     subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
                                                viewController:[RYGMobileConfigBrowserViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
-                                                     subtitle:nil
+                                                     subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"download"]
                                                        action:^{ [weakSelf chooseNameImportMode]; }];
     RYGSetting *exportNames = [RYGSetting buttonCellWithTitle:@"Export id_name_mapping.json"
-                                                     subtitle:nil
+                                                     subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"share"]
                                                        action:^{ [weakSelf exportNameMapping]; }];
 
     RYGSetting *importOverrides = [RYGSetting buttonCellWithTitle:@"Import mc_overrides.json"
-                                                         subtitle:nil
+                                                         subtitle:@""
                                                              icon:[RYGSymbol symbolWithName:@"download"]
                                                            action:^{ [weakSelf presentJSONPicker:RYGMCImportOperationOverrides]; }];
     RYGSetting *exportOverrides = [RYGSetting buttonCellWithTitle:@"Export mc_overrides.json"
-                                                         subtitle:nil
+                                                         subtitle:@""
                                                              icon:[RYGSymbol symbolWithName:@"share"]
                                                            action:^{ [weakSelf exportOverrides]; }];
     RYGSetting *clearOverrides = [RYGSetting buttonCellWithTitle:@"Clear overrides"
-                                                        subtitle:nil
+                                                        subtitle:@""
                                                             icon:[RYGSymbol symbolWithName:@"trash"]
                                                           action:^{ [weakSelf confirmClearOverrides]; }];
     clearOverrides.titleColor = UIColor.systemRedColor;
