@@ -1,0 +1,1 @@
+Current dogfood state: mapped EasyGating platform ABI + strict MobileConfig JSON grammar validation.
