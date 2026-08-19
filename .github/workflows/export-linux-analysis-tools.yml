@@ -3,6 +3,8 @@ name: Export Linux analysis tools
 on:
   push:
     branches: [ci/dogfood-live-runtime-rebuild-20260819-v3]
+  pull_request:
+    branches: [dogfood]
   workflow_dispatch:
 
 jobs:
@@ -18,17 +20,26 @@ jobs:
           python -m pip install lief==1.0.0 capstone==5.0.9
           python - <<'PY'
           import lief, capstone
-          print('lief', lief.__version__)
-          print('capstone', capstone.__version__)
+          print('lief', lief.__version__, lief.__file__)
+          print('capstone', capstone.__version__, capstone.__file__)
           PY
-      - name: Pack site-packages
+      - name: Pack importable modules
         run: |
-          SITE=$(python - <<'PY'
-          import site
-          print(site.getsitepackages()[0])
+          python - <<'PY'
+          import pathlib, shutil, lief, capstone
+          out = pathlib.Path('/tmp/analysis-python')
+          out.mkdir(parents=True, exist_ok=True)
+          for module in (lief, capstone):
+              path = pathlib.Path(module.__file__).resolve()
+              source = path.parent if path.name == '__init__.py' else path
+              dest = out / source.name
+              if source.is_dir():
+                  shutil.copytree(source, dest, dirs_exist_ok=True)
+              else:
+                  shutil.copy2(source, dest)
+          print('\n'.join(str(p) for p in out.rglob('*')))
           PY
-          )
-          tar -C "$SITE" -czf "$RUNNER_TEMP/analysis-site-packages.tgz" lief* capstone*
+          tar -C /tmp/analysis-python -czf "$RUNNER_TEMP/analysis-site-packages.tgz" .
       - uses: actions/upload-artifact@v4
         with:
           name: linux-py313-lief-capstone
