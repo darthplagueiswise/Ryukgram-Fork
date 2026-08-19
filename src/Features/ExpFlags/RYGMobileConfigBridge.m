@@ -1,9 +1,7 @@
 #import "RYGMobileConfig.h"
 #import "RYGMobileConfigJSONIO.h"
-#import "RYGMobileConfigViewController.h"
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <objc/message.h>
 #import <dlfcn.h>
 
 @interface RYGMobileConfig (RYGBridgePrivate)
@@ -12,24 +10,33 @@
 
 static NSString *const kRYGMappingCacheFile = @"id_name_mapping.json";
 static NSString *const kRYGMobileConfigNamesDidChangeNotification = @"RYGMobileConfigNamesDidChange";
-static __thread BOOL gRYGEnteringMobileConfigBrowser;
 
 static NSError *RYGBridgeError(NSString *message) {
     return [NSError errorWithDomain:@"com.ryukgram.mobileconfig.bridge"
                                code:1
-                           userInfo:@{NSLocalizedDescriptionKey:message ?: @"MobileConfig bridge error"}];
+                           userInfo:@{NSLocalizedDescriptionKey:message ?: @"MobileConfig mapping error"}];
 }
 
 static NSString *RYGBridgeSupportDirectory(void) {
     NSString *root = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
     if (!root.length) root = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
-    NSString *dir = [[root stringByAppendingPathComponent:@"RyukGram"] stringByAppendingPathComponent:@"MobileConfig"];
-    [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    return dir;
+    NSString *directory = [[root stringByAppendingPathComponent:@"RyukGram"] stringByAppendingPathComponent:@"MobileConfig"];
+    [NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil];
+    return directory;
 }
 
 static NSString *RYGBridgeMappingCachePath(void) {
     return [RYGBridgeSupportDirectory() stringByAppendingPathComponent:kRYGMappingCacheFile];
+}
+
+static NSNumber *RYGBridgeStrictUnsigned(NSString *text, BOOL allowZero) {
+    if (![text isKindOfClass:NSString.class] || !text.length) return nil;
+    const char *raw = text.UTF8String;
+    if (!raw || !*raw || *raw == '-') return nil;
+    char *end = NULL;
+    unsigned long long value = strtoull(raw, &end, 10);
+    if (end == raw || *end != '\0' || value > UINT32_MAX || (!allowZero && value == 0)) return nil;
+    return @(value);
 }
 
 static NSDictionary<NSNumber *, NSDictionary *> *RYGBridgeCatalogFromData(NSData *data, NSError **error) {
@@ -37,97 +44,88 @@ static NSDictionary<NSNumber *, NSDictionary *> *RYGBridgeCatalogFromData(NSData
         if (error) *error = RYGBridgeError(@"The id_name_mapping.json file is empty.");
         return nil;
     }
-    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
+    NSError *jsonError = nil;
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
     if (![json isKindOfClass:NSArray.class]) {
-        if (error && !*error) *error = RYGBridgeError(@"id_name_mapping.json must be an array of colon-delimited strings.");
+        if (error) *error = jsonError ?: RYGBridgeError(@"id_name_mapping.json must be an array of colon-delimited strings.");
         return nil;
     }
 
-    NSMutableDictionary<NSNumber *, NSDictionary *> *catalog = [NSMutableDictionary dictionary];
-    for (id raw in (NSArray *)json) {
-        if (![raw isKindOfClass:NSString.class]) {
+    NSMutableDictionary<NSNumber *, NSMutableDictionary *> *mutableCatalog = [NSMutableDictionary dictionary];
+    for (id rawEntry in (NSArray *)json) {
+        if (![rawEntry isKindOfClass:NSString.class]) {
             if (error) *error = RYGBridgeError(@"id_name_mapping.json contains a non-string entry.");
             return nil;
         }
-        NSArray<NSString *> *parts = [(NSString *)raw componentsSeparatedByString:@":"];
+        NSArray<NSString *> *parts = [(NSString *)rawEntry componentsSeparatedByString:@":"];
         if (parts.count < 2) {
             if (error) *error = RYGBridgeError(@"id_name_mapping.json contains an invalid config entry.");
             return nil;
         }
-        const char *rawConfig = parts[0].UTF8String;
-        char *configEnd = NULL;
-        unsigned long long configNumber = strtoull(rawConfig, &configEnd, 10);
-        if (!rawConfig || !*rawConfig || configEnd == rawConfig || *configEnd != '\0' || !configNumber || configNumber > UINT32_MAX) {
+        NSNumber *configNumber = RYGBridgeStrictUnsigned(parts[0], NO);
+        if (!configNumber) {
             if (error) *error = RYGBridgeError(@"id_name_mapping.json contains an invalid config id.");
             return nil;
         }
 
-        NSMutableDictionary<NSNumber *, NSString *> *params = [NSMutableDictionary dictionary];
-        for (NSUInteger i = 2; i + 1 < parts.count; i += 2) {
-            const char *rawIndex = parts[i].UTF8String;
-            char *indexEnd = NULL;
-            unsigned long long index = strtoull(rawIndex, &indexEnd, 10);
-            NSString *name = parts[i + 1];
-            if (!rawIndex || !*rawIndex || indexEnd == rawIndex || *indexEnd != '\0' || index > UINT32_MAX) continue;
-            if (name.length) params[@((unsigned int)index)] = name;
+        NSMutableDictionary *record = mutableCatalog[configNumber];
+        if (!record) {
+            record = [@{@"name": @"", @"params": [NSMutableDictionary dictionary]} mutableCopy];
+            mutableCatalog[configNumber] = record;
         }
-        catalog[@((unsigned int)configNumber)] = @{
-            @"name": parts[1] ?: @"",
-            @"params": params.copy,
-        };
+        if (parts[1].length) record[@"name"] = parts[1];
+        NSMutableDictionary *params = record[@"params"];
+        for (NSUInteger index = 2; index + 1 < parts.count; index += 2) {
+            NSNumber *paramIndex = RYGBridgeStrictUnsigned(parts[index], YES);
+            NSString *paramName = parts[index + 1];
+            if (paramIndex && paramName.length) params[paramIndex] = paramName;
+        }
     }
+
+    NSMutableDictionary *catalog = [NSMutableDictionary dictionaryWithCapacity:mutableCatalog.count];
+    [mutableCatalog enumerateKeysAndObjectsUsingBlock:^(NSNumber *key, NSDictionary *record, BOOL *stop) {
+        catalog[key] = @{
+            @"name": [record[@"name"] isKindOfClass:NSString.class] ? record[@"name"] : @"",
+            @"params": [record[@"params"] isKindOfClass:NSDictionary.class] ? [record[@"params"] copy] : @{},
+        };
+    }];
     return catalog.copy;
 }
 
-static NSData *RYGBridgeCanonicalMappingData(NSData *data, NSError **error) {
-    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
-    if (![json isKindOfClass:NSArray.class]) return nil;
-    return [NSJSONSerialization dataWithJSONObject:json options:0 error:error];
-}
-
-static void RYGBridgeMergeCatalog(NSMutableDictionary *destination, NSDictionary<NSNumber *, NSDictionary *> *source) {
-    [source enumerateKeysAndObjectsUsingBlock:^(NSNumber *configNumber, NSDictionary *info, BOOL *stop) {
-        NSDictionary *old = [destination[configNumber] isKindOfClass:NSDictionary.class] ? destination[configNumber] : nil;
-        NSMutableDictionary *params = [NSMutableDictionary dictionary];
-        if ([old[@"params"] isKindOfClass:NSDictionary.class]) [params addEntriesFromDictionary:old[@"params"]];
-        if ([info[@"params"] isKindOfClass:NSDictionary.class]) [params addEntriesFromDictionary:info[@"params"]];
-        NSString *name = [info[@"name"] isKindOfClass:NSString.class] && [info[@"name"] length]
-            ? info[@"name"] : (old[@"name"] ?: @"");
-        destination[configNumber] = @{@"name":name ?: @"", @"params":params.copy};
-    }];
+static NSData *RYGBridgeDataFromCatalog(NSDictionary<NSNumber *, NSDictionary *> *catalog, NSError **error) {
+    NSArray<NSNumber *> *configNumbers = [catalog.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    NSMutableArray<NSString *> *entries = [NSMutableArray arrayWithCapacity:configNumbers.count];
+    for (NSNumber *configNumber in configNumbers) {
+        NSDictionary *info = catalog[configNumber];
+        NSString *configName = [info[@"name"] isKindOfClass:NSString.class] ? info[@"name"] : @"";
+        NSMutableString *line = [NSMutableString stringWithFormat:@"%@:%@", configNumber, configName];
+        NSDictionary<NSNumber *, NSString *> *params = [info[@"params"] isKindOfClass:NSDictionary.class] ? info[@"params"] : @{};
+        for (NSNumber *paramIndex in [params.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+            NSString *name = [params[paramIndex] isKindOfClass:NSString.class] ? params[paramIndex] : @"";
+            if (name.length) [line appendFormat:@":%@:%@", paramIndex, name];
+        }
+        [entries addObject:line];
+    }
+    return [NSJSONSerialization dataWithJSONObject:entries options:0 error:error];
 }
 
 static NSUInteger RYGBridgeResolvedNameCount(RYGMobileConfig *mobileConfig) {
-    NSUInteger resolved = 0;
+    NSUInteger count = 0;
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
-        if (config.name.length) resolved++;
-        for (RYGMCParam *param in config.params) {
-            if (param.name.length) resolved++;
-        }
+        if (config.name.length) count++;
+        for (RYGMCParam *param in config.params) if (param.name.length) count++;
     }
-    return resolved;
+    return count;
 }
 
-static void RYGBridgePostNamesDidChange(RYGMobileConfig *mobileConfig, NSUInteger resolvedCount) {
-    NSDictionary *userInfo = @{ @"resolvedCount": @(resolvedCount) };
+static void RYGBridgePostNamesDidChange(RYGMobileConfig *mobileConfig) {
+    NSDictionary *info = @{@"resolvedCount": @(RYGBridgeResolvedNameCount(mobileConfig))};
     void (^post)(void) = ^{
         [NSNotificationCenter.defaultCenter postNotificationName:kRYGMobileConfigNamesDidChangeNotification
                                                           object:mobileConfig
-                                                        userInfo:userInfo];
+                                                        userInfo:info];
     };
-    if (NSThread.isMainThread) post();
-    else dispatch_async(dispatch_get_main_queue(), post);
-}
-
-static void RYGBridgeMirrorCachedMappingIfPossible(NSString *nativeDirectory) {
-    if (!nativeDirectory.length) return;
-    NSString *cachePath = RYGBridgeMappingCachePath();
-    NSData *cached = [NSData dataWithContentsOfFile:cachePath options:0 error:nil];
-    if (!cached.length) return;
-    NSString *nativePath = [nativeDirectory stringByAppendingPathComponent:kRYGMappingCacheFile];
-    NSData *native = [NSData dataWithContentsOfFile:nativePath options:0 error:nil];
-    if ([native isEqualToData:cached]) return;
-    [cached writeToFile:nativePath options:NSDataWritingAtomic error:nil];
+    if (NSThread.isMainThread) post(); else dispatch_async(dispatch_get_main_queue(), post);
 }
 
 #pragma mark - Signed App Group discovery
@@ -137,145 +135,98 @@ typedef CFTypeRef (*RYGSecTaskCopyValueForEntitlementFn)(CFTypeRef task, CFStrin
 
 static NSArray<NSString *> *RYGSignedApplicationGroups(void) {
     RYGSecTaskCreateFromSelfFn createTask = (RYGSecTaskCreateFromSelfFn)dlsym(RTLD_DEFAULT, "SecTaskCreateFromSelf");
-    RYGSecTaskCopyValueForEntitlementFn copyEntitlement = (RYGSecTaskCopyValueForEntitlementFn)dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
-    if (!createTask || !copyEntitlement) return @[];
-
+    RYGSecTaskCopyValueForEntitlementFn copyValue = (RYGSecTaskCopyValueForEntitlementFn)dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
+    if (!createTask || !copyValue) return @[];
     CFTypeRef task = createTask(kCFAllocatorDefault);
     if (!task) return @[];
-    CFTypeRef raw = copyEntitlement(task, CFSTR("com.apple.security.application-groups"), NULL);
+    CFTypeRef raw = copyValue(task, CFSTR("com.apple.security.application-groups"), NULL);
     NSMutableArray<NSString *> *groups = [NSMutableArray array];
     if (raw && CFGetTypeID(raw) == CFArrayGetTypeID()) {
-        NSArray *values = (__bridge NSArray *)raw;
-        for (id value in values) if ([value isKindOfClass:NSString.class] && [value length]) [groups addObject:value];
+        for (id value in (__bridge NSArray *)raw) if ([value isKindOfClass:NSString.class] && [value length]) [groups addObject:value];
     }
     if (raw) CFRelease(raw);
     CFRelease(task);
     return groups.copy;
 }
 
-static NSInteger RYGMobileConfigDataDirectoryScore(NSString *path) {
+static NSInteger RYGBridgeDataDirectoryScore(NSString *path) {
+    BOOL directory = NO;
     NSFileManager *fm = NSFileManager.defaultManager;
-    BOOL isDirectory = NO;
-    if (![fm fileExistsAtPath:path isDirectory:&isDirectory] || !isDirectory) return NSIntegerMin;
+    if (![fm fileExistsAtPath:path isDirectory:&directory] || !directory) return NSIntegerMin;
     NSInteger score = 0;
     NSString *name = path.lastPathComponent.lowercaseString;
-    if ([name hasSuffix:@".data"]) score += 20;
-    if (![name isEqualToString:@"sessionless.data"]) score += 15;
-    if ([fm fileExistsAtPath:[path stringByAppendingPathComponent:@"id_name_mapping.json"]]) score += 100;
+    if ([name hasSuffix:@".data"]) score += 30;
+    if (![name isEqualToString:@"sessionless.data"]) score += 20;
     if ([fm fileExistsAtPath:[path stringByAppendingPathComponent:@"mc_overrides.json"]]) score += 80;
-    NSDictionary *attributes = [fm attributesOfItemAtPath:path error:nil];
-    NSDate *date = attributes[NSFileModificationDate];
-    if (date) score += MIN(30, (NSInteger)MAX(0, 30.0 + [date timeIntervalSinceNow] / 86400.0));
+    if ([fm fileExistsAtPath:[path stringByAppendingPathComponent:@"id_name_mapping.json"]]) score += 100;
     return score;
 }
 
 static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *best = nil;
+    NSString *bestPath = nil;
     NSInteger bestScore = NSIntegerMin;
-
     for (NSString *group in RYGSignedApplicationGroups()) {
         NSURL *container = [fm containerURLForSecurityApplicationGroupIdentifier:group];
         if (!container.path.length) continue;
-        NSString *mobileConfig = [[container.path stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"mobileconfig"];
-        NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:mobileConfig error:nil];
-        for (NSString *child in children) {
-            NSString *candidate = [mobileConfig stringByAppendingPathComponent:child];
-            NSInteger score = RYGMobileConfigDataDirectoryScore(candidate);
-            if (score > bestScore) {
-                bestScore = score;
-                best = candidate;
-            }
+        NSString *root = [[container.path stringByAppendingPathComponent:@"Documents"] stringByAppendingPathComponent:@"mobileconfig"];
+        for (NSString *child in [fm contentsOfDirectoryAtPath:root error:nil]) {
+            NSString *candidate = [root stringByAppendingPathComponent:child];
+            NSInteger score = RYGBridgeDataDirectoryScore(candidate);
+            if (score > bestScore) { bestScore = score; bestPath = candidate; }
         }
     }
-    return bestScore == NSIntegerMin ? nil : best;
+    return bestScore == NSIntegerMin ? nil : bestPath;
+}
+
+static void RYGBridgeMirrorCache(NSString *nativeDirectory) {
+    if (!nativeDirectory.length) return;
+    NSData *cache = [NSData dataWithContentsOfFile:RYGBridgeMappingCachePath() options:0 error:nil];
+    if (!cache.length) return;
+    NSString *destination = [nativeDirectory stringByAppendingPathComponent:kRYGMappingCacheFile];
+    NSData *existing = [NSData dataWithContentsOfFile:destination options:0 error:nil];
+    if (![existing isEqualToData:cache]) [cache writeToFile:destination options:NSDataWritingAtomic error:nil];
 }
 
 @implementation RYGMobileConfig (RYGMobileConfigBridge)
 
 - (NSString *)ryg_bridgeNativeDataDirectory {
-    NSString *native = [self ryg_bridgeNativeDataDirectory];
-    if (!native.length) native = RYGFallbackNativeMobileConfigDirectory();
-    if (native.length) RYGBridgeMirrorCachedMappingIfPossible(native);
-    return native;
+    NSString *directory = [self ryg_bridgeNativeDataDirectory];
+    if (!directory.length) directory = RYGFallbackNativeMobileConfigDirectory();
+    if (directory.length) RYGBridgeMirrorCache(directory);
+    return directory;
 }
 
 - (BOOL)ryg_bridgeImportNameMappingData:(NSData *)data error:(NSError **)error {
-    NSError *validationError = nil;
-    if (!RYGBridgeCatalogFromData(data, &validationError)) {
-        if (error) *error = validationError;
-        return NO;
-    }
+    NSDictionary *catalog = RYGBridgeCatalogFromData(data, error);
+    if (!catalog) return NO;
+    NSData *canonical = RYGBridgeDataFromCatalog(catalog, error);
+    if (!canonical) return NO;
 
-    NSError *serializationError = nil;
-    NSData *canonical = RYGBridgeCanonicalMappingData(data, &serializationError);
-    if (!canonical) {
-        if (error) *error = serializationError;
-        return NO;
-    }
-
-    NSString *cachePath = RYGBridgeMappingCachePath();
-    if (![canonical writeToFile:cachePath options:NSDataWritingAtomic error:error]) return NO;
-
-    // Resolve and mirror the native directory before rebuilding the model. This
-    // ordering is important for Replace: if the old id_name_mapping.json stayed
-    // on disk during reload, names omitted by the replacement file would survive
-    // in the in-memory model until the next app launch.
+    // This selector represents REPLACE semantics. Merge is resolved by
+    // RYGMobileConfigJSONIO before it reaches here. The cache is authoritative:
+    // names absent from a replacement import must not be resurrected from an old
+    // native file on the next reload.
+    if (![canonical writeToFile:RYGBridgeMappingCachePath() options:NSDataWritingAtomic error:error]) return NO;
     NSString *nativeDirectory = [self ryg_nativeDataDirectory];
-    if (nativeDirectory.length) RYGBridgeMirrorCachedMappingIfPossible(nativeDirectory);
+    if (nativeDirectory.length) RYGBridgeMirrorCache(nativeDirectory);
 
-    // Rebuild from the canonical mapping source instead of mutating existing
-    // RYGMCConfig/RYGMCParam names in place. In-place mutation was the root cause
-    // of stale names after Replace and of already-open browsers not reflecting
-    // the same mapping that export/persistence contained.
     [self reloadFromRuntime];
-    NSUInteger resolvedCount = RYGBridgeResolvedNameCount(self);
-    RYGBridgePostNamesDidChange(self, resolvedCount);
+    RYGBridgePostNamesDidChange(self);
     return YES;
 }
 
 - (NSData *)ryg_bridgeExportNameMappingData:(NSError **)error {
-    NSData *cached = [NSData dataWithContentsOfFile:RYGBridgeMappingCachePath() options:0 error:nil];
-    if (cached.length) return cached;
+    NSData *cache = [NSData dataWithContentsOfFile:RYGBridgeMappingCachePath() options:0 error:nil];
+    if (cache.length) return cache;
     return [self ryg_bridgeExportNameMappingData:error];
 }
 
 - (NSDictionary *)ryg_bridgeLoadNameCatalog {
-    NSDictionary *native = [self ryg_bridgeLoadNameCatalog];
-    NSMutableDictionary *merged = [native isKindOfClass:NSDictionary.class] ? [native mutableCopy] : [NSMutableDictionary dictionary];
-    NSData *cached = [NSData dataWithContentsOfFile:RYGBridgeMappingCachePath() options:0 error:nil];
-    NSDictionary *catalog = cached.length ? RYGBridgeCatalogFromData(cached, NULL) : nil;
-    if (catalog.count) RYGBridgeMergeCatalog(merged, catalog);
-    return merged.copy;
-}
-
-- (void)ryg_bridgeReloadFromRuntime {
-    if (gRYGEnteringMobileConfigBrowser) {
-        [self prepare];
-        return;
-    }
-    [self ryg_bridgeReloadFromRuntime];
-}
-
-@end
-
-@implementation RYGMobileConfigViewController (RYGMobileConfigBridge)
-
-- (void)ryg_bridgeViewDidLoad {
-    BOOL previous = gRYGEnteringMobileConfigBrowser;
-    gRYGEnteringMobileConfigBrowser = YES;
-    [self ryg_bridgeViewDidLoad];
-    gRYGEnteringMobileConfigBrowser = previous;
-}
-
-- (void)ryg_bridgeRefreshRuntime {
-    [[RYGMobileConfig shared] prepare];
-    if ([self respondsToSelector:NSSelectorFromString(@"reload")]) {
-        ((void (*)(id, SEL))objc_msgSend)(self, NSSelectorFromString(@"reload"));
-    }
-    if ([self isKindOfClass:UITableViewController.class]) {
-        [((UITableViewController *)self).tableView.refreshControl endRefreshing];
-    }
+    NSData *cache = [NSData dataWithContentsOfFile:RYGBridgeMappingCachePath() options:0 error:nil];
+    NSDictionary *catalog = cache.length ? RYGBridgeCatalogFromData(cache, NULL) : nil;
+    if (catalog) return catalog;
+    return [self ryg_bridgeLoadNameCatalog];
 }
 
 @end
@@ -289,35 +240,15 @@ static void RYGBridgeSwapInstanceMethod(Class cls, SEL originalSelector, SEL rep
 __attribute__((constructor(100))) static void RYGMobileConfigEnableCaptureByDefault(void) {
     @autoreleasepool {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        if ([defaults objectForKey:@"ryg_metaconfig_enabled"] == nil) {
-            [defaults setBool:YES forKey:@"ryg_metaconfig_enabled"];
-        }
+        if ([defaults objectForKey:@"ryg_metaconfig_enabled"] == nil) [defaults setBool:YES forKey:@"ryg_metaconfig_enabled"];
     }
 }
 
 __attribute__((constructor(65460))) static void RYGInstallMobileConfigBridge(void) {
     @autoreleasepool {
-        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class,
-                                    @selector(ryg_nativeDataDirectory),
-                                    @selector(ryg_bridgeNativeDataDirectory));
-        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class,
-                                    @selector(ryg_importNameMappingData:error:),
-                                    @selector(ryg_bridgeImportNameMappingData:error:));
-        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class,
-                                    @selector(ryg_exportNameMappingData:),
-                                    @selector(ryg_bridgeExportNameMappingData:));
-        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class,
-                                    @selector(loadNameCatalog),
-                                    @selector(ryg_bridgeLoadNameCatalog));
-        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class,
-                                    @selector(reloadFromRuntime),
-                                    @selector(ryg_bridgeReloadFromRuntime));
-
-        RYGBridgeSwapInstanceMethod(RYGMobileConfigViewController.class,
-                                    @selector(viewDidLoad),
-                                    @selector(ryg_bridgeViewDidLoad));
-        RYGBridgeSwapInstanceMethod(RYGMobileConfigViewController.class,
-                                    NSSelectorFromString(@"refreshRuntime"),
-                                    @selector(ryg_bridgeRefreshRuntime));
+        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class, @selector(ryg_nativeDataDirectory), @selector(ryg_bridgeNativeDataDirectory));
+        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class, @selector(ryg_importNameMappingData:error:), @selector(ryg_bridgeImportNameMappingData:error:));
+        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class, @selector(ryg_exportNameMappingData:), @selector(ryg_bridgeExportNameMappingData:));
+        RYGBridgeSwapInstanceMethod(RYGMobileConfig.class, @selector(loadNameCatalog), @selector(ryg_bridgeLoadNameCatalog));
     }
 }
