@@ -6,98 +6,109 @@
 #import "RYGMetaLocalExperimentBrowser.h"
 #import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
 #import "../UI/RYGLiquidGlass.h"
-#import "../UI/RYGPopupChrome.h"
-
-@interface RYGDeveloperHubViewController ()
-@property (nonatomic, copy) NSArray<NSDictionary *> *rows;
-@end
 
 @implementation RYGDeveloperHubViewController
 
 - (instancetype)init {
-    return [super initWithStyle:UITableViewStyleInsetGrouped];
+    return [super initWithTitle:@"Developer"];
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Developer";
-    self.view.backgroundColor = [RYGPopupChrome backgroundColor];
-    self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
-    self.tableView.rowHeight = 52.0;
-
-    self.rows = @[
-        @{@"title":@"IGWordMark", @"icon":@"textformat", @"route":@"wordmark"},
-        @{@"title":@"Easy Gating Internal", @"icon":@"person.badge.key", @"route":@"easygating"},
-        @{@"title":@"MobileConfig", @"icon":@"slider.horizontal.3", @"route":@"mobileconfig"},
-        @{@"title":@"Prism UI", @"icon":@"diamond.inset.filled", @"route":@"prism"},
-        @{@"title":@"Liquid Glass", @"icon":@"circle.hexagongrid.fill", @"route":@"liquidglass"},
-        @{@"title":@"Stories · Tray & Grid", @"icon":@"square.grid.2x2", @"route":@"stories"},
-        @{@"title":@"IG-only / Internal-only", @"icon":@"eye.slash", @"route":@"internal"},
-        @{@"title":@"Bug Report", @"icon":@"ladybug.fill", @"route":@"bugreport"},
-        @{@"title":@"Hidden Settings Rows", @"icon":@"list.bullet.rectangle", @"route":@"settings"},
-        @{@"title":@"Direct Dogfooding Settings", @"icon":@"pawprint.fill", @"route":@"dogfood"},
-        @{@"title":@"MetaLocalExperiment", @"icon":@"testtube.2", @"route":@"metalocal"},
-        @{@"title":@"Runtime Browser · Live", @"icon":@"waveform.path.ecg.rectangle", @"route":@"runtime"},
-    ];
-
+    [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    (void)tableView;
-    return 1;
-}
+- (void)rebuildSections {
+    RYGSetting *wordmark = [RYGSetting navigationCellWithTitle:@"IGWordMark"
+                                                      subtitle:nil
+                                                          icon:[RYGSymbol symbolWithName:@"instagram"]
+                                                viewController:[RYGWordmarkViewController new]];
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    return self.rows.count;
-}
+    RYGSetting *easyGating = [RYGSetting navigationCellWithTitle:@"Easy Gating Internal"
+                                                        subtitle:nil
+                                                            icon:[RYGSymbol symbolWithName:@"key"]
+                                                  viewController:[RYGEasyGatingViewController new]];
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    (void)tableView;
-    NSDictionary *entry = self.rows[(NSUInteger)indexPath.row];
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    cell.textLabel.text = entry[@"title"];
-    cell.textLabel.font = [UIFont systemFontOfSize:15.5 weight:UIFontWeightRegular];
-    cell.imageView.image = [UIImage systemImageNamed:entry[@"icon"]];
-    cell.imageView.tintColor = UIColor.secondaryLabelColor;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    return cell;
-}
+    RYGSetting *mobileConfig = [RYGSetting navigationCellWithTitle:@"MobileConfig"
+                                                          subtitle:nil
+                                                              icon:[RYGSymbol symbolWithName:@"sliders"]
+                                                    viewController:[RYGMobileConfigToolsViewController new]];
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSString *route = self.rows[(NSUInteger)indexPath.row][@"route"];
-    UIViewController *controller = nil;
+    RYGSetting *prism = [RYGSetting navigationCellWithTitle:@"Prism UI"
+                                                   subtitle:nil
+                                                       icon:[RYGSymbol symbolWithName:@"layout"]
+                                             viewController:[[RYGDeveloperTopicViewController alloc]
+                                                 initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
 
-    if ([route isEqualToString:@"wordmark"]) {
-        controller = [RYGWordmarkViewController new];
-    } else if ([route isEqualToString:@"easygating"]) {
-        controller = [RYGEasyGatingViewController new];
-    } else if ([route isEqualToString:@"mobileconfig"]) {
-        controller = [RYGMobileConfigToolsViewController new];
-    } else if ([route isEqualToString:@"prism"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism];
-    } else if ([route isEqualToString:@"liquidglass"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass];
-    } else if ([route isEqualToString:@"stories"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories];
-    } else if ([route isEqualToString:@"internal"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly];
-    } else if ([route isEqualToString:@"bugreport"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceBugReport];
-    } else if ([route isEqualToString:@"settings"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows];
-    } else if ([route isEqualToString:@"dogfood"]) {
-        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood];
-    } else if ([route isEqualToString:@"metalocal"]) {
+    RYGSetting *glass = [RYGSetting navigationCellWithTitle:@"Liquid Glass"
+                                                   subtitle:nil
+                                                       icon:[RYGSymbol symbolWithName:@"interface"]
+                                             viewController:[[RYGDeveloperTopicViewController alloc]
+                                                 initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
+
+    RYGSetting *stories = [RYGSetting navigationCellWithTitle:@"Stories · Tray & Grid"
+                                                     subtitle:nil
+                                                         icon:[RYGSymbol symbolWithName:@"stories"]
+                                               viewController:[[RYGDeveloperTopicViewController alloc]
+                                                   initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
+
+    RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only"
+                                                          subtitle:nil
+                                                              icon:[RYGSymbol symbolWithName:@"eye"]
+                                                    viewController:[[RYGDeveloperTopicViewController alloc]
+                                                        initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
+
+    RYGSetting *bugReport = [RYGSetting navigationCellWithTitle:@"Bug Report"
+                                                       subtitle:nil
+                                                           icon:[RYGSymbol symbolWithName:@"bug"]
+                                                 viewController:[[RYGDeveloperTopicViewController alloc]
+                                                     initWithSurface:RYGDeveloperRuntimeSurfaceBugReport]];
+
+    RYGSetting *settingsRows = [RYGSetting navigationCellWithTitle:@"Hidden Settings Rows"
+                                                          subtitle:nil
+                                                              icon:[RYGSymbol symbolWithName:@"list"]
+                                                    viewController:[[RYGDeveloperTopicViewController alloc]
+                                                        initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows]];
+
+    RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Direct Dogfooding Settings"
+                                                     subtitle:nil
+                                                         icon:[RYGSymbol symbolWithName:@"paw"]
+                                               viewController:[[RYGDeveloperTopicViewController alloc]
+                                                   initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
+
+    RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment"
+                                                   subtitle:nil
+                                                       icon:[RYGSymbol symbolWithName:@"insights"]
+                                                     action:^{
         [RYGMetaLocalExperimentBrowser presentFromCurrentViewController];
-        return;
-    } else if ([route isEqualToString:@"runtime"]) {
-        controller = [RYGRuntimeBrowserViewController new];
-    }
+    }];
 
-    if (controller) [self.navigationController pushViewController:controller animated:YES];
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live"
+                                                     subtitle:nil
+                                                         icon:[RYGSymbol symbolWithName:@"search"]
+                                               viewController:[RYGRuntimeBrowserViewController new]];
+
+    NSArray *sections = @[
+        [RYGSettingsViewController sectionWithHeader:nil
+                                              footer:nil
+                                                rows:@[
+            wordmark,
+            easyGating,
+            mobileConfig,
+            prism,
+            glass,
+            stories,
+            internalOnly,
+            bugReport,
+            settingsRows,
+            dogfood,
+        ]],
+        [RYGSettingsViewController sectionWithHeader:nil
+                                              footer:nil
+                                                rows:@[metaLocal, runtime]],
+    ];
+    [self applySettingSections:sections];
 }
 
 @end
