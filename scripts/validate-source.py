@@ -19,23 +19,16 @@ def fail(message: str) -> None:
 
 
 def logos_orig_tail(line: str) -> str | None:
-    """Return the invalid tail after %orig, or None when the line is safe.
-
-    Logos 777925d consumes the rest of a source line after forwarding the
-    original call. Keeping the semicolon as the only token after %orig makes
-    the generated Objective-C retain surrounding returns and closing braces.
-    """
+    """Return the invalid tail after %orig, or None when the line is safe."""
     for match in re.finditer(r"%orig\b", line):
         cursor = match.end()
         while cursor < len(line) and line[cursor].isspace():
             cursor += 1
-
         if cursor < len(line) and line[cursor] == "(":
             depth = 0
             while cursor < len(line):
                 char = line[cursor]
-                if char == "(":
-                    depth += 1
+                if char == "(": depth += 1
                 elif char == ")":
                     depth -= 1
                     if depth == 0:
@@ -44,7 +37,6 @@ def logos_orig_tail(line: str) -> str | None:
                 cursor += 1
             if depth:
                 return line[match.end():]
-
         tail = line[cursor:]
         if not re.fullmatch(r"\s*;\s*", tail):
             return tail
@@ -66,10 +58,6 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
     if legacy_module.exists() and any(legacy_module.iterdir()):
         fail(f"separate compatibility module still exists: {legacy_module.relative_to(ROOT)}")
 
-# These files previously layered alternate UI dispatchers / swizzles / C hooks
-# over the same Developer and Runtime Browser responsibilities. Their presence
-# makes behavior depend on constructor/link order, so the rebuilt architecture
-# treats reintroduction as a source-validation failure.
 for obsolete in (
     "src/Debug/RYGDeveloperFeatureViewController.m",
     "src/Debug/RYGDeveloperGateViewController.m",
@@ -82,13 +70,13 @@ for obsolete in (
     if (ROOT / obsolete).exists():
         fail(f"obsolete competing runtime/UI implementation returned: {obsolete}")
 
-# Binary-derived ABI invariants. These values are not arbitrary source style:
-# they were revalidated against the supplied current arm64 Instagram / FBShared
-# binaries and canonical MobileConfig files.
+# Binary-derived ABI invariants revalidated against the supplied current arm64
+# Instagram / FBShared binaries and canonical MobileConfig files.
 mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
 mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
+runtime_class_path = ROOT / "src/Debug/RYGRuntimeClassBrowser.m"
 
 mc_header = mc_header_path.read_text(encoding="utf-8")
 for type_name, discriminator in (
@@ -125,9 +113,8 @@ for marker in ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"):
     if marker not in mc_json:
         fail(f"canonical MobileConfig JSON contract marker is missing: {marker}")
 
-# The public EasyGating wrapper maps its selector/index before branching to the
-# platform function. Hooking the wrapper would persist pre-map IDs and can force
-# an unrelated gate. Only the final platform entry point is allowed here.
+# Easy Gating public wrapper maps its selector/index before branching to the
+# platform function, so the pre-map wrapper must never be the installed hook.
 easy = easy_path.read_text(encoding="utf-8")
 if 'dlsym(RTLD_DEFAULT, "EasyGatingPlatformGetBoolean")' not in easy:
     fail("Easy Gating must hook the validated final platform entry point")
@@ -135,6 +122,25 @@ if re.search(r'dlsym\s*\([^\n]*"EasyGatingGetBoolean_Internal_DoNotUseOrMock"', 
     fail("pre-map Easy Gating public wrapper must not be hooked")
 if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
     fail("Easy Gating final-ID persistence namespace is missing")
+
+# Runtime browsing may expose all live classes/methods/properties, but BOOL
+# override eligibility must be derived only from the runtime ABI and the method
+# implementation must actually belong to the selected image.
+if not runtime_class_path.is_file():
+    fail("live Runtime Class Browser implementation is missing")
+runtime_class = runtime_class_path.read_text(encoding="utf-8")
+for marker in (
+    "method_getReturnType",
+    "method_getArgumentType",
+    "method_getNumberOfArguments",
+    "method_getImplementation",
+    "dladdr",
+    "objc_copyClassNamesForImage",
+    "objc_copyClassList",
+    "RYGRTHookableBool",
+):
+    if marker not in runtime_class:
+        fail(f"live Runtime Class Browser ABI/ownership marker is missing: {marker}")
 
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
@@ -195,6 +201,7 @@ required = (
     ROOT / "src/UI/RYGLiquidGlass.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
     ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
+    ROOT / "src/Debug/RYGRuntimeClassBrowser.m",
     ROOT / "src/Debug/RYGDeveloperRuntimeScanner.m",
     ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
     ROOT / "src/Debug/RYGWordmarkViewController.m",
@@ -206,4 +213,4 @@ for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: SDK 26.5, validated Easy Gating platform ABI, native MobileConfig 1/2/3/4 types, canonical JSON, direct BOOL Runtime Browser, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, validated Easy Gating platform ABI, native MobileConfig 1/2/3/4 types, canonical JSON, live class/method ABI browser, integrated sideload compatibility")
