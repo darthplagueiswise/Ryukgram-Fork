@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 typedef NS_ENUM(uint8_t, RYGMCType) {
+    RYGMCTypeUnknown = 0,
     RYGMCTypeBool   = 1,
     RYGMCTypeInt    = 2,
     RYGMCTypeDouble = 3,
@@ -18,15 +19,17 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 @property (nonatomic, assign) unsigned int configNumber;
 @property (nonatomic, assign) unsigned int paramIndex;
 @property (nonatomic, assign) RYGMCType type;
-@property (nonatomic, copy)   NSString *name;
+@property (nonatomic, assign, getter=isRuntimeBacked) BOOL runtimeBacked;
+@property (nonatomic, copy) NSString *name;
 @property (nonatomic, readonly) NSString *typeName;
 @end
 
 @interface RYGMCConfig : NSObject
 @property (nonatomic, assign) unsigned int number;
-@property (nonatomic, copy)   NSString *name;
+@property (nonatomic, copy) NSString *name;
 @property (nonatomic, strong) NSArray<RYGMCParam *> *params;
 @property (nonatomic, readonly) NSString *displayName;
+@property (nonatomic, readonly) BOOL hasRuntimeBacking;
 @end
 
 @interface RYGMobileConfig : NSObject
@@ -37,32 +40,30 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 @property (nonatomic, readonly) NSUInteger namedConfigCount;
 
 - (void)prepare;
-/// Discards only the in-memory UI snapshot and enumerates Instagram's current
-/// MobileConfig table and on-disk name mappings again. Overrides/notes remain.
+/// Rebuilds the browser model as the union of Instagram's live parameter table
+/// and the authoritative imported/on-disk id_name_mapping catalog.
 - (void)reloadFromRuntime;
 - (NSArray<RYGMCConfig *> *)allConfigs;
 - (NSArray<RYGMCConfig *> *)configsMatching:(NSString *)query onlyOverridden:(BOOL)onlyOverridden;
-- (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)c;
+- (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)config;
 
-- (id)liveValueFor:(RYGMCParam *)p;
+- (id)liveValueFor:(RYGMCParam *)param;
 
-- (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)p;
-- (id)overrideValueFor:(RYGMCParam *)p;
-- (BOOL)setOverride:(id)value for:(RYGMCParam *)p;
-- (void)clearOverrideFor:(RYGMCParam *)p;
+- (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)param;
+- (id)overrideValueFor:(RYGMCParam *)param;
+- (BOOL)setOverride:(id)value for:(RYGMCParam *)param;
+- (void)clearOverrideFor:(RYGMCParam *)param;
 - (NSUInteger)overrideCount;
 - (void)resetAllOverrides;
 - (void)resetOverridesForConfig:(RYGMCConfig *)config;
 
-- (NSString *)callSiteFor:(RYGMCParam *)p;
+- (NSString *)callSiteFor:(RYGMCParam *)param;
 
-- (NSString *)noteFor:(RYGMCParam *)p;
-- (void)setNote:(NSString *)note for:(RYGMCParam *)p;
+- (NSString *)noteFor:(RYGMCParam *)param;
+- (void)setNote:(NSString *)note for:(RYGMCParam *)param;
 
 - (void)markLaunchStable;
 - (BOOL)consumeCrashLoopFlag;
 - (void)reapplyOverridesToNativeTable;
-
-
 
 @end
