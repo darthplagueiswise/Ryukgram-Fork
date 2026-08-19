@@ -1,0 +1,1 @@
+CI validation marker after updating Mach-O validation to the rebuilt direct BOOL runtime contracts.
