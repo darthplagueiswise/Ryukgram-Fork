@@ -3,15 +3,18 @@
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, RYGRuntimeArgumentKind) {
-	RYGRuntimeArgumentNone = 0,
-	RYGRuntimeArgumentObject,
-	RYGRuntimeArgumentInteger,
+    RYGRuntimeArgumentNone = 0,
+    RYGRuntimeArgumentObject,
+    RYGRuntimeArgumentInteger,
 };
 
+// Retained for source compatibility with older callers. The live runtime no
+// longer semantically preclassifies methods by these scopes; image enumeration
+// returns every strict-BOOL method whose ABI is supported.
 typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
-	RYGRuntimeBrowserScopeRelevant = 0,
-	RYGRuntimeBrowserScopeEmployee,
-	RYGRuntimeBrowserScopeAll,
+    RYGRuntimeBrowserScopeRelevant = 0,
+    RYGRuntimeBrowserScopeEmployee,
+    RYGRuntimeBrowserScopeAll,
 };
 
 @interface RYGRuntimeBoolMethod : NSObject
@@ -35,25 +38,33 @@ typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
 
 @interface RYGRuntimeBrowserEngine : NSObject
 
-/// A fresh dyld snapshot. Nothing is loaded from a shipped table or persisted
-/// symbol cache. The app executable is first, then currently loaded app-owned
-/// frameworks and dylibs.
+/// Fresh dyld snapshot. No shipped/persisted symbol table is used.
 + (NSArray<NSString *> *)runtimeImagePaths;
 + (NSString *)shortNameForImagePath:(NSString *)imagePath;
 
-/// Enumerates the selected image at call time. Only arm64 Objective-C BOOL
-/// methods with a safe supported signature are returned.
+/// Compatibility API for callers that need a flat BOOL list. `scope` is
+/// deliberately ignored: the current browser does not classify methods by name.
+/// Enumeration is image-scoped and ABI-only.
 + (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath
-										 scope:(RYGRuntimeBrowserScope)scope;
+                                                      scope:(RYGRuntimeBrowserScope)scope;
 
-/// Reads LC_SYMTAB from the selected loaded image. Addresses are live runtime
-/// addresses and are deliberately never persisted.
+/// Reads LC_SYMTAB from the selected loaded image. Addresses are current-process
+/// runtime addresses and are never persisted.
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath;
 
-+ (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName;
+/// Installs the one unified pass-through/override trampoline for this exact
+/// method. With no override it only records the original BOOL result; with an
+/// override the same trampoline returns the forced value after recording native.
++ (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method;
++ (nullable NSNumber *)observedNativeValueForKey:(NSString *)overrideKey;
+
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
 + (void)setOverride:(nullable NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method;
 + (void)reinstallPersistedOverrides;
+
+/// Kept for source compatibility only; runtime browsing/hooking no longer uses
+/// name-based structural filtering.
++ (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName;
 
 @end
 
