@@ -1,13 +1,18 @@
 #import "RYGRuntimeBrowserViewController.h"
 #import "RYGRuntimeBrowserEngine.h"
+#import "RYGRuntimeClassBrowser.h"
 #import "RYGRuntimeLiveObserver.h"
 #import "../UI/RYGLiquidGlass.h"
 #import "../UI/RYGPopupChrome.h"
 #import "../Utils.h"
 #import <objc/runtime.h>
 
-static const void *kRYGRuntimeBoolKey = &kRYGRuntimeBoolKey;
 static NSString *const kRYGRuntimeSelectedImageKey = @"ryg_runtime_browser_selected_image";
+
+typedef NS_ENUM(NSInteger, RYGRuntimeTopMode) {
+    RYGRuntimeTopModeClasses = 0,
+    RYGRuntimeTopModeMachO = 1,
+};
 
 static NSString *RYGRuntimeImagePersistenceID(NSString *path) {
     NSString *standard = path.stringByStandardizingPath;
@@ -17,53 +22,169 @@ static NSString *RYGRuntimeImagePersistenceID(NSString *path) {
     return standard.lastPathComponent ?: @"";
 }
 
-static NSString *RYGRuntimeNormalizedSearch(NSString *value) {
-    if (!value.length) return @"";
-    NSMutableString *out = [NSMutableString stringWithCapacity:value.length];
-    NSString *lower = value.lowercaseString;
-    BOOL previousSpace = YES;
-    for (NSUInteger index = 0; index < lower.length; index++) {
-        unichar character = [lower characterAtIndex:index];
-        BOOL alnum = (character >= 'a' && character <= 'z') ||
-                     (character >= '0' && character <= '9');
-        if (alnum) {
-            [out appendFormat:@"%C", character];
-            previousSpace = NO;
-        } else if (!previousSpace) {
-            [out appendString:@" "];
-            previousSpace = YES;
-        }
-    }
-    return [out stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-}
-
-static BOOL RYGRuntimeMethodMatches(RYGRuntimeBoolMethod *method, NSString *query) {
-    NSString *needle = RYGRuntimeNormalizedSearch(query);
-    if (!needle.length) return YES;
-    NSString *haystack = RYGRuntimeNormalizedSearch([NSString stringWithFormat:@"%@ %@ %@ %@",
-        method.className ?: @"", method.selectorName ?: @"", method.typeEncoding ?: @"",
-        method.imagePath.lastPathComponent ?: @""]);
-    NSString *compact = [haystack stringByReplacingOccurrencesOfString:@" " withString:@""];
-    for (NSString *token in [needle componentsSeparatedByString:@" "]) {
-        if (!token.length) continue;
-        if ([haystack rangeOfString:token].location == NSNotFound &&
-            [compact rangeOfString:token].location == NSNotFound) return NO;
+static BOOL RYGRuntimeContainsTokens(NSString *haystack, NSString *query) {
+    if (!query.length) return YES;
+    NSString *hay = haystack.lowercaseString ?: @"";
+    for (NSString *token in [query.lowercaseString componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+        if (token.length && [hay rangeOfString:token].location == NSNotFound) return NO;
     }
     return YES;
 }
 
+@interface RYGRuntimeClassDetailViewController : UITableViewController <UISearchResultsUpdating>
+- (instancetype)initWithClassRow:(RYGRuntimeClassRow *)row;
+@property (nonatomic, strong) RYGRuntimeClassRow *classRow;
+@property (nonatomic, copy) NSArray<RYGRuntimeMethodRow *> *instanceMethods;
+@property (nonatomic, copy) NSArray<RYGRuntimeMethodRow *> *classMethods;
+@property (nonatomic, copy) NSArray<RYGRuntimePropertyRow *> *properties;
+@property (nonatomic, copy) NSArray<RYGRuntimeMethodRow *> *visibleInstanceMethods;
+@property (nonatomic, copy) NSArray<RYGRuntimeMethodRow *> *visibleClassMethods;
+@property (nonatomic, copy) NSArray<RYGRuntimePropertyRow *> *visibleProperties;
+@property (nonatomic, strong) UISearchController *searchController;
+@end
+
+@implementation RYGRuntimeClassDetailViewController
+
+- (instancetype)initWithClassRow:(RYGRuntimeClassRow *)row {
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) self.classRow = row;
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = self.classRow.className ?: @"Class";
+    self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
+    self.view.backgroundColor = [RYGPopupChrome backgroundColor];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 50.0;
+    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
+    self.searchController.searchResultsUpdater = self;
+    self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.searchBar.placeholder = @"Method or property";
+    self.navigationItem.searchController = self.searchController;
+    self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(nativeValueChanged:) name:RYGRuntimeNativeValueDidChangeNotification object:nil];
+    [self reloadRuntime];
+    RYGLiquidGlassApplyToViewController(self);
+}
+
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+
+- (void)nativeValueChanged:(NSNotification *)notification {
+    NSString *key = notification.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
+    if (key.length && [key containsString:self.classRow.className ?: @""]) [self.tableView reloadData];
+}
+
+- (void)reloadRuntime {
+    self.instanceMethods = [RYGRuntimeClassBrowser methodsForClass:self.classRow classMethods:NO] ?: @[];
+    self.classMethods = [RYGRuntimeClassBrowser methodsForClass:self.classRow classMethods:YES] ?: @[];
+    self.properties = [RYGRuntimeClassBrowser propertiesForClass:self.classRow classProperties:NO] ?: @[];
+    [self applyFilter];
+}
+
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { (void)searchController; [self applyFilter]; }
+
+- (void)applyFilter {
+    NSString *query = self.searchController.searchBar.text ?: @"";
+    if (!query.length) {
+        self.visibleInstanceMethods = self.instanceMethods ?: @[];
+        self.visibleClassMethods = self.classMethods ?: @[];
+        self.visibleProperties = self.properties ?: @[];
+    } else {
+        NSPredicate *methodFilter = [NSPredicate predicateWithBlock:^BOOL(RYGRuntimeMethodRow *row, NSDictionary *bindings) {
+            (void)bindings; return [RYGRuntimeClassBrowser methodRow:row matchesSearch:query];
+        }];
+        self.visibleInstanceMethods = [self.instanceMethods filteredArrayUsingPredicate:methodFilter];
+        self.visibleClassMethods = [self.classMethods filteredArrayUsingPredicate:methodFilter];
+        self.visibleProperties = [self.properties filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimePropertyRow *row, NSDictionary *bindings) {
+            (void)bindings; return RYGRuntimeContainsTokens([NSString stringWithFormat:@"%@ %@", row.name ?: @"", row.attributes ?: @""], query);
+        }]];
+    }
+    [self.tableView reloadData];
+}
+
+- (NSArray *)rowsForSection:(NSInteger)section {
+    if (section == 0) return self.visibleInstanceMethods ?: @[];
+    if (section == 1) return self.visibleClassMethods ?: @[];
+    return self.visibleProperties ?: @[];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { (void)tableView; return 3; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { (void)tableView; return [self rowsForSection:section].count; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    (void)tableView;
+    if (section == 0) return @"Instance Methods";
+    if (section == 1) return @"Class Methods";
+    return @"Properties";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGRuntimeClassDetail"];
+    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RYGRuntimeClassDetail"];
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    if (indexPath.section < 2) {
+        RYGRuntimeMethodRow *row = [self rowsForSection:indexPath.section][(NSUInteger)indexPath.row];
+        cell.textLabel.text = [NSString stringWithFormat:@"%@ %@", row.classMethod ? @"+" : @"−", row.selectorName ?: @""];
+        if (row.hookableBool) {
+            RYGRuntimeBoolMethod *method = [RYGRuntimeClassBrowser boolDescriptorForMethod:row];
+            NSNumber *forced = method.overrideValue;
+            NSNumber *native = method.liveValue;
+            NSString *state = forced ? (forced.boolValue ? @"forced true" : @"forced false") : (native ? (native.boolValue ? @"native true" : @"native false") : @"native not observed");
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", row.typeEncoding ?: @"BOOL", state];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        } else {
+            cell.detailTextLabel.text = row.typeEncoding.length ? row.typeEncoding : @"ABI not eligible for BOOL override";
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        }
+    } else {
+        RYGRuntimePropertyRow *property = [self rowsForSection:indexPath.section][(NSUInteger)indexPath.row];
+        cell.textLabel.text = property.name ?: @"Property";
+        cell.detailTextLabel.text = property.attributes ?: @"";
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section >= 2) return;
+    RYGRuntimeMethodRow *row = [self rowsForSection:indexPath.section][(NSUInteger)indexPath.row];
+    if (!row.hookableBool) return;
+    RYGRuntimeBoolMethod *method = [RYGRuntimeClassBrowser boolDescriptorForMethod:row];
+    if (!method) return;
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:row.selectorName message:row.typeEncoding preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe original value" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { RYGRuntimeBeginLiveObservation(@[method]); }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force false" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData]; }]];
+    if (method.overrideValue) [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) { [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData]; }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) { sheet.popoverPresentationController.sourceView = cell; sheet.popoverPresentationController.sourceRect = cell.bounds; }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+@end
+
 @interface RYGRuntimeBrowserViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UIButton *imageButton;
+@property (nonatomic, strong) UISegmentedControl *modeControl;
 @property (nonatomic, strong) UISearchController *searchController;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) UILabel *emptyLabel;
 @property (nonatomic, copy) NSArray<NSString *> *images;
 @property (nonatomic, copy) NSString *selectedImagePath;
-@property (nonatomic, copy) NSArray<RYGRuntimeBoolMethod *> *allRows;
-@property (nonatomic, copy) NSArray<RYGRuntimeBoolMethod *> *visibleRows;
+@property (nonatomic, copy) NSArray<RYGRuntimeClassRow *> *classRows;
+@property (nonatomic, copy) NSArray<RYGRuntimeClassRow *> *visibleClassRows;
+@property (nonatomic, copy) NSArray<RYGMachOSymbol *> *symbolRows;
+@property (nonatomic, copy) NSArray<RYGMachOSymbol *> *visibleSymbolRows;
 @property (nonatomic, assign) NSUInteger scanGeneration;
-@property (nonatomic, assign, getter=isScanning) BOOL scanning;
 @end
 
 @implementation RYGRuntimeBrowserViewController
@@ -72,325 +193,128 @@ static BOOL RYGRuntimeMethodMatches(RYGRuntimeBoolMethod *method, NSString *quer
     [super viewDidLoad];
     self.title = @"Runtime Browser";
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
-    self.allRows = @[];
-    self.visibleRows = @[];
-
+    self.classRows = @[]; self.visibleClassRows = @[]; self.symbolRows = @[]; self.visibleSymbolRows = @[];
     self.imageButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.imageButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.imageButton.showsMenuAsPrimaryAction = YES;
     self.imageButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
-    self.imageButton.titleLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-    RYGLiquidGlassConfigureButton(self.imageButton, NO);
     [self.view addSubview:self.imageButton];
-
+    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"Classes", @"Mach-O"]];
+    self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
+    self.modeControl.selectedSegmentIndex = RYGRuntimeTopModeClasses;
+    [self.modeControl addTarget:self action:@selector(modeChanged:) forControlEvents:UIControlEventValueChanged];
+    [self.view addSubview:self.modeControl];
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
-    self.tableView.dataSource = self;
-    self.tableView.delegate = self;
+    self.tableView.dataSource = self; self.tableView.delegate = self;
+    self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 50.0;
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
-    self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 50.0;
     [self.view addSubview:self.tableView];
-
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [self.imageButton.topAnchor constraintEqualToAnchor:guide.topAnchor constant:8.0],
         [self.imageButton.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16.0],
         [self.imageButton.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16.0],
         [self.imageButton.heightAnchor constraintGreaterThanOrEqualToConstant:44.0],
-        [self.tableView.topAnchor constraintEqualToAnchor:self.imageButton.bottomAnchor constant:4.0],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [self.modeControl.topAnchor constraintEqualToAnchor:self.imageButton.bottomAnchor constant:10.0],
+        [self.modeControl.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16.0],
+        [self.modeControl.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16.0],
+        [self.tableView.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:6.0],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
     ]];
-
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
-    self.searchController.searchResultsUpdater = self;
-    self.searchController.obscuresBackgroundDuringPresentation = NO;
-    self.searchController.searchBar.placeholder = @"Class, BOOL or ABI";
-    self.navigationItem.searchController = self.searchController;
-    self.navigationItem.hidesSearchBarWhenScrolling = NO;
-
+    self.searchController.searchResultsUpdater = self; self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.searchBar.placeholder = @"Class or symbol"; self.navigationItem.searchController = self.searchController; self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.emptyLabel = [UILabel new];
-    self.emptyLabel.textAlignment = NSTextAlignmentCenter;
-    self.emptyLabel.numberOfLines = 0;
-    self.emptyLabel.textColor = UIColor.secondaryLabelColor;
-    self.emptyLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
-
-    __weak typeof(self) weakSelf = self;
-    UIAction *observe = [UIAction actionWithTitle:@"Observe visible original values"
-                                            image:[UIImage systemImageNamed:@"waveform.path.ecg"]
-                                       identifier:nil
-                                          handler:^(__kindof UIAction *action) {
-        (void)action;
-        [weakSelf observeVisibleRows];
-    }];
-    UIAction *refresh = [UIAction actionWithTitle:@"Refresh selected image"
-                                            image:[UIImage systemImageNamed:@"arrow.clockwise"]
-                                       identifier:nil
-                                          handler:^(__kindof UIAction *action) {
-        (void)action;
-        [weakSelf scanSelectedImage];
-    }];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
-                 menu:[UIMenu menuWithTitle:@"Runtime" children:@[observe, refresh]]];
-
-    [NSNotificationCenter.defaultCenter addObserver:self
-                                           selector:@selector(nativeValueChanged:)
-                                               name:RYGRuntimeNativeValueDidChangeNotification
-                                             object:nil];
-
-    [self refreshRuntimeImages];
-    RYGLiquidGlassApplyToViewController(self);
-    [self scanSelectedImage];
-}
-
-- (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
+    self.emptyLabel = [UILabel new]; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.numberOfLines = 0; self.emptyLabel.textColor = UIColor.secondaryLabelColor; self.emptyLabel.font = [UIFont systemFontOfSize:14.0];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshTapped)];
+    [self refreshRuntimeImages]; [self rebuildImageMenu]; RYGLiquidGlassApplyToViewController(self); [self scanSelectedImage];
 }
 
 - (void)refreshRuntimeImages {
     self.images = [RYGRuntimeBrowserEngine runtimeImagePaths] ?: @[];
     NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:kRYGRuntimeSelectedImageKey];
     NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
-
     if (!self.selectedImagePath.length || ![self.images containsObject:self.selectedImagePath]) {
         self.selectedImagePath = nil;
-        for (NSString *path in self.images) {
-            NSString *identity = RYGRuntimeImagePersistenceID(path);
-            if (stored.length && [identity isEqualToString:stored]) {
-                self.selectedImagePath = path;
-                break;
-            }
-        }
-        if (!self.selectedImagePath.length) {
-            for (NSString *path in self.images) {
-                if ([path.stringByStandardizingPath isEqualToString:main]) {
-                    self.selectedImagePath = path;
-                    break;
-                }
-            }
-        }
+        for (NSString *path in self.images) if (stored.length && [RYGRuntimeImagePersistenceID(path) isEqualToString:stored]) { self.selectedImagePath = path; break; }
+        if (!self.selectedImagePath.length) for (NSString *path in self.images) if ([path.stringByStandardizingPath isEqualToString:main]) { self.selectedImagePath = path; break; }
         if (!self.selectedImagePath.length) self.selectedImagePath = self.images.firstObject;
     }
-    [self rebuildImageMenu];
 }
 
 - (void)rebuildImageMenu {
-    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray arrayWithCapacity:self.images.count];
+    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
     __weak typeof(self) weakSelf = self;
-    NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
-
     for (NSString *path in self.images) {
-        NSString *title = [RYGRuntimeBrowserEngine shortNameForImagePath:path];
-        UIAction *action = [UIAction actionWithTitle:title
-                                              image:[UIImage systemImageNamed:[path.stringByStandardizingPath isEqualToString:main] ? @"app" : @"shippingbox"]
-                                         identifier:nil
-                                            handler:^(__kindof UIAction *item) {
-            (void)item;
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self) return;
-            self.selectedImagePath = path;
-            [NSUserDefaults.standardUserDefaults setObject:RYGRuntimeImagePersistenceID(path)
-                                                    forKey:kRYGRuntimeSelectedImageKey];
-            [self rebuildImageMenu];
-            [self scanSelectedImage];
+        UIAction *action = [UIAction actionWithTitle:[RYGRuntimeBrowserEngine shortNameForImagePath:path] image:nil identifier:nil handler:^(__unused UIAction *a) {
+            weakSelf.selectedImagePath = path; [NSUserDefaults.standardUserDefaults setObject:RYGRuntimeImagePersistenceID(path) forKey:kRYGRuntimeSelectedImageKey]; [weakSelf rebuildImageMenu]; [weakSelf scanSelectedImage];
         }];
-        action.state = [path isEqualToString:self.selectedImagePath] ? UIMenuElementStateOn : UIMenuElementStateOff;
-        [actions addObject:action];
+        action.state = [path isEqualToString:self.selectedImagePath] ? UIMenuElementStateOn : UIMenuElementStateOff; [actions addObject:action];
     }
-
-    NSString *shortName = self.selectedImagePath.length
-        ? [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath]
-        : @"No loaded image";
-    NSString *buttonTitle = [NSString stringWithFormat:@"Image: %@", shortName];
-    [self.imageButton setTitle:buttonTitle forState:UIControlStateNormal];
+    NSString *title = [NSString stringWithFormat:@"Image: %@", self.selectedImagePath.length ? [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath] : @"None"];
+    self.imageButton.menu = [UIMenu menuWithTitle:@"Loaded images" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:actions];
+    RYGLiquidGlassConfigureButton(self.imageButton, NO);
     UIButtonConfiguration *configuration = self.imageButton.configuration;
-    if (configuration) {
-        configuration.title = buttonTitle;
-        if (@available(iOS 26.0, *)) [configuration setDefaultContentInsets];
-        self.imageButton.configuration = configuration;
-    }
-    self.imageButton.menu = [UIMenu menuWithTitle:@"Loaded executable and frameworks" children:actions];
-    [self.imageButton invalidateIntrinsicContentSize];
+    if (configuration) { configuration.title = title; if (@available(iOS 26.0, *)) [configuration setDefaultContentInsets]; self.imageButton.configuration = configuration; }
+    else [self.imageButton setTitle:title forState:UIControlStateNormal];
 }
 
-- (void)setScanning:(BOOL)scanning {
-    _scanning = scanning;
-    if (scanning) {
-        [self.spinner startAnimating];
-        self.tableView.backgroundView = self.spinner;
-    } else {
-        [self.spinner stopAnimating];
-        self.tableView.backgroundView = self.visibleRows.count ? nil : self.emptyLabel;
-    }
-}
+- (void)modeChanged:(UISegmentedControl *)sender { (void)sender; self.searchController.searchBar.text = @""; [self scanSelectedImage]; }
+- (void)refreshTapped { [self refreshRuntimeImages]; [self rebuildImageMenu]; [self scanSelectedImage]; }
 
 - (void)scanSelectedImage {
-    [self refreshRuntimeImages];
-    NSString *imagePath = self.selectedImagePath.copy;
-    NSUInteger generation = ++self.scanGeneration;
-    if (!imagePath.length) {
-        self.allRows = @[];
-        self.visibleRows = @[];
-        self.emptyLabel.text = @"No loaded app image";
-        self.scanning = NO;
-        [self.tableView reloadData];
-        return;
-    }
-
-    self.scanning = YES;
-    __weak typeof(self) weakSelf = self;
+    NSString *path = self.selectedImagePath.copy; NSUInteger generation = ++self.scanGeneration; if (!path.length) return;
+    [self.spinner startAnimating]; self.tableView.backgroundView = self.spinner;
+    RYGRuntimeTopMode mode = (RYGRuntimeTopMode)self.modeControl.selectedSegmentIndex; __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray<RYGRuntimeBoolMethod *> *rows = [RYGRuntimeBrowserEngine boolMethodsForImagePath:imagePath
-                                                                                           scope:RYGRuntimeBrowserScopeAll];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) self = weakSelf;
-            if (!self || generation != self.scanGeneration || ![self.selectedImagePath isEqualToString:imagePath]) return;
-            self.allRows = rows ?: @[];
-            self.scanning = NO;
-            [self applySearchFilter];
-        });
+        if (mode == RYGRuntimeTopModeClasses) {
+            NSArray<RYGRuntimeClassRow *> *rows = [RYGRuntimeClassBrowser classesForImagePath:path];
+            dispatch_async(dispatch_get_main_queue(), ^{ __strong typeof(weakSelf) self = weakSelf; if (!self || generation != self.scanGeneration) return; self.classRows = rows ?: @[]; [self.spinner stopAnimating]; [self applySearchFilter]; });
+        } else {
+            NSArray<RYGMachOSymbol *> *rows = [RYGRuntimeBrowserEngine machOSymbolsForImagePath:path];
+            dispatch_async(dispatch_get_main_queue(), ^{ __strong typeof(weakSelf) self = weakSelf; if (!self || generation != self.scanGeneration) return; self.symbolRows = rows ?: @[]; [self.spinner stopAnimating]; [self applySearchFilter]; });
+        }
     });
 }
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    (void)searchController;
-    [self applySearchFilter];
-}
-
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { (void)searchController; [self applySearchFilter]; }
 - (void)applySearchFilter {
     NSString *query = self.searchController.searchBar.text ?: @"";
-    if (!query.length) {
-        self.visibleRows = self.allRows ?: @[];
+    if (self.modeControl.selectedSegmentIndex == RYGRuntimeTopModeClasses) {
+        self.visibleClassRows = query.length ? [self.classRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeClassRow *row, NSDictionary *bindings) { (void)bindings; return RYGRuntimeContainsTokens(row.className ?: @"", query); }]] : (self.classRows ?: @[]);
+        self.emptyLabel.text = @"No class in this loaded image matches the current search."; self.tableView.backgroundView = self.visibleClassRows.count ? nil : self.emptyLabel;
     } else {
-        NSMutableArray *matches = [NSMutableArray array];
-        for (RYGRuntimeBoolMethod *method in self.allRows) {
-            if (RYGRuntimeMethodMatches(method, query)) [matches addObject:method];
-        }
-        self.visibleRows = matches.copy;
+        self.visibleSymbolRows = query.length ? [self.symbolRows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGMachOSymbol *row, NSDictionary *bindings) { (void)bindings; return RYGRuntimeContainsTokens([NSString stringWithFormat:@"%@ %@", row.name ?: @"", row.kind ?: @""], query); }]] : (self.symbolRows ?: @[]);
+        self.emptyLabel.text = @"No Mach-O symbol matches the current search."; self.tableView.backgroundView = self.visibleSymbolRows.count ? nil : self.emptyLabel;
     }
-
-    self.emptyLabel.text = query.length
-        ? @"No hookable BOOL matched this search"
-        : @"No supported BOOL method is declared in this loaded image";
-    if (!self.isScanning) self.tableView.backgroundView = self.visibleRows.count ? nil : self.emptyLabel;
     [self.tableView reloadData];
 }
 
-- (void)observeVisibleRows {
-    if (!self.visibleRows.count) return;
-    RYGRuntimeBeginLiveObservation(self.visibleRows);
-    [RYGUtils showToastForDuration:1.4
-                            title:@"Live observation"
-                         subtitle:[NSString stringWithFormat:@"Observing up to %lu visible BOOLs", (unsigned long)MIN(self.visibleRows.count, (NSUInteger)64)]];
-}
-
-- (void)nativeValueChanged:(NSNotification *)notification {
-    NSString *key = notification.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
-    if (!key.length) return;
-    for (RYGRuntimeBoolMethod *method in self.visibleRows) {
-        if ([method.overrideKey isEqualToString:key]) {
-            [self.tableView reloadData];
-            break;
-        }
-    }
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    return self.visibleRows.count;
-}
-
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    if (!self.visibleRows.count) return nil;
-    return [NSString stringWithFormat:@"%lu hookable BOOL%@", (unsigned long)self.visibleRows.count,
-            self.visibleRows.count == 1 ? @"" : @"s"];
-}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { (void)tableView; (void)section; return self.modeControl.selectedSegmentIndex == RYGRuntimeTopModeClasses ? self.visibleClassRows.count : self.visibleSymbolRows.count; }
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section { (void)tableView; (void)section; return self.modeControl.selectedSegmentIndex == RYGRuntimeTopModeClasses ? [NSString stringWithFormat:@"%lu Classes", (unsigned long)self.visibleClassRows.count] : [NSString stringWithFormat:@"%lu Mach-O Symbols", (unsigned long)self.visibleSymbolRows.count]; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    static NSString *identifier = @"RYGRuntimeDirectBool";
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
-    RYGRuntimeBoolMethod *method = self.visibleRows[(NSUInteger)indexPath.row];
-
-    cell.textLabel.text = [NSString stringWithFormat:@"%@[%@ %@]",
-                           method.classMethod ? @"+" : @"−", method.className ?: @"", method.selectorName ?: @""];
-    cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12.5 weight:UIFontWeightMedium];
-    cell.textLabel.numberOfLines = 1;
-    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-
-    NSNumber *native = method.liveValue;
-    NSNumber *forced = method.overrideValue;
-    NSString *nativeText = native ? (native.boolValue ? @"original true" : @"original false") : @"original not observed";
-    NSString *output = forced ? (forced.boolValue ? @"forced true" : @"forced false") : @"native output";
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@", nativeText, output];
-    cell.detailTextLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightRegular];
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.detailTextLabel.numberOfLines = 1;
-
-    UISwitch *toggle = [UISwitch new];
-    toggle.on = forced ? forced.boolValue : (native ? native.boolValue : NO);
-    toggle.onTintColor = [RYGUtils RYGColor_Primary];
-    objc_setAssociatedObject(toggle, kRYGRuntimeBoolKey, method, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [toggle addTarget:self action:@selector(boolToggleChanged:) forControlEvents:UIControlEventValueChanged];
-    cell.accessoryView = toggle;
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGRuntimeRoot"]; if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RYGRuntimeRoot"];
+    cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle; cell.detailTextLabel.textColor = UIColor.secondaryLabelColor; cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    if (self.modeControl.selectedSegmentIndex == RYGRuntimeTopModeClasses) {
+        RYGRuntimeClassRow *row = self.visibleClassRows[(NSUInteger)indexPath.row]; cell.textLabel.text = row.className; cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%lu instance · %lu class · %lu properties", (unsigned long)row.instanceMethodCount, (unsigned long)row.classMethodCount, (unsigned long)row.propertyCount]; cell.detailTextLabel.font = [UIFont systemFontOfSize:10.5];
+    } else {
+        RYGMachOSymbol *row = self.visibleSymbolRows[(NSUInteger)indexPath.row]; cell.textLabel.text = row.name; cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightMedium];
+        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · 0x%llx", row.kind ?: @"symbol", (unsigned long long)row.address]; cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
+    }
     return cell;
 }
 
-- (void)boolToggleChanged:(UISwitch *)toggle {
-    RYGRuntimeBoolMethod *method = objc_getAssociatedObject(toggle, kRYGRuntimeBoolKey);
-    if (!method) return;
-    [RYGRuntimeBrowserEngine setOverride:@(toggle.isOn) forMethod:method];
-    [self.tableView reloadData];
-}
-
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if ((NSUInteger)indexPath.row >= self.visibleRows.count) return;
-    [self presentActionsForMethod:self.visibleRows[(NSUInteger)indexPath.row] source:cell];
-}
-
-- (void)presentActionsForMethod:(RYGRuntimeBoolMethod *)method source:(UIView *)source {
-    NSNumber *native = method.liveValue;
-    NSNumber *forced = method.overrideValue;
-    NSString *message = [NSString stringWithFormat:@"%@\n%@\nOriginal: %@\nOutput: %@",
-        method.className ?: @"", method.typeEncoding ?: @"",
-        native ? (native.boolValue ? @"true" : @"false") : @"not observed yet",
-        forced ? (forced.boolValue ? @"forced true" : @"forced false") : @"native"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:method.selectorName
-                                                                    message:message
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe original live value" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        RYGRuntimeBeginLiveObservation(@[method]);
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force false" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData];
-    }]];
-    if (forced) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-            [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy method details" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%@[%@ %@] %@",
-            method.classMethod ? @"+" : @"−", method.className ?: @"", method.selectorName ?: @"", method.typeEncoding ?: @""];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = source ?: self.view;
-        sheet.popoverPresentationController.sourceRect = source ? source.bounds : self.view.bounds;
-    }
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath]; [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.modeControl.selectedSegmentIndex == RYGRuntimeTopModeClasses) { RYGRuntimeClassRow *row = self.visibleClassRows[(NSUInteger)indexPath.row]; [self.navigationController pushViewController:[[RYGRuntimeClassDetailViewController alloc] initWithClassRow:row] animated:YES]; return; }
+    RYGMachOSymbol *symbol = self.visibleSymbolRows[(NSUInteger)indexPath.row];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:symbol.name message:[NSString stringWithFormat:@"%@\n0x%llx\n\nNo patch action is offered until this symbol's ABI is resolved.", symbol.kind ?: @"symbol", (unsigned long long)symbol.address] preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy symbol" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) { UIPasteboard.generalPasteboard.string = symbol.name ?: @""; }]]; [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) { sheet.popoverPresentationController.sourceView = cell; sheet.popoverPresentationController.sourceRect = cell.bounds; }
     [self presentViewController:sheet animated:YES completion:nil];
 }
-
 @end
