@@ -78,6 +78,7 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
     self.button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
     [self.button addTarget:self action:@selector(didTap) forControlEvents:UIControlEventTouchUpInside];
     [self.contentView addSubview:self.button];
+    RYGLiquidGlassConfigureButton(self.button, NO);
 
     self.nameLabel = [UILabel new];
     self.nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -104,12 +105,12 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
         [self.button.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-10.0],
         [self.button.topAnchor constraintEqualToAnchor:self.contentView.topAnchor],
         [self.button.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor],
-        [self.nameLabel.leadingAnchor constraintEqualToAnchor:self.button.leadingAnchor],
+        [self.nameLabel.leadingAnchor constraintEqualToAnchor:self.button.leadingAnchor constant:12.0],
         [self.nameLabel.centerYAnchor constraintEqualToAnchor:self.button.centerYAnchor],
         [self.idLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.nameLabel.trailingAnchor constant:8.0],
         [self.idLabel.centerYAnchor constraintEqualToAnchor:self.button.centerYAnchor],
         [self.idLabel.trailingAnchor constraintEqualToAnchor:self.chevron.leadingAnchor constant:-8.0],
-        [self.chevron.trailingAnchor constraintEqualToAnchor:self.button.trailingAnchor],
+        [self.chevron.trailingAnchor constraintEqualToAnchor:self.button.trailingAnchor constant:-12.0],
         [self.chevron.centerYAnchor constraintEqualToAnchor:self.button.centerYAnchor],
         [self.chevron.widthAnchor constraintEqualToConstant:12.0],
         [self.chevron.heightAnchor constraintEqualToConstant:16.0],
@@ -125,6 +126,7 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
     self.button.enabled = !searching;
     self.chevron.hidden = searching;
     self.chevron.transform = expanded ? CGAffineTransformMakeRotation((CGFloat)M_PI_2) : CGAffineTransformIdentity;
+    RYGLiquidGlassConfigureButton(self.button, NO);
 }
 
 @end
