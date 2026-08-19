@@ -12,6 +12,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  analysis_tools_linux:
+    name: Export Linux LIEF + Capstone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install exact analysis modules
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install lief==1.0.0 capstone==5.0.9
+          python - <<'PY'
+          import lief, capstone
+          print('lief', lief.__version__)
+          print('capstone', capstone.__version__)
+          PY
+      - name: Pack Linux site-packages
+        run: |
+          SITE=$(python - <<'PY'
+          import site
+          print(site.getsitepackages()[0])
+          PY
+          )
+          tar -C "$SITE" -czf "$RUNNER_TEMP/analysis-site-packages.tgz" lief* capstone*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-py313-lief-capstone
+          path: ${{ runner.temp }}/analysis-site-packages.tgz
+
   build:
     name: Rootless + rootful · arm64
     runs-on: macos-latest
