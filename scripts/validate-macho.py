@@ -21,22 +21,31 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # The rebuilt Runtime Browser is image-scoped and lists hookable BOOLs
-    # directly. Validate the current user-visible live-observation contract,
-    # not labels from the removed class/property browser.
+    # Direct image-scoped BOOL Runtime Browser.
     b"Observe visible original values",
     b"No supported BOOL method is declared in this loaded image",
-    # ABI analysis of the supplied FBSharedFramework showed that the public
-    # EasyGating wrapper maps its w1 selector before tail-calling this platform
-    # entry point. The tweak must therefore contain the final platform symbol,
-    # not the old pre-map hook target.
+    # Binary-validated Easy Gating target. The public wrapper maps its selector
+    # before branching here, so overrides must be keyed at the platform layer.
     b"EasyGatingPlatformGetBoolean",
     b"Mapped ID",
-    # Canonical MobileConfig file formats used by the app-side workflow.
+    b"ryg_easy_gating_platform_bool_overrides_v2",
+    # Canonical MobileConfig file formats.
     b"id_name_mapping.json",
     b"mc_overrides.json",
     b"_qe_overrides_",
     b": : ",
+    # Native MobileConfig metadata and typed C++ override paths. These strings
+    # are the dlsym contracts consumed by the compiled tweak; requiring all of
+    # them prevents a build from silently falling back to guessed value ABIs.
+    b"_ZN12mobileconfig17typeFromParameterEy",
+    b"_ZN12mobileconfig23kMobileConfigParamsListE",
+    b"_ZN12mobileconfig23kMobileConfigParamsSizeE",
+    b"_ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb",
+    b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb",
+    b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb",
+    b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb",
+    b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb",
+    b"_ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb",
 )
 
 
@@ -135,7 +144,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, mapped Easy Gating platform ABI, canonical MobileConfig JSON")
+    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
     return 0
 
 
