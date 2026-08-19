@@ -26,11 +26,17 @@ REQUIRED = (
     # not labels from the removed class/property browser.
     b"Observe visible original values",
     b"No supported BOOL method is declared in this loaded image",
-    # The Developer surfaces use the real Easy Gating C entry point and the
-    # canonical MobileConfig file formats requested by the app-side workflow.
-    b"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+    # ABI analysis of the supplied FBSharedFramework showed that the public
+    # EasyGating wrapper maps its w1 selector before tail-calling this platform
+    # entry point. The tweak must therefore contain the final platform symbol,
+    # not the old pre-map hook target.
+    b"EasyGatingPlatformGetBoolean",
+    b"Mapped ID",
+    # Canonical MobileConfig file formats used by the app-side workflow.
     b"id_name_mapping.json",
     b"mc_overrides.json",
+    b"_qe_overrides_",
+    b": : ",
 )
 
 
@@ -129,7 +135,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, Easy Gating, canonical MobileConfig JSON")
+    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, mapped Easy Gating platform ABI, canonical MobileConfig JSON")
     return 0
 
 
