@@ -257,8 +257,8 @@ static id new_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id opts
     switch (self.type) {
         case RYGMCTypeBool: return @"bool";
         case RYGMCTypeInt: return @"int";
-        case RYGMCTypeDouble: return @"double";
         case RYGMCTypeString: return @"string";
+        case RYGMCTypeDouble: return @"double";
         case RYGMCTypeUnknown: break;
     }
     return @"unknown";
@@ -452,8 +452,6 @@ static id new_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id opts
     _typeFromParam = (int (*)(unsigned long long))rygSym("_ZN12mobileconfig17typeFromParameterEy");
     NSDictionary<NSNumber *, NSDictionary *> *catalog = [self loadNameCatalog] ?: @{};
 
-    // config -> (paramIndex -> param). This is a keyed union, so a runtime row
-    // upgrades a mapping-only row instead of creating a duplicate.
     NSMutableDictionary<NSNumber *, NSMutableDictionary<NSNumber *, RYGMCParam *> *> *paramsByConfig = [NSMutableDictionary dictionary];
 
     size_t stride = 0, count = 0;
@@ -469,7 +467,7 @@ static id new_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id opts
             unsigned int ordinal = ordinalMix & 0xFFFF;
             unsigned int serial = typeSerial & 0xFFFF;
             RYGMCType type = (RYGMCType)(typeSerial >> 16);
-            if (type < RYGMCTypeBool || type > RYGMCTypeString) continue;
+            if (!RYGMCTypeIsRuntimeValue(type)) continue;
             unsigned long long pid = [self validParamIDForOrdinal:ordinal index:paramIndex serial:serial type:type];
             if (!pid) continue;
 
@@ -491,8 +489,6 @@ static id new_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id opts
         }
     }
 
-    // Materialize every imported mapping config and every imported parameter,
-    // even when the current iOS runtime metadata table doesn't contain it.
     [catalog enumerateKeysAndObjectsUsingBlock:^(NSNumber *configKey, NSDictionary *info, BOOL *stop) {
         NSMutableDictionary<NSNumber *, RYGMCParam *> *bucket = paramsByConfig[configKey];
         if (!bucket) { bucket = [NSMutableDictionary dictionary]; paramsByConfig[configKey] = bucket; }
@@ -637,14 +633,14 @@ static NSString *rygNormalize(NSString *string) {
         case RYGMCTypeInt:
             if ([manager respondsToSelector:@selector(getInt64:)]) return @(((long long (*)(id, SEL, unsigned long long))objc_msgSend)(manager, @selector(getInt64:), pid));
             break;
-        case RYGMCTypeDouble:
-            if ([manager respondsToSelector:@selector(getDouble:)]) return @(((double (*)(id, SEL, unsigned long long))objc_msgSend)(manager, @selector(getDouble:), pid));
-            break;
         case RYGMCTypeString:
             if ([manager respondsToSelector:@selector(getString:)]) {
                 id value = ((id (*)(id, SEL, unsigned long long))objc_msgSend)(manager, @selector(getString:), pid);
                 return [value isKindOfClass:NSString.class] ? value : nil;
             }
+            break;
+        case RYGMCTypeDouble:
+            if ([manager respondsToSelector:@selector(getDouble:)]) return @(((double (*)(id, SEL, unsigned long long))objc_msgSend)(manager, @selector(getDouble:), pid));
             break;
         case RYGMCTypeUnknown: break;
     }
@@ -658,9 +654,6 @@ static NSString *rygNormalize(NSString *string) {
     id manager = [self managerForPid:pid];
     if (!manager) return NULL;
 
-    // _configManager is an INSTANCE ivar of FBMobileConfigContextManager. The
-    // previous code queried the metaclass, so it could never reliably locate
-    // this ivar and the native overrides table appeared unavailable.
     Ivar ivar = class_getInstanceVariable([manager class], "_configManager");
     if (!ivar) return NULL;
     void *cppManager = NULL;
@@ -683,7 +676,7 @@ static NSString *rygNormalize(NSString *string) {
 }
 
 - (BOOL)writeNativeForPid:(unsigned long long)pid value:(id)value type:(RYGMCType)type {
-    if (!pid || type == RYGMCTypeUnknown) return NO;
+    if (!pid || !RYGMCTypeIsRuntimeValue(type)) return NO;
     void *table = [self overridesTableForPid:pid];
     if (!table) return NO;
     switch (type) {
@@ -699,17 +692,17 @@ static NSString *rygNormalize(NSString *string) {
             ((void (*)(void *, unsigned long long, long long, bool))function)(table, pid, [value longLongValue], false);
             return YES;
         }
-        case RYGMCTypeDouble: {
-            void *function = rygSym("_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb");
-            if (!function) return NO;
-            ((void (*)(void *, unsigned long long, double, bool))function)(table, pid, [value doubleValue], false);
-            return YES;
-        }
         case RYGMCTypeString: {
             void *function = rygSym("_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb");
             if (!function) return NO;
             std::string stringValue([value description].UTF8String ?: "");
             ((void (*)(void *, unsigned long long, const std::string &, bool))function)(table, pid, stringValue, false);
+            return YES;
+        }
+        case RYGMCTypeDouble: {
+            void *function = rygSym("_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb");
+            if (!function) return NO;
+            ((void (*)(void *, unsigned long long, double, bool))function)(table, pid, [value doubleValue], false);
             return YES;
         }
         case RYGMCTypeUnknown: return NO;
@@ -737,13 +730,13 @@ static NSString *rygNormalize(NSString *string) {
     for (NSNumber *key in _overrides.copy) {
         unsigned long long pid = key.unsignedLongLongValue;
         RYGMCType type = (RYGMCType)((pid >> 48) & 0x0F);
-        if (type < RYGMCTypeBool || type > RYGMCTypeString) continue;
+        if (!RYGMCTypeIsRuntimeValue(type)) continue;
         [self writeNativeBothUnitsForPid:pid value:_overrides[key] type:type];
     }
 }
 
 - (BOOL)setOverride:(id)value for:(RYGMCParam *)param {
-    if (!param.runtimeBacked || !param.paramID || param.type == RYGMCTypeUnknown) return NO;
+    if (!param.runtimeBacked || !param.paramID || !RYGMCTypeIsRuntimeValue(param.type)) return NO;
     BOOL validValue = param.type == RYGMCTypeString ? [value isKindOfClass:NSString.class] : [value isKindOfClass:NSNumber.class];
     if (!validValue) return NO;
     unsigned long long canonical = rygCanonicalPid(param.paramID);
@@ -821,7 +814,7 @@ static NSString *rygNormalize(NSString *string) {
         RYGMCType type = (RYGMCType)((pid >> 48) & 0x0F);
         id value = disk[rawKey];
         BOOL valid = type == RYGMCTypeString ? [value isKindOfClass:NSString.class] : [value isKindOfClass:NSNumber.class];
-        if (pid && type >= RYGMCTypeBool && type <= RYGMCTypeString && valid) result[@(rygCanonicalPid(pid))] = value;
+        if (pid && RYGMCTypeIsRuntimeValue(type) && valid) result[@(rygCanonicalPid(pid))] = value;
     }
     return result;
 }
