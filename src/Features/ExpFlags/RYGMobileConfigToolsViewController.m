@@ -24,6 +24,7 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
 
 @interface RYGMobileConfigToolsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, assign) RYGMCImportOperation pendingImportOperation;
+@property (nonatomic, assign) RYGMCNameMappingImportMode pendingNameMappingMode;
 @end
 
 @implementation RYGMobileConfigToolsViewController
@@ -32,6 +33,7 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.pendingNameMappingMode = RYGMCNameMappingImportModeMerge;
     [[RYGMobileConfig shared] prepare];
     [self rebuildSections];
 }
@@ -57,9 +59,9 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
     }];
 
     RYGSetting *importMapping = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
-                                                       subtitle:@"Validate and cache immediately; mirror into the active *.data directory when Instagram exposes it"
+                                                       subtitle:@"Choose Merge or Replace, then validate/cache the canonical mapping immediately"
                                                            icon:[RYGSymbol symbolWithName:@"download"]
-                                                         action:^{ [weakSelf presentJSONPickerForOperation:RYGMCImportOperationNameMapping]; }];
+                                                         action:^{ [weakSelf chooseNameMappingImportMode]; }];
     RYGSetting *exportMapping = [RYGSetting buttonCellWithTitle:@"Export id_name_mapping.json"
                                                        subtitle:@"Share the imported/resolved mapping even when the native *.data directory is not available yet"
                                                            icon:[RYGSymbol symbolWithName:@"share"]
@@ -88,13 +90,40 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
                                               footer:runtimeFooter
                                                 rows:@[browser, reapply]],
         [RYGSettingsViewController sectionWithHeader:@"id_name_mapping.json"
-                                              footer:@"The mapping is useful immediately from RyukGram's cache. When the native *.data directory appears, the same canonical file is mirrored there automatically."
+                                              footer:@"Merge preserves existing configs/params not present in the imported file; imported names win conflicts. Replace discards the prior imported mapping and makes the selected JSON the complete RyukGram mapping overlay."
                                                 rows:@[importMapping, exportMapping]],
         [RYGSettingsViewController sectionWithHeader:@"mc_overrides.json"
                                               footer:@"Runtime application uses Instagram's native FBMobileConfigOverridesTable when captured. JSON persistence is a separate step targeting the actual active *.data directory."
                                                 rows:@[importOverrides, exportOverrides, clearOverrides]],
     ];
     [self applySettingSections:sections];
+}
+
+- (void)chooseNameMappingImportMode {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Import id_name_mapping.json"
+                                                                    message:@"How should the selected mapping be applied?"
+                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge with existing mapping"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeMerge;
+        [weakSelf presentJSONPickerForOperation:RYGMCImportOperationNameMapping];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Replace existing mapping"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(__unused UIAlertAction *action) {
+        weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeReplace;
+        [weakSelf presentJSONPickerForOperation:RYGMCImportOperationNameMapping];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+        sheet.popoverPresentationController.sourceView = self.view;
+        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), 100.0, 1.0, 1.0);
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)presentJSONPickerForOperation:(RYGMCImportOperation)operation {
@@ -105,11 +134,14 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
     [self presentViewController:picker animated:YES completion:nil];
 }
 
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { self.pendingImportOperation = RYGMCImportOperationNone; }
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    self.pendingImportOperation = RYGMCImportOperationNone;
+}
 
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *url = urls.firstObject;
     RYGMCImportOperation operation = self.pendingImportOperation;
+    RYGMCNameMappingImportMode mappingMode = self.pendingNameMappingMode;
     self.pendingImportOperation = RYGMCImportOperationNone;
     if (!url) return;
 
@@ -125,7 +157,7 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
     NSError *error = nil;
     RYGMobileConfig *mc = [RYGMobileConfig shared];
     if (operation == RYGMCImportOperationNameMapping) {
-        if (![mc ryg_importNameMappingData:data error:&error]) {
+        if (![mc ryg_importNameMappingData:data mode:mappingMode error:&error]) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Import failed"];
             return;
         }
@@ -133,8 +165,9 @@ static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount
         RYGMCResolvedNameCounts(mc, &namedConfigs, &namedParams);
         NSString *nativePath = [mc ryg_nativeNameMappingPath];
         NSString *storage = nativePath.length ? @"mirrored to native *.data" : @"cached; native mirror pending";
+        NSString *modeText = mappingMode == RYGMCNameMappingImportModeMerge ? @"Merged" : @"Replaced";
         [RYGUtils showToastForDuration:2.0
-                                title:@"Mapping applied"
+                                title:[NSString stringWithFormat:@"Mapping %@", modeText.lowercaseString]
                              subtitle:[NSString stringWithFormat:@"%lu config names · %lu param names · %@",
                                        (unsigned long)namedConfigs, (unsigned long)namedParams, storage]];
     } else if (operation == RYGMCImportOperationOverrides) {
