@@ -50,6 +50,11 @@ NSDictionary<NSNumber *, NSDictionary *> *RYGMCNameMappingCatalogFromData(NSData
         return nil;
     }
 
+    // Canonical file grammar observed in the supplied mapping:
+    //   "<configId>:<configName>[:<paramIndex>:<paramName>]*"
+    // Each config ID occurs once. A dangling param token is malformed; silently
+    // dropping it would make an imported/exported mapping look valid while
+    // changing its meaning.
     NSMutableDictionary<NSNumber *, NSMutableDictionary *> *catalog = [NSMutableDictionary dictionary];
     for (id rawEntry in (NSArray *)json) {
         if (![rawEntry isKindOfClass:NSString.class]) {
@@ -59,9 +64,9 @@ NSDictionary<NSNumber *, NSDictionary *> *RYGMCNameMappingCatalogFromData(NSData
         }
 
         NSArray<NSString *> *parts = [(NSString *)rawEntry componentsSeparatedByString:@":"];
-        if (parts.count < 2) {
+        if (parts.count < 2 || ((parts.count - 2) & 1u) != 0) {
             if (error) *error = RYGMCNameMappingError(
-                @"id_name_mapping.json contains an invalid config entry.");
+                @"id_name_mapping.json contains an invalid config/parameter pair sequence.");
             return nil;
         }
 
@@ -71,26 +76,34 @@ NSDictionary<NSNumber *, NSDictionary *> *RYGMCNameMappingCatalogFromData(NSData
                 @"id_name_mapping.json contains an invalid config id.");
             return nil;
         }
-
-        NSMutableDictionary *record = catalog[configNumber];
-        if (!record) {
-            record = [@{
-                @"name": @"",
-                @"params": [NSMutableDictionary dictionary],
-            } mutableCopy];
-            catalog[configNumber] = record;
+        if (catalog[configNumber]) {
+            if (error) *error = RYGMCNameMappingError([NSString stringWithFormat:
+                @"id_name_mapping.json contains duplicate config id %@.", configNumber]);
+            return nil;
         }
 
-        NSString *configName = parts[1];
-        if (configName.length) record[@"name"] = configName;
-
-        NSMutableDictionary<NSNumber *, NSString *> *params = record[@"params"];
-        for (NSUInteger index = 2; index + 1 < parts.count; index += 2) {
+        NSMutableDictionary<NSNumber *, NSString *> *params = [NSMutableDictionary dictionary];
+        for (NSUInteger index = 2; index < parts.count; index += 2) {
             NSNumber *paramIndex = RYGMCStrictUnsigned(parts[index], YES);
             NSString *paramName = parts[index + 1];
-            if (!paramIndex || !paramName.length) continue;
+            if (!paramIndex || !paramName.length) {
+                if (error) *error = RYGMCNameMappingError([NSString stringWithFormat:
+                    @"id_name_mapping.json contains an invalid parameter pair in config %@.", configNumber]);
+                return nil;
+            }
+            if (params[paramIndex]) {
+                if (error) *error = RYGMCNameMappingError([NSString stringWithFormat:
+                    @"id_name_mapping.json contains duplicate parameter index %@ in config %@.",
+                    paramIndex, configNumber]);
+                return nil;
+            }
             params[paramIndex] = paramName;
         }
+
+        catalog[configNumber] = [@{
+            @"name": parts[1] ?: @"",
+            @"params": params,
+        } mutableCopy];
     }
 
     NSMutableDictionary<NSNumber *, NSDictionary *> *immutable =
