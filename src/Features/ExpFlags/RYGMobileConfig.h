@@ -1,12 +1,16 @@
 #import <Foundation/Foundation.h>
 
 typedef NS_ENUM(uint8_t, RYGMCType) {
-    RYGMCTypeUnknown = 0,
     RYGMCTypeBool   = 1,
     RYGMCTypeInt    = 2,
     RYGMCTypeDouble = 3,
     RYGMCTypeString = 4,
 };
+
+// Mapping-only parameters deliberately have no runtime type. Keep this sentinel
+// outside the NS_ENUM members so every switch over the four real MobileConfig
+// runtime types stays exhaustive under -Wswitch/-Werror.
+#define RYGMCTypeUnknown ((RYGMCType)0)
 
 typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
     RYGMCOverrideNone = 0,
