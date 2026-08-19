@@ -11,6 +11,17 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     RYGMCImportOperationOverrides,
 };
 
+static void RYGMCResolvedNameCounts(RYGMobileConfig *mc, NSUInteger *configCount, NSUInteger *paramCount) {
+    NSUInteger configs = 0;
+    NSUInteger params = 0;
+    for (RYGMCConfig *config in mc.allConfigs) {
+        if (config.name.length) configs++;
+        for (RYGMCParam *param in config.params) if (param.name.length) params++;
+    }
+    if (configCount) *configCount = configs;
+    if (paramCount) *paramCount = params;
+}
+
 @interface RYGMobileConfigToolsViewController () <UIDocumentPickerDelegate>
 @property (nonatomic, assign) RYGMCImportOperation pendingImportOperation;
 @end
@@ -118,9 +129,14 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Import failed"];
             return;
         }
+        NSUInteger namedConfigs = 0, namedParams = 0;
+        RYGMCResolvedNameCounts(mc, &namedConfigs, &namedParams);
         NSString *nativePath = [mc ryg_nativeNameMappingPath];
-        [RYGUtils showToastForDuration:1.7 title:@"Mapping imported"
-                             subtitle:nativePath.length ? @"Cached and mirrored to native *.data" : @"Cached; native *.data will be mirrored when available"];
+        NSString *storage = nativePath.length ? @"mirrored to native *.data" : @"cached; native mirror pending";
+        [RYGUtils showToastForDuration:2.0
+                                title:@"Mapping applied"
+                             subtitle:[NSString stringWithFormat:@"%lu config names · %lu param names · %@",
+                                       (unsigned long)namedConfigs, (unsigned long)namedParams, storage]];
     } else if (operation == RYGMCImportOperationOverrides) {
         NSUInteger count = 0;
         if (![mc ryg_importAndApplyOverridesData:data appliedCount:&count error:&error]) {
