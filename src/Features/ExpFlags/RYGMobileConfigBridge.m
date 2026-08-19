@@ -97,24 +97,12 @@ static void RYGBridgeMergeCatalog(NSMutableDictionary *destination, NSDictionary
     }];
 }
 
-static NSUInteger RYGBridgeApplyCatalogToModels(RYGMobileConfig *mobileConfig, NSDictionary<NSNumber *, NSDictionary *> *catalog) {
+static NSUInteger RYGBridgeResolvedNameCount(RYGMobileConfig *mobileConfig) {
     NSUInteger resolved = 0;
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
-        NSDictionary *info = catalog[@(config.number)];
-        if (![info isKindOfClass:NSDictionary.class]) continue;
-        NSString *configName = info[@"name"];
-        if ([configName isKindOfClass:NSString.class] && configName.length) {
-            if (![config.name isEqualToString:configName]) config.name = configName;
-            resolved++;
-        }
-        NSDictionary *params = info[@"params"];
-        if (![params isKindOfClass:NSDictionary.class]) continue;
+        if (config.name.length) resolved++;
         for (RYGMCParam *param in config.params) {
-            NSString *name = params[@(param.paramIndex)];
-            if ([name isKindOfClass:NSString.class] && name.length) {
-                if (![param.name isEqualToString:name]) param.name = name;
-                resolved++;
-            }
+            if (param.name.length) resolved++;
         }
     }
     return resolved;
@@ -214,8 +202,7 @@ static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
 
 - (BOOL)ryg_bridgeImportNameMappingData:(NSData *)data error:(NSError **)error {
     NSError *validationError = nil;
-    NSDictionary *catalog = RYGBridgeCatalogFromData(data, &validationError);
-    if (!catalog) {
+    if (!RYGBridgeCatalogFromData(data, &validationError)) {
         if (error) *error = validationError;
         return NO;
     }
@@ -230,20 +217,19 @@ static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
     NSString *cachePath = RYGBridgeMappingCachePath();
     if (![canonical writeToFile:cachePath options:NSDataWritingAtomic error:error]) return NO;
 
-    // Do not depend on Instagram having exposed getOverridesTablePath yet. The
-    // imported mapping becomes the browser's source of names immediately.
-    [self prepare];
-    NSUInteger resolvedCount = RYGBridgeApplyCatalogToModels(self, catalog);
-
-    // Mirror the exact canonical mapping into the currently resolved native
-    // MobileConfig *.data directory. If the directory appears later,
-    // ryg_bridgeNativeDataDirectory mirrors the persistent cache then.
+    // Resolve and mirror the native directory before rebuilding the model. This
+    // ordering is important for Replace: if the old id_name_mapping.json stayed
+    // on disk during reload, names omitted by the replacement file would survive
+    // in the in-memory model until the next app launch.
     NSString *nativeDirectory = [self ryg_nativeDataDirectory];
     if (nativeDirectory.length) RYGBridgeMirrorCachedMappingIfPossible(nativeDirectory);
 
-    // The replacement/native browser listens to this notification. Without it,
-    // an already-open browser kept the old numeric rows even though the model
-    // objects had just been renamed in place.
+    // Rebuild from the canonical mapping source instead of mutating existing
+    // RYGMCConfig/RYGMCParam names in place. In-place mutation was the root cause
+    // of stale names after Replace and of already-open browsers not reflecting
+    // the same mapping that export/persistence contained.
+    [self reloadFromRuntime];
+    NSUInteger resolvedCount = RYGBridgeResolvedNameCount(self);
     RYGBridgePostNamesDidChange(self, resolvedCount);
     return YES;
 }
@@ -265,10 +251,6 @@ static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
 
 - (void)ryg_bridgeReloadFromRuntime {
     if (gRYGEnteringMobileConfigBrowser) {
-        // The tools page has already prepared a stable snapshot. The former
-        // browser viewDidLoad invalidated it and immediately re-read private C++
-        // globals during a navigation transition, which is unnecessary and was
-        // the remaining entry-crash path.
         [self prepare];
         return;
     }
@@ -304,10 +286,6 @@ static void RYGBridgeSwapInstanceMethod(Class cls, SEL originalSelector, SEL rep
     if (original && replacement) method_exchangeImplementations(original, replacement);
 }
 
-// Must precede the Logos MobileConfig %ctor: the current Developer menu exposes
-// MobileConfig directly, so a clean install needs its context-manager capture
-// hooks without depending on a removed legacy settings switch. An explicit user
-// value is always respected.
 __attribute__((constructor(100))) static void RYGMobileConfigEnableCaptureByDefault(void) {
     @autoreleasepool {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
