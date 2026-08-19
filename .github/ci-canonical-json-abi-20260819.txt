@@ -1,0 +1,1 @@
+Validate current dogfood after canonical mc_overrides round-trip restoration and LIEF/Capstone ABI audit.
