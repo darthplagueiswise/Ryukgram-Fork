@@ -22,7 +22,7 @@ def logos_orig_tail(line: str) -> str | None:
     """Return the invalid tail after %orig, or None when the line is safe.
 
     Logos 777925d consumes the rest of a source line after forwarding the
-    original call.  Keeping the semicolon as the only token after %orig makes
+    original call. Keeping the semicolon as the only token after %orig makes
     the generated Objective-C retain surrounding returns and closing braces.
     """
     for match in re.finditer(r"%orig\b", line):
@@ -66,6 +66,22 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
     if legacy_module.exists() and any(legacy_module.iterdir()):
         fail(f"separate compatibility module still exists: {legacy_module.relative_to(ROOT)}")
 
+# These files previously layered alternate UI dispatchers / swizzles / C hooks
+# over the same Developer and Runtime Browser responsibilities. Their presence
+# makes behavior depend on constructor/link order, so the rebuilt architecture
+# treats reintroduction as a source-validation failure.
+for obsolete in (
+    "src/Debug/RYGDeveloperFeatureViewController.m",
+    "src/Debug/RYGDeveloperGateViewController.m",
+    "src/Debug/RYGDeveloperExactSurfaceViewController.m",
+    "src/Debug/RYGDeveloperRuntimeBrowserViewController.m",
+    "src/Debug/RYGDeveloperEasyGatingControls.m",
+    "src/Debug/RYGCFunctionOverrideEngine.m",
+    "src/UI/RYGSettingsMenuGlassFix.m",
+):
+    if (ROOT / obsolete).exists():
+        fail(f"obsolete competing runtime/UI implementation returned: {obsolete}")
+
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
 for path in build_surfaces:
@@ -84,8 +100,6 @@ for suffix in ("*.m", "*.mm", "*.x", "*.xm", "*.h"):
 legacy_symbol = re.compile(r"\bSCI[A-Z][A-Za-z0-9_]*|\bsci[A-Z][A-Za-z0-9_]*")
 for path in active_sources:
     text = path.read_text(encoding="utf-8", errors="replace")
-    # Legacy product names remain intentionally in migration string values,
-    # comments and attribution URLs. Validate executable identifiers only.
     code = re.sub(
         r"/\*.*?\*/|//[^\n]*",
         lambda match: "\n" * match.group(0).count("\n"),
@@ -127,9 +141,15 @@ required = (
     ROOT / "src/UI/RYGLiquidGlass.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
     ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
+    ROOT / "src/Debug/RYGDeveloperRuntimeScanner.m",
+    ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
+    ROOT / "src/Debug/RYGWordmarkViewController.m",
+    ROOT / "src/Debug/RYGEasyGatingRuntime.m",
+    ROOT / "src/Features/ExpFlags/RYGMobileConfigNameMappingStore.m",
+    ROOT / "src/Features/ExpFlags/RYGMobileConfigNativeBrowser.m",
 )
 for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: SDK 26.5, integrated sideload compatibility, RYG namespace, no preloaded MobileConfig table")
+print("source validation OK: SDK 26.5, live Developer surfaces, direct BOOL Runtime Browser, canonical MobileConfig mapping, integrated sideload compatibility")
