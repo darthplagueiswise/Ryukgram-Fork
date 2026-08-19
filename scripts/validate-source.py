@@ -82,6 +82,60 @@ for obsolete in (
     if (ROOT / obsolete).exists():
         fail(f"obsolete competing runtime/UI implementation returned: {obsolete}")
 
+# Binary-derived ABI invariants. These values are not arbitrary source style:
+# they were revalidated against the supplied current arm64 Instagram / FBShared
+# binaries and canonical MobileConfig files.
+mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
+mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
+mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
+easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
+
+mc_header = mc_header_path.read_text(encoding="utf-8")
+for type_name, discriminator in (
+    ("RYGMCTypeBool", 1),
+    ("RYGMCTypeInt", 2),
+    ("RYGMCTypeString", 3),
+    ("RYGMCTypeDouble", 4),
+):
+    if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
+        fail(f"native MobileConfig discriminator drifted: {type_name} must equal {discriminator}")
+if "RYGMCTypeIsRuntimeValue" not in mc_header:
+    fail("MobileConfig type validation helper is missing")
+
+mc_impl = mc_impl_path.read_text(encoding="utf-8")
+for marker in (
+    "_ZN12mobileconfig17typeFromParameterEy",
+    "_ZN12mobileconfig23kMobileConfigParamsListE",
+    "_ZN12mobileconfig23kMobileConfigParamsSizeE",
+    "_ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb",
+    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb",
+    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb",
+    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb",
+    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb",
+    "_ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb",
+    'class_getInstanceVariable([manager class], "_configManager")',
+):
+    if marker not in mc_impl:
+        fail(f"validated MobileConfig native ABI marker is missing: {marker}")
+if re.search(r"RYGMCTypeBool\s*&&\s*type\s*<=\s*RYGMCTypeString", mc_impl):
+    fail("ordinal MobileConfig type range check returned; string/double are not ordered as the old enum assumed")
+
+mc_json = mc_json_path.read_text(encoding="utf-8")
+for marker in ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"):
+    if marker not in mc_json:
+        fail(f"canonical MobileConfig JSON contract marker is missing: {marker}")
+
+# The public EasyGating wrapper maps its selector/index before branching to the
+# platform function. Hooking the wrapper would persist pre-map IDs and can force
+# an unrelated gate. Only the final platform entry point is allowed here.
+easy = easy_path.read_text(encoding="utf-8")
+if 'dlsym(RTLD_DEFAULT, "EasyGatingPlatformGetBoolean")' not in easy:
+    fail("Easy Gating must hook the validated final platform entry point")
+if re.search(r'dlsym\s*\([^\n]*"EasyGatingGetBoolean_Internal_DoNotUseOrMock"', easy):
+    fail("pre-map Easy Gating public wrapper must not be hooked")
+if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
+    fail("Easy Gating final-ID persistence namespace is missing")
+
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
 for path in build_surfaces:
@@ -152,4 +206,4 @@ for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: SDK 26.5, live Developer surfaces, direct BOOL Runtime Browser, canonical MobileConfig mapping, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, validated Easy Gating platform ABI, native MobileConfig 1/2/3/4 types, canonical JSON, direct BOOL Runtime Browser, integrated sideload compatibility")
