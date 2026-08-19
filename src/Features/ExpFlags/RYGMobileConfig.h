@@ -48,6 +48,9 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 - (NSArray<RYGMCConfig *> *)configsMatching:(NSString *)query onlyOverridden:(BOOL)onlyOverridden;
 - (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)config;
 
+/// Native-disk fallback used only before an explicit imported mapping exists.
+- (void)mergeDiskNamesInto:(NSMutableDictionary *)catalog;
+
 - (id)liveValueFor:(RYGMCParam *)param;
 
 - (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)param;
