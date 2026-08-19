@@ -21,10 +21,9 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # Current Runtime Browser implementation is discovered from live classes,
-    # methods/properties and method type encodings, not a shipped selector list.
-    b"RYGRuntimeClassBrowser",
-    b"RYGRuntimeBrowserEngine",
+    # Runtime Browser implementation is guarded structurally by
+    # validate-source.py. Class names cannot be required in the stripped dylib
+    # because obfuscate-classes intentionally renames them after linking.
     # Binary-validated Easy Gating target. The public wrapper maps its selector
     # before branching here, so overrides are keyed at the platform layer.
     b"EasyGatingPlatformGetBoolean",
@@ -141,7 +140,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, live class/method Runtime Browser, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
+    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
     return 0
 
 
