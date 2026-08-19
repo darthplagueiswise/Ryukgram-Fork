@@ -11,6 +11,7 @@
 @end
 
 static NSString *const kRYGMappingCacheFile = @"id_name_mapping.json";
+static NSString *const kRYGMobileConfigNamesDidChangeNotification = @"RYGMobileConfigNamesDidChange";
 static __thread BOOL gRYGEnteringMobileConfigBrowser;
 
 static NSError *RYGBridgeError(NSString *message) {
@@ -21,7 +22,8 @@ static NSError *RYGBridgeError(NSString *message) {
 
 static NSString *RYGBridgeSupportDirectory(void) {
     NSString *root = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *dir = [root stringByAppendingPathComponent:@"RyukGram"];
+    if (!root.length) root = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support"];
+    NSString *dir = [[root stringByAppendingPathComponent:@"RyukGram"] stringByAppendingPathComponent:@"MobileConfig"];
     [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     return dir;
 }
@@ -52,19 +54,24 @@ static NSDictionary<NSNumber *, NSDictionary *> *RYGBridgeCatalogFromData(NSData
             if (error) *error = RYGBridgeError(@"id_name_mapping.json contains an invalid config entry.");
             return nil;
         }
-        unsigned long long configNumber = strtoull(parts[0].UTF8String, NULL, 10);
-        if (!configNumber) {
+        const char *rawConfig = parts[0].UTF8String;
+        char *configEnd = NULL;
+        unsigned long long configNumber = strtoull(rawConfig, &configEnd, 10);
+        if (!rawConfig || !*rawConfig || configEnd == rawConfig || *configEnd != '\0' || !configNumber || configNumber > UINT32_MAX) {
             if (error) *error = RYGBridgeError(@"id_name_mapping.json contains an invalid config id.");
             return nil;
         }
 
         NSMutableDictionary<NSNumber *, NSString *> *params = [NSMutableDictionary dictionary];
         for (NSUInteger i = 2; i + 1 < parts.count; i += 2) {
-            unsigned long long index = strtoull(parts[i].UTF8String, NULL, 10);
+            const char *rawIndex = parts[i].UTF8String;
+            char *indexEnd = NULL;
+            unsigned long long index = strtoull(rawIndex, &indexEnd, 10);
             NSString *name = parts[i + 1];
-            if (name.length) params[@(index)] = name;
+            if (!rawIndex || !*rawIndex || indexEnd == rawIndex || *indexEnd != '\0' || index > UINT32_MAX) continue;
+            if (name.length) params[@((unsigned int)index)] = name;
         }
-        catalog[@(configNumber)] = @{
+        catalog[@((unsigned int)configNumber)] = @{
             @"name": parts[1] ?: @"",
             @"params": params.copy,
         };
@@ -90,18 +97,49 @@ static void RYGBridgeMergeCatalog(NSMutableDictionary *destination, NSDictionary
     }];
 }
 
-static void RYGBridgeApplyCatalogToModels(RYGMobileConfig *mobileConfig, NSDictionary<NSNumber *, NSDictionary *> *catalog) {
+static NSUInteger RYGBridgeApplyCatalogToModels(RYGMobileConfig *mobileConfig, NSDictionary<NSNumber *, NSDictionary *> *catalog) {
+    NSUInteger resolved = 0;
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
         NSDictionary *info = catalog[@(config.number)];
         if (![info isKindOfClass:NSDictionary.class]) continue;
         NSString *configName = info[@"name"];
-        if ([configName isKindOfClass:NSString.class] && configName.length) config.name = configName;
+        if ([configName isKindOfClass:NSString.class] && configName.length) {
+            if (![config.name isEqualToString:configName]) config.name = configName;
+            resolved++;
+        }
         NSDictionary *params = info[@"params"];
+        if (![params isKindOfClass:NSDictionary.class]) continue;
         for (RYGMCParam *param in config.params) {
             NSString *name = params[@(param.paramIndex)];
-            if ([name isKindOfClass:NSString.class] && name.length) param.name = name;
+            if ([name isKindOfClass:NSString.class] && name.length) {
+                if (![param.name isEqualToString:name]) param.name = name;
+                resolved++;
+            }
         }
     }
+    return resolved;
+}
+
+static void RYGBridgePostNamesDidChange(RYGMobileConfig *mobileConfig, NSUInteger resolvedCount) {
+    NSDictionary *userInfo = @{ @"resolvedCount": @(resolvedCount) };
+    void (^post)(void) = ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:kRYGMobileConfigNamesDidChangeNotification
+                                                          object:mobileConfig
+                                                        userInfo:userInfo];
+    };
+    if (NSThread.isMainThread) post();
+    else dispatch_async(dispatch_get_main_queue(), post);
+}
+
+static void RYGBridgeMirrorCachedMappingIfPossible(NSString *nativeDirectory) {
+    if (!nativeDirectory.length) return;
+    NSString *cachePath = RYGBridgeMappingCachePath();
+    NSData *cached = [NSData dataWithContentsOfFile:cachePath options:0 error:nil];
+    if (!cached.length) return;
+    NSString *nativePath = [nativeDirectory stringByAppendingPathComponent:kRYGMappingCacheFile];
+    NSData *native = [NSData dataWithContentsOfFile:nativePath options:0 error:nil];
+    if ([native isEqualToData:cached]) return;
+    [cached writeToFile:nativePath options:NSDataWritingAtomic error:nil];
 }
 
 #pragma mark - Signed App Group discovery
@@ -169,8 +207,9 @@ static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
 
 - (NSString *)ryg_bridgeNativeDataDirectory {
     NSString *native = [self ryg_bridgeNativeDataDirectory];
-    if (native.length) return native;
-    return RYGFallbackNativeMobileConfigDirectory();
+    if (!native.length) native = RYGFallbackNativeMobileConfigDirectory();
+    if (native.length) RYGBridgeMirrorCachedMappingIfPossible(native);
+    return native;
 }
 
 - (BOOL)ryg_bridgeImportNameMappingData:(NSData *)data error:(NSError **)error {
@@ -191,16 +230,21 @@ static NSString *RYGFallbackNativeMobileConfigDirectory(void) {
     NSString *cachePath = RYGBridgeMappingCachePath();
     if (![canonical writeToFile:cachePath options:NSDataWritingAtomic error:error]) return NO;
 
-    // The imported mapping is useful immediately. Do not invalidate and rescan
-    // the private C++ MobileConfig table simply to rename rows.
+    // Do not depend on Instagram having exposed getOverridesTablePath yet. The
+    // imported mapping becomes the browser's source of names immediately.
     [self prepare];
-    RYGBridgeApplyCatalogToModels(self, catalog);
+    NSUInteger resolvedCount = RYGBridgeApplyCatalogToModels(self, catalog);
 
-    // Mirror into Instagram's current native *.data directory when one is
-    // available. Failure to discover that directory no longer rejects a valid
-    // mapping import; the signed-App-Group fallback above will find it later.
-    NSString *nativePath = [self ryg_nativeNameMappingPath];
-    if (nativePath.length) [canonical writeToFile:nativePath options:NSDataWritingAtomic error:nil];
+    // Mirror the exact canonical mapping into the currently resolved native
+    // MobileConfig *.data directory. If the directory appears later,
+    // ryg_bridgeNativeDataDirectory mirrors the persistent cache then.
+    NSString *nativeDirectory = [self ryg_nativeDataDirectory];
+    if (nativeDirectory.length) RYGBridgeMirrorCachedMappingIfPossible(nativeDirectory);
+
+    // The replacement/native browser listens to this notification. Without it,
+    // an already-open browser kept the old numeric rows even though the model
+    // objects had just been renamed in place.
+    RYGBridgePostNamesDidChange(self, resolvedCount);
     return YES;
 }
 
