@@ -7,9 +7,7 @@
 
 @implementation RYGEasyGatingViewController
 
-- (instancetype)init {
-    return [super initWithTitle:@"Easy Gating Internal"];
-}
+- (instancetype)init { return [super initWithTitle:@"Easy Gating Internal"]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -21,7 +19,7 @@
                                              object:nil];
 
     __weak typeof(self) weakSelf = self;
-    UIAction *clear = [UIAction actionWithTitle:@"Clear live observations"
+    UIAction *clear = [UIAction actionWithTitle:@"Clear observations"
                                          image:[[RYGSymbol symbolWithName:@"history"] image]
                                     identifier:nil
                                        handler:^(__unused UIAction *action) {
@@ -30,94 +28,70 @@
     }];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
         initWithImage:[[RYGSymbol symbolWithName:@"ellipsis_circle"] image]
-                menu:[UIMenu menuWithTitle:@"Easy Gating" children:@[clear]]];
+                menu:[UIMenu menuWithChildren:@[clear]]];
 
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
 
-- (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
-}
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 
 - (void)easyGatingChanged:(NSNotification *)notification {
     (void)notification;
-    if (!NSThread.isMainThread) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [self rebuildSections]; });
-        return;
-    }
-    [self rebuildSections];
+    if (NSThread.isMainThread) [self rebuildSections];
+    else dispatch_async(dispatch_get_main_queue(), ^{ [self rebuildSections]; });
 }
 
-- (RYGSetting *)settingForObservation:(RYGEasyGatingObservation *)row {
-    NSNumber *forced = row.overrideValue;
-    NSString *title = [NSString stringWithFormat:@"Gate %u · 0x%X", row.gateID, row.gateID];
-    NSString *native = row.nativeValue ? @"true" : @"false";
-    NSString *output = forced ? (forced.boolValue ? @"forced true" : @"forced false") : @"native";
-    NSString *subtitle = [NSString stringWithFormat:@"variant %u · original %@ · output %@\n%lu live call%@",
-                          row.variant,
-                          native,
-                          output,
-                          (unsigned long)row.callCount,
-                          row.callCount == 1 ? @"" : @"s"];
-    RYGSymbol *icon = forced
-        ? [RYGSymbol symbolWithName:(forced.boolValue ? @"circle_check_filled" : @"xmark")]
-        : [RYGSymbol symbolWithName:@"function" color:UIColor.secondaryLabelColor];
+- (RYGSetting *)settingForObservation:(RYGEasyGatingObservation *)observation {
+    NSNumber *forced = observation.overrideValue;
+    NSString *title = [NSString stringWithFormat:@"Gate %u", observation.gateID];
+    NSString *subtitle = forced
+        ? [NSString stringWithFormat:@"native %@ · forced %@",
+            observation.nativeValue ? @"true" : @"false",
+            forced.boolValue ? @"true" : @"false"]
+        : [NSString stringWithFormat:@"native %@", observation.nativeValue ? @"true" : @"false"];
     __weak typeof(self) weakSelf = self;
-    return [RYGSetting buttonCellWithTitle:title subtitle:subtitle icon:icon action:^{
-        [weakSelf presentActionsForObservation:row];
-    }];
+    return [RYGSetting buttonCellWithTitle:title
+                                  subtitle:subtitle
+                                      icon:[RYGSymbol symbolWithName:forced ? @"slider_horizontal_3" : @"function"]
+                                    action:^{ [weakSelf presentActionsForObservation:observation]; }];
 }
 
 - (void)rebuildSections {
-    NSArray<RYGEasyGatingObservation *> *observations = [[RYGEasyGatingRuntime shared] observations];
+    NSArray<RYGEasyGatingObservation *> *observations = RYGEasyGatingRuntime.shared.observations;
     NSMutableArray<RYGSetting *> *rows = [NSMutableArray arrayWithCapacity:observations.count];
-    for (RYGEasyGatingObservation *observation in observations) {
-        [rows addObject:[self settingForObservation:observation]];
-    }
+    for (RYGEasyGatingObservation *observation in observations) [rows addObject:[self settingForObservation:observation]];
     if (!rows.count) {
-        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for a live Easy Gating query"
-                                               subtitle:@"The supplied Instagram executable imports EasyGatingGetBoolean_Internal_DoNotUseOrMock. This page lists gate IDs only after that exact API is called; no guessed Objective-C employee getter is substituted."
-                                                   icon:[RYGSymbol symbolWithName:@"info"]]];
+        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live gates" subtitle:nil icon:[RYGSymbol symbolWithName:@"function"]]];
     }
-
-    NSString *footer = [NSString stringWithFormat:@"%lu gate ID%@ observed through the real Easy Gating Boolean C entry point. Context pointers are never persisted. Overrides are per numeric gate ID and native pass-through is the default.",
-                        (unsigned long)observations.count,
-                        observations.count == 1 ? @"" : @"s"];
-    [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:@"Live Boolean gates"
-                                                                           footer:footer
-                                                                             rows:rows]]];
+    [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:nil footer:nil rows:rows]]];
 }
 
-- (void)presentActionsForObservation:(RYGEasyGatingObservation *)row {
-    NSNumber *forced = row.overrideValue;
-    NSString *message = [NSString stringWithFormat:@"Gate ID %u (0x%X)\nVariant %u\nOriginal: %@\nOutput: %@\nCalls: %lu",
-                         row.gateID,
-                         row.gateID,
-                         row.variant,
-                         row.nativeValue ? @"true" : @"false",
-                         forced ? (forced.boolValue ? @"forced true" : @"forced false") : @"native",
-                         (unsigned long)row.callCount];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Easy Gating Boolean"
+- (void)presentActionsForObservation:(RYGEasyGatingObservation *)observation {
+    NSNumber *forced = observation.overrideValue;
+    NSString *message = [NSString stringWithFormat:@"ID %u · variant %u · native %@ · %lu call%@",
+        observation.gateID,
+        observation.variant,
+        observation.nativeValue ? @"true" : @"false",
+        (unsigned long)observation.callCount,
+        observation.callCount == 1 ? @"" : @"s"];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Easy Gating"
                                                                     message:message
                                                              preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [[RYGEasyGatingRuntime shared] setOverride:@YES forGateID:row.gateID];
-        [weakSelf rebuildSections];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force True" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        [RYGEasyGatingRuntime.shared setOverride:@YES forGateID:observation.gateID]; [weakSelf rebuildSections];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force false" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [[RYGEasyGatingRuntime shared] setOverride:@NO forGateID:row.gateID];
-        [weakSelf rebuildSections];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force False" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        [RYGEasyGatingRuntime.shared setOverride:@NO forGateID:observation.gateID]; [weakSelf rebuildSections];
     }]];
     if (forced) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-            [[RYGEasyGatingRuntime shared] setOverride:nil forGateID:row.gateID];
-            [weakSelf rebuildSections];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+            [RYGEasyGatingRuntime.shared setOverride:nil forGateID:observation.gateID]; [weakSelf rebuildSections];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy gate ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%u", row.gateID];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%u", observation.gateID];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
