@@ -9,7 +9,10 @@
 NSString *const RYGEasyGatingDidObserveNotification = @"RYGEasyGatingDidObserveNotification";
 NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
 
-static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_bool_overrides";
+// v2 is intentionally separate. The old storage was keyed by the public
+// wrapper's pre-map selector/index; reusing those numbers as final platform gate
+// IDs could force an unrelated gate after the ABI correction.
+static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_platform_bool_overrides_v2";
 
 // ABI re-validated against FBSharedFramework(20260819-042733):
 //
