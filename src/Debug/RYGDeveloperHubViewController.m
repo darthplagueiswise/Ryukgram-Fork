@@ -1,6 +1,5 @@
 #import "RYGDeveloperHubViewController.h"
-#import "RYGDeveloperGateViewController.h"
-#import "RYGDeveloperExactSurfaceViewController.h"
+#import "RYGDeveloperTopicViewController.h"
 #import "RYGWordmarkViewController.h"
 #import "RYGRuntimeBrowserViewController.h"
 #import "RYGEasyGatingViewController.h"
@@ -24,7 +23,7 @@
     self.title = @"Developer";
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
-    self.tableView.rowHeight = 54.0;
+    self.tableView.rowHeight = 52.0;
 
     self.rows = @[
         @{@"title":@"IGWordMark", @"icon":@"textformat", @"route":@"wordmark"},
@@ -59,7 +58,7 @@
     NSDictionary *entry = self.rows[(NSUInteger)indexPath.row];
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     cell.textLabel.text = entry[@"title"];
-    cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
+    cell.textLabel.font = [UIFont systemFontOfSize:15.5 weight:UIFontWeightRegular];
     cell.imageView.image = [UIImage systemImageNamed:entry[@"icon"]];
     cell.imageView.tintColor = UIColor.secondaryLabelColor;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -78,19 +77,19 @@
     } else if ([route isEqualToString:@"mobileconfig"]) {
         controller = [RYGMobileConfigToolsViewController new];
     } else if ([route isEqualToString:@"prism"]) {
-        controller = [[RYGDeveloperGateViewController alloc] initWithSurface:RYGDeveloperGateSurfacePrism];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism];
     } else if ([route isEqualToString:@"liquidglass"]) {
-        controller = [[RYGDeveloperGateViewController alloc] initWithSurface:RYGDeveloperGateSurfaceLiquidGlass];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass];
     } else if ([route isEqualToString:@"stories"]) {
-        controller = [[RYGDeveloperExactSurfaceViewController alloc] initWithSurface:RYGDeveloperExactSurfaceStories];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories];
     } else if ([route isEqualToString:@"internal"]) {
-        controller = [[RYGDeveloperGateViewController alloc] initWithSurface:RYGDeveloperGateSurfaceInternal];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly];
     } else if ([route isEqualToString:@"bugreport"]) {
-        controller = [[RYGDeveloperExactSurfaceViewController alloc] initWithSurface:RYGDeveloperExactSurfaceBugReport];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceBugReport];
     } else if ([route isEqualToString:@"settings"]) {
-        controller = [[RYGDeveloperExactSurfaceViewController alloc] initWithSurface:RYGDeveloperExactSurfaceSettingsVisibility];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows];
     } else if ([route isEqualToString:@"dogfood"]) {
-        controller = [[RYGDeveloperExactSurfaceViewController alloc] initWithSurface:RYGDeveloperExactSurfaceDirectDogfood];
+        controller = [[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood];
     } else if ([route isEqualToString:@"metalocal"]) {
         [RYGMetaLocalExperimentBrowser presentFromCurrentViewController];
         return;
