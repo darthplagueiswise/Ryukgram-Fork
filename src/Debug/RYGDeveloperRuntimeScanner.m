@@ -1,5 +1,6 @@
 #import "RYGDeveloperRuntimeScanner.h"
 #import "RYGRuntimeBrowserEngine.h"
+#import "RYGRuntimeClassBrowser.h"
 
 static NSString *RYGDevScanNormalize(NSString *value) {
     if (!value.length) return @"";
@@ -7,146 +8,62 @@ static NSString *RYGDevScanNormalize(NSString *value) {
     NSString *lower = value.lowercaseString;
     for (NSUInteger index = 0; index < lower.length; index++) {
         unichar character = [lower characterAtIndex:index];
-        if ((character >= 'a' && character <= 'z') ||
-            (character >= '0' && character <= '9')) {
-            [result appendFormat:@"%C", character];
-        }
+        if ((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')) [result appendFormat:@"%C", character];
     }
     return result;
 }
-
-static NSString *RYGDevRuntimeHaystack(RYGRuntimeBoolMethod *row) {
-    return RYGDevScanNormalize([NSString stringWithFormat:@"%@ %@ %@",
-        row.className ?: @"",
-        row.selectorName ?: @"",
-        row.imagePath.lastPathComponent ?: @""]);
-}
-
-static BOOL RYGDevHaystackContainsAny(NSString *haystack, NSArray<NSString *> *needles) {
-    if (!haystack.length) return NO;
-    for (NSString *needle in needles) {
-        NSString *normalized = RYGDevScanNormalize(needle);
-        if (normalized.length && [haystack containsString:normalized]) return YES;
-    }
+static BOOL RYGDevContainsAny(NSString *haystack, NSArray<NSString *> *needles) {
+    NSString *normalizedHaystack = RYGDevScanNormalize(haystack);
+    if (!normalizedHaystack.length) return NO;
+    for (NSString *needle in needles) { NSString *normalized = RYGDevScanNormalize(needle); if (normalized.length && [normalizedHaystack containsString:normalized]) return YES; }
     return NO;
 }
-
-static BOOL RYGDevMatchesKeywords(RYGRuntimeBoolMethod *row, NSArray<NSString *> *needles) {
-    if (!needles.count) return YES;
-    return RYGDevHaystackContainsAny(RYGDevRuntimeHaystack(row), needles);
-}
-
-static BOOL RYGDevMatchesSurface(RYGRuntimeBoolMethod *row, RYGDeveloperRuntimeSurface surface) {
-    NSString *haystack = RYGDevRuntimeHaystack(row);
-    NSString *selector = RYGDevScanNormalize(row.selectorName);
-    NSString *className = RYGDevScanNormalize(row.className);
-
+static BOOL RYGDevMatchesSurfaceText(NSString *className, NSString *selector, RYGDeveloperRuntimeSurface surface) {
+    NSString *combined = [NSString stringWithFormat:@"%@ %@", className ?: @"", selector ?: @""];
     switch (surface) {
         case RYGDeveloperRuntimeSurfacePrism:
-            // Current supplied Instagram / FBShared binaries expose the Prism
-            // launcher/design BOOL family with "prism" in the selector, and
-            // additionally contain the BDSL/IGDS design-system naming family.
-            return RYGDevHaystackContainsAny(haystack, @[@"prism", @"bdslprism"]);
-
+            return RYGDevContainsAny(combined, @[@"prism", @"igdsprism", @"bdslprism"]);
         case RYGDeveloperRuntimeSurfaceLiquidGlass:
-            // Throwback chrome belongs here intentionally: it is the alternate
-            // blue/header Liquid Glass experiment, not a separate Developer row.
-            return RYGDevHaystackContainsAny(haystack, @[
-                @"liquidglass", @"glassbackground", @"glasseffect",
-                @"glassrendering", @"glassbutton", @"lucent", @"throwback"
-            ]) || [className containsString:@"igliquidglass"]
-               || [className containsString:@"igthrowbackchrome"];
-
+            return RYGDevContainsAny(combined, @[@"liquidglass", @"glasseffect", @"glassrendering", @"glassbutton", @"throwbackchrome"]);
         case RYGDeveloperRuntimeSurfaceStories:
-            return RYGDevHaystackContainsAny(haystack, @[
-                @"storytray", @"storiestray", @"portablestorytray",
-                @"storygrid", @"storiesgrid", @"freshstoriestray"
-            ]);
-
+            return RYGDevContainsAny(combined, @[@"storytray", @"storiestray", @"portablestorytray", @"storygrid", @"storiesgrid"]);
         case RYGDeveloperRuntimeSurfaceInternalOnly:
-            return RYGDevHaystackContainsAny(haystack, @[
-                @"igonly", @"internalonly", @"internalsettings",
-                @"internalmenu", @"iginternalonly"
-            ]);
-
+            return RYGDevContainsAny(combined, @[@"igonly", @"internalonly", @"internalsettings", @"internalmenu"]);
         case RYGDeveloperRuntimeSurfaceBugReport:
-            return RYGDevHaystackContainsAny(haystack, @[
-                @"bugreport", @"rageshake", @"dogfoodingassistant",
-                @"loggedoutinternalsettings", @"shaketoreport", @"sandboxcreatoragent"
-            ]) || ([className containsString:@"bugreport"] &&
-                    RYGDevHaystackContainsAny(selector, @[@"show", @"enable", @"allow", @"internal", @"sandbox"]));
-
-        case RYGDeveloperRuntimeSurfaceSettingsRows: {
-            if ([selector isEqualToString:@"showinsettings"] ||
-                [selector containsString:@"settingsrow"] ||
-                [selector containsString:@"settingrow"]) return YES;
-            BOOL settingsFamily = [haystack containsString:@"settings"] || [haystack containsString:@"setting"];
-            BOOL visibility = RYGDevHaystackContainsAny(selector, @[
-                @"show", @"hide", @"visible", @"eligible", @"available",
-                @"enabled", @"disabled", @"entrypoint", @"navigation", @"cansee"
-            ]);
-            return settingsFamily && visibility;
-        }
-
+            return RYGDevContainsAny(combined, @[@"bugreport", @"rageshake", @"dogfoodingassistant", @"loggedout", @"sandbox"]);
+        case RYGDeveloperRuntimeSurfaceSettingsRows:
+            return RYGDevContainsAny(combined, @[@"settingsrow", @"settingrow", @"showinsettings", @"hiddensettings", @"settingsvisibility"]);
         case RYGDeveloperRuntimeSurfaceDirectDogfood:
-            return RYGDevHaystackContainsAny(haystack, @[
-                @"dogfood", @"dogfooding", @"dogfooder", @"fishfood"
-            ]);
+            return RYGDevContainsAny(combined, @[@"dogfood", @"dogfooding", @"dogfooder", @"fishfood"]);
     }
     return NO;
 }
-
 static NSArray<RYGRuntimeBoolMethod *> *RYGDevSortedDedupedRows(NSArray<RYGRuntimeBoolMethod *> *source) {
-    NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
-    NSMutableSet<NSString *> *seen = [NSMutableSet set];
-    for (RYGRuntimeBoolMethod *row in source) {
-        NSString *key = row.overrideKey;
-        if (!key.length || [seen containsObject:key]) continue;
-        [seen addObject:key];
-        [rows addObject:row];
-    }
-    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
-        NSComparisonResult image = [left.imagePath.lastPathComponent localizedCaseInsensitiveCompare:right.imagePath.lastPathComponent];
-        if (image != NSOrderedSame) return image;
-        NSComparisonResult classOrder = [left.className localizedCaseInsensitiveCompare:right.className];
-        if (classOrder != NSOrderedSame) return classOrder;
-        return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
-    }];
+    NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array]; NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (RYGRuntimeBoolMethod *row in source) { NSString *key = row.overrideKey; if (!key.length || [seen containsObject:key]) continue; [seen addObject:key]; [rows addObject:row]; }
+    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) { NSComparisonResult image = [left.imagePath.lastPathComponent localizedCaseInsensitiveCompare:right.imagePath.lastPathComponent]; if (image != NSOrderedSame) return image; NSComparisonResult classOrder = [left.className localizedCaseInsensitiveCompare:right.className]; return classOrder != NSOrderedSame ? classOrder : [left.selectorName localizedCaseInsensitiveCompare:right.selectorName]; }];
     return rows.copy;
 }
 
 @implementation RYGDeveloperRuntimeScanner
-
 + (NSArray<NSString *> *)primaryDeveloperImagePaths {
-    NSArray<NSString *> *all = [RYGRuntimeBrowserEngine runtimeImagePaths];
-    NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
-    NSMutableOrderedSet<NSString *> *selected = [NSMutableOrderedSet orderedSet];
-
-    for (NSString *path in all) {
-        NSString *standard = path.stringByStandardizingPath;
-        if (main.length && ([standard isEqualToString:main] ||
-            [standard.stringByResolvingSymlinksInPath isEqualToString:main.stringByResolvingSymlinksInPath])) {
-            [selected addObject:path];
-            break;
-        }
-    }
-    for (NSString *path in all) {
-        if ([path.lastPathComponent rangeOfString:@"FBSharedFramework" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            [selected addObject:path];
-            break;
-        }
-    }
+    NSArray<NSString *> *all = [RYGRuntimeBrowserEngine runtimeImagePaths]; NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath; NSMutableOrderedSet<NSString *> *selected = [NSMutableOrderedSet orderedSet];
+    for (NSString *path in all) { NSString *standard = path.stringByStandardizingPath; if (main.length && ([standard isEqualToString:main] || [standard.stringByResolvingSymlinksInPath isEqualToString:main.stringByResolvingSymlinksInPath])) { [selected addObject:path]; break; } }
+    for (NSString *path in all) if ([path.lastPathComponent rangeOfString:@"FBSharedFramework" options:NSCaseInsensitiveSearch].location != NSNotFound) { [selected addObject:path]; break; }
     return selected.array;
 }
 
-+ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePaths:(NSArray<NSString *> *)imagePaths
-                                                    keywords:(NSArray<NSString *> *)keywords {
-    if (!imagePaths.count) return @[];
++ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePaths:(NSArray<NSString *> *)imagePaths keywords:(NSArray<NSString *> *)keywords {
     NSMutableArray<RYGRuntimeBoolMethod *> *matches = [NSMutableArray array];
     for (NSString *imagePath in imagePaths) {
-        for (RYGRuntimeBoolMethod *row in [RYGRuntimeBrowserEngine boolMethodsForImagePath:imagePath
-                                                                                     scope:RYGRuntimeBrowserScopeAll]) {
-            if (RYGDevMatchesKeywords(row, keywords)) [matches addObject:row];
+        for (RYGRuntimeClassRow *classRow in [RYGRuntimeClassBrowser classesForImagePath:imagePath]) {
+            for (NSUInteger pass = 0; pass < 2; pass++) {
+                for (RYGRuntimeMethodRow *method in [RYGRuntimeClassBrowser methodsForClass:classRow classMethods:(pass == 1)]) {
+                    if (!method.hookableBool) continue;
+                    NSString *text = [NSString stringWithFormat:@"%@ %@ %@", classRow.className ?: @"", method.selectorName ?: @"", imagePath.lastPathComponent ?: @""];
+                    if (!keywords.count || RYGDevContainsAny(text, keywords)) { RYGRuntimeBoolMethod *descriptor = [RYGRuntimeClassBrowser boolDescriptorForMethod:method]; if (descriptor) [matches addObject:descriptor]; }
+                }
+            }
         }
     }
     return RYGDevSortedDedupedRows(matches);
@@ -155,10 +72,13 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGDevSortedDedupedRows(NSArray<RYGRunti
 + (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForSurface:(RYGDeveloperRuntimeSurface)surface {
     NSMutableArray<RYGRuntimeBoolMethod *> *matches = [NSMutableArray array];
     for (NSString *imagePath in [self primaryDeveloperImagePaths]) {
-        NSArray<RYGRuntimeBoolMethod *> *imageRows =
-            [RYGRuntimeBrowserEngine boolMethodsForImagePath:imagePath scope:RYGRuntimeBrowserScopeAll];
-        for (RYGRuntimeBoolMethod *row in imageRows) {
-            if (RYGDevMatchesSurface(row, surface)) [matches addObject:row];
+        for (RYGRuntimeClassRow *classRow in [RYGRuntimeClassBrowser classesForImagePath:imagePath]) {
+            for (NSUInteger pass = 0; pass < 2; pass++) {
+                for (RYGRuntimeMethodRow *method in [RYGRuntimeClassBrowser methodsForClass:classRow classMethods:(pass == 1)]) {
+                    if (!method.hookableBool || !RYGDevMatchesSurfaceText(classRow.className, method.selectorName, surface)) continue;
+                    RYGRuntimeBoolMethod *descriptor = [RYGRuntimeClassBrowser boolDescriptorForMethod:method]; if (descriptor) [matches addObject:descriptor];
+                }
+            }
         }
     }
     return RYGDevSortedDedupedRows(matches);
@@ -176,5 +96,4 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGDevSortedDedupedRows(NSArray<RYGRunti
     }
     return @"Developer";
 }
-
 @end
