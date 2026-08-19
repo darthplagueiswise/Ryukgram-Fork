@@ -48,62 +48,89 @@ static BOOL RYGWordmarkBoolMethod(Method method) {
     char encoded[32] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGWordmarkSkipQualifiers(encoded);
-    return type && *type == 'B' && RYGWordmarkArgumentKind(method) >= 0;
+    RYGRuntimeArgumentKind argument = RYGWordmarkArgumentKind(method);
+    return type && *type == 'B'
+        && argument >= RYGRuntimeArgumentNone
+        && argument <= RYGRuntimeArgumentInteger;
+}
+
+static BOOL RYGWordmarkContains(NSString *value, NSString *needle) {
+    return value.length && needle.length &&
+        [value rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+static NSArray<NSString *> *RYGWordmarkPrimaryImages(void) {
+    NSArray<NSString *> *images = RYGRuntimeBrowserEngine.runtimeImagePaths;
+    NSMutableOrderedSet<NSString *> *selected = [NSMutableOrderedSet orderedSet];
+    NSString *main = NSBundle.mainBundle.executablePath;
+    for (NSString *path in images) {
+        if ([path isEqualToString:main] ||
+            [path.stringByResolvingSymlinksInPath isEqualToString:main.stringByResolvingSymlinksInPath]) {
+            [selected addObject:path];
+            break;
+        }
+    }
+    for (NSString *path in images) {
+        if (RYGWordmarkContains(path.lastPathComponent, @"FBShared")) [selected addObject:path];
+    }
+    return selected.array;
+}
+
+static const char **RYGWordmarkCopyClassNames(NSString *imagePath, unsigned int *count) {
+    if (count) *count = 0;
+    const char **names = objc_copyClassNamesForImage(imagePath.fileSystemRepresentation, count);
+    if (names) return names;
+    NSString *resolved = imagePath.stringByResolvingSymlinksInPath;
+    if (![resolved isEqualToString:imagePath])
+        return objc_copyClassNamesForImage(resolved.fileSystemRepresentation, count);
+    return NULL;
 }
 
 static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
-    NSMutableSet<NSString *> *selectors = [NSMutableSet set];
-    for (NSDictionary *variant in RYGWordmarkVariants()) [selectors addObject:variant[@"selector"]];
+    NSMutableSet<NSString *> *wantedSelectors = [NSMutableSet set];
+    for (NSDictionary *variant in RYGWordmarkVariants()) [wantedSelectors addObject:variant[@"selector"]];
 
-    NSArray<NSString *> *images = [RYGRuntimeBrowserEngine runtimeImagePaths];
-    NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
-    NSMutableSet<NSString *> *wantedImages = [NSMutableSet set];
-    if (main.length) [wantedImages addObject:main];
-    for (NSString *path in images) {
-        if ([path.lastPathComponent rangeOfString:@"FBSharedFramework" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-            [wantedImages addObject:path.stringByStandardizingPath];
-        }
-    }
+    NSMutableDictionary<NSString *, RYGRuntimeBoolMethod *> *found = [NSMutableDictionary dictionary];
+    for (NSString *imagePath in RYGWordmarkPrimaryImages()) {
+        unsigned int classCount = 0;
+        const char **classNames = RYGWordmarkCopyClassNames(imagePath, &classCount);
+        if (!classNames) continue;
 
-    unsigned int classCount = 0;
-    Class *classes = objc_copyClassList(&classCount);
-    if (!classes) return @{};
-    NSMutableDictionary *found = [NSMutableDictionary dictionary];
-    for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
-        Class cls = classes[classIndex];
-        const char *rawImage = class_getImageName(cls);
-        if (!rawImage) continue;
-        NSString *imagePath = [[NSString stringWithUTF8String:rawImage] stringByStandardizingPath];
-        if (![wantedImages containsObject:imagePath]) continue;
-        NSString *className = NSStringFromClass(cls);
-        if (!className.length) continue;
+        for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
+            const char *rawClassName = classNames[classIndex];
+            if (!rawClassName || !*rawClassName) continue;
+            Class cls = objc_lookUpClass(rawClassName);
+            if (!cls) continue;
+            NSString *className = [NSString stringWithUTF8String:rawClassName];
 
-        for (NSInteger pass = 0; pass < 2; pass++) {
-            BOOL classMethod = pass == 1;
-            Class owner = classMethod ? object_getClass(cls) : cls;
-            if (!owner) continue;
-            unsigned int methodCount = 0;
-            Method *methods = class_copyMethodList(owner, &methodCount);
-            for (unsigned int methodIndex = 0; methodIndex < methodCount; methodIndex++) {
-                Method method = methods[methodIndex];
-                SEL selector = method_getName(method);
-                if (!selector || !RYGWordmarkBoolMethod(method)) continue;
-                NSString *selectorName = NSStringFromSelector(selector);
-                if (![selectors containsObject:selectorName] || found[selectorName]) continue;
-                RYGRuntimeBoolMethod *row = [RYGRuntimeBoolMethod new];
-                row.imagePath = imagePath;
-                row.className = className;
-                row.selectorName = selectorName;
-                row.classMethod = classMethod;
-                row.argumentKind = RYGWordmarkArgumentKind(method);
-                const char *types = method_getTypeEncoding(method);
-                row.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
-                found[selectorName] = row;
+            for (NSUInteger pass = 0; pass < 2; pass++) {
+                BOOL classMethod = pass == 1;
+                Class owner = classMethod ? object_getClass(cls) : cls;
+                unsigned int methodCount = 0;
+                Method *methods = owner ? class_copyMethodList(owner, &methodCount) : NULL;
+                for (unsigned int methodIndex = 0; methodIndex < methodCount; methodIndex++) {
+                    Method method = methods[methodIndex];
+                    if (!RYGWordmarkBoolMethod(method)) continue;
+                    SEL selector = method_getName(method);
+                    if (!selector) continue;
+                    NSString *selectorName = NSStringFromSelector(selector);
+                    if (![wantedSelectors containsObject:selectorName] || found[selectorName]) continue;
+
+                    RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
+                    runtimeMethod.imagePath = imagePath;
+                    runtimeMethod.className = className ?: @"";
+                    runtimeMethod.selectorName = selectorName;
+                    runtimeMethod.classMethod = classMethod;
+                    runtimeMethod.argumentKind = RYGWordmarkArgumentKind(method);
+                    const char *types = method_getTypeEncoding(method);
+                    runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+                    found[selectorName] = runtimeMethod;
+                }
+                if (methods) free(methods);
             }
-            if (methods) free(methods);
         }
+        free(classNames);
     }
-    free(classes);
     return found.copy;
 }
 
@@ -136,8 +163,7 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     ]];
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithCustomView:self.spinner];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:self.spinner];
 
     [NSNotificationCenter.defaultCenter addObserver:self
                                            selector:@selector(nativeValueChanged:)
@@ -147,18 +173,13 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     [self refreshRuntime];
 }
 
-- (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
-}
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 
 - (void)nativeValueChanged:(NSNotification *)notification {
     NSString *key = notification.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
     if (!key.length) return;
     for (RYGRuntimeBoolMethod *method in self.methodsBySelector.allValues) {
-        if ([method.overrideKey isEqualToString:key]) {
-            [self rebuildGrid];
-            return;
-        }
+        if ([method.overrideKey isEqualToString:key]) { [self rebuildGrid]; return; }
     }
 }
 
@@ -174,6 +195,7 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
             self.methodsBySelector = methods;
             [self.spinner stopAnimating];
             [self rebuildGrid];
+            if (methods.count) RYGRuntimeBeginLiveObservation(methods.allValues);
         });
     });
 }
@@ -209,7 +231,6 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
             content.axis = UILayoutConstraintAxisVertical;
             content.spacing = 8.0;
             content.alignment = UIStackViewAlignmentCenter;
-            content.distribution = UIStackViewDistributionFill;
             [button addSubview:content];
 
             UIImageView *imageView = [[UIImageView alloc] initWithImage:[RYGIcon fbImageNamed:variant[@"asset"]]];
@@ -248,8 +269,7 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
 - (void)wordmarkTapped:(UIButton *)button {
     RYGRuntimeBoolMethod *method = objc_getAssociatedObject(button, kRYGWordmarkMethodKey);
     if (!method) return;
-    NSString *variantTitle = button.accessibilityLabel ?: @"IGWordMark";
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:variantTitle
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:button.accessibilityLabel ?: @"IGWordMark"
                                                                     message:nil
                                                              preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
