@@ -18,13 +18,11 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 @implementation RYGMobileConfigToolsViewController
 
-- (instancetype)init {
-    return [super initWithTitle:@"MobileConfig"];
-}
+- (instancetype)init { return [super initWithTitle:@"MobileConfig"]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [[RYGMobileConfig shared] prepare];
+    [RYGMobileConfig.shared prepare];
     [self rebuildSections];
 }
 
@@ -53,6 +51,13 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
                                                          subtitle:@""
                                                              icon:[RYGSymbol symbolWithName:@"share"]
                                                            action:^{ [weakSelf exportOverrides]; }];
+    RYGSetting *applyOverrides = [RYGSetting buttonCellWithTitle:@"Apply active overrides"
+                                                        subtitle:@""
+                                                            icon:[RYGSymbol symbolWithName:@"arrow.clockwise"]
+                                                          action:^{
+        [RYGMobileConfig.shared reapplyOverridesToNativeTable];
+        [RYGUtils showToastForDuration:1.0 title:@"Overrides applied" subtitle:nil];
+    }];
     RYGSetting *clearOverrides = [RYGSetting buttonCellWithTitle:@"Clear overrides"
                                                         subtitle:@""
                                                             icon:[RYGSymbol symbolWithName:@"trash"]
@@ -62,7 +67,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[browser]],
         [RYGSettingsViewController sectionWithHeader:@"Names" footer:nil rows:@[importNames, exportNames]],
-        [RYGSettingsViewController sectionWithHeader:@"Overrides" footer:nil rows:@[importOverrides, exportOverrides, clearOverrides]],
+        [RYGSettingsViewController sectionWithHeader:@"Overrides" footer:nil rows:@[importOverrides, exportOverrides, applyOverrides, clearOverrides]],
     ]];
 }
 
@@ -71,15 +76,11 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
                                                                     message:nil
                                                              preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Replace"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeReplace;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeMerge;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
@@ -94,8 +95,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 - (void)presentJSONPicker:(RYGMCImportOperation)operation {
     self.pendingImportOperation = operation;
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[UTTypeJSON]
-                            asCopy:YES];
+        initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
@@ -122,7 +122,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
         return;
     }
 
-    RYGMobileConfig *mobileConfig = [RYGMobileConfig shared];
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
     NSError *error = nil;
     if (operation == RYGMCImportOperationNameMapping) {
         if (![mobileConfig ryg_importNameMappingData:data mode:self.pendingNameMappingMode error:&error]) {
@@ -134,7 +134,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
             if (config.name.length) configs++;
             for (RYGMCParam *param in config.params) if (param.name.length) params++;
         }
-        [RYGUtils showToastForDuration:1.8
+        [RYGUtils showToastForDuration:1.5
                                 title:self.pendingNameMappingMode == RYGMCNameMappingImportModeReplace ? @"Mapping replaced" : @"Mapping merged"
                              subtitle:[NSString stringWithFormat:@"%lu configs · %lu params", (unsigned long)configs, (unsigned long)params]];
         return;
@@ -146,7 +146,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Override import failed"];
             return;
         }
-        [RYGUtils showToastForDuration:1.5 title:@"Overrides imported" subtitle:[NSString stringWithFormat:@"%lu applied", (unsigned long)applied]];
+        [RYGUtils showToastForDuration:1.2 title:@"Overrides imported" subtitle:[NSString stringWithFormat:@"%lu applied", (unsigned long)applied]];
     }
 }
 
@@ -168,7 +168,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 - (void)exportNameMapping {
     NSError *error = nil;
-    NSData *data = [[RYGMobileConfig shared] ryg_exportNameMappingData:&error];
+    NSData *data = [RYGMobileConfig.shared ryg_exportNameMappingData:&error];
     if (!data.length) {
         [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"No mapping available"];
         return;
@@ -178,7 +178,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 - (void)exportOverrides {
     NSError *error = nil;
-    NSData *data = [[RYGMobileConfig shared] ryg_exportOverridesData:&error];
+    NSData *data = [RYGMobileConfig.shared ryg_exportOverridesData:&error];
     if (!data.length) {
         [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"No overrides available"];
         return;
@@ -187,13 +187,11 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 }
 
 - (void)confirmClearOverrides {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear overrides?"
-                                                                    message:nil
-                                                             preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear overrides?" message:nil preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-        [[RYGMobileConfig shared] resetAllOverrides];
+        [RYGMobileConfig.shared resetAllOverrides];
         [weakSelf rebuildSections];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
