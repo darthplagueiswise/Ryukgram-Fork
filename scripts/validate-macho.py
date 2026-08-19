@@ -21,13 +21,12 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # Direct image-scoped BOOL Runtime Browser.
-    b"Observe visible original values",
-    b"No supported BOOL method is declared in this loaded image",
+    # Current Runtime Browser implementation is discovered from live classes,
+    # methods/properties and method type encodings, not a shipped selector list.
+    b"RYGRuntimeClassBrowser",
+    b"RYGRuntimeBrowserEngine",
     # Binary-validated Easy Gating target. The public wrapper maps its selector
-    # before branching here, so overrides must be keyed at the platform layer.
-    # Validate implementation/storage symbols, not UI prose that the linker may
-    # coalesce or strip.
+    # before branching here, so overrides are keyed at the platform layer.
     b"EasyGatingPlatformGetBoolean",
     b"ryg_easy_gating_platform_bool_overrides_v2",
     # Canonical MobileConfig file formats.
@@ -72,10 +71,7 @@ def choose_binary(parsed: object):
 
 
 def library_names(binary) -> list[str]:
-    names: list[str] = []
-    for library in getattr(binary, "libraries", []):
-        names.append(str(getattr(library, "name", library)))
-    return names
+    return [str(getattr(library, "name", library)) for library in getattr(binary, "libraries", [])]
 
 
 def disassemble_text(binary) -> tuple[int, list[str]]:
@@ -113,7 +109,7 @@ def main() -> int:
 
     try:
         parsed = lief.MachO.parse(str(path))
-    except Exception as exc:  # pragma: no cover - diagnostic path on CI
+    except Exception as exc:
         die(f"LIEF could not parse {path.name}: {exc}")
     binary = choose_binary(parsed)
     if binary is None:
@@ -145,7 +141,7 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, direct live BOOL Runtime Browser, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
+    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, live class/method Runtime Browser, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
     return 0
 
 
