@@ -46,10 +46,15 @@
     NSNumber *forced = observation.overrideValue;
     NSString *title = [NSString stringWithFormat:@"Gate %u", observation.gateID];
     NSString *subtitle = forced
-        ? [NSString stringWithFormat:@"native %@ · forced %@",
+        ? [NSString stringWithFormat:@"original %@ · forced %@ · default %@ · exposure %@",
             observation.nativeValue ? @"true" : @"false",
-            forced.boolValue ? @"true" : @"false"]
-        : [NSString stringWithFormat:@"native %@", observation.nativeValue ? @"true" : @"false"];
+            forced.boolValue ? @"true" : @"false",
+            observation.defaultValue ? @"true" : @"false",
+            observation.exposureEnabled ? @"on" : @"off"]
+        : [NSString stringWithFormat:@"original %@ · default %@ · exposure %@",
+            observation.nativeValue ? @"true" : @"false",
+            observation.defaultValue ? @"true" : @"false",
+            observation.exposureEnabled ? @"on" : @"off"];
     __weak typeof(self) weakSelf = self;
     return [RYGSetting buttonCellWithTitle:title
                                   subtitle:subtitle
@@ -62,16 +67,19 @@
     NSMutableArray<RYGSetting *> *rows = [NSMutableArray arrayWithCapacity:observations.count];
     for (RYGEasyGatingObservation *observation in observations) [rows addObject:[self settingForObservation:observation]];
     if (!rows.count) {
-        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live gates" subtitle:nil icon:[RYGSymbol symbolWithName:@"function"]]];
+        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live mapped gates" subtitle:nil icon:[RYGSymbol symbolWithName:@"function"]]];
     }
-    [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:nil footer:nil rows:rows]]];
+    [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:nil
+                                                                       footer:@"IDs shown here are the final mapped IDs received by EasyGatingPlatformGetBoolean, not the pre-map selector/index passed to the public wrapper."
+                                                                         rows:rows]]];
 }
 
 - (void)presentActionsForObservation:(RYGEasyGatingObservation *)observation {
     NSNumber *forced = observation.overrideValue;
-    NSString *message = [NSString stringWithFormat:@"ID %u · variant %u · native %@ · %lu call%@",
+    NSString *message = [NSString stringWithFormat:@"Mapped ID %u · default %@ · exposure %@ · original %@ · %lu call%@",
         observation.gateID,
-        observation.variant,
+        observation.defaultValue ? @"true" : @"false",
+        observation.exposureEnabled ? @"on" : @"off",
         observation.nativeValue ? @"true" : @"false",
         (unsigned long)observation.callCount,
         observation.callCount == 1 ? @"" : @"s"];
@@ -90,7 +98,7 @@
             [RYGEasyGatingRuntime.shared setOverride:nil forGateID:observation.gateID]; [weakSelf rebuildSections];
         }]];
     }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy mapped ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%u", observation.gateID];
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
