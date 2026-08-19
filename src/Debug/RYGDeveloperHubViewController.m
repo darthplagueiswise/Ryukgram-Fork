@@ -1,6 +1,7 @@
 #import "RYGDeveloperHubViewController.h"
 #import "RYGDeveloperGateViewController.h"
 #import "RYGDeveloperExactSurfaceViewController.h"
+#import "RYGWordmarkViewController.h"
 #import "RYGRuntimeBrowserViewController.h"
 #import "RYGEasyGatingViewController.h"
 #import "RYGMetaLocalExperimentBrowser.h"
@@ -71,7 +72,7 @@
     UIViewController *controller = nil;
 
     if ([route isEqualToString:@"wordmark"]) {
-        controller = [[RYGDeveloperGateViewController alloc] initWithSurface:RYGDeveloperGateSurfaceWordMark];
+        controller = [RYGWordmarkViewController new];
     } else if ([route isEqualToString:@"easygating"]) {
         controller = [RYGEasyGatingViewController new];
     } else if ([route isEqualToString:@"mobileconfig"]) {
