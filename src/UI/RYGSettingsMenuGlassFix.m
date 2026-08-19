@@ -10,47 +10,6 @@
                                         indexPath:(NSIndexPath *)indexPath;
 @end
 
-static UIMenuElement *RYGCompactCloneMenuElement(UIMenuElement *element) {
-    if ([element isKindOfClass:UICommand.class]) {
-        UICommand *source = (UICommand *)element;
-        NSString *title = source.title ?: @"";
-        // UIKit reserves a complete leading state column when any command uses
-        // UIMenuElementStateOn. In a narrow value picker that becomes the large,
-        // fixed-looking left margin seen on iOS 26/27. Keep the selected mark in
-        // the title instead so the expanded menu sizes from its actual content.
-        if (source.state == UIMenuElementStateOn) {
-            title = [NSString stringWithFormat:@"✓  %@", title];
-        }
-        UICommand *copy = [UICommand commandWithTitle:title
-                                                image:source.image
-                                               action:source.action
-                                         propertyList:source.propertyList];
-        copy.attributes = source.attributes;
-        copy.state = UIMenuElementStateOff;
-        return copy;
-    }
-    if ([element isKindOfClass:UIMenu.class]) {
-        UIMenu *source = (UIMenu *)element;
-        NSMutableArray<UIMenuElement *> *children = [NSMutableArray arrayWithCapacity:source.children.count];
-        for (UIMenuElement *child in source.children) {
-            UIMenuElement *copy = RYGCompactCloneMenuElement(child);
-            if (copy) [children addObject:copy];
-        }
-        UIMenu *copy = [UIMenu menuWithTitle:source.title ?: @""
-                                       image:source.image
-                                  identifier:source.identifier
-                                     options:source.options
-                                    children:children];
-        if (@available(iOS 16.0, *)) {
-            // Large preserves the vertical picker semantics. Width is now driven
-            // by content because the artificial state column above is gone.
-            copy.preferredElementSize = UIMenuElementSizeLarge;
-        }
-        return copy;
-    }
-    return element;
-}
-
 @implementation RYGSettingsViewController (RYGSettingsMenuGlassFix)
 
 - (UIListContentConfiguration *)ryg_menuFixedConfiguredContent:(UIListContentConfiguration *)config
@@ -64,35 +23,23 @@ static UIMenuElement *RYGCompactCloneMenuElement(UIMenuElement *element) {
     if (row.type != RYGTableCellMenu) return result;
 
     UIButton *button = [cell.accessoryView isKindOfClass:UIButton.class] ? (UIButton *)cell.accessoryView : nil;
-    if (!button) return result;
+    if (!button || !button.showsMenuAsPrimaryAction) return result;
 
-    NSString *visibleTitle = [button titleForState:UIControlStateNormal] ?: button.configuration.title ?: @"•••";
-    UIMenu *menu = button.menu;
-    if (menu) button.menu = (UIMenu *)RYGCompactCloneMenuElement(menu);
-
-    // Configure Glass *before* the final sizeToFit. The previous order measured
-    // the plain 8pt button and later replaced its configuration with Glass while
-    // it was already installed as accessoryView, leaving a stale narrow frame
-    // ("Off" became "O\nff").
+    // RYGSetting already turns the source button into an iOS 26 Glass button.
+    // Keep UIKit's own intrinsic menu-source geometry: do not clone the UIMenu,
+    // clear selection state, force a frame, add a corner radius, or copy closed
+    // control margins into the expanded morph.
     RYGLiquidGlassConfigureButton(button, NO);
-    UIButtonConfiguration *configuration = button.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-    configuration.title = visibleTitle;
-    configuration.contentInsets = NSDirectionalEdgeInsetsMake(7.0, 12.0, 7.0, 12.0);
-    configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
-    configuration.buttonSize = UIButtonConfigurationSizeSmall;
-    button.configuration = configuration;
-
+    if (@available(iOS 26.0, *)) {
+        UIButtonConfiguration *configuration = button.configuration;
+        if (configuration) {
+            [configuration setDefaultContentInsets];
+            button.configuration = configuration;
+        }
+    }
     button.titleLabel.numberOfLines = 1;
     button.titleLabel.lineBreakMode = NSLineBreakByClipping;
-    button.titleLabel.adjustsFontSizeToFitWidth = NO;
     [button invalidateIntrinsicContentSize];
-    [button sizeToFit];
-
-    CGRect frame = button.frame;
-    frame.size.width = MAX(frame.size.width, 58.0);
-    frame.size.height = MAX(frame.size.height, 34.0);
-    button.frame = frame;
-    cell.accessoryView = button;
     return result;
 }
 
