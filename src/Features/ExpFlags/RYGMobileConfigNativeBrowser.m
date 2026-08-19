@@ -258,13 +258,14 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
 }
 
 - (NSString *)detailTextForParam:(RYGMCParam *)param {
-    if (!param.isRuntimeBacked) return [NSString stringWithFormat:@"%u · mapping only", param.paramIndex];
+    if (!param.isRuntimeBacked) return [NSString stringWithFormat:@"#%u · imported name", param.paramIndex];
     id live = [RYGMobileConfig.shared liveValueFor:param];
     id forced = [RYGMobileConfig.shared overrideValueFor:param];
-    NSString *state = forced
-        ? [NSString stringWithFormat:@"%@ → %@", [live description] ?: @"native", [forced description]]
-        : ([live description] ?: @"native");
-    return [NSString stringWithFormat:@"%u · %@ · %@", param.paramIndex, param.typeName ?: @"", state];
+    if (forced) {
+        return [NSString stringWithFormat:@"#%u · %@ → %@", param.paramIndex,
+                [live description] ?: @"native", [forced description]];
+    }
+    return [NSString stringWithFormat:@"#%u · %@", param.paramIndex, [live description] ?: @"native"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -274,21 +275,20 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
     cell.accessoryView = nil;
     cell.accessoryType = UITableViewCellAccessoryNone;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.imageView.image = nil;
 
     NSArray<RYGMCParam *> *params = [self paramsForSection:indexPath.section];
     RYGMCParam *param = params[(NSUInteger)indexPath.row];
     cell.textLabel.text = param.name.length ? param.name : [NSString stringWithFormat:@"Parameter %u", param.paramIndex];
-    cell.textLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightRegular];
+    cell.textLabel.font = [UIFont systemFontOfSize:14.5 weight:UIFontWeightRegular];
     cell.textLabel.numberOfLines = 1;
     cell.detailTextLabel.text = [self detailTextForParam:param];
-    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.0 weight:UIFontWeightRegular];
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.detailTextLabel.numberOfLines = 1;
 
     if (!param.isRuntimeBacked) {
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.imageView.image = [UIImage systemImageNamed:@"tag"];
-        cell.imageView.tintColor = UIColor.tertiaryLabelColor;
         return cell;
     }
 
@@ -301,12 +301,8 @@ static NSString *RYGMCParamSearchText(RYGMCParam *param) {
         objc_setAssociatedObject(toggle, kRYGMCParamSwitchKey, param, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [toggle addTarget:self action:@selector(boolSwitchChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;
-        cell.imageView.image = [UIImage systemImageNamed:@"switch.2"];
-        cell.imageView.tintColor = [RYGUtils RYGColor_Primary];
     } else {
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        cell.imageView.image = [UIImage systemImageNamed:@"slider.horizontal.3"];
-        cell.imageView.tintColor = UIColor.secondaryLabelColor;
     }
     return cell;
 }
