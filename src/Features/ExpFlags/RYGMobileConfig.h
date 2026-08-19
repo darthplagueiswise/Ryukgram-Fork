@@ -5,9 +5,16 @@ enum {
     RYGMCTypeUnknown = 0,
     RYGMCTypeBool    = 1,
     RYGMCTypeInt     = 2,
-    RYGMCTypeDouble  = 3,
-    RYGMCTypeString  = 4,
+    // Revalidated against the current FBSharedFramework parameter table and
+    // native mc_overrides.json: discriminator 3 is string and 4 is double.
+    RYGMCTypeString  = 3,
+    RYGMCTypeDouble  = 4,
 };
+
+static inline BOOL RYGMCTypeIsRuntimeValue(RYGMCType type) {
+    return type == RYGMCTypeBool || type == RYGMCTypeInt ||
+           type == RYGMCTypeString || type == RYGMCTypeDouble;
+}
 
 typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
     RYGMCOverrideNone = 0,
