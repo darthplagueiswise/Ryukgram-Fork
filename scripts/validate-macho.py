@@ -26,8 +26,9 @@ REQUIRED = (
     b"No supported BOOL method is declared in this loaded image",
     # Binary-validated Easy Gating target. The public wrapper maps its selector
     # before branching here, so overrides must be keyed at the platform layer.
+    # Validate implementation/storage symbols, not UI prose that the linker may
+    # coalesce or strip.
     b"EasyGatingPlatformGetBoolean",
-    b"Mapped ID",
     b"ryg_easy_gating_platform_bool_overrides_v2",
     # Canonical MobileConfig file formats.
     b"id_name_mapping.json",
