@@ -25,9 +25,6 @@
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.rowHeight = 54.0;
 
-    // Keep this list intentionally small. Every row routes to a controller with
-    // a concrete runtime/file contract; there is no keyword-generated feature
-    // page and no synthetic "recommended apply" action.
     self.rows = @[
         @{@"title":@"IGWordMark", @"icon":@"textformat", @"route":@"wordmark"},
         @{@"title":@"Easy Gating Internal", @"icon":@"person.badge.key", @"route":@"easygating"},
@@ -94,7 +91,8 @@
     } else if ([route isEqualToString:@"dogfood"]) {
         controller = [[RYGDeveloperExactSurfaceViewController alloc] initWithSurface:RYGDeveloperExactSurfaceDirectDogfood];
     } else if ([route isEqualToString:@"metalocal"]) {
-        controller = [RYGMetaLocalExperimentBrowser new];
+        [RYGMetaLocalExperimentBrowser presentFromCurrentViewController];
+        return;
     } else if ([route isEqualToString:@"runtime"]) {
         controller = [RYGRuntimeBrowserViewController new];
     }
