@@ -96,8 +96,6 @@ static NSArray<RYGRuntimeClassRow *> *RYGRuntimeClassesForImagePath(NSString *im
         NSString *className = NSStringFromClass(cls);
         if (!className.length) continue;
 
-        // Never retain a runtime Class object in a Foundation collection. The
-        // model stores it as an assign pointer; the array retains only the model.
         RYGRuntimeClassRow *row = [RYGRuntimeClassRow new];
         row.className = className;
         row.runtimeClass = cls;
@@ -136,9 +134,6 @@ static RYGRuntimeArgumentKind RYGRuntimeSafeArgumentKind(Method method) {
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@' || *type == '#' || *type == ':') return RYGRuntimeArgumentObject;
 
-    // Only actual integer/scalar register arguments use the generic integer
-    // adapter. Pointers and C strings are deliberately excluded even though
-    // they also occupy a general-purpose register on arm64.
     if (strchr("BcCsSiIlLqQ", *type)) return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
@@ -311,18 +306,26 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
         self.visibleClassMethods = self.classMethods;
         self.visibleProperties = self.properties;
     } else {
-        self.visibleInstanceMethods = [self.instanceMethods filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeMethodRow *row, NSDictionary *bindings) {
+        NSMutableArray<RYGRuntimeMethodRow *> *instanceMatches = [NSMutableArray array];
+        for (RYGRuntimeMethodRow *row in self.instanceMethods) {
             NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.selectorName ?: @"", row.typeEncoding ?: @""];
-            return RYGRuntimeSearchMatches(haystack, query);
-        }]];
-        self.visibleClassMethods = [self.classMethods filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeMethodRow *row, NSDictionary *bindings) {
+            if (RYGRuntimeSearchMatches(haystack, query)) [instanceMatches addObject:row];
+        }
+        self.visibleInstanceMethods = instanceMatches.copy;
+
+        NSMutableArray<RYGRuntimeMethodRow *> *classMatches = [NSMutableArray array];
+        for (RYGRuntimeMethodRow *row in self.classMethods) {
             NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.selectorName ?: @"", row.typeEncoding ?: @""];
-            return RYGRuntimeSearchMatches(haystack, query);
-        }]];
-        self.visibleProperties = [self.properties filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimePropertyRow *row, NSDictionary *bindings) {
+            if (RYGRuntimeSearchMatches(haystack, query)) [classMatches addObject:row];
+        }
+        self.visibleClassMethods = classMatches.copy;
+
+        NSMutableArray<RYGRuntimePropertyRow *> *propertyMatches = [NSMutableArray array];
+        for (RYGRuntimePropertyRow *row in self.properties) {
             NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.name ?: @"", row.attributes ?: @""];
-            return RYGRuntimeSearchMatches(haystack, query);
-        }]];
+            if (RYGRuntimeSearchMatches(haystack, query)) [propertyMatches addObject:row];
+        }
+        self.visibleProperties = propertyMatches.copy;
     }
     [self.tableView reloadData];
 }
@@ -461,7 +464,8 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
 @property (nonatomic, copy) NSString *selectedImagePath;
 @property (nonatomic, copy) NSArray<RYGRuntimeClassRow *> *classRows;
 @property (nonatomic, copy) NSArray<RYGMachOSymbol *> *symbolRows;
-@property (nonatomic, copy) NSArray *visibleRows;
+@property (nonatomic, copy) NSArray<RYGRuntimeClassRow *> *visibleClassRows;
+@property (nonatomic, copy) NSArray<RYGMachOSymbol *> *visibleSymbolRows;
 @property (nonatomic, assign) NSUInteger scanGeneration;
 @property (nonatomic, assign, getter=isScanning) BOOL scanning;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
@@ -476,7 +480,8 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.classRows = @[];
     self.symbolRows = @[];
-    self.visibleRows = @[];
+    self.visibleClassRows = @[];
+    self.visibleSymbolRows = @[];
 
     NSInteger storedMode = [NSUserDefaults.standardUserDefaults integerForKey:kRYGRuntimeModeKey];
 
@@ -552,8 +557,20 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
     RYGLiquidGlassApplyToViewController(self);
 }
 
+- (RYGRuntimeBrowserMode)currentMode {
+    return self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeMachOSymbols
+        ? RYGRuntimeBrowserModeMachOSymbols
+        : RYGRuntimeBrowserModeObjectiveC;
+}
+
+- (NSUInteger)visibleRowCount {
+    return [self currentMode] == RYGRuntimeBrowserModeObjectiveC
+        ? self.visibleClassRows.count
+        : self.visibleSymbolRows.count;
+}
+
 - (void)updateSearchPlaceholder {
-    self.searchController.searchBar.placeholder = self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC
+    self.searchController.searchBar.placeholder = [self currentMode] == RYGRuntimeBrowserModeObjectiveC
         ? RYGLocalized(@"Class name")
         : RYGLocalized(@"Symbol name or section");
 }
@@ -628,7 +645,7 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
         self.tableView.backgroundView = self.spinner;
     } else {
         [self.spinner stopAnimating];
-        self.tableView.backgroundView = self.visibleRows.count ? nil : self.emptyLabel;
+        self.tableView.backgroundView = [self visibleRowCount] ? nil : self.emptyLabel;
     }
 }
 
@@ -638,21 +655,34 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
     if (!path.length) {
         self.classRows = @[];
         self.symbolRows = @[];
+        self.visibleClassRows = @[];
+        self.visibleSymbolRows = @[];
         [self applySearchFilter];
         return;
     }
 
-    RYGRuntimeBrowserMode mode = (RYGRuntimeBrowserMode)self.modeControl.selectedSegmentIndex;
+    RYGRuntimeBrowserMode mode = [self currentMode];
     NSUInteger generation = ++self.scanGeneration;
     self.scanning = YES;
+
+    if (mode == RYGRuntimeBrowserModeObjectiveC) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSArray<RYGRuntimeClassRow *> *rows = RYGRuntimeClassesForImagePath(path);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (generation != self.scanGeneration || [self currentMode] != RYGRuntimeBrowserModeObjectiveC) return;
+                self.classRows = rows;
+                self.scanning = NO;
+                [self applySearchFilter];
+            });
+        });
+        return;
+    }
+
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray *rows = mode == RYGRuntimeBrowserModeObjectiveC
-            ? RYGRuntimeClassesForImagePath(path)
-            : [RYGRuntimeBrowserEngine machOSymbolsForImagePath:path];
+        NSArray<RYGMachOSymbol *> *rows = [RYGRuntimeBrowserEngine machOSymbolsForImagePath:path];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation != self.scanGeneration) return;
-            if (mode == RYGRuntimeBrowserModeObjectiveC) self.classRows = rows;
-            else self.symbolRows = rows;
+            if (generation != self.scanGeneration || [self currentMode] != RYGRuntimeBrowserModeMachOSymbols) return;
+            self.symbolRows = rows;
             self.scanning = NO;
             [self applySearchFilter];
         });
@@ -661,24 +691,39 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
 
 - (void)applySearchFilter {
     NSString *query = [self.searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    BOOL objectiveC = self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC;
-    NSArray *source = objectiveC ? self.classRows : self.symbolRows;
-    if (!query.length) {
-        self.visibleRows = source;
-    } else if (objectiveC) {
-        self.visibleRows = [source filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeClassRow *row, NSDictionary *bindings) {
-            return RYGRuntimeSearchMatches(row.className, query);
-        }]];
+    RYGRuntimeBrowserMode mode = [self currentMode];
+
+    if (mode == RYGRuntimeBrowserModeObjectiveC) {
+        NSArray<RYGRuntimeClassRow *> *source = self.classRows ?: @[];
+        if (!query.length) {
+            self.visibleClassRows = source;
+        } else {
+            NSMutableArray<RYGRuntimeClassRow *> *matches = [NSMutableArray array];
+            for (RYGRuntimeClassRow *row in source) {
+                if (RYGRuntimeSearchMatches(row.className, query)) [matches addObject:row];
+            }
+            self.visibleClassRows = matches.copy;
+        }
+        self.visibleSymbolRows = @[];
+        self.emptyLabel.text = RYGLocalized(@"No Objective-C class matched this loaded image. Classes are shown as the runtime owns them; methods are inspected only after opening a class.");
     } else {
-        self.visibleRows = [source filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGMachOSymbol *row, NSDictionary *bindings) {
-            return RYGRuntimeSearchMatches([NSString stringWithFormat:@"%@ %@", row.name ?: @"", row.kind ?: @""], query);
-        }]];
+        NSArray<RYGMachOSymbol *> *source = self.symbolRows ?: @[];
+        if (!query.length) {
+            self.visibleSymbolRows = source;
+        } else {
+            NSMutableArray<RYGMachOSymbol *> *matches = [NSMutableArray array];
+            for (RYGMachOSymbol *row in source) {
+                NSString *haystack = [NSString stringWithFormat:@"%@ %@", row.name ?: @"", row.kind ?: @""];
+                if (RYGRuntimeSearchMatches(haystack, query)) [matches addObject:row];
+            }
+            self.visibleSymbolRows = matches.copy;
+        }
+        self.visibleClassRows = @[];
+        self.emptyLabel.text = RYGLocalized(@"No Mach-O symbol matched this loaded image.");
     }
 
-    self.emptyLabel.text = objectiveC
-        ? RYGLocalized(@"No Objective-C class matched this loaded image. Classes are shown as the runtime owns them; methods are inspected only after opening a class.")
-        : RYGLocalized(@"No Mach-O symbol matched this loaded image.");
-    self.tableView.backgroundView = self.visibleRows.count || self.isScanning ? (self.isScanning ? self.spinner : nil) : self.emptyLabel;
+    NSUInteger count = [self visibleRowCount];
+    self.tableView.backgroundView = count || self.isScanning ? (self.isScanning ? self.spinner : nil) : self.emptyLabel;
     [self.tableView reloadData];
 }
 
@@ -687,7 +732,7 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return self.visibleRows.count;
+    return (NSInteger)[self visibleRowCount];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -698,15 +743,15 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.detailTextLabel.numberOfLines = 2;
 
-    if (self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC) {
-        RYGRuntimeClassRow *row = self.visibleRows[indexPath.row];
+    if ([self currentMode] == RYGRuntimeBrowserModeObjectiveC) {
+        RYGRuntimeClassRow *row = self.visibleClassRows[indexPath.row];
         cell.textLabel.text = row.className;
         cell.detailTextLabel.text = RYGLocalized(@"Open declared instance methods, class methods and properties");
         cell.imageView.image = [UIImage systemImageNamed:@"cube.transparent"];
         cell.imageView.tintColor = UIColor.secondaryLabelColor;
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     } else {
-        RYGMachOSymbol *row = self.visibleRows[indexPath.row];
+        RYGMachOSymbol *row = self.visibleSymbolRows[indexPath.row];
         cell.textLabel.text = row.name;
         cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · 0x%llx%@", row.kind ?: @"Symbol", row.address,
                                      row.external ? @" · external" : @""];
@@ -718,17 +763,18 @@ static NSString *RYGRuntimeArgumentDescription(RYGRuntimeArgumentKind kind) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.row < 0 || indexPath.row >= (NSInteger)self.visibleRows.count) return;
 
-    if (self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC) {
-        RYGRuntimeClassRow *row = self.visibleRows[indexPath.row];
+    if ([self currentMode] == RYGRuntimeBrowserModeObjectiveC) {
+        if ((NSUInteger)indexPath.row >= self.visibleClassRows.count) return;
+        RYGRuntimeClassRow *row = self.visibleClassRows[indexPath.row];
         RYGRuntimeClassDetailViewController *detail = [[RYGRuntimeClassDetailViewController alloc] initWithClassRow:row
                                                                                                          imagePath:self.selectedImagePath];
         [self.navigationController pushViewController:detail animated:YES];
         return;
     }
 
-    RYGMachOSymbol *symbol = self.visibleRows[indexPath.row];
+    if ((NSUInteger)indexPath.row >= self.visibleSymbolRows.count) return;
+    RYGMachOSymbol *symbol = self.visibleSymbolRows[indexPath.row];
     UIPasteboard.generalPasteboard.string = symbol.name;
     [RYGUtils showToastForDuration:1.2 title:@"Copied" subtitle:symbol.name];
 }
