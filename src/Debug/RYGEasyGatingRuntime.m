@@ -1,29 +1,32 @@
 #import "RYGEasyGatingRuntime.h"
-#include "../../modules/fishhook/fishhook.h"
+#import <substrate.h>
 #import <os/lock.h>
 #import <stdatomic.h>
 #import <stdint.h>
+#import <dlfcn.h>
+#import <mach-o/dyld.h>
 
 NSString *const RYGEasyGatingDidObserveNotification = @"RYGEasyGatingDidObserveNotification";
 NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
 
 static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_bool_overrides";
 
-// The supplied Instagram arm64 executable has repeated call sites to
-// _EasyGatingGetBoolean_Internal_DoNotUseOrMock with the observable register
-// shape x0, w1, w2, x3 and a return consumed from w0. Keep the unknown context
-// arguments opaque and forward them bit-for-bit; only w1 is treated as the gate
-// identifier because call sites explicitly materialize IDs there (for example
-// 0x139 and 0x0f0 in the supplied executable).
+// Re-validated against the current supplied Instagram executable. Calls to the
+// FBSharedFramework export materialize the gate id in w1, the variant in w2,
+// preserve opaque contexts in x0/x3 and consume the Boolean result from w0.
+// The opaque arguments are forwarded bit-for-bit; only the proven integer
+// fields and Boolean return are interpreted.
 typedef uint32_t (*RYGEasyGatingGetBooleanFn)(uintptr_t context0,
                                               uint32_t gateID,
                                               uint32_t variant,
                                               uintptr_t context3);
+
 static RYGEasyGatingGetBooleanFn gRYGOriginalEasyGatingGetBoolean;
 static os_unfair_lock gRYGEasyGatingLock = OS_UNFAIR_LOCK_INIT;
 static NSMutableDictionary<NSNumber *, RYGEasyGatingObservation *> *gRYGEasyGatingObservations;
 static NSDictionary<NSString *, NSNumber *> *gRYGEasyGatingOverrideCache;
 static atomic_bool gRYGEasyGatingInstalled = false;
+static atomic_bool gRYGEasyGatingRetryScheduled = false;
 
 @implementation RYGEasyGatingObservation
 - (NSNumber *)overrideValue {
@@ -37,8 +40,11 @@ static NSDictionary<NSString *, NSNumber *> *RYGEasyGatingReadOverrides(void) {
     NSMutableDictionary<NSString *, NSNumber *> *clean = [NSMutableDictionary dictionary];
     [(NSDictionary *)raw enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
         if (![key isKindOfClass:NSString.class] || ![value isKindOfClass:NSNumber.class]) return;
-        unsigned long long numeric = [(NSString *)key longLongValue];
-        if (numeric > UINT32_MAX) return;
+        const char *digits = [(NSString *)key UTF8String];
+        if (!digits || !*digits || *digits == '-') return;
+        char *end = NULL;
+        unsigned long long numeric = strtoull(digits, &end, 10);
+        if (end == digits || *end != '\0' || numeric > UINT32_MAX) return;
         clean[key] = @([value boolValue]);
     }];
     return clean.copy;
@@ -60,9 +66,7 @@ static NSNumber *RYGEasyGatingCachedOverride(uint32_t gateID) {
 }
 
 static void RYGEasyGatingRecord(uint32_t gateID, uint32_t variant, BOOL nativeValue) {
-    __block BOOL notify = NO;
-    __block RYGEasyGatingObservation *snapshot = nil;
-
+    BOOL notify = NO;
     os_unfair_lock_lock(&gRYGEasyGatingLock);
     if (!gRYGEasyGatingObservations) gRYGEasyGatingObservations = [NSMutableDictionary dictionary];
     NSNumber *key = @(gateID);
@@ -73,7 +77,7 @@ static void RYGEasyGatingRecord(uint32_t gateID, uint32_t variant, BOOL nativeVa
         row.variant = variant;
         row.nativeValue = nativeValue;
         row.callCount = 1;
-        row.lastSeen = [NSDate date];
+        row.lastSeen = NSDate.date;
         gRYGEasyGatingObservations[key] = row;
         notify = YES;
     } else {
@@ -83,15 +87,11 @@ static void RYGEasyGatingRecord(uint32_t gateID, uint32_t variant, BOOL nativeVa
             row.nativeValue = nativeValue;
             notify = YES;
         }
-        // Avoid creating an NSDate for every Easy Gating query. Updating every
-        // 64 calls is sufficient for the developer UI while keeping the hook's
-        // pass-through path inexpensive.
-        if ((row.callCount & 63u) == 0u || notify) row.lastSeen = [NSDate date];
+        if ((row.callCount & 63u) == 0u || notify) row.lastSeen = NSDate.date;
     }
-    if (notify) snapshot = row;
     os_unfair_lock_unlock(&gRYGEasyGatingLock);
 
-    if (snapshot) {
+    if (notify) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [NSNotificationCenter.defaultCenter postNotificationName:RYGEasyGatingDidObserveNotification
                                                               object:nil
@@ -112,6 +112,40 @@ static uint32_t RYGEasyGatingGetBooleanReplacement(uintptr_t context0,
     return forced ? (forced.boolValue ? 1u : 0u) : native;
 }
 
+static BOOL RYGInstallEasyGatingExportHook(void) {
+    if (atomic_load(&gRYGEasyGatingInstalled)) return YES;
+    void *function = dlsym(RTLD_DEFAULT, "EasyGatingGetBoolean_Internal_DoNotUseOrMock");
+    if (!function) return NO;
+
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&gRYGEasyGatingInstalled, &expected, true)) return YES;
+    MSHookFunction(function,
+                   (void *)&RYGEasyGatingGetBooleanReplacement,
+                   (void **)&gRYGOriginalEasyGatingGetBoolean);
+    if (!gRYGOriginalEasyGatingGetBoolean) {
+        atomic_store(&gRYGEasyGatingInstalled, false);
+        return NO;
+    }
+    return YES;
+}
+
+static void RYGScheduleEasyGatingInstall(void) {
+    if (atomic_load(&gRYGEasyGatingInstalled)) return;
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&gRYGEasyGatingRetryScheduled, &expected, true)) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        atomic_store(&gRYGEasyGatingRetryScheduled, false);
+        RYGInstallEasyGatingExportHook();
+    });
+}
+
+static void RYGEasyGatingImageLoaded(const struct mach_header *header, intptr_t slide) {
+    (void)header;
+    (void)slide;
+    RYGScheduleEasyGatingInstall();
+}
+
 @implementation RYGEasyGatingRuntime
 
 + (instancetype)shared {
@@ -125,16 +159,7 @@ static uint32_t RYGEasyGatingGetBooleanReplacement(uintptr_t context0,
 }
 
 - (void)installIfNeeded {
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&gRYGEasyGatingInstalled, &expected, true)) return;
-
-    struct rebinding binding = {
-        "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
-        (void *)RYGEasyGatingGetBooleanReplacement,
-        (void **)&gRYGOriginalEasyGatingGetBoolean,
-    };
-    int result = rebind_symbols(&binding, 1);
-    if (result != 0) atomic_store(&gRYGEasyGatingInstalled, false);
+    if (!RYGInstallEasyGatingExportHook()) RYGScheduleEasyGatingInstall();
 }
 
 - (NSArray<RYGEasyGatingObservation *> *)observations {
@@ -179,6 +204,8 @@ static uint32_t RYGEasyGatingGetBooleanReplacement(uintptr_t context0,
 
 __attribute__((constructor(180))) static void RYGEasyGatingRuntimeBootstrap(void) {
     @autoreleasepool {
-        [[RYGEasyGatingRuntime shared] installIfNeeded];
+        RYGEasyGatingRefreshOverrideCache();
+        RYGInstallEasyGatingExportHook();
+        _dyld_register_func_for_add_image(RYGEasyGatingImageLoaded);
     }
 }
