@@ -111,14 +111,11 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
     if (old) glass.cornerStyle = old.cornerStyle;
 
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-    // A selector is semantic label text inside a Glass pill. Falling back to
-    // UIButton.tintColor here inherited the system-link blue and is what made
-    // the selected value look detached from the Liquid Glass selector.
     glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
     if (menuSource) {
-        // A menu-source button participates in UIKit's own closed→expanded
-        // morph. Default metrics are part of that transition contract; custom
-        // contentInsets from the closed state must not be carried into it.
+        // UIKit owns the closed -> expanded Liquid Glass menu morph. Keep its
+        // default source metrics; never carry a hand-authored inset into the
+        // expanded menu geometry.
         [glass setDefaultContentInsets];
     } else if (old) {
         glass.contentInsets = old.contentInsets;
@@ -131,21 +128,31 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
     if (@available(iOS 26.0, *)) {
         if (!RYGLiquidGlassIsAvailable()) return;
 
-        // Reconfiguration is allowed when a plain button becomes a menu source
-        // after its first render. The previous one-shot marker made that state
-        // transition keep stale geometry.
         BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-        NSString *stateKey = [NSString stringWithFormat:@"%d:%d", prominent, menuSource];
+        NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
+        NSString *stateKey = [NSString stringWithFormat:@"%d:%d:%@", prominent, menuSource, title];
         NSString *configured = objc_getAssociatedObject(button, kRYGGlassButtonConfiguredKey);
-        if ([configured isEqualToString:stateKey]) return;
+        if (![configured isEqualToString:stateKey]) {
+            button.backgroundColor = UIColor.clearColor;
+            if (menuSource) button.tintColor = UIColor.labelColor;
+            button.configuration = RYGGlassConfigurationForButton(button, prominent);
+            objc_setAssociatedObject(button,
+                                     kRYGGlassButtonConfiguredKey,
+                                     stateKey,
+                                     OBJC_ASSOCIATION_COPY_NONATOMIC);
+        }
 
-        button.backgroundColor = UIColor.clearColor;
-        if (menuSource) button.tintColor = UIColor.labelColor;
-        button.configuration = RYGGlassConfigurationForButton(button, prominent);
-        objc_setAssociatedObject(button,
-                                 kRYGGlassButtonConfiguredKey,
-                                 stateKey,
-                                 OBJC_ASSOCIATION_COPY_NONATOMIC);
+        if (menuSource) {
+            [button invalidateIntrinsicContentSize];
+            [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+            [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+            // UITableViewCell.accessoryView is frame-based. The old code sized
+            // the plain button first and changed it to a Glass configuration
+            // later, so the pill drew outside the stale accessory frame and on
+            // top of the title/subtitle. Only frame-managed controls are sized
+            // here; Auto Layout-owned buttons keep their constraints untouched.
+            if (button.translatesAutoresizingMaskIntoConstraints) [button sizeToFit];
+        }
     }
 }
 
@@ -208,8 +215,6 @@ static void RYGStyleOwnedControls(UIView *root) {
         if ([view isKindOfClass:UIButton.class]) {
             UIButton *button = (UIButton *)view;
             BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-            // Standard cell content is deliberately not wrapped in additional
-            // Glass. Custom actionable controls and menu sources are.
             if (menuSource || !RYGViewLivesInsideContentCell(button)) {
                 RYGLiquidGlassConfigureButton(button, NO);
             }
@@ -226,21 +231,8 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
         content = ((UINavigationController *)controller).visibleViewController ?: controller;
     }
 
-    // Apply the readable title pill only to RyukGram-owned screens and only
-    // when the screen did not provide a custom titleView. This keeps Instagram's
-    // UINavigationBar untouched while making the title itself participate in
-    // the same Liquid Glass visual language as menu-source controls.
     if (content.navigationItem.titleView == nil && content.title.length) {
         content.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(content.title);
-    }
-
-    if (@available(iOS 26.0, *)) {
-        // UINavigationBar, UIToolbar, UISearchController and standard bar-button
-        // items already participate in the system Liquid Glass layer. Keep the
-        // system bar itself native; only our title pill is custom.
-    } else {
-        // Pre-iOS 26 keeps the normal UIKit appearance; RYGLiquidGlassView has a
-        // thin-material fallback for the few custom surfaces that request it.
     }
 
     if (content.isViewLoaded) {

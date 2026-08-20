@@ -1,6 +1,6 @@
 #import "RYGSettingsSections.h"
 #import "../../Features/Experimental/RYGExperimentalGuard.h"
-#import "../../Features/ExpFlags/RYGMobileConfigViewController.h"
+#import "../../Features/ExpFlags/RYGMobileConfigBrowserViewController.h"
 #import "../../UI/RYGPopupChrome.h"
 
 @implementation RYGTweakSettings (Section_Experimental)
@@ -58,7 +58,7 @@
 		return;
 	}
 	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ryg_metaconfig_warning_seen"]) {
-		[RYGPopupChrome presentVC:[RYGMobileConfigViewController new] from:nil];
+		[RYGPopupChrome presentVC:[RYGMobileConfigBrowserViewController new] from:nil];
 		return;
 	}
 	UIAlertController *a = [UIAlertController
@@ -69,7 +69,7 @@
 	[a addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"I understand") style:UIAlertActionStyleDefault
 										handler:^(UIAlertAction *_) {
 		[[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"ryg_metaconfig_warning_seen"];
-		[RYGPopupChrome presentVC:[RYGMobileConfigViewController new] from:nil];
+		[RYGPopupChrome presentVC:[RYGMobileConfigBrowserViewController new] from:nil];
 	}]];
 	[rygTopVC() presentViewController:a animated:YES completion:nil];
 }
