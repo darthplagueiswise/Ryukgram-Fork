@@ -222,11 +222,18 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
         content = ((UINavigationController *)controller).visibleViewController ?: controller;
     }
 
+    // Apply the readable title pill only to RyukGram-owned screens and only
+    // when the screen did not provide a custom titleView. This keeps Instagram's
+    // UINavigationBar untouched while making the title itself participate in
+    // the same Liquid Glass visual language as menu-source controls.
+    if (content.navigationItem.titleView == nil && content.title.length) {
+        content.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(content.title);
+    }
+
     if (@available(iOS 26.0, *)) {
         // UINavigationBar, UIToolbar, UISearchController and standard bar-button
         // items already participate in the system Liquid Glass layer. Keep the
-        // system bar itself native; screens that need a readable title pill use
-        // RYGLiquidGlassNavigationTitleView rather than a global navbar swizzle.
+        // system bar itself native; only our title pill is custom.
     } else {
         // Pre-iOS 26 keeps the normal UIKit appearance; RYGLiquidGlassView has a
         // thin-material fallback for the few custom surfaces that request it.
