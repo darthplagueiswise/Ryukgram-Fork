@@ -47,40 +47,32 @@ static BOOL RYGCommandIsSelected(UICommand *command) {
 }
 
 static UIAction *RYGActionFromCommand(UICommand *command) {
-    BOOL selected = RYGCommandIsSelected(command);
     UIAction *action = [UIAction actionWithTitle:command.title ?: @""
                                            image:command.image
                                       identifier:nil
-                                         handler:^(__kindof UIAction *item) {
-        (void)item;
+                                         handler:^(__unused UIAction *item) {
         if (command.action) {
-            [UIApplication.sharedApplication sendAction:command.action
-                                                     to:nil
-                                                   from:command
-                                               forEvent:nil];
+            [UIApplication.sharedApplication sendAction:command.action to:nil from:command forEvent:nil];
         }
     }];
-    action.state = selected ? UIMenuElementStateOn : UIMenuElementStateOff;
+    action.state = RYGCommandIsSelected(command) ? UIMenuElementStateOn : UIMenuElementStateOff;
     action.attributes = command.attributes;
     return action;
 }
 
-static UIMenu *RYGNormalizeSelectorMenu(UIMenu *menu) {
+// Convert legacy UICommand leaves only. Preserve every UIMenu's original
+// options exactly: forcing SingleSelection into nested inline/submenus changes
+// UIKit's expanded geometry and selection contract and was the source of the
+// oversized morphing panels.
+static UIMenu *RYGMenuPreservingHierarchy(UIMenu *menu) {
+    if (!menu) return nil;
     NSMutableArray<UIMenuElement *> *children = [NSMutableArray arrayWithCapacity:menu.children.count];
     for (UIMenuElement *element in menu.children) {
-        if ([element isKindOfClass:UIMenu.class]) {
-            [children addObject:RYGNormalizeSelectorMenu((UIMenu *)element)];
-        } else if ([element isKindOfClass:UICommand.class]) {
-            [children addObject:RYGActionFromCommand((UICommand *)element)];
-        } else {
-            [children addObject:element];
-        }
+        if ([element isKindOfClass:UIMenu.class]) [children addObject:RYGMenuPreservingHierarchy((UIMenu *)element)];
+        else if ([element isKindOfClass:UICommand.class]) [children addObject:RYGActionFromCommand((UICommand *)element)];
+        else [children addObject:element];
     }
-    return [UIMenu menuWithTitle:menu.title
-                           image:menu.image
-                      identifier:menu.identifier
-                         options:(menu.options | UIMenuOptionsSingleSelection)
-                        children:children];
+    return [UIMenu menuWithTitle:menu.title image:menu.image identifier:menu.identifier options:menu.options children:children];
 }
 
 static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
@@ -97,8 +89,13 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
 }
 
 - (UIMenu *)menuForButton:(UIButton *)button {
-    UIMenu *menu = RYGNormalizeSelectorMenu(self.baseMenu);
+    UIMenu *menu = RYGMenuPreservingHierarchy(self.baseMenu);
     if (!button) return menu;
+
+    button.menu = menu;
+    button.showsMenuAsPrimaryAction = YES;
+    button.changesSelectionAsPrimaryAction = YES;
+    button.tintColor = UIColor.labelColor;
 
     NSString *selectedTitle = RYGSelectedTitleForMenu(menu);
     UIButtonConfiguration *configuration = button.configuration ?: [UIButtonConfiguration plainButtonConfiguration];
@@ -106,14 +103,8 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
     configuration.baseForegroundColor = UIColor.labelColor;
     button.configuration = configuration;
 
-    button.menu = menu;
-    button.showsMenuAsPrimaryAction = YES;
-    button.changesSelectionAsPrimaryAction = YES;
-    button.tintColor = UIColor.labelColor;
-
-    // One owner only: this real UIButton is both the collapsed selector and the
-    // source for UIKit's expanded Liquid Glass morph. There is no overlay,
-    // swizzled replacement, fixed width, or copied accessory inset geometry.
+    // One source view owns both states of the morph. Do not create an overlay,
+    // duplicate accessory, fixed expanded margin, or custom content insets.
     RYGLiquidGlassConfigureButton(button, NO);
     if (@available(iOS 26.0, *)) {
         UIButtonConfiguration *glass = button.configuration;
@@ -126,7 +117,7 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
 
 - (UIMenu *)submenuForButton:(UIButton *)button submenu:(UIMenu *)submenu {
     (void)button;
-    return RYGNormalizeSelectorMenu(submenu);
+    return RYGMenuPreservingHierarchy(submenu);
 }
 
 @end

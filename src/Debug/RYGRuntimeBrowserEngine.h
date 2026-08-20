@@ -8,12 +8,38 @@ typedef NS_ENUM(NSInteger, RYGRuntimeArgumentKind) {
     RYGRuntimeArgumentInteger,
 };
 
-// Kept only for source compatibility. Runtime enumeration is not preclassified.
 typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
     RYGRuntimeBrowserScopeRelevant = 0,
     RYGRuntimeBrowserScopeEmployee,
     RYGRuntimeBrowserScopeAll,
 };
+
+typedef NS_ENUM(NSInteger, RYGRuntimeMemberKind) {
+    RYGRuntimeMemberInstanceMethod = 0,
+    RYGRuntimeMemberClassMethod,
+    RYGRuntimeMemberInstanceProperty,
+    RYGRuntimeMemberClassProperty,
+};
+
+@interface RYGRuntimeClassRow : NSObject
+@property (nonatomic, copy) NSString *imagePath;
+@property (nonatomic, copy) NSString *className;
+@property (nonatomic, assign) NSUInteger instanceMethodCount;
+@property (nonatomic, assign) NSUInteger classMethodCount;
+@property (nonatomic, assign) NSUInteger propertyCount;
+@end
+
+@interface RYGRuntimeMemberRow : NSObject
+@property (nonatomic, copy) NSString *imagePath;
+@property (nonatomic, copy) NSString *className;
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *typeEncoding;
+@property (nonatomic, assign) RYGRuntimeMemberKind kind;
+@property (nonatomic, assign) BOOL hookableBool;
+@property (nonatomic, assign) RYGRuntimeArgumentKind argumentKind;
+@property (nonatomic, readonly) BOOL method;
+@property (nonatomic, readonly) BOOL classMember;
+@end
 
 @interface RYGRuntimeBoolMethod : NSObject
 @property (nonatomic, copy) NSString *imagePath;
@@ -37,27 +63,16 @@ typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
 @interface RYGRuntimeBrowserEngine : NSObject
 + (NSArray<NSString *> *)runtimeImagePaths;
 + (NSString *)shortNameForImagePath:(NSString *)imagePath;
-
-/// Returns live ObjC BOOL methods for the selected loaded image. `scope` is
-/// ignored deliberately; no name/employee/gate classification is performed.
-/// Historical ObjC BOOL encodings B/c/C are accepted after ABI validation.
-+ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath
-                                                      scope:(RYGRuntimeBrowserScope)scope;
-
-/// Reads the selected image's live Mach-O symbol table.
++ (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath;
++ (NSArray<RYGRuntimeMemberRow *> *)membersForClassName:(NSString *)className imagePath:(NSString *)imagePath;
++ (nullable RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member;
++ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath scope:(RYGRuntimeBrowserScope)scope;
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath;
-
-/// Installs one pass-through trampoline for this exact ABI-validated method.
-/// Without an override it only observes the original result.
 + (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method;
 + (nullable NSNumber *)observedNativeValueForKey:(NSString *)overrideKey;
-
-/// Runtime Browser overrides are intentionally process-local. They are never
-/// installed automatically during app startup or dyld image loading.
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
 + (void)setOverride:(nullable NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method;
-+ (void)reinstallPersistedOverrides; // compatibility no-op
-
++ (void)reinstallPersistedOverrides;
 + (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName;
 @end
 

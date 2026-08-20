@@ -1,11 +1,33 @@
 #import "RYGMobileConfigViewController.h"
 #import "RYGMobileConfig.h"
 #import "../../UI/RYGPopupChrome.h"
+#import "../../UI/RYGLiquidGlass.h"
 #import "../../Localization/RYGLocalization.h"
 #import "../../Utils.h"
 #import <objc/runtime.h>
 
 static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
+
+typedef NS_ENUM(NSInteger, RYGMCListScope) {
+    RYGMCListScopeAll = 0,
+    RYGMCListScopeSeen,
+    RYGMCListScopeNotSeen,
+    RYGMCListScopeOverridden,
+};
+
+static BOOL RYGMCConfigHasSeenParam(RYGMCConfig *config, RYGMobileConfig *engine) {
+    for (RYGMCParam *param in config.params) {
+        if (param.isRuntimeBacked && [engine callSiteFor:param].length) return YES;
+    }
+    return NO;
+}
+
+static BOOL RYGMCConfigHasOverride(RYGMCConfig *config, RYGMobileConfig *engine) {
+    for (RYGMCParam *param in config.params) {
+        if (param.isRuntimeBacked && [engine overrideStateFor:param] == RYGMCOverrideSet) return YES;
+    }
+    return NO;
+}
 
 @interface RYGMCConfigDetailViewController : UITableViewController
 @property (nonatomic, strong) RYGMCConfig *config;
@@ -32,8 +54,13 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     bar.backgroundColor = [RYGPopupChrome backgroundColor];
     [self.view addSubview:bar];
 
-    self.scope = [[UISegmentedControl alloc] initWithItems:@[RYGLocalized(@"All"), RYGLocalized(@"Overridden")]];
-    self.scope.selectedSegmentIndex = 0;
+    self.scope = [[UISegmentedControl alloc] initWithItems:@[
+        RYGLocalized(@"All"),
+        RYGLocalized(@"Seen"),
+        RYGLocalized(@"Not Seen"),
+        RYGLocalized(@"Overridden")
+    ]];
+    self.scope.selectedSegmentIndex = RYGMCListScopeAll;
     self.scope.translatesAutoresizingMaskIntoConstraints = NO;
     [self.scope addTarget:self action:@selector(scopeChanged) forControlEvents:UIControlEventValueChanged];
     [bar addSubview:self.scope];
@@ -65,17 +92,18 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     self.search = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.search.searchResultsUpdater = self;
     self.search.obscuresBackgroundDuringPresentation = NO;
-    self.search.searchBar.placeholder = RYGLocalized(@"Search name or config number");
+    self.search.searchBar.placeholder = RYGLocalized(@"Search name, config or parameter");
     self.navigationItem.searchController = self.search;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
     self.navigationItem.rightBarButtonItem =
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[self menu]];
-	self.tableView.refreshControl = [UIRefreshControl new];
-	[self.tableView.refreshControl addTarget:self action:@selector(refreshRuntime) forControlEvents:UIControlEventValueChanged];
+    self.tableView.refreshControl = [UIRefreshControl new];
+    [self.tableView.refreshControl addTarget:self action:@selector(refreshRuntime) forControlEvents:UIControlEventValueChanged];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reload)
                                                  name:@"RYGMobileConfigNamesDidChange" object:nil];
-	[[RYGMobileConfig shared] reloadFromRuntime];
+    [[RYGMobileConfig shared] reloadFromRuntime];
+    RYGLiquidGlassApplyToViewController(self);
     [self reload];
 }
 
@@ -83,15 +111,16 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
 
 - (void)scopeChanged {
     [self reload];
-    if (self.rows.count)
+    if (self.rows.count) {
         [self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]
                               atScrollPosition:UITableViewScrollPositionTop animated:NO];
+    }
 }
 
 - (void)refreshRuntime {
-	[[RYGMobileConfig shared] reloadFromRuntime];
-	[self reload];
-	[self.tableView.refreshControl endRefreshing];
+    [[RYGMobileConfig shared] reloadFromRuntime];
+    [self reload];
+    [self.tableView.refreshControl endRefreshing];
 }
 
 - (UIMenu *)menu {
@@ -100,37 +129,65 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     UIAction *reset = [UIAction actionWithTitle:RYGLocalized(@"Reset all overrides")
                                           image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
                                      identifier:nil handler:^(__kindof UIAction *a) {
+        (void)a;
         UIAlertController *c = [UIAlertController alertControllerWithTitle:RYGLocalized(@"Reset all overrides?")
                                                                   message:[NSString stringWithFormat:RYGLocalized(@"%lu override(s) will be removed."), (unsigned long)e.overrideCount]
                                                            preferredStyle:UIAlertControllerStyleAlert];
         [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-        [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a2) {
-            [e resetAllOverrides]; [ws reload];
+        [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Reset") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a2) {
+            [e resetAllOverrides];
+            [ws reload];
         }]];
         [ws presentViewController:c animated:YES completion:nil];
     }];
     reset.attributes = e.overrideCount ? 0 : UIMenuElementAttributesDisabled;
-	UIAction *rescan = [UIAction actionWithTitle:RYGLocalized(@"Rescan live MobileConfig table")
-		image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__kindof UIAction *action) {
-		[ws refreshRuntime];
-	}];
+
+    UIAction *rescan = [UIAction actionWithTitle:RYGLocalized(@"Rescan live MobileConfig table")
+                                           image:[UIImage systemImageNamed:@"arrow.clockwise"]
+                                      identifier:nil handler:^(__unused UIAction *action) {
+        [ws refreshRuntime];
+    }];
     return [UIMenu menuWithChildren:@[rescan, reset]];
 }
 
 - (void)reload {
-    BOOL onlyOv = self.scope.selectedSegmentIndex == 1;
-    self.rows = [[RYGMobileConfig shared] configsMatching:self.search.searchBar.text onlyOverridden:onlyOv];
-    RYGMobileConfig *e = [RYGMobileConfig shared];
-    [self.scope setTitle:e.overrideCount ? [NSString stringWithFormat:@"%@ (%lu)", RYGLocalized(@"Overridden"), (unsigned long)e.overrideCount]
-                                         : RYGLocalized(@"Overridden")
-       forSegmentAtIndex:1];
+    RYGMobileConfig *engine = [RYGMobileConfig shared];
+    NSArray<RYGMCConfig *> *matches = [engine configsMatching:self.search.searchBar.text onlyOverridden:NO] ?: @[];
+    RYGMCListScope selectedScope = (RYGMCListScope)self.scope.selectedSegmentIndex;
+
+    if (selectedScope == RYGMCListScopeAll) {
+        self.rows = matches;
+    } else {
+        NSMutableArray<RYGMCConfig *> *filtered = [NSMutableArray array];
+        for (RYGMCConfig *config in matches) {
+            BOOL seen = RYGMCConfigHasSeenParam(config, engine);
+            BOOL overridden = RYGMCConfigHasOverride(config, engine);
+            BOOL include = selectedScope == RYGMCListScopeSeen ? seen
+                : selectedScope == RYGMCListScopeNotSeen ? !seen
+                : overridden;
+            if (include) [filtered addObject:config];
+        }
+        self.rows = filtered.copy;
+    }
+
+    [self.scope setTitle:engine.overrideCount
+        ? [NSString stringWithFormat:@"%@ (%lu)", RYGLocalized(@"Overridden"), (unsigned long)engine.overrideCount]
+        : RYGLocalized(@"Overridden")
+       forSegmentAtIndex:RYGMCListScopeOverridden];
     self.navigationItem.rightBarButtonItem.menu = [self menu];
     [self.tableView reloadData];
 }
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)sc { [self reload]; }
+- (void)updateSearchResultsForSearchController:(UISearchController *)sc {
+    (void)sc;
+    [self reload];
+}
 
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return self.rows.count; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
+    (void)tv;
+    (void)s;
+    return self.rows.count;
+}
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *cell = [tv dequeueReusableCellWithIdentifier:@"c"];
@@ -139,7 +196,10 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     RYGMobileConfig *e = [RYGMobileConfig shared];
 
     NSUInteger ov = 0;
-    for (RYGMCParam *p in c.params) if ([e overrideStateFor:p] == RYGMCOverrideSet) ov++;
+    for (RYGMCParam *p in c.params) {
+        if (p.isRuntimeBacked && [e overrideStateFor:p] == RYGMCOverrideSet) ov++;
+    }
+    BOOL seen = RYGMCConfigHasSeenParam(c, e);
 
     cell.textLabel.text = c.displayName;
     cell.textLabel.font = [UIFont systemFontOfSize:16 weight:c.name.length ? UIFontWeightSemibold : UIFontWeightRegular];
@@ -147,19 +207,22 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
 
     NSMutableAttributedString *sub = [[NSMutableAttributedString alloc]
-        initWithString:[NSString stringWithFormat:@"%u · %lu %@", c.number, (unsigned long)c.params.count,
-                        c.params.count == 1 ? RYGLocalized(@"param") : RYGLocalized(@"params")]
+        initWithString:[NSString stringWithFormat:@"%u · %lu %@ · %@", c.number, (unsigned long)c.params.count,
+                        c.params.count == 1 ? RYGLocalized(@"param") : RYGLocalized(@"params"),
+                        seen ? RYGLocalized(@"seen") : RYGLocalized(@"not seen")]
         attributes:@{NSForegroundColorAttributeName: [UIColor secondaryLabelColor], NSFontAttributeName: [UIFont systemFontOfSize:12]}];
-    if (ov) [sub appendAttributedString:[[NSAttributedString alloc]
-        initWithString:[NSString stringWithFormat:@"  ·  %lu %@", (unsigned long)ov, RYGLocalized(@"overridden")]
-        attributes:@{NSForegroundColorAttributeName: RYGMCAccent(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]}]];
+    if (ov) {
+        [sub appendAttributedString:[[NSAttributedString alloc]
+            initWithString:[NSString stringWithFormat:@"  ·  %lu %@", (unsigned long)ov, RYGLocalized(@"overridden")]
+            attributes:@{NSForegroundColorAttributeName: RYGMCAccent(), NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]}]];
+    }
 
-    // When a search matched inside this config's parameters, show which ones.
     NSArray<NSString *> *pm = [e paramsMatching:self.search.searchBar.text inConfig:c];
-    if (pm.count) [sub appendAttributedString:[[NSAttributedString alloc]
-        initWithString:[NSString stringWithFormat:@"\n%@ %@", RYGLocalized(@"Parameter:"),
-                        [pm componentsJoinedByString:@", "]]
-        attributes:@{NSForegroundColorAttributeName: [UIColor systemBlueColor], NSFontAttributeName: [UIFont systemFontOfSize:12]}]];
+    if (pm.count) {
+        [sub appendAttributedString:[[NSAttributedString alloc]
+            initWithString:[NSString stringWithFormat:@"\n%@ %@", RYGLocalized(@"Parameter:"), [pm componentsJoinedByString:@", "]]
+            attributes:@{NSForegroundColorAttributeName: [UIColor systemBlueColor], NSFontAttributeName: [UIFont systemFontOfSize:12]}]];
+    }
     cell.detailTextLabel.numberOfLines = 0;
     cell.detailTextLabel.attributedText = sub;
 
@@ -182,25 +245,32 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
+    (void)tv;
+    (void)s;
     RYGMobileConfig *e = [RYGMobileConfig shared];
-    return [NSString stringWithFormat:RYGLocalized(@"%lu live configs  ·  %lu named by Instagram on this device · rows are not persisted"),
+    return [NSString stringWithFormat:RYGLocalized(@"%lu configs · %lu named · Seen is runtime telemetry; a native-backed parameter can be overridden before it is seen."),
             (unsigned long)self.rows.count, (unsigned long)e.namedConfigCount];
 }
 
-// Long-press a config to reset just its overrides.
 - (UIContextMenuConfiguration *)tableView:(UITableView *)tv contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)ip point:(CGPoint)point {
+    (void)tv;
+    (void)point;
     RYGMobileConfig *e = [RYGMobileConfig shared];
     RYGMCConfig *c = self.rows[ip.row];
     NSUInteger ov = 0;
-    for (RYGMCParam *p in c.params) if ([e overrideStateFor:p] == RYGMCOverrideSet) ov++;
+    for (RYGMCParam *p in c.params) {
+        if (p.isRuntimeBacked && [e overrideStateFor:p] == RYGMCOverrideSet) ov++;
+    }
     if (!ov) return nil;
     __weak __typeof__(self) ws = self;
     return [UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil
-        actionProvider:^UIMenu *(NSArray<UIMenuElement *> *sug) {
+        actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
+        (void)suggested;
         UIAction *reset = [UIAction actionWithTitle:[NSString stringWithFormat:RYGLocalized(@"Reset %lu override(s)"), (unsigned long)ov]
                                               image:[UIImage systemImageNamed:@"arrow.counterclockwise"]
-                                         identifier:nil handler:^(__kindof UIAction *a) {
-            [e resetOverridesForConfig:c]; [ws reload];
+                                         identifier:nil handler:^(__unused UIAction *a) {
+            [e resetOverridesForConfig:c];
+            [ws reload];
         }];
         reset.attributes = UIMenuElementAttributesDestructive;
         return [UIMenu menuWithTitle:c.displayName children:@[reset]];
@@ -216,28 +286,37 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = self.config.displayName;
+    self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.config.displayName);
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
+    RYGLiquidGlassApplyToViewController(self);
 }
 
-// section 0 = config info (copiable), sections 1..n = one per param
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return 1 + self.config.params.count; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv {
+    (void)tv;
+    return 1 + self.config.params.count;
+}
+
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s {
+    (void)tv;
     return s == 0 ? (self.config.name.length ? 2 : 1) : 1;
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
+    (void)tv;
     if (s == 0) return RYGLocalized(@"Config");
     RYGMCParam *p = self.config.params[s - 1];
     return p.name.length ? p.name : [NSString stringWithFormat:@"#%u", p.paramIndex];
 }
 
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
-    if (s == 0) return RYGLocalized(@"Tap a field to copy. Tap a value below to edit.");
+    (void)tv;
+    if (s == 0) return RYGLocalized(@"Tap a field to copy. Native-backed values below can be overridden even before first observation.");
     return nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
+    (void)tv;
     RYGMobileConfig *e = [RYGMobileConfig shared];
 
     if (ip.section == 0) {
@@ -258,26 +337,37 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     }
 
     RYGMCParam *p = self.config.params[ip.section - 1];
-    BOOL overridden = [e overrideStateFor:p] == RYGMCOverrideSet;
-    id live = [e liveValueFor:p];
+    BOOL runtimeBacked = p.isRuntimeBacked;
+    BOOL overridden = runtimeBacked && [e overrideStateFor:p] == RYGMCOverrideSet;
+    BOOL seen = runtimeBacked && [e callSiteFor:p].length > 0;
+    id live = runtimeBacked ? [e liveValueFor:p] : nil;
 
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    cell.textLabel.text = overridden ? RYGLocalized(@"Override") : RYGLocalized(@"Value");
+    cell.textLabel.text = !runtimeBacked ? RYGLocalized(@"Mapping only") : overridden ? RYGLocalized(@"Override") : RYGLocalized(@"Value");
     cell.textLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
 
     NSString *meta = [NSString stringWithFormat:@"%@ · #%u", p.typeName, p.paramIndex];
+    if (runtimeBacked) meta = [meta stringByAppendingFormat:@" · %@", seen ? RYGLocalized(@"seen") : RYGLocalized(@"not seen")];
+    else meta = [meta stringByAppendingString:@" · no native backing"];
     NSString *note = [e noteFor:p];
     if (note.length) meta = [meta stringByAppendingFormat:@" · “%@”", note];
     cell.detailTextLabel.text = meta;
     cell.detailTextLabel.textColor = overridden ? RYGMCAccent() : [UIColor secondaryLabelColor];
     cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+    cell.detailTextLabel.numberOfLines = 0;
 
-    cell.imageView.image = [UIImage systemImageNamed:overridden ? @"circle.fill" : @"circle"];
+    cell.imageView.image = [UIImage systemImageNamed:overridden ? @"circle.fill" : runtimeBacked ? @"circle" : @"number"];
     cell.imageView.tintColor = overridden ? RYGMCAccent() : [UIColor tertiaryLabelColor];
+
+    if (!runtimeBacked) {
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
 
     if (p.type == RYGMCTypeBool) {
         UISwitch *sw = [UISwitch new];
-        sw.on = overridden ? [[e overrideValueFor:p] boolValue] : [live boolValue];
+        NSNumber *forced = overridden ? [e overrideValueFor:p] : nil;
+        sw.on = forced ? forced.boolValue : ([live isKindOfClass:NSNumber.class] ? [live boolValue] : NO);
         sw.onTintColor = overridden ? RYGMCAccent() : nil;
         objc_setAssociatedObject(sw, "p", p, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [sw addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged];
@@ -307,17 +397,22 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
         return;
     }
     RYGMCParam *p = self.config.params[ip.section - 1];
-    if (p.type == RYGMCTypeBool) return;
+    if (!p.isRuntimeBacked || p.type == RYGMCTypeBool) return;
     [self editValueFor:p];
 }
 
 - (void)toggle:(UISwitch *)sw {
     RYGMCParam *p = objc_getAssociatedObject(sw, "p");
-    [[RYGMobileConfig shared] setOverride:@(sw.on) for:p];
+    if (!p || !p.isRuntimeBacked) return;
+    if (![[RYGMobileConfig shared] setOverride:@(sw.on) for:p]) {
+        sw.on = !sw.on;
+        [RYGUtils showErrorHUDWithDescription:RYGLocalized(@"MobileConfig rejected this override")];
+    }
     [self.tableView reloadData];
 }
 
 - (void)editValueFor:(RYGMCParam *)p {
+    if (!p.isRuntimeBacked) return;
     RYGMobileConfig *e = [RYGMobileConfig shared];
     BOOL overridden = [e overrideStateFor:p] == RYGMCOverrideSet;
     UIAlertController *c = [UIAlertController alertControllerWithTitle:(p.name.length ? p.name : [NSString stringWithFormat:@"#%u", p.paramIndex])
@@ -332,19 +427,21 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     }];
     __weak __typeof__(self) ws = self;
     [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    if (overridden)
-        [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Clear override") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
-            [e clearOverrideFor:p]; [ws.tableView reloadData];
+    if (overridden) {
+        [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Clear override") style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a) {
+            [e clearOverrideFor:p];
+            [ws.tableView reloadData];
         }]];
-    [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Set") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    }
+    [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Set") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
         NSString *t = c.textFields.firstObject.text ?: @"";
-        id value;
-        switch (p.type) {
-            case RYGMCTypeInt:    value = @(strtoll(t.UTF8String, NULL, 10)); break;
-            case RYGMCTypeDouble: value = @(t.doubleValue); break;
-            default:              value = t; break;
+        id value = nil;
+        if (p.type == RYGMCTypeInt) value = @(strtoll(t.UTF8String, NULL, 10));
+        else if (p.type == RYGMCTypeDouble) value = @(t.doubleValue);
+        else if (p.type == RYGMCTypeString) value = t;
+        if (!value || ![e setOverride:value for:p]) {
+            [RYGUtils showErrorHUDWithDescription:RYGLocalized(@"MobileConfig rejected this override")];
         }
-        [e setOverride:value for:p];
         [ws.tableView reloadData];
     }]];
     [self presentViewController:c animated:YES completion:nil];
@@ -355,18 +452,21 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
     RYGMobileConfig *e = [RYGMobileConfig shared];
     RYGMCParam *p = self.config.params[ip.section - 1];
     NSMutableArray *acts = [NSMutableArray array];
-    if ([e overrideStateFor:p] == RYGMCOverrideSet) {
+    if (p.isRuntimeBacked && [e overrideStateFor:p] == RYGMCOverrideSet) {
         UIContextualAction *clr = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
                                                                           title:RYGLocalized(@"Clear")
-                                                                        handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
-            [e clearOverrideFor:p]; [tv reloadData]; done(YES);
+                                                                        handler:^(__unused UIContextualAction *a, __unused UIView *v, void (^done)(BOOL)) {
+            [e clearOverrideFor:p];
+            [tv reloadData];
+            done(YES);
         }];
         [acts addObject:clr];
     }
     UIContextualAction *note = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
                                                                        title:RYGLocalized(@"Note")
-                                                                     handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
-        [self editNoteFor:p]; done(YES);
+                                                                     handler:^(__unused UIContextualAction *a, __unused UIView *v, void (^done)(BOOL)) {
+        [self editNoteFor:p];
+        done(YES);
     }];
     note.backgroundColor = [UIColor systemBlueColor];
     [acts addObject:note];
@@ -376,12 +476,14 @@ static UIColor *RYGMCAccent(void) { return [UIColor systemOrangeColor]; }
 - (void)editNoteFor:(RYGMCParam *)p {
     RYGMobileConfig *e = [RYGMobileConfig shared];
     UIAlertController *c = [UIAlertController alertControllerWithTitle:RYGLocalized(@"Note")
-                                                              message:(p.name.length ? p.name : nil) preferredStyle:UIAlertControllerStyleAlert];
+                                                              message:(p.name.length ? p.name : nil)
+                                                       preferredStyle:UIAlertControllerStyleAlert];
     [c addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.text = [e noteFor:p]; }];
     __weak __typeof__(self) ws = self;
     [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        [e setNote:c.textFields.firstObject.text for:p]; [ws.tableView reloadData];
+    [c addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"Save") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+        [e setNote:c.textFields.firstObject.text for:p];
+        [ws.tableView reloadData];
     }]];
     [self presentViewController:c animated:YES completion:nil];
 }

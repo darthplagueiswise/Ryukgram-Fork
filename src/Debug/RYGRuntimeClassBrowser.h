@@ -3,14 +3,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface RYGRuntimeClassRow : NSObject
-@property (nonatomic, copy) NSString *imagePath;
-@property (nonatomic, copy) NSString *className;
-@property (nonatomic, assign) NSUInteger instanceMethodCount;
-@property (nonatomic, assign) NSUInteger classMethodCount;
-@property (nonatomic, assign) NSUInteger propertyCount;
-@end
-
+// Compatibility presentation models used by the existing class-detail UI.
+// RYGRuntimeClassRow itself is owned by RYGRuntimeBrowserEngine so there is a
+// single runtime/image enumeration implementation.
 @interface RYGRuntimeMethodRow : NSObject
 @property (nonatomic, copy) NSString *imagePath;
 @property (nonatomic, copy) NSString *className;
@@ -24,10 +19,11 @@ NS_ASSUME_NONNULL_BEGIN
 @interface RYGRuntimePropertyRow : NSObject
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *attributes;
+@property (nonatomic, assign) BOOL classProperty;
 @end
 
-/// Structural Objective-C runtime browser. It never classifies methods by name
-/// and never calls target methods while enumerating them.
+/// Thin UI adapter over RYGRuntimeBrowserEngine. No independent scan, feature
+/// keyword classification, cached table, or Class-object retention lives here.
 @interface RYGRuntimeClassBrowser : NSObject
 + (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath;
 + (NSArray<RYGRuntimeMethodRow *> *)methodsForClass:(RYGRuntimeClassRow *)row classMethods:(BOOL)classMethods;
