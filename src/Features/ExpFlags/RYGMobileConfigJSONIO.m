@@ -80,6 +80,11 @@ static id RYGMCParseCanonicalJSONValue(NSString *text, RYGMCType type) {
     return nil;
 }
 
+static NSNumber *RYGMCRuntimeOverrideKey(unsigned int configNumber, unsigned int paramIndex) {
+    uint64_t key = ((uint64_t)configNumber << 32) | (uint64_t)paramIndex;
+    return @(key);
+}
+
 static NSDictionary<NSNumber *, NSDictionary *> *RYGMCCatalogFromCurrentModels(RYGMobileConfig *mobileConfig) {
     NSMutableDictionary<NSNumber *, NSDictionary *> *catalog = [NSMutableDictionary dictionary];
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
@@ -252,9 +257,11 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
     NSMutableDictionary<NSNumber *, RYGMCConfig *> *configs = [NSMutableDictionary dictionary];
     for (RYGMCConfig *config in self.allConfigs) configs[@(config.number)] = config;
 
-    // Validate the entire canonical document first. Nothing is applied until
-    // every structural field and every known runtime-backed value is valid.
+    // The imported mc_overrides.json is the complete active document for every
+    // parameter whose ABI is known in this binary. Unknown/mapping-only rows are
+    // preserved in the canonical JSON, but never converted into fabricated PIDs.
     NSMutableArray<NSDictionary *> *actions = [NSMutableArray array];
+    NSMutableSet<NSNumber *> *desiredRuntimeKeys = [NSMutableSet set];
     for (id rawKey in json) {
         if (![rawKey isKindOfClass:NSString.class]) {
             if (error) *error = RYGMCJSONError(@"Every mc_overrides key must be a string.");
@@ -312,8 +319,6 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
 
             RYGMCParam *param = params[indexKey];
             if (!param || !param.isRuntimeBacked || !RYGMCTypeIsRuntimeValue(param.type)) {
-                // Valid canonical row whose current iOS binary has no typed
-                // runtime backing. Preserve it exactly; never invent a PID/type.
                 continue;
             }
             id value = RYGMCParseCanonicalJSONValue(valueText, param.type);
@@ -322,7 +327,18 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
                                                     key, paramIndex, param.typeName ?: @"unknown"]);
                 return NO;
             }
+            [desiredRuntimeKeys addObject:RYGMCRuntimeOverrideKey(param.configNumber, param.paramIndex)];
             [actions addObject:@{@"param":param, @"value":value}];
+        }
+    }
+
+    NSMutableArray<RYGMCParam *> *clearParams = [NSMutableArray array];
+    for (RYGMCConfig *config in self.allConfigs) {
+        for (RYGMCParam *param in config.params) {
+            if (!param.isRuntimeBacked || !RYGMCTypeIsRuntimeValue(param.type)) continue;
+            if ([self overrideStateFor:param] != RYGMCOverrideSet) continue;
+            NSNumber *runtimeKey = RYGMCRuntimeOverrideKey(param.configNumber, param.paramIndex);
+            if (![desiredRuntimeKeys containsObject:runtimeKey]) [clearParams addObject:param];
         }
     }
 
@@ -333,9 +349,6 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
     NSString *nativePath = [self ryg_nativeOverridesJSONPath];
     NSFileManager *fileManager = NSFileManager.defaultManager;
 
-    // Snapshot both disk representations before touching live state. If an
-    // existing file cannot even be read, abort rather than lose the last known
-    // good canonical document during rollback.
     BOOL cacheExisted = [fileManager fileExistsAtPath:cachePath];
     BOOL nativeExisted = nativePath.length && [fileManager fileExistsAtPath:nativePath];
     NSError *snapshotError = nil;
@@ -355,17 +368,24 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
         return NO;
     }
 
-    NSMutableArray<NSDictionary *> *previousOverrides = [NSMutableArray arrayWithCapacity:actions.count];
-    for (NSDictionary *action in actions) {
-        RYGMCParam *param = action[@"param"];
+    // Snapshot every touched runtime parameter once — both rows being replaced
+    // and old active rows that the imported final document intentionally omits.
+    NSMutableArray<NSDictionary *> *previousOverrides = [NSMutableArray arrayWithCapacity:actions.count + clearParams.count];
+    NSMutableSet<NSNumber *> *snapshottedKeys = [NSMutableSet set];
+    void (^snapshotParam)(RYGMCParam *) = ^(RYGMCParam *param) {
+        NSNumber *runtimeKey = RYGMCRuntimeOverrideKey(param.configNumber, param.paramIndex);
+        if ([snapshottedKeys containsObject:runtimeKey]) return;
+        [snapshottedKeys addObject:runtimeKey];
         BOOL hadOverride = [self overrideStateFor:param] == RYGMCOverrideSet;
         id previousValue = hadOverride ? [self overrideValueFor:param] : nil;
         [previousOverrides addObject:@{
-            @"param": param,
-            @"had": @(hadOverride),
-            @"value": previousValue ?: NSNull.null,
+            @"param":param,
+            @"had":@(hadOverride),
+            @"value":previousValue ?: NSNull.null,
         }];
-    }
+    };
+    for (RYGMCParam *param in clearParams) snapshotParam(param);
+    for (NSDictionary *action in actions) snapshotParam(action[@"param"]);
 
     void (^rollbackLiveState)(void) = ^{
         for (NSInteger index = (NSInteger)previousOverrides.count - 1; index >= 0; index--) {
@@ -395,6 +415,8 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
             }
         }
     };
+
+    for (RYGMCParam *param in clearParams) [self clearOverrideFor:param];
 
     NSUInteger applied = 0;
     for (NSDictionary *action in actions) {
