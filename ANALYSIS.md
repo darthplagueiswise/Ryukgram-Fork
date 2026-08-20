@@ -9,7 +9,7 @@ This branch does not treat hook signatures or MobileConfig serialization as gues
 - `id_name_mapping.json`: SHA-256 `65b9bf0d65b1c79742b5ad6696c9daded24be1fc808f0b1f3054c70b74214419`
 - `mc_overrides.json`: SHA-256 `b023ca6131e73cf6d14cc1dc335c143d754ba27524846b8abc986fb60ee192d6`
 
-The uploaded application binaries were inspected directly as Mach-O/arm64 using `llvm-objdump` plus explicit parsing of Objective-C relative method lists, dyld chained fixups and the MobileConfig parameter table. The build workflow separately parses/disassembles the produced RyukGram dylib with LIEF, Capstone and radare2.
+The uploaded application binaries were inspected directly as Mach-O/arm64 using `llvm-objdump` plus explicit parsing of Objective-C relative method lists, dyld chained fixups and the MobileConfig parameter table. These notes preserve that one-time ABI validation; the normal dogfood build no longer reruns a post-build LIEF/Capstone/radare2 validation stage.
 
 ## Easy Gating
 
