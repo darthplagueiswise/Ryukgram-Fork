@@ -1,4 +1,5 @@
 #import "RYGRuntimeClassBrowser.h"
+#import <objc/runtime.h>
 
 @implementation RYGRuntimeMethodRow @end
 @implementation RYGRuntimePropertyRow @end
@@ -15,7 +16,23 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
 @implementation RYGRuntimeClassBrowser
 
 + (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath {
-    return [RYGRuntimeBrowserEngine classesForImagePath:imagePath] ?: @[];
+    NSArray<RYGRuntimeClassRow *> *rows = [RYGRuntimeBrowserEngine classesForImagePath:imagePath] ?: @[];
+    for (RYGRuntimeClassRow *row in rows) {
+        Class cls = row.className.length ? objc_lookUpClass(row.className.UTF8String) : Nil;
+        if (!cls) continue;
+        unsigned int instanceCount = 0, classCount = 0, propertyCount = 0;
+        Method *instanceMethods = class_copyMethodList(cls, &instanceCount);
+        if (instanceMethods) free(instanceMethods);
+        Class meta = object_getClass(cls);
+        Method *classMethods = meta ? class_copyMethodList(meta, &classCount) : NULL;
+        if (classMethods) free(classMethods);
+        objc_property_t *properties = class_copyPropertyList(cls, &propertyCount);
+        if (properties) free(properties);
+        row.instanceMethodCount = instanceCount;
+        row.classMethodCount = classCount;
+        row.propertyCount = propertyCount;
+    }
+    return rows;
 }
 
 + (NSArray<RYGRuntimeMethodRow *> *)methodsForClass:(RYGRuntimeClassRow *)row classMethods:(BOOL)classMethods {
