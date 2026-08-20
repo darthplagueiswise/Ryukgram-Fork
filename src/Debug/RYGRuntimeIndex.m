@@ -55,12 +55,14 @@ static NSString *RYGIndexRuntimeNameForPath(NSString *path) {
     return nil;
 }
 
-static BOOL RYGIndexClassBelongsToHeader(Class cls, const struct mach_header *target) {
-    if (!cls || !target) return NO;
+static BOOL RYGIndexClassBelongsToImage(Class cls, NSString *runtimeName, NSString *canonical) {
+    if (!cls || !runtimeName.length || !canonical.length) return NO;
     const char *raw = class_getImageName(cls);
-    if (!raw) return NO;
+    if (!raw || !*raw) return NO;
+    const char *wanted = runtimeName.fileSystemRepresentation;
+    if (wanted && strcmp(raw, wanted) == 0) return YES;
     NSString *runtimePath = [NSString stringWithUTF8String:raw];
-    return RYGIndexHeaderForPath(runtimePath) == target;
+    return [RYGIndexCanonicalPath(runtimePath) isEqualToString:canonical];
 }
 
 static const char *RYGIndexSkipQualifiers(const char *type) {
@@ -145,8 +147,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 
     // Sideload paths can differ textually from dyld's registered image name.
     // If the direct API returns nothing, fall back to the runtime class list and
-    // compare image headers rather than filesystem strings. This still runs only
-    // on the serial utility queue.
+    // compare image ownership off-main-thread without touching executable pages.
     if (!declaredNames.count) {
         int total = objc_getClassList(NULL, 0);
         if (total <= 0 || total > 500000) return result;
@@ -155,7 +156,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
         int filled = objc_getClassList(classes, total);
         for (int index = 0; index < filled; index++) {
             Class cls = classes[index];
-            if (!RYGIndexClassBelongsToHeader(cls, target)) continue;
+            if (!RYGIndexClassBelongsToImage(cls, runtimeName, canonical)) continue;
             const char *rawClass = class_getName(cls);
             if (!rawClass || !*rawClass) continue;
             NSString *name = [NSString stringWithUTF8String:rawClass];
@@ -174,7 +175,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     for (NSString *className in orderedNames) {
         @autoreleasepool {
             Class cls = objc_lookUpClass(className.UTF8String);
-            if (!cls || !RYGIndexClassBelongsToHeader(cls, target)) continue;
+            if (!cls || !RYGIndexClassBelongsToImage(cls, runtimeName, canonical)) continue;
 
             NSMutableArray<RYGRuntimeBoolMethod *> *rows = nil;
             NSUInteger instanceCount = 0;
