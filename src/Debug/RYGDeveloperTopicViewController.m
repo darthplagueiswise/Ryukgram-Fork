@@ -171,10 +171,21 @@ static BOOL RYGOpenDogfoodSettings(void) {
     if (!method || method_getNumberOfArguments(method) != 5 || !RYGMethodReturns(method, 'v') || !RYGMethodArgumentMatches(method, 2, '@') || !RYGMethodArgumentMatches(method, 3, '@') || !RYGMethodArgumentMatches(method, 4, '@')) return NO;
     UIViewController *top = RYGTopViewController(); if (!top) return NO; ((void (*)(id, SEL, id, id, id))objc_msgSend)((id)cls, selector, gRYGDogfoodConfig, top, gRYGDogfoodUserSession); return YES;
 }
+static RYGRuntimeBoolMethod *RYGStoryTrayGateMethod(void) {
+    return RYGMethodsForOwner(@"_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs", YES, @[@"isTrayAttachedToHeaderEnabled:"]).firstObject;
+}
 static BOOL RYGOpenStoryTrayDebug(void) {
+    RYGRuntimeBoolMethod *gate = RYGStoryTrayGateMethod();
+    if (!gate) return NO;
+    [RYGRuntimeBrowserEngine observeMethod:gate];
+    NSNumber *current = gate.liveValue;
+    if (!current) return NO;
     Class cls = objc_lookUpClass("_TtC25IGOverlayStoriesTrayDebug39IGOverlayStoriesTrayDebugViewController"); SEL selector = NSSelectorFromString(@"presentFrom:currentlyEnabled:onApplyAndRestart:"); Method method = cls ? class_getClassMethod(cls, selector) : NULL;
     if (!method || method_getNumberOfArguments(method) != 5 || !RYGMethodReturns(method, 'v') || !RYGMethodArgumentMatches(method, 2, '@') || !RYGMethodArgumentMatches(method, 3, 'B') || !RYGMethodArgumentMatches(method, 4, '@')) return NO;
-    UIViewController *top = RYGTopViewController(); if (!top) return NO; void (^completion)(void) = ^{}; ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)((id)cls, selector, top, NO, completion); return YES;
+    UIViewController *top = RYGTopViewController(); if (!top) return NO;
+    void (^completion)(void) = ^{};
+    ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)((id)cls, selector, top, current.boolValue, completion);
+    return YES;
 }
 
 static id RYGSharedHelper(NSString *className) {
@@ -230,6 +241,7 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
     [super viewDidLoad]; self.title = RYGSurfaceTitle(self.surface); self.view.backgroundColor = [RYGPopupChrome backgroundColor]; self.tableView.backgroundColor = [RYGPopupChrome backgroundColor]; self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag; self.tableView.rowHeight = UITableViewAutomaticDimension; self.tableView.estimatedRowHeight = 54.0;
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil]; self.searchController.searchResultsUpdater = self; self.searchController.obscuresBackgroundDuringPresentation = NO; self.searchController.searchBar.placeholder = @"Class or method"; self.navigationItem.searchController = self.searchController; self.navigationItem.hidesSearchBarWhenScrolling = YES;
     RYGLiquidGlassApplyToViewController(self); [[self class] activatePersistedNativeFeatures]; [self rebuildNativeControls]; [self refreshRows];
+    if (self.surface == RYGDeveloperRuntimeSurfaceStories) { RYGRuntimeBoolMethod *gate = RYGStoryTrayGateMethod(); if (gate) [RYGRuntimeBrowserEngine observeMethod:gate]; }
 }
 - (void)refreshRows { self.allRows = RYGRowsForSurface(self.surface); [self rebuildFilteredModel]; }
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { (void)searchController; [self rebuildFilteredModel]; }
@@ -240,7 +252,7 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
 }
 - (void)rebuildNativeControls {
     NSMutableArray *rows = [NSMutableArray array];
-    if (self.surface == RYGDeveloperRuntimeSurfaceStories) [rows addObject:@{@"kind":@"storyDebug", @"title":@"Open native Story Tray Debug", @"subtitle":@"IGOverlayStoriesTrayDebugViewController"}];
+    if (self.surface == RYGDeveloperRuntimeSurfaceStories) [rows addObject:@{@"kind":@"storyDebug", @"title":@"Open native Story Tray Debug", @"subtitle":@"Uses the live isTrayAttachedToHeaderEnabled: value; never invents the current state"}];
     else if (self.surface == RYGDeveloperRuntimeSurfaceLiquidGlass) { [rows addObject:@{@"kind":@"throwback", @"title":@"Throwback Chrome", @"subtitle":@"Native overrideIsEnabled:"}]; [rows addObject:@{@"kind":@"navGlass", @"title":@"Liquid Glass Navigation", @"subtitle":@"Native overrideIsEnabled:"}]; }
     else if (self.surface == RYGDeveloperRuntimeSurfaceInternalOnly || self.surface == RYGDeveloperRuntimeSurfaceBugReport || self.surface == RYGDeveloperRuntimeSurfaceSettingsRows) [rows addObject:@{@"kind":@"internal", @"title":@"Expose Internal Settings", @"subtitle":@"Exact IGBugReportMenu initializer flags"}];
     else if (self.surface == RYGDeveloperRuntimeSurfaceDirectDogfood) {
@@ -264,7 +276,7 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
     UIAction *nativeAction = [UIAction actionWithTitle:@"Native" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData]; }]; nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
     UIAction *on = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData]; }]; on.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
     UIAction *off = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData]; }]; off.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
-    button.menu = [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[nativeAction, on, off]]; button.showsMenuAsPrimaryAction = YES; return button;
+    button.menu = [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[nativeAction, on, off]]; button.showsMenuAsPrimaryAction = YES; button.changesSelectionAsPrimaryAction = YES; return button;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -291,7 +303,9 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     if (self.nativeControls.count && indexPath.section == 0) {
         NSString *kind = self.nativeControls[(NSUInteger)indexPath.row][@"kind"];
-        if ([kind isEqualToString:@"storyDebug"]) { if (!RYGOpenStoryTrayDebug()) [RYGUtils showErrorHUDWithDescription:@"Native Story Tray Debug controller is not available with the validated ABI"]; }
+        if ([kind isEqualToString:@"storyDebug"]) {
+            if (!RYGOpenStoryTrayDebug()) [RYGUtils showErrorHUDWithDescription:@"Story Tray observer is armed, but Instagram has not produced a native isTrayAttachedToHeaderEnabled: value yet. Return to the feed/Stories once and retry; RyukGram will not invent the current state."];
+        }
         else if ([kind isEqualToString:@"dogfoodOpen"]) { if (!RYGOpenDogfoodSettings()) [RYGUtils showErrorHUDWithDescription:@"Open the native Dogfooding Assistant once so Instagram creates a real IGDogfoodingSettingsConfig; RyukGram will capture and reuse it"]; }
         else if ([kind isEqualToString:@"dogfoodLauncher"]) { if (!RYGReapplyCapturedDogfoodLauncher()) [RYGUtils showErrorHUDWithDescription:@"No native Dogfooding launcher invocation has been captured yet"]; }
         else if ([kind isEqualToString:@"easyGating"]) { [RYGEasyGatingRuntime.shared installIfNeeded]; [RYGUtils showToastForDuration:1.2 title:@"EasyGating observer installed" subtitle:[NSString stringWithFormat:@"%lu final IDs observed", (unsigned long)RYGEasyGatingRuntime.shared.observations.count]]; }
