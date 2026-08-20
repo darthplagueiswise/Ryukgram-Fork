@@ -109,9 +109,12 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
     glass.imagePadding = old ? old.imagePadding : 6.0;
     glass.titlePadding = old.titlePadding;
     if (old) glass.cornerStyle = old.cornerStyle;
-    glass.baseForegroundColor = old.baseForegroundColor ?: button.tintColor;
 
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
+    // A selector is semantic label text inside a Glass pill. Falling back to
+    // UIButton.tintColor here inherited the system-link blue and is what made
+    // the selected value look detached from the Liquid Glass selector.
+    glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
     if (menuSource) {
         // A menu-source button participates in UIKit's own closed→expanded
         // morph. Default metrics are part of that transition contract; custom
@@ -137,6 +140,7 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
         if ([configured isEqualToString:stateKey]) return;
 
         button.backgroundColor = UIColor.clearColor;
+        if (menuSource) button.tintColor = UIColor.labelColor;
         button.configuration = RYGGlassConfigurationForButton(button, prominent);
         objc_setAssociatedObject(button,
                                  kRYGGlassButtonConfiguredKey,

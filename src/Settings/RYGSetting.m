@@ -62,27 +62,43 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
     return nil;
 }
 
+static void RYGUpdateMenuButtonPresentation(UIButton *button) {
+    if (!button) return;
+    NSString *selectedTitle = RYGSelectedTitleForMenu(button.menu);
+    NSString *title = selectedTitle.length ? selectedTitle : @"•••";
+
+    UIButtonConfiguration *configuration = button.configuration;
+    if (configuration) {
+        configuration.title = title;
+        // Menu selectors are labels/choices, not blue link-style actions.
+        // Keep UIKit's Glass material but use semantic label foreground.
+        configuration.baseForegroundColor = UIColor.labelColor;
+        if (@available(iOS 26.0, *)) [configuration setDefaultContentInsets];
+        button.configuration = configuration;
+    } else {
+        [button setTitle:title forState:UIControlStateNormal];
+        [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
+    }
+    [button invalidateIntrinsicContentSize];
+}
+
 - (UIMenu *)menuForButton:(UIButton *)button {
     UIMenu *menu = [self submenuForButton:nil submenu:self.baseMenu];
-    NSString *selectedTitle = RYGSelectedTitleForMenu(menu);
     if (!button) return menu;
 
     button.menu = menu;
     button.showsMenuAsPrimaryAction = YES;
-    // RYGTableCellMenu is a selector by contract. Let UIKit own the selected
-    // element, closed title and the Liquid Glass expansion/morph transition.
     button.changesSelectionAsPrimaryAction = YES;
-    RYGLiquidGlassConfigureButton(button, NO);
+    button.tintColor = UIColor.labelColor;
 
-    UIButtonConfiguration *configuration = button.configuration;
-    if (configuration) {
-        configuration.title = selectedTitle.length ? selectedTitle : @"•••";
-        if (@available(iOS 26.0, *)) [configuration setDefaultContentInsets];
-        button.configuration = configuration;
-    } else {
-        [button setTitle:selectedTitle.length ? selectedTitle : @"•••" forState:UIControlStateNormal];
-    }
-    [button invalidateIntrinsicContentSize];
+    // Configure only the real menu-source button. UIKit owns the source size,
+    // expanded menu geometry and closed→expanded Liquid Glass morph.
+    RYGLiquidGlassConfigureButton(button, NO);
+    button.configurationUpdateHandler = ^(UIButton *source) {
+        RYGUpdateMenuButtonPresentation(source);
+    };
+    RYGUpdateMenuButtonPresentation(button);
+    [button setNeedsUpdateConfiguration];
     return menu;
 }
 
@@ -107,8 +123,9 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
             continue;
         }
 
-        // UIAction owns its handler/state. Preserve the UIKit element so the
-        // native menu source can morph and update without a second renderer.
+        // UIAction owns its handler/state. Preserve the original UIKit element;
+        // changesSelectionAsPrimaryAction updates its single-selection state and
+        // the button's configurationUpdateHandler mirrors that state in the pill.
         [children addObject:element];
     }
 
