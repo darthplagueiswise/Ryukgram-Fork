@@ -1,7 +1,7 @@
 #import "RYGDeveloperHubViewController.h"
 #import "RYGDeveloperTopicViewController.h"
 #import "RYGWordmarkViewController.h"
-#import "RYGRuntimeBrowserViewController.h"
+#import "RYGFastRuntimeBrowserViewController.h"
 #import "RYGEasyGatingViewController.h"
 #import "RYGMetaLocalExperimentBrowser.h"
 #import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
@@ -28,8 +28,9 @@
     RYGSetting *subs = [RYGSetting navigationCellWithTitle:@"SubsConsumer / IGPlus / Aura" subtitle:@"IGConsumerSubsService owner" icon:[RYGSymbol symbolWithName:@"heart"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceConsumerSubs]];
     RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only" subtitle:@"Exact Bug Reporter menu visibility ABI" icon:[RYGSymbol symbolWithName:@"eye"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
     RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Dogfooding Mode" subtitle:@"Native menu + resolved MobileConfig + EasyGating" icon:[RYGSymbol symbolWithName:@"paw"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
+    // Keep the proven native MetaLocalExperiment presentation path unchanged.
     RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment" subtitle:nil icon:[RYGSymbol symbolWithName:@"insights"] action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Image → ABI-validated BOOL methods · native value + explicit override" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGRuntimeBrowserViewController new]];
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Cached image index · ABI-validated BOOL methods · explicit observation/override" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGFastRuntimeBrowserViewController new]];
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, easyGating, mobileConfig]],
