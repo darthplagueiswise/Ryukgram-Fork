@@ -14,7 +14,7 @@
 
 static NSString *const kRYGInternalMenuPref = @"ryg_dev_internal_menu_enabled";
 static NSString *const kRYGDogfoodModePref = @"ryg_dev_dogfood_mode_enabled";
-static NSString *const kRYGDogfoodOwnsAssistantMCPref = @"ryg_dev_dogfood_owns_assistant_mc";
+static NSString *const kRYGDogfoodOwnedMCStatePref = @"ryg_dev_dogfood_owned_mc_state_v2";
 static const void *kRYGNativeControlKey = &kRYGNativeControlKey;
 static const void *kRYGMCParamKey = &kRYGMCParamKey;
 
@@ -35,6 +35,7 @@ static NSDictionary *gRYGDogfoodLauncherParameters;
 static NSInteger gRYGPrismSetterMode = -1;
 static NSInteger gRYGRedesignSetterMode = -1;
 static BOOL gRYGDeveloperBootstrapScheduled;
+static BOOL gRYGDeveloperImageCallbackRegistered;
 
 #pragma mark - ABI validation
 
@@ -55,7 +56,12 @@ static BOOL RYGTypeIsObject(const char *type) {
 
 static BOOL RYGTypeIsInteger(const char *type) {
     type = RYGUnqualifiedType(type);
-    return type && strchr("cCsSiIlLqQB", *type) != NULL;
+    return type && strchr("cCsSiIlLqQ", *type) != NULL;
+}
+
+static BOOL RYGTypeIsInt64(const char *type) {
+    type = RYGUnqualifiedType(type);
+    return type && (*type == 'q' || *type == 'Q');
 }
 
 static BOOL RYGMethodReturns(Method method, char expected) {
@@ -76,7 +82,7 @@ static BOOL RYGMethodArgumentMatches(Method method, unsigned int index, char exp
     method_getArgumentType(method, index, encoded, sizeof(encoded));
     if (expected == '@') return RYGTypeIsObject(encoded);
     if (expected == 'B') return RYGTypeIsBool(encoded);
-    if (expected == 'Q') return RYGTypeIsInteger(encoded);
+    if (expected == 'Q') return RYGTypeIsInt64(encoded);
     return NO;
 }
 
@@ -434,39 +440,113 @@ static BOOL RYGSetNativeHelperBool(NSString *className, NSString *selectorName, 
 
 #pragma mark - Resolved MobileConfig dogfood integration
 
-static BOOL RYGCaseEqual(NSString *left, NSString *right) {
-    return left.length && right.length && [left caseInsensitiveCompare:right] == NSOrderedSame;
-}
+typedef struct {
+    unsigned int configNumber;
+    unsigned int paramIndex;
+    const char *label;
+} RYGDogfoodMCTarget;
 
-static RYGMCParam *RYGFindResolvedMCParam(NSString *configName, NSString *paramName) {
-    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig reloadFromRuntime];
+static const RYGDogfoodMCTarget kRYGDogfoodCoreMCTargets[] = {
+    {56474, 0, "ig_is_employee.is_employee"},
+    {56474, 1, "ig_is_employee.is_employee_or_employee_test_account"},
+    {90775, 1, "ig_dogfooding_assistant.show_in_bug_report_menu"},
+    {58792, 0, "ig_dogfooding_first_client.is_enabled"},
+};
+
+static RYGMCParam *RYGFindMCParamByIdentity(RYGMobileConfig *mobileConfig, unsigned int configNumber, unsigned int paramIndex) {
+    if (!mobileConfig) return nil;
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
-        if (!RYGCaseEqual(config.name, configName)) continue;
+        if (config.number != configNumber) continue;
         for (RYGMCParam *param in config.params) {
-            if (param.isRuntimeBacked && RYGCaseEqual(param.name, paramName)) return param;
+            if (param.paramIndex == paramIndex && param.isRuntimeBacked) return param;
         }
+        break;
     }
     return nil;
 }
 
-static BOOL RYGApplyDogfoodAssistantMobileConfig(BOOL enabled) {
+static NSString *RYGDogfoodMCIdentity(unsigned int configNumber, unsigned int paramIndex) {
+    return [NSString stringWithFormat:@"%u:%u", configNumber, paramIndex];
+}
+
+static NSDictionary *RYGDogfoodOwnedMCState(void) {
+    id value = [NSUserDefaults.standardUserDefaults dictionaryForKey:kRYGDogfoodOwnedMCStatePref];
+    return [value isKindOfClass:NSDictionary.class] ? value : @{};
+}
+
+static NSUInteger RYGApplyDogfoodCoreMobileConfig(BOOL enabled, NSUInteger *availableCount) {
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    RYGMCParam *param = RYGFindResolvedMCParam(@"ig_dogfooding_assistant", @"show_in_bug_report_menu");
-    if (!param || param.type != RYGMCTypeBool) return NO;
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if (enabled) {
-        BOOL alreadyOwned = [defaults boolForKey:kRYGDogfoodOwnsAssistantMCPref];
-        if ([mobileConfig overrideStateFor:param] == RYGMCOverrideSet && !alreadyOwned) return YES;
-        if (![mobileConfig setOverride:@YES for:param]) return NO;
-        [defaults setBool:YES forKey:kRYGDogfoodOwnsAssistantMCPref];
-        return YES;
+    [mobileConfig reloadFromRuntime];
+    NSMutableDictionary *owned = [RYGDogfoodOwnedMCState() mutableCopy];
+    NSUInteger available = 0, changed = 0;
+
+    for (NSUInteger index = 0; index < sizeof(kRYGDogfoodCoreMCTargets) / sizeof(kRYGDogfoodCoreMCTargets[0]); index++) {
+        const RYGDogfoodMCTarget target = kRYGDogfoodCoreMCTargets[index];
+        NSString *identity = RYGDogfoodMCIdentity(target.configNumber, target.paramIndex);
+        RYGMCParam *param = RYGFindMCParamByIdentity(mobileConfig, target.configNumber, target.paramIndex);
+        if (!param || param.type != RYGMCTypeBool) continue;
+        available++;
+
+        if (enabled) {
+            NSDictionary *ownership = [owned[identity] isKindOfClass:NSDictionary.class] ? owned[identity] : nil;
+            NSNumber *existing = [mobileConfig overrideValueFor:param];
+            if (!ownership && existing && existing.boolValue) continue;
+
+            if (!ownership) {
+                NSMutableDictionary *record = [NSMutableDictionary dictionary];
+                BOOL hadOverride = [mobileConfig overrideStateFor:param] == RYGMCOverrideSet;
+                record[@"hadOverride"] = @(hadOverride);
+                if (hadOverride && existing) record[@"previousValue"] = @([existing boolValue]);
+                record[@"label"] = [NSString stringWithUTF8String:target.label] ?: identity;
+                ownership = record.copy;
+            }
+
+            if ([mobileConfig setOverride:@YES for:param]) {
+                owned[identity] = ownership;
+                changed++;
+            }
+        } else {
+            NSDictionary *ownership = [owned[identity] isKindOfClass:NSDictionary.class] ? owned[identity] : nil;
+            if (!ownership) continue;
+            BOOL hadOverride = [ownership[@"hadOverride"] boolValue];
+            NSNumber *previous = [ownership[@"previousValue"] isKindOfClass:NSNumber.class] ? ownership[@"previousValue"] : nil;
+            if (hadOverride && previous) {
+                if ([mobileConfig setOverride:previous for:param]) {
+                    [owned removeObjectForKey:identity];
+                    changed++;
+                }
+            } else {
+                [mobileConfig clearOverrideFor:param];
+                [owned removeObjectForKey:identity];
+                changed++;
+            }
+        }
     }
-    if ([defaults boolForKey:kRYGDogfoodOwnsAssistantMCPref]) {
-        [mobileConfig clearOverrideFor:param];
-        [defaults removeObjectForKey:kRYGDogfoodOwnsAssistantMCPref];
+
+    if (owned.count) [NSUserDefaults.standardUserDefaults setObject:owned.copy forKey:kRYGDogfoodOwnedMCStatePref];
+    else [NSUserDefaults.standardUserDefaults removeObjectForKey:kRYGDogfoodOwnedMCStatePref];
+    if (availableCount) *availableCount = available;
+    return changed;
+}
+
+static NSArray<RYGMCParam *> *RYGExactPrismMCCandidates(void) {
+    static const unsigned int targets[][2] = {
+        {111146, 1},
+        {111146, 3},
+        {76504, 1},
+        {76504, 19},
+        {76504, 21},
+        {44021, 9},
+        {44021, 18},
+    };
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+    [mobileConfig reloadFromRuntime];
+    NSMutableArray<RYGMCParam *> *rows = [NSMutableArray array];
+    for (NSUInteger index = 0; index < sizeof(targets) / sizeof(targets[0]); index++) {
+        RYGMCParam *param = RYGFindMCParamByIdentity(mobileConfig, targets[index][0], targets[index][1]);
+        if (param && param.type == RYGMCTypeBool) [rows addObject:param];
     }
-    return YES;
+    return rows.copy;
 }
 
 static BOOL RYGDogfoodCandidateName(NSString *name) {
@@ -494,6 +574,10 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
 
 #pragma mark - Controller
 
+static void RYGDeveloperNativeImageDidLoad(const struct mach_header *header, intptr_t slide);
+static void RYGEnsureDeveloperImageCallback(void);
+static void RYGScheduleDeveloperNativeActivation(void);
+
 @interface RYGDeveloperTopicViewController () <UISearchResultsUpdating>
 @property (nonatomic, assign) RYGDeveloperRuntimeSurface surface;
 @property (nonatomic, strong) UISearchController *searchController;
@@ -515,6 +599,7 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
         RYGInstallDogfoodConfigCapture();
         RYGInstallDogfoodLauncherCapture();
         [RYGEasyGatingRuntime.shared installIfNeeded];
+        (void)RYGApplyDogfoodCoreMobileConfig(YES, NULL);
     }
 }
 
@@ -559,7 +644,9 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
 - (void)rebuildModels {
     self.allRows = RYGRowsForSurface(self.surface);
     [self rebuildNativeControls];
-    self.mobileConfigCandidates = self.surface == RYGDeveloperRuntimeSurfaceDirectDogfood ? RYGResolvedDogfoodMCCandidates() : @[];
+    if (self.surface == RYGDeveloperRuntimeSurfaceDirectDogfood) self.mobileConfigCandidates = RYGResolvedDogfoodMCCandidates();
+    else if (self.surface == RYGDeveloperRuntimeSurfacePrism) self.mobileConfigCandidates = RYGExactPrismMCCandidates();
+    else self.mobileConfigCandidates = @[];
     [self rebuildFilteredModel];
 }
 
@@ -646,7 +733,11 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
     if (self.nativeControls.count && section == 0) return @"Native controls";
     NSInteger classIndex = section - [self nativeSectionCount];
     if (classIndex >= 0 && classIndex < (NSInteger)self.classSections.count) return self.classSections[(NSUInteger)classIndex];
-    if (self.mobileConfigCandidates.count && section == [self mobileConfigSectionIndex]) return @"Resolved MobileConfig · dogfood / employee / internal";
+    if (self.mobileConfigCandidates.count && section == [self mobileConfigSectionIndex]) {
+        return self.surface == RYGDeveloperRuntimeSurfacePrism
+            ? @"Validated Prism MobileConfig"
+            : @"Resolved MobileConfig · dogfood / employee / internal";
+    }
     return nil;
 }
 
@@ -795,22 +886,30 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
     NSString *kind = objc_getAssociatedObject(toggle, kRYGNativeControlKey);
     if ([kind isEqualToString:@"internal"]) {
         [NSUserDefaults.standardUserDefaults setBool:toggle.isOn forKey:kRYGInternalMenuPref];
-        if (toggle.isOn) RYGInstallBugMenuHooks();
+        if (toggle.isOn) {
+            RYGEnsureDeveloperImageCallback();
+            RYGInstallBugMenuHooks();
+            RYGScheduleDeveloperNativeActivation();
+        }
         return;
     }
     if ([kind isEqualToString:@"dogfood"]) {
         [NSUserDefaults.standardUserDefaults setBool:toggle.isOn forKey:kRYGDogfoodModePref];
         if (toggle.isOn) {
+            RYGEnsureDeveloperImageCallback();
             RYGInstallBugMenuHooks();
             RYGInstallDogfoodConfigCapture();
             RYGInstallDogfoodLauncherCapture();
             [RYGEasyGatingRuntime.shared installIfNeeded];
-            BOOL mobileConfigApplied = RYGApplyDogfoodAssistantMobileConfig(YES);
+            NSUInteger available = 0;
+            NSUInteger mobileConfigChanged = RYGApplyDogfoodCoreMobileConfig(YES, &available);
             BOOL launcherReapplied = RYGReapplyCapturedDogfoodLauncher();
-            [RYGUtils showToastForDuration:2.0 title:@"Dogfooding enabled" subtitle:[NSString stringWithFormat:@"assistant MC %@ · launcher %@", mobileConfigApplied ? @"ready" : @"not resolved", launcherReapplied ? @"reapplied" : @"awaiting native context"]];
+            RYGScheduleDeveloperNativeActivation();
+            [RYGUtils showToastForDuration:2.0 title:@"Dogfooding enabled" subtitle:[NSString stringWithFormat:@"core MC %lu/%lu active · launcher %@", (unsigned long)mobileConfigChanged, (unsigned long)available, launcherReapplied ? @"reapplied" : @"awaiting native context"]];
         } else {
-            (void)RYGApplyDogfoodAssistantMobileConfig(NO);
-            [RYGUtils showToastForDuration:1.5 title:@"Dogfooding disabled" subtitle:@"Only RyukGram-owned dogfooding MobileConfig override was cleared"];
+            NSUInteger available = 0;
+            NSUInteger restored = RYGApplyDogfoodCoreMobileConfig(NO, &available);
+            [RYGUtils showToastForDuration:1.5 title:@"Dogfooding disabled" subtitle:[NSString stringWithFormat:@"%lu RyukGram-owned MC value(s) restored", (unsigned long)restored]];
         }
         [self rebuildModels];
         return;
@@ -851,6 +950,14 @@ static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
 
 #pragma mark - Persisted exact native activation
 
+static void RYGEnsureDeveloperImageCallback(void) {
+    @synchronized(RYGDeveloperTopicViewController.class) {
+        if (gRYGDeveloperImageCallbackRegistered) return;
+        gRYGDeveloperImageCallbackRegistered = YES;
+    }
+    _dyld_register_func_for_add_image(RYGDeveloperNativeImageDidLoad);
+}
+
 static void RYGScheduleDeveloperNativeActivation(void) {
     @synchronized(RYGDeveloperTopicViewController.class) {
         if (gRYGDeveloperBootstrapScheduled) return;
@@ -872,7 +979,7 @@ __attribute__((constructor(210))) static void RYGDeveloperNativeBootstrap(void) 
     @autoreleasepool {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         if (![defaults boolForKey:kRYGDogfoodModePref] && ![defaults boolForKey:kRYGInternalMenuPref]) return;
-        _dyld_register_func_for_add_image(RYGDeveloperNativeImageDidLoad);
+        RYGEnsureDeveloperImageCallback();
         RYGScheduleDeveloperNativeActivation();
     }
 }
