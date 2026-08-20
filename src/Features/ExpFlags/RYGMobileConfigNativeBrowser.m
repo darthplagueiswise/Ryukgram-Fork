@@ -4,8 +4,11 @@
 #import "../../UI/RYGLiquidGlass.h"
 #import "../../UI/RYGPopupChrome.h"
 #import "../../Utils.h"
-#import <math.h>
+#import <objc/runtime.h>
 #include <stdlib.h>
+
+static NSString *const kRYGMobileConfigNamesDidChangeNotification = @"RYGMobileConfigNamesDidChange";
+static const void *kRYGMCParamKey = &kRYGMCParamKey;
 
 typedef NS_ENUM(NSInteger, RYGMCBrowserScope) {
     RYGMCBrowserScopeAll = 0,
@@ -14,17 +17,16 @@ typedef NS_ENUM(NSInteger, RYGMCBrowserScope) {
     RYGMCBrowserScopeOverridden,
 };
 
-static NSString *const kRYGMobileConfigNamesDidChangeNotification = @"RYGMobileConfigNamesDidChange";
-
 static NSString *RYGMCNormalize(NSString *value) {
     if (!value.length) return @"";
     NSMutableString *result = [NSMutableString stringWithCapacity:value.length];
-    BOOL previousSpace = YES;
     NSString *lower = value.lowercaseString;
-    for (NSUInteger index = 0; index < lower.length; index++) {
-        unichar character = [lower characterAtIndex:index];
-        if ((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')) {
-            [result appendFormat:@"%C", character];
+    BOOL previousSpace = YES;
+    for (NSUInteger i = 0; i < lower.length; i++) {
+        unichar c = [lower characterAtIndex:i];
+        BOOL alnum = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        if (alnum) {
+            [result appendFormat:@"%C", c];
             previousSpace = NO;
         } else if (!previousSpace) {
             [result appendString:@" "];
@@ -37,10 +39,8 @@ static NSString *RYGMCNormalize(NSString *value) {
 static NSArray<NSString *> *RYGMCTokens(NSString *query) {
     NSString *normalized = RYGMCNormalize(query);
     if (!normalized.length) return @[];
-    NSMutableArray<NSString *> *tokens = [NSMutableArray array];
-    for (NSString *part in [normalized componentsSeparatedByString:@" "]) {
-        if (part.length) [tokens addObject:part];
-    }
+    NSMutableArray *tokens = [NSMutableArray array];
+    for (NSString *part in [normalized componentsSeparatedByString:@" "]) if (part.length) [tokens addObject:part];
     return tokens.copy;
 }
 
@@ -70,48 +70,41 @@ static RYGMCParam *RYGMCCloneParam(RYGMCParam *source) {
 static NSArray<RYGMCConfig *> *RYGMCResolvedConfigs(void) {
     RYGMobileConfig *engine = RYGMobileConfig.shared;
     [engine prepare];
-
-    NSMutableDictionary<NSNumber *, RYGMCConfig *> *liveByNumber = [NSMutableDictionary dictionary];
-    for (RYGMCConfig *config in engine.allConfigs ?: @[]) liveByNumber[@(config.number)] = config;
+    NSMutableDictionary<NSNumber *, RYGMCConfig *> *live = [NSMutableDictionary dictionary];
+    for (RYGMCConfig *config in engine.allConfigs ?: @[]) live[@(config.number)] = config;
 
     NSDictionary<NSNumber *, NSDictionary *> *mapping = RYGMCLoadCachedNameMappingCatalog(NULL) ?: @{};
-    NSMutableSet<NSNumber *> *numbers = [NSMutableSet setWithArray:liveByNumber.allKeys];
+    NSMutableSet<NSNumber *> *numbers = [NSMutableSet setWithArray:live.allKeys];
     [numbers addObjectsFromArray:mapping.allKeys];
-    NSArray<NSNumber *> *ordered = [numbers.allObjects sortedArrayUsingSelector:@selector(compare:)];
-    NSMutableArray<RYGMCConfig *> *resolved = [NSMutableArray arrayWithCapacity:ordered.count];
+    NSArray<NSNumber *> *orderedNumbers = [numbers.allObjects sortedArrayUsingSelector:@selector(compare:)];
+    NSMutableArray<RYGMCConfig *> *resolved = [NSMutableArray arrayWithCapacity:orderedNumbers.count];
 
-    for (NSNumber *number in ordered) {
-        RYGMCConfig *live = liveByNumber[number];
-        NSDictionary *nameInfo = [mapping[number] isKindOfClass:NSDictionary.class] ? mapping[number] : @{};
-        NSString *mappedName = [nameInfo[@"name"] isKindOfClass:NSString.class] ? nameInfo[@"name"] : @"";
-        NSDictionary<NSNumber *, NSString *> *mappedParams = [nameInfo[@"params"] isKindOfClass:NSDictionary.class]
-            ? nameInfo[@"params"] : @{};
+    for (NSNumber *number in orderedNumbers) {
+        RYGMCConfig *liveConfig = live[number];
+        NSDictionary *info = [mapping[number] isKindOfClass:NSDictionary.class] ? mapping[number] : @{};
+        NSDictionary<NSNumber *, NSString *> *mappedParams = [info[@"params"] isKindOfClass:NSDictionary.class] ? info[@"params"] : @{};
+        NSString *mappedName = [info[@"name"] isKindOfClass:NSString.class] ? info[@"name"] : @"";
 
         RYGMCConfig *config = [RYGMCConfig new];
         config.number = number.unsignedIntValue;
-        config.name = mappedName.length ? mappedName : (live.name ?: @"");
-
+        config.name = mappedName.length ? mappedName : (liveConfig.name ?: @"");
         NSMutableDictionary<NSNumber *, RYGMCParam *> *params = [NSMutableDictionary dictionary];
-        for (RYGMCParam *liveParam in live.params ?: @[]) {
-            params[@(liveParam.paramIndex)] = RYGMCCloneParam(liveParam);
-        }
-        [mappedParams enumerateKeysAndObjectsUsingBlock:^(NSNumber *paramIndex, NSString *paramName, BOOL *stop) {
+        for (RYGMCParam *liveParam in liveConfig.params ?: @[]) params[@(liveParam.paramIndex)] = RYGMCCloneParam(liveParam);
+        [mappedParams enumerateKeysAndObjectsUsingBlock:^(NSNumber *index, NSString *name, BOOL *stop) {
             (void)stop;
-            RYGMCParam *param = params[paramIndex];
+            RYGMCParam *param = params[index];
             if (!param) {
                 param = [RYGMCParam new];
                 param.configNumber = number.unsignedIntValue;
-                param.paramIndex = paramIndex.unsignedIntValue;
+                param.paramIndex = index.unsignedIntValue;
                 param.type = RYGMCTypeUnknown;
                 param.runtimeBacked = NO;
-                params[paramIndex] = param;
+                params[index] = param;
             }
-            if ([paramName isKindOfClass:NSString.class] && paramName.length) param.name = paramName;
+            if ([name isKindOfClass:NSString.class] && name.length) param.name = name;
         }];
-
-        NSArray<NSNumber *> *indexes = [params.allKeys sortedArrayUsingSelector:@selector(compare:)];
-        NSMutableArray<RYGMCParam *> *orderedParams = [NSMutableArray arrayWithCapacity:indexes.count];
-        for (NSNumber *index in indexes) [orderedParams addObject:params[index]];
+        NSMutableArray *orderedParams = [NSMutableArray array];
+        for (NSNumber *index in [params.allKeys sortedArrayUsingSelector:@selector(compare:)]) [orderedParams addObject:params[index]];
         config.params = orderedParams.copy;
         [resolved addObject:config];
     }
@@ -119,16 +112,12 @@ static NSArray<RYGMCConfig *> *RYGMCResolvedConfigs(void) {
 }
 
 static BOOL RYGMCConfigSeen(RYGMCConfig *config) {
-    for (RYGMCParam *param in config.params) {
-        if (param.isRuntimeBacked && [RYGMobileConfig.shared callSiteFor:param].length) return YES;
-    }
+    for (RYGMCParam *param in config.params) if (param.isRuntimeBacked && [RYGMobileConfig.shared callSiteFor:param].length) return YES;
     return NO;
 }
 
 static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
-    for (RYGMCParam *param in config.params) {
-        if (param.isRuntimeBacked && [RYGMobileConfig.shared overrideStateFor:param] == RYGMCOverrideSet) return YES;
-    }
+    for (RYGMCParam *param in config.params) if (param.isRuntimeBacked && [RYGMobileConfig.shared overrideStateFor:param] == RYGMCOverrideSet) return YES;
     return NO;
 }
 
@@ -164,39 +153,28 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
     self.searchController.searchBar.placeholder = @"Config, ID or parameter";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
-
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
-        initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"]
-                 menu:[self scopeMenu]];
+        initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self scopeMenu]];
+
     self.tableView.refreshControl = [UIRefreshControl new];
     [self.tableView.refreshControl addTarget:self action:@selector(refreshRuntime) forControlEvents:UIControlEventValueChanged];
-
-    [NSNotificationCenter.defaultCenter addObserver:self
-                                           selector:@selector(namesDidChange:)
-                                               name:kRYGMobileConfigNamesDidChangeNotification
-                                             object:nil];
-    [self reloadModel:NO];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(namesDidChange:)
+                                               name:kRYGMobileConfigNamesDidChangeNotification object:nil];
     RYGLiquidGlassApplyToViewController(self);
-}
-
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
     [self reloadModel:NO];
 }
 
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reloadModel:NO]; }
 - (void)namesDidChange:(NSNotification *)notification { (void)notification; [self reloadModel:NO]; }
 - (void)refreshRuntime { [RYGMobileConfig.shared reloadFromRuntime]; [self reloadModel:NO]; [self.tableView.refreshControl endRefreshing]; }
 
 - (UIMenu *)scopeMenu {
-    NSArray<NSString *> *titles = @[@"All", @"Seen at runtime", @"Not seen", @"Overridden"];
-    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
+    NSArray *titles = @[@"All", @"Seen at runtime", @"Not seen", @"Overridden"];
+    NSMutableArray *actions = [NSMutableArray array];
     __weak typeof(self) weakSelf = self;
     for (NSInteger index = 0; index < (NSInteger)titles.count; index++) {
-        UIAction *action = [UIAction actionWithTitle:titles[(NSUInteger)index]
-                                              image:nil
-                                         identifier:nil
-                                            handler:^(__unused UIAction *item) {
+        UIAction *action = [UIAction actionWithTitle:titles[(NSUInteger)index] image:nil identifier:nil handler:^(__unused UIAction *item) {
             weakSelf.scope = (RYGMCBrowserScope)index;
             weakSelf.navigationItem.rightBarButtonItem.menu = [weakSelf scopeMenu];
             [weakSelf rebuildVisibleConfigs];
@@ -213,10 +191,7 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
     [self rebuildVisibleConfigs];
 }
 
-- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    (void)searchController;
-    [self rebuildVisibleConfigs];
-}
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController { (void)searchController; [self rebuildVisibleConfigs]; }
 
 - (BOOL)configPassesScope:(RYGMCConfig *)config {
     if (self.scope == RYGMCBrowserScopeSeen) return RYGMCConfigSeen(config);
@@ -226,19 +201,16 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
 }
 
 - (void)rebuildVisibleConfigs {
-    NSArray<NSString *> *tokens = RYGMCTokens(self.searchController.searchBar.text ?: @"");
-    NSMutableArray<RYGMCConfig *> *visible = [NSMutableArray array];
-    NSMutableDictionary<NSNumber *, NSArray<RYGMCParam *> *> *matches = [NSMutableDictionary dictionary];
-
+    NSArray *tokens = RYGMCTokens(self.searchController.searchBar.text ?: @"");
+    NSMutableArray *visible = [NSMutableArray array];
+    NSMutableDictionary *matches = [NSMutableDictionary dictionary];
     for (RYGMCConfig *config in self.allConfigs ?: @[]) {
         if (![self configPassesScope:config]) continue;
-        NSString *configText = [NSString stringWithFormat:@"%@ %u", config.name ?: @"", config.number];
-        BOOL configMatch = RYGMCMatches(configText, tokens);
-        NSMutableArray<RYGMCParam *> *paramMatches = [NSMutableArray array];
+        BOOL configMatch = RYGMCMatches([NSString stringWithFormat:@"%@ %u", config.name ?: @"", config.number], tokens);
+        NSMutableArray *paramMatches = [NSMutableArray array];
         for (RYGMCParam *param in config.params) {
-            NSString *paramText = [NSString stringWithFormat:@"%@ %u %llu",
-                                   param.name ?: @"", param.paramIndex, param.paramID];
-            if (tokens.count && RYGMCMatches(paramText, tokens)) [paramMatches addObject:param];
+            NSString *text = [NSString stringWithFormat:@"%@ %u %llu", param.name ?: @"", param.paramIndex, param.paramID];
+            if (tokens.count && RYGMCMatches(text, tokens)) [paramMatches addObject:param];
         }
         if (!tokens.count || configMatch || paramMatches.count) {
             [visible addObject:config];
@@ -250,10 +222,7 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
     [self.tableView reloadData];
 }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    return self.visibleConfigs.count;
-}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { (void)tableView; (void)section; return self.visibleConfigs.count; }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGMCConfig"];
@@ -262,13 +231,10 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
     cell.textLabel.text = config.name.length ? config.name : [NSString stringWithFormat:@"Config %u", config.number];
     cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
     cell.textLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-
     NSArray<RYGMCParam *> *matched = self.searchMatches[@(config.number)];
     if (matched.count) {
-        NSMutableArray<NSString *> *names = [NSMutableArray array];
-        for (RYGMCParam *param in matched) {
-            [names addObject:param.name.length ? param.name : [NSString stringWithFormat:@"#%u", param.paramIndex]];
-        }
+        NSMutableArray *names = [NSMutableArray array];
+        for (RYGMCParam *param in matched) [names addObject:param.name.length ? param.name : [NSString stringWithFormat:@"#%u", param.paramIndex]];
         cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · %@", config.number, [names componentsJoinedByString:@", "]];
         cell.detailTextLabel.numberOfLines = 2;
     } else {
@@ -284,8 +250,7 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    RYGMCResolvedConfigDetailViewController *detail = [[RYGMCResolvedConfigDetailViewController alloc]
-        initWithStyle:UITableViewStyleInsetGrouped];
+    RYGMCResolvedConfigDetailViewController *detail = [[RYGMCResolvedConfigDetailViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
     detail.config = self.visibleConfigs[(NSUInteger)indexPath.row];
     [self.navigationController pushViewController:detail animated:YES];
 }
@@ -296,77 +261,26 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.config.name.length ? self.config.name : [NSString stringWithFormat:@"Config %u", self.config.number];
+    NSString *title = self.config.name.length ? self.config.name : [NSString stringWithFormat:@"Config %u", self.config.number];
+    self.title = title;
+    self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(title);
     self.tableView.backgroundColor = [RYGPopupChrome backgroundColor];
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     RYGLiquidGlassApplyToViewController(self);
 }
 
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    [self.tableView reloadData];
-}
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self.tableView reloadData]; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { (void)tableView; (void)section; return self.config.params.count; }
 
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; (void)section;
-    return self.config.params.count;
-}
-
-- (UIButton *)boolOutputButtonForParam:(RYGMCParam *)param {
-    NSNumber *forced = [RYGMobileConfig.shared overrideValueFor:param];
-    NSString *closedTitle = forced ? (forced.boolValue ? @"On" : @"Off") : @"Native";
-    __weak typeof(self) weakSelf = self;
-
-    UIAction *nativeAction = [UIAction actionWithTitle:@"Native"
-                                                image:nil
-                                           identifier:nil
-                                              handler:^(__unused UIAction *action) {
-        [RYGMobileConfig.shared clearOverrideFor:param];
-        [weakSelf.tableView reloadData];
-    }];
-    nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
-
-    UIAction *forceOn = [UIAction actionWithTitle:@"Force On"
-                                           image:nil
-                                      identifier:nil
-                                         handler:^(__unused UIAction *action) {
-        if (![RYGMobileConfig.shared setOverride:@YES for:param]) {
-            [RYGUtils showErrorHUDWithDescription:@"MobileConfig rejected this override"];
-        }
-        [weakSelf.tableView reloadData];
-    }];
-    forceOn.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
-
-    UIAction *forceOff = [UIAction actionWithTitle:@"Force Off"
-                                            image:nil
-                                       identifier:nil
-                                          handler:^(__unused UIAction *action) {
-        if (![RYGMobileConfig.shared setOverride:@NO for:param]) {
-            [RYGUtils showErrorHUDWithDescription:@"MobileConfig rejected this override"];
-        }
-        [weakSelf.tableView reloadData];
-    }];
-    forceOff.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
-
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.menu = [UIMenu menuWithTitle:@"Output"
-                                  image:nil
-                             identifier:nil
-                                options:UIMenuOptionsSingleSelection
-                               children:@[nativeAction, forceOn, forceOff]];
-    button.showsMenuAsPrimaryAction = YES;
-    button.changesSelectionAsPrimaryAction = YES;
-    RYGLiquidGlassConfigureButton(button, NO);
-    UIButtonConfiguration *configuration = button.configuration;
-    if (configuration) {
-        configuration.title = closedTitle;
-        if (@available(iOS 26.0, *)) [configuration setDefaultContentInsets];
-        button.configuration = configuration;
-    } else {
-        [button setTitle:closedTitle forState:UIControlStateNormal];
+- (void)boolSwitchChanged:(UISwitch *)toggle {
+    RYGMCParam *param = objc_getAssociatedObject(toggle, kRYGMCParamKey);
+    if (!param) return;
+    if (![RYGMobileConfig.shared setOverride:@(toggle.isOn) for:param]) {
+        toggle.on = !toggle.isOn;
+        [RYGUtils showErrorHUDWithDescription:@"MobileConfig rejected this override"];
     }
-    return button;
+    [self.tableView reloadData];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -383,99 +297,81 @@ static BOOL RYGMCConfigOverridden(RYGMCConfig *config) {
 
     id forced = param.isRuntimeBacked ? [RYGMobileConfig.shared overrideValueFor:param] : nil;
     id native = param.isRuntimeBacked ? [RYGMobileConfig.shared liveValueFor:param] : nil;
-    if (!param.isRuntimeBacked) {
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · mapping only", param.paramIndex];
-    } else if (forced) {
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · %@ → %@", param.paramIndex, native ?: @"native", forced];
-    } else {
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · %@", param.paramIndex, native ?: @"native"];
-    }
+    NSString *state = forced ? @"override" : @"native";
+    if (!param.isRuntimeBacked) cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · mapping only", param.paramIndex];
+    else cell.detailTextLabel.text = [NSString stringWithFormat:@"#%u · %@ · %@", param.paramIndex, state, forced ?: native ?: @"not observed"];
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:11.0 weight:UIFontWeightRegular];
 
-    if (!param.isRuntimeBacked) {
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        return cell;
-    }
+    if (!param.isRuntimeBacked) { cell.selectionStyle = UITableViewCellSelectionStyleNone; return cell; }
     if (param.type == RYGMCTypeBool) {
-        cell.accessoryView = [self boolOutputButtonForParam:param];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *toggle = [UISwitch new];
+        NSNumber *visibleValue = forced ?: ([native isKindOfClass:NSNumber.class] ? native : @NO);
+        toggle.on = visibleValue.boolValue;
+        toggle.onTintColor = [RYGUtils RYGColor_Primary];
+        objc_setAssociatedObject(toggle, kRYGMCParamKey, param, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [toggle addTarget:self action:@selector(boolSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
     } else {
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     return cell;
 }
 
+- (void)presentUseNativeForBool:(RYGMCParam *)param source:(UIView *)source {
+    if ([RYGMobileConfig.shared overrideStateFor:param] != RYGMCOverrideSet) return;
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:param.name.length ? param.name : @"Boolean parameter"
+                                                                    message:@"This parameter currently has a RyukGram override."
+                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Use native value" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+        [RYGMobileConfig.shared clearOverrideFor:param];
+        [weakSelf.tableView reloadData];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+        sheet.popoverPresentationController.sourceView = source ?: self.view;
+        sheet.popoverPresentationController.sourceRect = source ? source.bounds : self.view.bounds;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     RYGMCParam *param = self.config.params[(NSUInteger)indexPath.row];
-    if (!param.isRuntimeBacked || param.type == RYGMCTypeBool) return;
+    if (!param.isRuntimeBacked) return;
+    if (param.type == RYGMCTypeBool) { [self presentUseNativeForBool:param source:cell]; return; }
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:param.name.length ? param.name : @"MobileConfig value"
-                                                                    message:nil
-                                                             preferredStyle:UIAlertControllerStyleAlert];
+                                                                    message:nil preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
         id current = [RYGMobileConfig.shared overrideValueFor:param] ?: [RYGMobileConfig.shared liveValueFor:param];
         field.text = current ? [current description] : @"";
-        if (param.type == RYGMCTypeInt || param.type == RYGMCTypeDouble) {
-            field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
-        }
+        if (param.type == RYGMCTypeInt || param.type == RYGMCTypeDouble) field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
     }];
-
     __weak typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if ([RYGMobileConfig.shared overrideStateFor:param] == RYGMCOverrideSet) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Use native"
-                                                 style:UIAlertActionStyleDestructive
-                                               handler:^(__unused UIAlertAction *action) {
-            [RYGMobileConfig.shared clearOverrideFor:param];
-            [weakSelf.tableView reloadData];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Use native" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+            [RYGMobileConfig.shared clearOverrideFor:param]; [weakSelf.tableView reloadData];
         }]];
     }
-    [alert addAction:[UIAlertAction actionWithTitle:@"Apply"
-                                             style:UIAlertActionStyleDefault
-                                           handler:^(__unused UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         NSString *text = alert.textFields.firstObject.text ?: @"";
         id value = nil;
         if (param.type == RYGMCTypeString) value = text;
         else if (param.type == RYGMCTypeInt) {
-            char *end = NULL;
-            long long parsed = strtoll(text.UTF8String, &end, 10);
-            if (end != text.UTF8String && *end == '\0') value = @(parsed);
+            char *end = NULL; long long number = strtoll(text.UTF8String, &end, 10);
+            if (end && *end == '\0') value = @(number);
         } else if (param.type == RYGMCTypeDouble) {
-            char *end = NULL;
-            double parsed = strtod(text.UTF8String, &end);
-            if (end != text.UTF8String && *end == '\0' && isfinite(parsed)) value = @(parsed);
+            char *end = NULL; double number = strtod(text.UTF8String, &end);
+            if (end && *end == '\0') value = @(number);
         }
-        if (!value || ![RYGMobileConfig.shared setOverride:value for:param]) {
-            [RYGUtils showErrorHUDWithDescription:@"Invalid MobileConfig value"];
-        }
+        if (!value || ![RYGMobileConfig.shared setOverride:value for:param]) [RYGUtils showErrorHUDWithDescription:@"Invalid or rejected MobileConfig value"];
         [weakSelf.tableView reloadData];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView
- contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
-                                    point:(CGPoint)point {
-    (void)tableView; (void)point;
-    RYGMCParam *param = self.config.params[(NSUInteger)indexPath.row];
-    if (!param.isRuntimeBacked || param.type == RYGMCTypeBool ||
-        [RYGMobileConfig.shared overrideStateFor:param] != RYGMCOverrideSet) return nil;
-
-    __weak typeof(self) weakSelf = self;
-    return [UIContextMenuConfiguration configurationWithIdentifier:nil
-                                                   previewProvider:nil
-                                                    actionProvider:^UIMenu *(__unused NSArray<UIMenuElement *> *suggested) {
-        UIAction *native = [UIAction actionWithTitle:@"Use native value"
-                                              image:[UIImage systemImageNamed:@"arrow.uturn.backward"]
-                                         identifier:nil
-                                            handler:^(__unused UIAction *action) {
-            [RYGMobileConfig.shared clearOverrideFor:param];
-            [weakSelf.tableView reloadData];
-        }];
-        return [UIMenu menuWithChildren:@[native]];
-    }];
 }
 
 @end
