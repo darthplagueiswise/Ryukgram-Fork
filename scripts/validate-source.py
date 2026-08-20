@@ -26,7 +26,8 @@ def logos_orig_tail(line: str) -> str | None:
             depth = 0
             while cursor < len(line):
                 char = line[cursor]
-                if char == "(": depth += 1
+                if char == "(":
+                    depth += 1
                 elif char == ")":
                     depth -= 1
                     if depth == 0:
@@ -56,6 +57,10 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
     if legacy_module.exists() and any(legacy_module.iterdir()):
         fail(f"separate compatibility module still exists: {legacy_module.relative_to(ROOT)}")
 
+# Competing implementations that previously stacked hooks/renderers remain
+# forbidden. RYGRuntimeClassBrowser is intentionally NOT on this list: it is the
+# structural, non-classifying Class -> methods/properties enumerator used by the
+# live Runtime Browser.
 for obsolete in (
     "src/Debug/RYGDeveloperFeatureViewController.m",
     "src/Debug/RYGDeveloperGateViewController.m",
@@ -64,12 +69,11 @@ for obsolete in (
     "src/Debug/RYGDeveloperEasyGatingControls.m",
     "src/Debug/RYGCFunctionOverrideEngine.m",
     "src/Debug/RYGDeveloperRuntimeScanner.m",
-    "src/Debug/RYGRuntimeClassBrowser.m",
-    "src/Debug/RYGRuntimeClassBrowser.h",
     "src/UI/RYGSettingsMenuGlassFix.m",
     "src/Settings/RYGSettingsMenuLiquidGlass.m",
     "src/Features/ExpFlags/RYGMobileConfigExternalSeenTracker.m",
     "src/Features/ExpFlags/RYGMobileConfigParamTableCompatibility.m",
+    "src/Features/ExpFlags/RYGMobileConfigNativeSync.m",
 ):
     if (ROOT / obsolete).exists():
         fail(f"obsolete competing implementation returned: {obsolete}")
@@ -79,6 +83,7 @@ mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
 runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
+runtime_class_path = ROOT / "src/Debug/RYGRuntimeClassBrowser.m"
 runtime_view_path = ROOT / "src/Debug/RYGRuntimeBrowserViewController.m"
 topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
 setting_path = ROOT / "src/Settings/RYGSetting.m"
@@ -152,26 +157,41 @@ if "__attribute__((constructor))" in runtime_engine or "_dyld_register_func_for_
 if "NSUserDefaults" in runtime_engine and "ryg_runtime_bool_overrides" in runtime_engine:
     fail("generic Runtime Browser overrides must remain process-local")
 
+runtime_class = runtime_class_path.read_text(encoding="utf-8")
+for marker in (
+    "classesForImagePath",
+    "class_copyMethodList",
+    "class_copyPropertyList",
+    "objc_copyClassNamesForImage",
+    "objc_getClassList",
+    "class_getImageName",
+    'strchr("BcC"',
+    "boolDescriptorForMethod",
+):
+    if marker not in runtime_class:
+        fail(f"structural Runtime Class Browser marker is missing: {marker}")
+for forbidden in ("keywords:", "employee", "dogfood", "prism", "liquidglass"):
+    if forbidden in runtime_class.lower():
+        fail(f"Runtime Class Browser must not preclassify classes/methods: {forbidden}")
+
 runtime_view = runtime_view_path.read_text(encoding="utf-8")
 for marker in (
-    "boolMethodsForImagePath",
-    "Observe visible original values",
-    "outputButtonForMethod",
-    "original not observed",
-    "Force On",
-    "Force Off",
-    "Use native value",
-):
-    if marker not in runtime_view:
-        fail(f"direct live BOOL Runtime Browser marker is missing: {marker}")
-for forbidden in (
+    'initWithItems:@[@"Classes", @"Mach-O"]',
     "RYGRuntimeClassBrowser",
     "RYGRuntimeClassDetailViewController",
-    "RYGRuntimeTopModeMachO",
-    'initWithItems:@[@"Classes", @"Mach-O"]',
+    "Instance Methods",
+    "Class Methods",
+    "Properties",
+    "boolDescriptorForMethod",
+    "Force On",
+    "Force Off",
+    "Native",
+    "machOSymbolsForImagePath",
 ):
-    if forbidden in runtime_view:
-        fail(f"obsolete class/Mach-O Runtime Browser layer returned: {forbidden}")
+    if marker not in runtime_view:
+        fail(f"structural live Runtime Browser marker is missing: {marker}")
+if "boolMethodsForImagePath" in runtime_view:
+    fail("Runtime Browser root must enumerate classes first, not pre-filter BOOL methods")
 
 topic = topic_path.read_text(encoding="utf-8")
 for marker in (
@@ -241,15 +261,18 @@ required = (
     ROOT / "src/UI/RYGLiquidGlass.m",
     ROOT / "src/Settings/RYGSetting.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
+    ROOT / "src/Debug/RYGRuntimeClassBrowser.h",
+    ROOT / "src/Debug/RYGRuntimeClassBrowser.m",
     ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
     ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
     ROOT / "src/Debug/RYGWordmarkViewController.m",
     ROOT / "src/Debug/RYGEasyGatingRuntime.m",
     ROOT / "src/Features/ExpFlags/RYGMobileConfigNameMappingStore.m",
     ROOT / "src/Features/ExpFlags/RYGMobileConfigNativeBrowser.m",
+    ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONSync.m",
 )
 for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: one Liquid Glass menu renderer, direct live BOOL Runtime Browser, exact Developer owners, final-ID EasyGating, current native MobileConfig StartupConfigs API, Replace/Merge mapping, integrated sideload compatibility")
+print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, exact Developer owners, final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")
