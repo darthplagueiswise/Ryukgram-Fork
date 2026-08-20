@@ -1,24 +1,26 @@
 #import "RYGEasyGatingRuntime.h"
-#import <substrate.h>
+#import "../../modules/fishhook/fishhook.h"
 #import <os/lock.h>
 #import <stdatomic.h>
 #import <stdint.h>
-#import <dlfcn.h>
+#include <stdlib.h>
 
 NSString *const RYGEasyGatingDidObserveNotification = @"RYGEasyGatingDidObserveNotification";
 NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
 
-// v2 is intentionally separate. The old storage was keyed by the public
-// wrapper's pre-map selector/index; reusing those numbers as final platform gate
-// IDs could force an unrelated gate after the ABI correction.
 static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_platform_bool_overrides_v2";
 
-// ABI re-validated against FBSharedFramework(20260819-042733):
-// EasyGatingGetBoolean_Internal_DoNotUseOrMock maps its incoming selector/index
-// to the final gate ID, then tail-calls EasyGatingPlatformGetBoolean with:
-//   x0 = context, w1 = FINAL gate ID, w2 = default Boolean, w3 = exposure flag.
-// We hook only that final platform function and only after EasyGating/Dogfood is
-// explicitly activated. There is deliberately no process-start constructor.
+// FBSharedFramework(20260819-042733), revalidated with LIEF + Capstone:
+// EasyGatingGetBoolean_Internal_DoNotUseOrMock resolves the public selector/index
+// to the final gate ID and reaches EasyGatingPlatformGetBoolean with
+// x0=context, w1=final gate ID, w2=default Boolean, w3=exposure flag.
+//
+// IMPORTANT FOR SIDELOAD:
+// Never inline-patch this function. On Instagram 443 the function is at
+// FBSharedFramework + 0x50faf4, in the same 16 KiB signed __TEXT page as
+// FBStashManagerGetStash. MSHookFunction made that page non-executable and iOS
+// killed the process with CODESIGNING/Invalid Page. fishhook changes indirect
+// symbol slots instead, leaving the framework's executable page untouched.
 typedef uint32_t (*RYGEasyGatingPlatformGetBooleanFn)(uintptr_t context,
                                                        uint32_t gateID,
                                                        uint32_t defaultValue,
@@ -28,8 +30,7 @@ static RYGEasyGatingPlatformGetBooleanFn gRYGOriginalEasyGatingPlatformGetBoolea
 static os_unfair_lock gRYGEasyGatingLock = OS_UNFAIR_LOCK_INIT;
 static NSMutableDictionary<NSNumber *, RYGEasyGatingObservation *> *gRYGEasyGatingObservations;
 static NSDictionary<NSString *, NSNumber *> *gRYGEasyGatingOverrideCache;
-static atomic_bool gRYGEasyGatingInstalled = false;
-static atomic_bool gRYGEasyGatingRetryScheduled = false;
+static atomic_bool gRYGEasyGatingRebindingRegistered = false;
 
 @implementation RYGEasyGatingObservation
 - (NSNumber *)overrideValue {
@@ -115,9 +116,9 @@ static uint32_t RYGEasyGatingPlatformGetBooleanReplacement(uintptr_t context,
                                                             uint32_t gateID,
                                                             uint32_t defaultValue,
                                                             uint32_t exposureFlag) {
-    uint32_t native = gRYGOriginalEasyGatingPlatformGetBoolean
-        ? gRYGOriginalEasyGatingPlatformGetBoolean(context, gateID, defaultValue, exposureFlag)
-        : (defaultValue != 0 ? 1u : 0u);
+    RYGEasyGatingPlatformGetBooleanFn original = gRYGOriginalEasyGatingPlatformGetBoolean;
+    uint32_t native = original ? original(context, gateID, defaultValue, exposureFlag)
+                               : (defaultValue ? 1u : 0u);
     RYGEasyGatingRecord(gateID,
                         defaultValue != 0,
                         exposureFlag != 0,
@@ -126,32 +127,22 @@ static uint32_t RYGEasyGatingPlatformGetBooleanReplacement(uintptr_t context,
     return forced ? (forced.boolValue ? 1u : 0u) : native;
 }
 
-static BOOL RYGInstallEasyGatingPlatformHook(void) {
-    if (atomic_load(&gRYGEasyGatingInstalled)) return YES;
-    void *function = dlsym(RTLD_DEFAULT, "EasyGatingPlatformGetBoolean");
-    if (!function) return NO;
+static BOOL RYGRegisterEasyGatingRebinding(void) {
+    if (atomic_load(&gRYGEasyGatingRebindingRegistered)) return YES;
 
     bool expected = false;
-    if (!atomic_compare_exchange_strong(&gRYGEasyGatingInstalled, &expected, true)) return YES;
-    MSHookFunction(function,
-                   (void *)&RYGEasyGatingPlatformGetBooleanReplacement,
-                   (void **)&gRYGOriginalEasyGatingPlatformGetBoolean);
-    if (!gRYGOriginalEasyGatingPlatformGetBoolean) {
-        atomic_store(&gRYGEasyGatingInstalled, false);
+    if (!atomic_compare_exchange_strong(&gRYGEasyGatingRebindingRegistered, &expected, true)) return YES;
+
+    struct rebinding binding = {
+        .name = "EasyGatingPlatformGetBoolean",
+        .replacement = (void *)&RYGEasyGatingPlatformGetBooleanReplacement,
+        .replaced = (void **)&gRYGOriginalEasyGatingPlatformGetBoolean,
+    };
+    if (rebind_symbols(&binding, 1) != 0) {
+        atomic_store(&gRYGEasyGatingRebindingRegistered, false);
         return NO;
     }
     return YES;
-}
-
-static void RYGScheduleEasyGatingInstall(void) {
-    if (atomic_load(&gRYGEasyGatingInstalled)) return;
-    bool expected = false;
-    if (!atomic_compare_exchange_strong(&gRYGEasyGatingRetryScheduled, &expected, true)) return;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        atomic_store(&gRYGEasyGatingRetryScheduled, false);
-        RYGInstallEasyGatingPlatformHook();
-    });
 }
 
 @implementation RYGEasyGatingRuntime
@@ -167,7 +158,7 @@ static void RYGScheduleEasyGatingInstall(void) {
 }
 
 - (void)installIfNeeded {
-    if (!RYGInstallEasyGatingPlatformHook()) RYGScheduleEasyGatingInstall();
+    (void)RYGRegisterEasyGatingRebinding();
 }
 
 - (NSArray<RYGEasyGatingObservation *> *)observations {
