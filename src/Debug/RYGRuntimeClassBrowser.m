@@ -39,7 +39,7 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
     if (!row.className.length || !row.imagePath.length) return @[];
     NSMutableArray<RYGRuntimeMethodRow *> *result = [NSMutableArray array];
     for (RYGRuntimeMemberRow *member in [RYGRuntimeBrowserEngine membersForClassName:row.className imagePath:row.imagePath]) {
-        if (!member.isMethod) continue;
+        if (!member.method) continue;
         BOOL isClass = member.kind == RYGRuntimeMemberClassMethod;
         if (isClass != classMethods) continue;
         RYGRuntimeMethodRow *method = [RYGRuntimeMethodRow new];
@@ -59,7 +59,7 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
     if (!row.className.length || !row.imagePath.length) return @[];
     NSMutableArray<RYGRuntimePropertyRow *> *result = [NSMutableArray array];
     for (RYGRuntimeMemberRow *member in [RYGRuntimeBrowserEngine membersForClassName:row.className imagePath:row.imagePath]) {
-        if (member.isMethod) continue;
+        if (member.method) continue;
         RYGRuntimePropertyRow *property = [RYGRuntimePropertyRow new];
         property.name = member.name ?: @"";
         property.attributes = member.typeEncoding ?: @"";
@@ -83,7 +83,11 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
 }
 
 + (BOOL)methodRow:(RYGRuntimeMethodRow *)row matchesSearch:(NSString *)query {
-    return RYGRTContainsTokens([NSString stringWithFormat:@"%@ %@ %@", row.className ?: @"", row.selectorName ?: @"", row.typeEncoding ?: @""], query);
+    return RYGRTContainsTokens([NSString stringWithFormat:@"%@ %@ %@",
+                               row.className ?: @"",
+                               row.selectorName ?: @"",
+                               row.typeEncoding ?: @""],
+                               query);
 }
 
 @end
