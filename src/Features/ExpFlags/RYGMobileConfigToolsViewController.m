@@ -1,5 +1,5 @@
 #import "RYGMobileConfigToolsViewController.h"
-#import "RYGMobileConfigBrowserViewController.h"
+#import "RYGMobileConfigViewController.h"
 #import "RYGMobileConfig.h"
 #import "RYGMobileConfigJSONIO.h"
 #import "../../Utils.h"
@@ -37,10 +37,13 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 - (void)rebuildSections {
     __weak typeof(self) weakSelf = self;
 
+    // Keep the original RyukGram MobileConfig list/detail UI as the primary
+    // browser. Its BOOL editor is the native UISwitch-based control the tweak
+    // historically used; the newer experimental browser must not replace it.
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
                                                      subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
-                                               viewController:[RYGMobileConfigBrowserViewController new]];
+                                               viewController:[RYGMobileConfigViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
                                                      subtitle:@""
