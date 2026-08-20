@@ -23,6 +23,11 @@ FOUNDATION_EXPORT void RYGLiquidGlassSetTint(UIVisualEffectView *view,
 FOUNDATION_EXPORT void RYGLiquidGlassConfigureButton(UIButton *button,
                                                      BOOL prominent);
 
+/// Creates a compact non-interactive title pill for nested navigation screens.
+/// On iOS 26+ this uses the native Glass button configuration, which gives the
+/// title its own readable material without a second navigation-bar renderer.
+FOUNDATION_EXPORT UIView *RYGLiquidGlassNavigationTitleView(NSString *title);
+
 /// Applies RyukGram's native navigation/control-layer styling. Content remains
 /// on system backgrounds so glass is never stacked behind every table cell.
 FOUNDATION_EXPORT void RYGLiquidGlassApplyToViewController(UIViewController *controller);
