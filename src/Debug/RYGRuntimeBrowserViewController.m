@@ -64,6 +64,8 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
 @property (nonatomic, copy) NSString *selectedImagePath;
 @property (nonatomic, copy) NSArray<RYGRuntimeBoolMethod *> *allRows;
 @property (nonatomic, copy) NSArray<RYGRuntimeBoolMethod *> *visibleRows;
+@property (nonatomic, copy) NSArray<NSString *> *classSections;
+@property (nonatomic, copy) NSDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *rowsByClass;
 @property (nonatomic, assign) NSUInteger scanGeneration;
 @property (nonatomic, assign, getter=isScanning) BOOL scanning;
 @end
@@ -76,6 +78,8 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.allRows = @[];
     self.visibleRows = @[];
+    self.classSections = @[];
+    self.rowsByClass = @{};
 
     self.imageButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.imageButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -242,9 +246,12 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
 - (void)scanSelectedImage {
     NSString *imagePath = self.selectedImagePath.copy;
     NSUInteger generation = ++self.scanGeneration;
+    self.allRows = @[];
+    self.visibleRows = @[];
+    self.classSections = @[];
+    self.rowsByClass = @{};
+
     if (!imagePath.length) {
-        self.allRows = @[];
-        self.visibleRows = @[];
         self.emptyLabel.text = @"No loaded app image";
         self.scanning = NO;
         [self.tableView reloadData];
@@ -252,6 +259,7 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
     }
 
     self.scanning = YES;
+    [self.tableView reloadData];
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSArray<RYGRuntimeBoolMethod *> *rows =
@@ -273,16 +281,29 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
 
 - (void)applySearchFilter {
     NSString *query = self.searchController.searchBar.text ?: @"";
-    if (!query.length) {
-        self.visibleRows = self.allRows ?: @[];
-    } else {
-        NSMutableArray<RYGRuntimeBoolMethod *> *matches = [NSMutableArray array];
-        for (RYGRuntimeBoolMethod *method in self.allRows) {
-            if (RYGRuntimeMethodMatchesQuery(method, query)) [matches addObject:method];
-        }
-        self.visibleRows = matches.copy;
+    NSMutableArray<RYGRuntimeBoolMethod *> *visible = [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSMutableArray<RYGRuntimeBoolMethod *> *> *groups = [NSMutableDictionary dictionary];
+
+    for (RYGRuntimeBoolMethod *method in self.allRows) {
+        if (query.length && !RYGRuntimeMethodMatchesQuery(method, query)) continue;
+        [visible addObject:method];
+        NSString *className = method.className.length ? method.className : @"Runtime";
+        if (!groups[className]) groups[className] = [NSMutableArray array];
+        [groups[className] addObject:method];
     }
 
+    NSArray<NSString *> *classes = [groups.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    NSMutableDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *frozen = [NSMutableDictionary dictionaryWithCapacity:classes.count];
+    for (NSString *className in classes) {
+        frozen[className] = [groups[className] sortedArrayUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
+            if (left.classMethod != right.classMethod) return left.classMethod ? NSOrderedAscending : NSOrderedDescending;
+            return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
+        }];
+    }
+
+    self.visibleRows = visible.copy;
+    self.classSections = classes;
+    self.rowsByClass = frozen.copy;
     self.emptyLabel.text = query.length
         ? @"No ABI-supported BOOL matched this search"
         : @"No ABI-supported BOOL is declared in this loaded image";
@@ -310,19 +331,31 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
     }
 }
 
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    (void)tableView;
+    return self.classSections.count;
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     (void)tableView;
-    (void)section;
-    return self.visibleRows.count;
+    if (section < 0 || section >= (NSInteger)self.classSections.count) return 0;
+    return [self.rowsByClass[self.classSections[(NSUInteger)section]] count];
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     (void)tableView;
-    (void)section;
-    if (!self.visibleRows.count) return nil;
-    return [NSString stringWithFormat:@"%lu hookable BOOL%@",
-            (unsigned long)self.visibleRows.count,
-            self.visibleRows.count == 1 ? @"" : @"s"];
+    if (section < 0 || section >= (NSInteger)self.classSections.count) return nil;
+    NSString *className = self.classSections[(NSUInteger)section];
+    NSUInteger count = [self.rowsByClass[className] count];
+    return [NSString stringWithFormat:@"%@ · %lu", className, (unsigned long)count];
+}
+
+- (RYGRuntimeBoolMethod *)methodAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section < 0 || indexPath.section >= (NSInteger)self.classSections.count) return nil;
+    NSString *className = self.classSections[(NSUInteger)indexPath.section];
+    NSArray<RYGRuntimeBoolMethod *> *rows = self.rowsByClass[className] ?: @[];
+    if (indexPath.row < 0 || indexPath.row >= (NSInteger)rows.count) return nil;
+    return rows[(NSUInteger)indexPath.row];
 }
 
 - (UIButton *)outputButtonForMethod:(RYGRuntimeBoolMethod *)method {
@@ -384,12 +417,11 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
     static NSString *identifier = @"RYGRuntimeDirectBool";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:identifier];
-    if ((NSUInteger)indexPath.row >= self.visibleRows.count) return cell;
 
-    RYGRuntimeBoolMethod *method = self.visibleRows[(NSUInteger)indexPath.row];
-    cell.textLabel.text = [NSString stringWithFormat:@"%@[%@ %@]",
+    RYGRuntimeBoolMethod *method = [self methodAtIndexPath:indexPath];
+    if (!method) return cell;
+    cell.textLabel.text = [NSString stringWithFormat:@"%@ %@",
                            method.classMethod ? @"+" : @"−",
-                           method.className ?: @"",
                            method.selectorName ?: @""];
     cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightMedium];
     cell.textLabel.numberOfLines = 0;
@@ -418,8 +450,9 @@ static BOOL RYGRuntimeMethodMatchesQuery(RYGRuntimeBoolMethod *method, NSString 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if ((NSUInteger)indexPath.row >= self.visibleRows.count) return;
-    [self presentActionsForMethod:self.visibleRows[(NSUInteger)indexPath.row] source:cell];
+    RYGRuntimeBoolMethod *method = [self methodAtIndexPath:indexPath];
+    if (!method) return;
+    [self presentActionsForMethod:method source:cell];
 }
 
 - (void)presentActionsForMethod:(RYGRuntimeBoolMethod *)method source:(UIView *)source {
