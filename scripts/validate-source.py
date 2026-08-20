@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,7 +18,6 @@ def fail(message: str) -> None:
 
 
 def logos_orig_tail(line: str) -> str | None:
-    """Return the invalid tail after %orig, or None when the line is safe."""
     for match in re.finditer(r"%orig\b", line):
         cursor = match.end()
         while cursor < len(line) and line[cursor].isspace():
@@ -65,18 +63,23 @@ for obsolete in (
     "src/Debug/RYGDeveloperRuntimeBrowserViewController.m",
     "src/Debug/RYGDeveloperEasyGatingControls.m",
     "src/Debug/RYGCFunctionOverrideEngine.m",
+    "src/Debug/RYGDeveloperRuntimeScanner.m",
     "src/UI/RYGSettingsMenuGlassFix.m",
+    "src/Settings/RYGSettingsMenuLiquidGlass.m",
+    "src/Features/ExpFlags/RYGMobileConfigExternalSeenTracker.m",
+    "src/Features/ExpFlags/RYGMobileConfigParamTableCompatibility.m",
 ):
     if (ROOT / obsolete).exists():
-        fail(f"obsolete competing runtime/UI implementation returned: {obsolete}")
+        fail(f"obsolete competing implementation returned: {obsolete}")
 
-# Binary-derived ABI invariants revalidated against the supplied current arm64
-# Instagram / FBShared binaries and canonical MobileConfig files.
 mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
 mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
 runtime_class_path = ROOT / "src/Debug/RYGRuntimeClassBrowser.m"
+runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
+topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
+setting_path = ROOT / "src/Settings/RYGSetting.m"
 
 mc_header = mc_header_path.read_text(encoding="utf-8")
 for type_name, discriminator in (
@@ -95,26 +98,33 @@ for marker in (
     "_ZN12mobileconfig17typeFromParameterEy",
     "_ZN12mobileconfig23kMobileConfigParamsListE",
     "_ZN12mobileconfig23kMobileConfigParamsSizeE",
-    "_ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb",
-    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb",
-    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb",
-    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyRKNSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEEb",
-    "_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEydb",
-    "_ZN12mobileconfig28FBMobileConfigOverridesTable22removeOverrideForParamEyb",
-    'class_getInstanceVariable([manager class], "_configManager")',
+    '@"FBMobileConfigStartupConfigs"',
+    '@"setOverrideForParam:andValue:"',
+    '@"removeOverrideForParam:"',
+    "descriptorAt:",
+    "exportedParamCount",
+    "rygCanonicalPointerValue",
 ):
     if marker not in mc_impl:
-        fail(f"validated MobileConfig native ABI marker is missing: {marker}")
-if re.search(r"RYGMCTypeBool\s*&&\s*type\s*<=\s*RYGMCTypeString", mc_impl):
-    fail("ordinal MobileConfig type range check returned; string/double are not ordered as the old enum assumed")
+        fail(f"validated MobileConfig contract marker is missing: {marker}")
+for forbidden in (
+    "getOrCreateOverridesTable",
+    "FBMobileConfigOverridesTable22updateOverrideForParam",
+    'class_getInstanceVariable([manager class], "_configManager")',
+):
+    if forbidden in mc_impl:
+        fail(f"obsolete C++ MobileConfig override path returned: {forbidden}")
+if "dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC))" in mc_impl:
+    fail("MobileConfig overrides must not be auto-reapplied during app startup")
 
 mc_json = mc_json_path.read_text(encoding="utf-8")
 for marker in ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"):
     if marker not in mc_json:
         fail(f"canonical MobileConfig JSON contract marker is missing: {marker}")
+json_header = (ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.h").read_text(encoding="utf-8")
+if "RYGMCNameMappingImportModeMerge" not in json_header or "mode:(RYGMCNameMappingImportMode)mode" not in mc_json:
+    fail("id_name_mapping Replace/Merge import contract is missing")
 
-# Easy Gating public wrapper maps its selector/index before branching to the
-# platform function, so the pre-map wrapper must never be the installed hook.
 easy = easy_path.read_text(encoding="utf-8")
 if 'dlsym(RTLD_DEFAULT, "EasyGatingPlatformGetBoolean")' not in easy:
     fail("Easy Gating must hook the validated final platform entry point")
@@ -123,11 +133,6 @@ if re.search(r'dlsym\s*\([^\n]*"EasyGatingGetBoolean_Internal_DoNotUseOrMock"', 
 if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
     fail("Easy Gating final-ID persistence namespace is missing")
 
-# Runtime browsing may expose all live classes/methods/properties, but BOOL
-# override eligibility must be derived only from the runtime ABI and the method
-# implementation must actually belong to the selected image.
-if not runtime_class_path.is_file():
-    fail("live Runtime Class Browser implementation is missing")
 runtime_class = runtime_class_path.read_text(encoding="utf-8")
 for marker in (
     "method_getReturnType",
@@ -136,11 +141,44 @@ for marker in (
     "method_getImplementation",
     "dladdr",
     "objc_copyClassNamesForImage",
-    "objc_copyClassList",
+    "class_getImageName",
+    'strchr("BcC"',
     "RYGRTHookableBool",
 ):
     if marker not in runtime_class:
         fail(f"live Runtime Class Browser ABI/ownership marker is missing: {marker}")
+
+runtime_engine = runtime_engine_path.read_text(encoding="utf-8")
+for marker in ("objc_getClassList", "class_getImageName", 'strchr("BcC"'):
+    if marker not in runtime_engine:
+        fail(f"runtime image fallback/BOOL ABI marker is missing: {marker}")
+if "__attribute__((constructor))" in runtime_engine or "_dyld_register_func_for_add_image" in runtime_engine:
+    fail("Runtime Browser must not reinstall developer overrides at process startup/image load")
+if "NSUserDefaults" in runtime_engine and "ryg_runtime_bool_overrides" in runtime_engine:
+    fail("generic Runtime Browser overrides must remain process-local")
+
+topic = topic_path.read_text(encoding="utf-8")
+for marker in (
+    "_TtC25IGOverlayStoriesTrayDebug39IGOverlayStoriesTrayDebugViewController",
+    "_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs",
+    "_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper",
+    "_TtC21IGConsumerSubsService21IGConsumerSubsService",
+    "_TtC17IGBugReporterMenu29IGBugReportMenuViewController",
+    "showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:showDogfoodingAssistant:",
+    "_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController",
+    "_TtC20IGDogfoodingSettings20IGDogfoodingSettings",
+    "_TtC35IGDogfoodingAssistantLauncherClient35IGDogfoodingAssistantLauncherClient",
+):
+    if marker not in topic:
+        fail(f"validated Developer native owner/selector is missing: {marker}")
+for forbidden in ("keywords:", "RYGDevContainsAny", "boolMethodsForSurface"):
+    if forbidden in topic:
+        fail(f"Developer topic preclassification returned: {forbidden}")
+
+setting = setting_path.read_text(encoding="utf-8")
+for marker in ("UIAction.class", "UICommand.class", "RYGLiquidGlassConfigureButton", "setDefaultContentInsets"):
+    if marker not in setting:
+        fail(f"settings menu Liquid Glass/state marker is missing: {marker}")
 
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
@@ -153,19 +191,14 @@ for path in build_surfaces:
     if re.search(r"ipapatch|--dylib\s+\S*(?:pluginsinject|noplugin|sideloadpatch)", text, re.I):
         fail(f"separate sideload-helper injection remains in {path.relative_to(ROOT)}")
 
-active_sources = []
+active_sources: list[Path] = []
 for suffix in ("*.m", "*.mm", "*.x", "*.xm", "*.h"):
     active_sources.extend((ROOT / "src").rglob(suffix))
 
 legacy_symbol = re.compile(r"\bSCI[A-Z][A-Za-z0-9_]*|\bsci[A-Z][A-Za-z0-9_]*")
 for path in active_sources:
     text = path.read_text(encoding="utf-8", errors="replace")
-    code = re.sub(
-        r"/\*.*?\*/|//[^\n]*",
-        lambda match: "\n" * match.group(0).count("\n"),
-        text,
-        flags=re.S,
-    )
+    code = re.sub(r"/\*.*?\*/|//[^\n]*", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
     code = re.sub(r'@?"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', '""', code)
     match = legacy_symbol.search(code)
     if match:
@@ -176,22 +209,13 @@ for path in active_sources:
         for line_number, line in enumerate(code.splitlines(), 1):
             tail = logos_orig_tail(line)
             if tail is not None:
-                fail(
-                    "tokens follow %orig on the same source line in "
-                    f"{path.relative_to(ROOT)}:{line_number}: {tail.strip()!r}"
-                )
+                fail(f"tokens follow %orig on the same source line in {path.relative_to(ROOT)}:{line_number}: {tail.strip()!r}")
 
 theos_root = os.environ.get("THEOS")
 logos = Path(theos_root) / "bin/logos.pl" if theos_root else None
 if logos and logos.is_file():
     for path in sorted(p for p in active_sources if p.suffix in {".x", ".xm"}):
-        result = subprocess.run(
-            ["perl", str(logos), str(path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        result = subprocess.run(["perl", str(logos), str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=False)
         if result.returncode:
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
@@ -199,10 +223,10 @@ if logos and logos.is_file():
 required = (
     ROOT / "src/Compatibility/RYGSideloadCompatibility.xm",
     ROOT / "src/UI/RYGLiquidGlass.m",
+    ROOT / "src/Settings/RYGSetting.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
     ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
     ROOT / "src/Debug/RYGRuntimeClassBrowser.m",
-    ROOT / "src/Debug/RYGDeveloperRuntimeScanner.m",
     ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
     ROOT / "src/Debug/RYGWordmarkViewController.m",
     ROOT / "src/Debug/RYGEasyGatingRuntime.m",
@@ -213,4 +237,4 @@ for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: SDK 26.5, validated Easy Gating platform ABI, native MobileConfig 1/2/3/4 types, canonical JSON, live class/method ABI browser, integrated sideload compatibility")
+print("source validation OK: one Liquid Glass menu renderer, structural live runtime, exact Developer owners, final-ID EasyGating, current native MobileConfig StartupConfigs API, Replace/Merge mapping, integrated sideload compatibility")
