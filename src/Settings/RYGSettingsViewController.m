@@ -465,7 +465,6 @@ static char kRYGRowKey;
 	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
 
-	// Search results keep the normal layout so the breadcrumb still has a place.
 	if (row.centeredTitle && ![self isSearching]) {
 		config.textProperties.alignment = UIListContentTextAlignmentCenter;
 		cell.contentConfiguration = config;
@@ -634,8 +633,10 @@ static char kRYGRowKey;
 			b.showsMenuAsPrimaryAction = YES;
 			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			// No accessory-specific insets: the same native Glass source owns both
-			// the collapsed selector and UIKit's expanded morphing menu geometry.
+			// Configure Glass before UITableView captures the accessoryView frame.
+			// The source uses UIKit default menu metrics; no manual expanded-menu
+			// margins or contentInsets are introduced here.
+			RYGLiquidGlassConfigureButton(b, NO);
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
