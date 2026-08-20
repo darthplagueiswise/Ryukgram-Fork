@@ -8,9 +8,7 @@ typedef NS_ENUM(NSInteger, RYGRuntimeArgumentKind) {
     RYGRuntimeArgumentInteger,
 };
 
-// Retained for source compatibility with older callers. The live runtime no
-// longer semantically preclassifies methods by these scopes; image enumeration
-// returns every strict-BOOL method whose ABI is supported.
+// Kept only for source compatibility. Runtime enumeration is not preclassified.
 typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
     RYGRuntimeBrowserScopeRelevant = 0,
     RYGRuntimeBrowserScopeEmployee,
@@ -37,35 +35,30 @@ typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
 @end
 
 @interface RYGRuntimeBrowserEngine : NSObject
-
-/// Fresh dyld snapshot. No shipped/persisted symbol table is used.
 + (NSArray<NSString *> *)runtimeImagePaths;
 + (NSString *)shortNameForImagePath:(NSString *)imagePath;
 
-/// Compatibility API for callers that need a flat BOOL list. `scope` is
-/// deliberately ignored: the current browser does not classify methods by name.
-/// Enumeration is image-scoped and ABI-only.
+/// Returns live ObjC BOOL methods for the selected loaded image. `scope` is
+/// ignored deliberately; no name/employee/gate classification is performed.
+/// Historical ObjC BOOL encodings B/c/C are accepted after ABI validation.
 + (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath
                                                       scope:(RYGRuntimeBrowserScope)scope;
 
-/// Reads LC_SYMTAB from the selected loaded image. Addresses are current-process
-/// runtime addresses and are never persisted.
+/// Reads the selected image's live Mach-O symbol table.
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath;
 
-/// Installs the one unified pass-through/override trampoline for this exact
-/// method. With no override it only records the original BOOL result; with an
-/// override the same trampoline returns the forced value after recording native.
+/// Installs one pass-through trampoline for this exact ABI-validated method.
+/// Without an override it only observes the original result.
 + (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method;
 + (nullable NSNumber *)observedNativeValueForKey:(NSString *)overrideKey;
 
+/// Runtime Browser overrides are intentionally process-local. They are never
+/// installed automatically during app startup or dyld image loading.
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
 + (void)setOverride:(nullable NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method;
-+ (void)reinstallPersistedOverrides;
++ (void)reinstallPersistedOverrides; // compatibility no-op
 
-/// Kept for source compatibility only; runtime browsing/hooking no longer uses
-/// name-based structural filtering.
 + (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName;
-
 @end
 
 NS_ASSUME_NONNULL_END

@@ -15,12 +15,22 @@ static NSString *RYGRTCanonicalPath(NSString *path) {
 }
 
 static BOOL RYGRTPathEquals(NSString *left, NSString *right) {
-    return left.length && right.length && [RYGRTCanonicalPath(left) isEqualToString:RYGRTCanonicalPath(right)];
+    if (!left.length || !right.length) return NO;
+    NSString *a = RYGRTCanonicalPath(left), *b = RYGRTCanonicalPath(right);
+    return [a isEqualToString:b] || [a.lastPathComponent isEqualToString:b.lastPathComponent];
 }
 
 static const char *RYGRTSkipQualifiers(const char *type) {
     while (type && strchr("rnNoORV", *type)) type++;
     return type;
+}
+
+static BOOL RYGRTBoolReturn(Method method) {
+    if (!method) return NO;
+    char raw[32] = {0};
+    method_getReturnType(method, raw, sizeof(raw));
+    const char *type = RYGRTSkipQualifiers(raw);
+    return type && strchr("BcC", *type) != NULL;
 }
 
 static RYGRuntimeArgumentKind RYGRTArgumentKind(Method method) {
@@ -38,12 +48,8 @@ static RYGRuntimeArgumentKind RYGRTArgumentKind(Method method) {
 }
 
 static BOOL RYGRTHookableBool(Method method) {
-    if (!method) return NO;
-    char raw[32] = {0};
-    method_getReturnType(method, raw, sizeof(raw));
-    const char *type = RYGRTSkipQualifiers(raw);
     RYGRuntimeArgumentKind kind = RYGRTArgumentKind(method);
-    return type && *type == 'B' && kind >= RYGRuntimeArgumentNone && kind <= RYGRuntimeArgumentInteger;
+    return RYGRTBoolReturn(method) && kind >= RYGRuntimeArgumentNone && kind <= RYGRuntimeArgumentInteger;
 }
 
 static BOOL RYGRTMethodBelongsToImage(Method method, NSString *imagePath) {
@@ -92,7 +98,8 @@ static NSArray<RYGRuntimeMethodRow *> *RYGRTMethods(Class cls, NSString *imagePa
 
     unsigned int namedCount = 0;
     const char **names = objc_copyClassNamesForImage(imagePath.fileSystemRepresentation, &namedCount);
-    if (!names) {
+    if (!names || namedCount == 0) {
+        if (names) { free(names); names = NULL; }
         NSString *resolved = imagePath.stringByResolvingSymlinksInPath;
         if (![resolved isEqualToString:imagePath]) names = objc_copyClassNamesForImage(resolved.fileSystemRepresentation, &namedCount);
     }
@@ -101,9 +108,27 @@ static NSArray<RYGRuntimeMethodRow *> *RYGRTMethods(Class cls, NSString *imagePa
     }
     if (names) free(names);
 
+    // Sideloaded paths can differ from the path ObjC recorded for the defining
+    // image. Fall back to class_getImageName before scanning categories by IMP.
+    if (!classNames.count) {
+        int total = objc_getClassList(NULL, 0);
+        if (total > 0 && total < 500000) {
+            Class *classes = calloc((size_t)total, sizeof(Class));
+            int filled = classes ? objc_getClassList(classes, total) : 0;
+            for (int i = 0; i < filled; i++) {
+                Class cls = classes[i];
+                const char *rawImage = cls ? class_getImageName(cls) : NULL;
+                if (!rawImage) continue;
+                if (!RYGRTPathEquals([NSString stringWithUTF8String:rawImage], imagePath)) continue;
+                NSString *name = NSStringFromClass(cls);
+                if (name.length) [classNames addObject:name];
+            }
+            free(classes);
+        }
+    }
+
     // Categories can contribute methods to a class whose defining image is not
-    // the selected image. Discover those classes from the live runtime by IMP
-    // ownership instead of relying on a pre-rendered class table.
+    // the selected image. Discover those classes by implementation ownership.
     unsigned int runtimeCount = 0;
     Class *runtimeClasses = objc_copyClassList(&runtimeCount);
     for (unsigned int i = 0; runtimeClasses && i < runtimeCount; i++) {

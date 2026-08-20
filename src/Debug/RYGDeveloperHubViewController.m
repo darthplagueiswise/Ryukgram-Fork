@@ -9,106 +9,33 @@
 
 @implementation RYGDeveloperHubViewController
 
-- (instancetype)init {
-    return [super initWithTitle:@"Developer"];
-}
+- (instancetype)init { return [super initWithTitle:@"Developer"]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [RYGDeveloperTopicViewController activatePersistedNativeFeatures];
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
 
 - (void)rebuildSections {
-    RYGSetting *wordmark = [RYGSetting navigationCellWithTitle:@"IGWordMark"
-                                                      subtitle:nil
-                                                          icon:[RYGSymbol symbolWithName:@"instagram"]
-                                                viewController:[RYGWordmarkViewController new]];
+    RYGSetting *wordmark = [RYGSetting navigationCellWithTitle:@"IGWordMark" subtitle:nil icon:[RYGSymbol symbolWithName:@"instagram"] viewController:[RYGWordmarkViewController new]];
+    RYGSetting *easyGating = [RYGSetting navigationCellWithTitle:@"Easy Gating Internal" subtitle:@"Final mapped IDs observed live" icon:[RYGSymbol symbolWithName:@"key"] viewController:[RYGEasyGatingViewController new]];
+    RYGSetting *mobileConfig = [RYGSetting navigationCellWithTitle:@"MobileConfig" subtitle:@"Live table + id_name_mapping + native overrides" icon:[RYGSymbol symbolWithName:@"sliders"] viewController:[RYGMobileConfigToolsViewController new]];
+    RYGSetting *prism = [RYGSetting navigationCellWithTitle:@"Prism / Redesign" subtitle:@"Validated runtime owners" icon:[RYGSymbol symbolWithName:@"layout"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
+    RYGSetting *glass = [RYGSetting navigationCellWithTitle:@"Liquid Glass" subtitle:@"Navigation, Throwback Chrome and Throwback Feed" icon:[RYGSymbol symbolWithName:@"interface"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
+    RYGSetting *stories = [RYGSetting navigationCellWithTitle:@"Stories / Story Tray" subtitle:@"Native Story Tray debug + redesign gates" icon:[RYGSymbol symbolWithName:@"stories"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
+    RYGSetting *subs = [RYGSetting navigationCellWithTitle:@"SubsConsumer / IGPlus / Aura" subtitle:@"IGConsumerSubsService owner" icon:[RYGSymbol symbolWithName:@"heart"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceConsumerSubs]];
+    RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only" subtitle:@"Exact Bug Reporter menu visibility ABI" icon:[RYGSymbol symbolWithName:@"eye"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
+    RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Dogfooding Mode" subtitle:@"Native menu + resolved MobileConfig + EasyGating" icon:[RYGSymbol symbolWithName:@"paw"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
+    RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment" subtitle:nil icon:[RYGSymbol symbolWithName:@"insights"] action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Image → class → methods/properties; no topic preclassification" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGRuntimeBrowserViewController new]];
 
-    RYGSetting *easyGating = [RYGSetting navigationCellWithTitle:@"Easy Gating Internal"
-                                                        subtitle:nil
-                                                            icon:[RYGSymbol symbolWithName:@"key"]
-                                                  viewController:[RYGEasyGatingViewController new]];
-
-    RYGSetting *mobileConfig = [RYGSetting navigationCellWithTitle:@"MobileConfig"
-                                                          subtitle:nil
-                                                              icon:[RYGSymbol symbolWithName:@"sliders"]
-                                                    viewController:[RYGMobileConfigToolsViewController new]];
-
-    RYGSetting *prism = [RYGSetting navigationCellWithTitle:@"Prism UI"
-                                                   subtitle:nil
-                                                       icon:[RYGSymbol symbolWithName:@"layout"]
-                                             viewController:[[RYGDeveloperTopicViewController alloc]
-                                                 initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
-
-    RYGSetting *glass = [RYGSetting navigationCellWithTitle:@"Liquid Glass"
-                                                   subtitle:nil
-                                                       icon:[RYGSymbol symbolWithName:@"interface"]
-                                             viewController:[[RYGDeveloperTopicViewController alloc]
-                                                 initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
-
-    RYGSetting *stories = [RYGSetting navigationCellWithTitle:@"Stories · Tray & Grid"
-                                                     subtitle:nil
-                                                         icon:[RYGSymbol symbolWithName:@"stories"]
-                                               viewController:[[RYGDeveloperTopicViewController alloc]
-                                                   initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
-
-    RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only"
-                                                          subtitle:nil
-                                                              icon:[RYGSymbol symbolWithName:@"eye"]
-                                                    viewController:[[RYGDeveloperTopicViewController alloc]
-                                                        initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
-
-    RYGSetting *bugReport = [RYGSetting navigationCellWithTitle:@"Bug Report"
-                                                       subtitle:nil
-                                                           icon:[RYGSymbol symbolWithName:@"bug"]
-                                                 viewController:[[RYGDeveloperTopicViewController alloc]
-                                                     initWithSurface:RYGDeveloperRuntimeSurfaceBugReport]];
-
-    RYGSetting *settingsRows = [RYGSetting navigationCellWithTitle:@"Hidden Settings Rows"
-                                                          subtitle:nil
-                                                              icon:[RYGSymbol symbolWithName:@"list"]
-                                                    viewController:[[RYGDeveloperTopicViewController alloc]
-                                                        initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows]];
-
-    RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Direct Dogfooding Settings"
-                                                     subtitle:nil
-                                                         icon:[RYGSymbol symbolWithName:@"paw"]
-                                               viewController:[[RYGDeveloperTopicViewController alloc]
-                                                   initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
-
-    RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment"
-                                                   subtitle:nil
-                                                       icon:[RYGSymbol symbolWithName:@"insights"]
-                                                     action:^{
-        [RYGMetaLocalExperimentBrowser presentFromCurrentViewController];
-    }];
-
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live"
-                                                     subtitle:nil
-                                                         icon:[RYGSymbol symbolWithName:@"search"]
-                                               viewController:[RYGRuntimeBrowserViewController new]];
-
-    NSArray *sections = @[
-        [RYGSettingsViewController sectionWithHeader:nil
-                                              footer:nil
-                                                rows:@[
-            wordmark,
-            easyGating,
-            mobileConfig,
-            prism,
-            glass,
-            stories,
-            internalOnly,
-            bugReport,
-            settingsRows,
-            dogfood,
-        ]],
-        [RYGSettingsViewController sectionWithHeader:nil
-                                              footer:nil
-                                                rows:@[metaLocal, runtime]],
-    ];
-    [self applySettingSections:sections];
+    [self applySettingSections:@[
+        [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, easyGating, mobileConfig]],
+        [RYGSettingsViewController sectionWithHeader:@"Validated surfaces" footer:nil rows:@[prism, glass, stories, subs, internalOnly, dogfood]],
+        [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
+    ]];
 }
 
 @end
