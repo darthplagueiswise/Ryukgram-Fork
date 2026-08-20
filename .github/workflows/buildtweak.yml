@@ -1,3 +1,5 @@
+# Validation branch intentionally touches this workflow so pull_request runs use
+# the same compiler + LIEF/Capstone/radare2 pipeline as dogfood. Do not merge.
 name: Build RyukGram dogfood · SDK 26.5
 
 on:
