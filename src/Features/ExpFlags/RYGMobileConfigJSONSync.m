@@ -1,7 +1,7 @@
 #import "RYGMobileConfigJSONIO.h"
 #import "RYGMobileConfigNameMappingStore.h"
 
-@implementation RYGMobileConfig (RYGJSONSync)
+@implementation RYGMobileConfig (RYGPersistedJSONSync)
 
 - (BOOL)ryg_syncPersistedJSONToNativeDataDirectory {
     NSString *directory = [self ryg_nativeDataDirectory];
