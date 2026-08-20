@@ -29,7 +29,7 @@
     RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only" subtitle:@"Exact Bug Reporter menu visibility ABI" icon:[RYGSymbol symbolWithName:@"eye"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
     RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Dogfooding Mode" subtitle:@"Native menu + resolved MobileConfig + EasyGating" icon:[RYGSymbol symbolWithName:@"paw"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
     RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment" subtitle:nil icon:[RYGSymbol symbolWithName:@"insights"] action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Image → class → methods/properties; no topic preclassification" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGRuntimeBrowserViewController new]];
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Image → ABI-validated BOOL methods; live native value + explicit override" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGRuntimeBrowserViewController new]];
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, easyGating, mobileConfig]],
