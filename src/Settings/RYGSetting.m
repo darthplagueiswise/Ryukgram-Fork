@@ -69,7 +69,9 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
 
     button.menu = menu;
     button.showsMenuAsPrimaryAction = YES;
-    button.changesSelectionAsPrimaryAction = (menu.options & UIMenuOptionsSingleSelection) != 0;
+    // RYGTableCellMenu is a selector by contract. Let UIKit own the selected
+    // element, closed title and the Liquid Glass expansion/morph transition.
+    button.changesSelectionAsPrimaryAction = YES;
     RYGLiquidGlassConfigureButton(button, NO);
 
     UIButtonConfiguration *configuration = button.configuration;
@@ -110,10 +112,11 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
         [children addObject:element];
     }
 
+    UIMenuOptions options = submenu.options | UIMenuOptionsSingleSelection;
     return [UIMenu menuWithTitle:submenu.title
                            image:submenu.image
                       identifier:submenu.identifier
-                         options:submenu.options
+                         options:options
                         children:children];
 }
 
