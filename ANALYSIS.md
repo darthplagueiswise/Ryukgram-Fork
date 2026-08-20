@@ -100,3 +100,19 @@ The supplied `mc_overrides.json` is an object whose normal keys use `<configId>:
 ```
 
 The special `_qe_overrides_` array is preserved. Import validates the complete file before applying any live value, and unsupported/mapping-only rows are preserved rather than assigned a fabricated parameter ID or type.
+
+## Developer surfaces revalidated on the current binaries
+
+The current Developer hub targets are owner/ABI driven rather than keyword-scanned Objective-C methods. Revalidation used LIEF 1.0.0, Capstone 5.x and `llvm-objdump` against the two SHA-256 inputs above.
+
+- `_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs +isTrayAttachedToHeaderEnabled:` is `B24@0:8@16`.
+- `_TtC25IGOverlayStoriesTrayDebug39IGOverlayStoriesTrayDebugViewController +presentFrom:currentlyEnabled:onApplyAndRestart:` is `v36@0:8@16B24@?28`.
+- `_TtC38IGStoryViewerRedesignExperimentHelpers38IGStoryViewerRedesignExperimentHelpers +isStoryViewerCardAnimationEnabledWithLauncherSet:` is `B24@0:8@16`.
+- `_TtC17IGBugReporterMenu29IGBugReportMenuViewController` exposes both the legacy `@92@0:8@16@24@32@40@48@56q64q72B80B84B88` initializer and the full `@104@0:8@16@24@32@40@48@56q64q72B80B84B88B92q96` initializer. Only those validated BOOL visibility arguments are eligible for modification.
+- `_TtC20IGDogfoodingSettings20IGDogfoodingSettings +openWithConfig:onViewController:userSession:` is `v40@0:8@16@24@32`; `_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController -initWithConfig:userSession:` is `@32@0:8@16@24`. The implementation captures and reuses a real Instagram config/session rather than constructing one.
+- `_TtC35IGDogfoodingAssistantLauncherClient35IGDogfoodingAssistantLauncherClient -overrideLauncherWithUserSession:launcherName:parametersToValues:` is `B40@0:8@16@24@32`; `-clearAllOverridesWithUserSession:` is `v24@0:8@16`.
+- `IGBloksFollowButtonView -setPrismEnabled:` and `IGTableViewCell -setListRedesignOn:` are `v20@0:8B16`; `IGTableViewCell -isListRedesignOn` is `B16@0:8`.
+- `_TtC21IGConsumerSubsService21IGConsumerSubsService` is the owner used for IGPlus/subscription BOOL gates; Aura is wired through `IGProfileGatingService +isAuraQuietPostingEnabledWithConsumerSubsService:` (`B24@0:8@16`).
+- `_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper -overrideIsEnabled:` is `v20@0:8B16`, so Throwback Chrome uses its native override API instead of a generic message hook.
+
+The supplied mapping resolves config `90775` as `ig_dogfooding_assistant` and parameter `1` as `show_in_bug_report_menu`; the runtime only applies that MobileConfig row when it is also present as a typed live parameter. Other `dogfood`, `employee` and `internal` matches are surfaced as resolved MobileConfig candidates rather than being converted into guessed Objective-C gates.
