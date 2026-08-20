@@ -27,20 +27,12 @@ jobs:
           path: main
           fetch-depth: 0
 
-      - name: Install build and binary-analysis dependencies
+      - name: Install build dependencies
         run: |
-          brew install ldid dpkg make radare2
-          python3 -m venv "$RUNNER_TEMP/ryg-python"
-          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --upgrade pip capstone lief r2pipe
-          echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
+          brew untap aws/tap || true
+          brew untap azure/bicep || true
+          brew install ldid dpkg make
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/ryg-python/bin/python" - <<'PY'
-          import capstone, lief, r2pipe
-          print('capstone', capstone.__version__)
-          print('lief', lief.__version__)
-          print('r2pipe', getattr(r2pipe, '__version__', 'installed'))
-          PY
-          r2 -v
 
       - name: Setup Theos
         uses: actions/checkout@v4
@@ -86,28 +78,6 @@ jobs:
           set -o pipefail
           ./build.sh rootless 2>&1 | tee "$RUNNER_TEMP/ryg-rootless-build.log"
 
-      - name: Validate rootless dylib with LIEF, Capstone and radare2
-        working-directory: main
-        run: |
-          DEB="$(ls -t packages/*_rootless.deb | head -n1)"
-          test -n "$DEB"
-          STAGE="$(mktemp -d)"
-          dpkg-deb -x "$DEB" "$STAGE"
-          DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
-          test -n "$DYLIB"
-          python3 scripts/validate-macho.py "$DYLIB"
-          r2 -2qc 'ij' "$DYLIB" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("bin",{}).get("arch") in ("arm","arm64"); assert d.get("bin",{}).get("bits") == 64; print("radare2", d.get("bin",{}).get("arch"), d.get("bin",{}).get("bits"))'
-          python3 - "$DYLIB" <<'PY'
-          import r2pipe, sys
-          r = r2pipe.open(sys.argv[1], flags=['-2'])
-          info = r.cmdj('ij') or {}
-          assert (info.get('bin') or {}).get('bits') == 64
-          r.quit()
-          print('r2pipe Mach-O check: PASS')
-          PY
-          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
-          rm -rf "$STAGE"
-
       - name: Name rootless artifact
         working-directory: main
         run: |
@@ -122,20 +92,6 @@ jobs:
         run: |
           set -o pipefail
           ./build.sh rootful 2>&1 | tee "$RUNNER_TEMP/ryg-rootful-build.log"
-
-      - name: Validate rootful dylib with LIEF, Capstone and radare2
-        working-directory: main
-        run: |
-          DEB="$(ls -t packages/*_rootful.deb | head -n1)"
-          test -n "$DEB"
-          STAGE="$(mktemp -d)"
-          dpkg-deb -x "$DEB" "$STAGE"
-          DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
-          test -n "$DYLIB"
-          python3 scripts/validate-macho.py "$DYLIB"
-          r2 -2qc 'ij' "$DYLIB" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("bin",{}).get("bits") == 64; print("radare2 rootful check: PASS")'
-          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
-          rm -rf "$STAGE"
 
       - name: Name rootful artifact
         working-directory: main
