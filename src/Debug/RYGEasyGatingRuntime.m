@@ -4,7 +4,6 @@
 #import <stdatomic.h>
 #import <stdint.h>
 #import <dlfcn.h>
-#import <mach-o/dyld.h>
 
 NSString *const RYGEasyGatingDidObserveNotification = @"RYGEasyGatingDidObserveNotification";
 NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
@@ -15,18 +14,11 @@ NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
 static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_platform_bool_overrides_v2";
 
 // ABI re-validated against FBSharedFramework(20260819-042733):
-//
-// EasyGatingGetBoolean_Internal_DoNotUseOrMock saves incoming x3/x2, maps the
-// incoming w1 selector/index through its internal jump table, then tail-calls
-// EasyGatingPlatformGetBoolean after restoring:
-//   x0 = original context
-//   w1 = FINAL mapped gate ID
-//   w2 = original Boolean/default value
-//   w3 = (original w3 == 1)
-//
-// EasyGatingPlatformGetBoolean itself immediately preserves x2 as its fallback
-// result, which independently confirms the default-value role. We therefore hook
-// the platform function, not the pre-map public wrapper.
+// EasyGatingGetBoolean_Internal_DoNotUseOrMock maps its incoming selector/index
+// to the final gate ID, then tail-calls EasyGatingPlatformGetBoolean with:
+//   x0 = context, w1 = FINAL gate ID, w2 = default Boolean, w3 = exposure flag.
+// We hook only that final platform function and only after EasyGating/Dogfood is
+// explicitly activated. There is deliberately no process-start constructor.
 typedef uint32_t (*RYGEasyGatingPlatformGetBooleanFn)(uintptr_t context,
                                                        uint32_t gateID,
                                                        uint32_t defaultValue,
@@ -162,12 +154,6 @@ static void RYGScheduleEasyGatingInstall(void) {
     });
 }
 
-static void RYGEasyGatingImageLoaded(const struct mach_header *header, intptr_t slide) {
-    (void)header;
-    (void)slide;
-    RYGScheduleEasyGatingInstall();
-}
-
 @implementation RYGEasyGatingRuntime
 
 + (instancetype)shared {
@@ -223,11 +209,3 @@ static void RYGEasyGatingImageLoaded(const struct mach_header *header, intptr_t 
 }
 
 @end
-
-__attribute__((constructor(180))) static void RYGEasyGatingRuntimeBootstrap(void) {
-    @autoreleasepool {
-        RYGEasyGatingRefreshOverrideCache();
-        RYGInstallEasyGatingPlatformHook();
-        _dyld_register_func_for_add_image(RYGEasyGatingImageLoaded);
-    }
-}
