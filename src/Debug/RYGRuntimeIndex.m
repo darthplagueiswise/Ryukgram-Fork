@@ -31,6 +31,18 @@ static NSString *RYGIndexCanonicalPath(NSString *path) {
     return resolved.length ? resolved.stringByStandardizingPath : standard;
 }
 
+static NSString *RYGIndexRuntimeNameForPath(NSString *path) {
+    NSString *wanted = RYGIndexCanonicalPath(path);
+    if (!wanted.length) return nil;
+    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
+        const char *raw = _dyld_get_image_name(index);
+        if (!raw) continue;
+        NSString *runtimeName = [NSString stringWithUTF8String:raw];
+        if ([RYGIndexCanonicalPath(runtimeName) isEqualToString:wanted]) return runtimeName;
+    }
+    return nil;
+}
+
 static const struct mach_header *RYGIndexHeaderForPath(NSString *path) {
     NSString *wanted = RYGIndexCanonicalPath(path);
     if (!wanted.length) return NULL;
@@ -53,7 +65,7 @@ static BOOL RYGIndexBoolReturn(Method method) {
     char encoded[64] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGIndexSkipQualifiers(encoded);
-    return type && (*type == 'B' || *type == 'c' || *type == 'C');
+    return type && *type == 'B';
 }
 
 static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
@@ -66,7 +78,7 @@ static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
     const char *type = RYGIndexSkipQualifiers(encoded);
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@') return RYGRuntimeArgumentObject;
-    if (strchr("cCsSiIlLqQ", *type) != NULL) return RYGRuntimeArgumentInteger;
+    if (*type == 'q' || *type == 'Q') return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
 
@@ -110,10 +122,10 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     result.methodsByClass = @{};
     if (!target) return result;
 
-    // Enumerate only classes defined by the selected Mach-O image. This keeps
-    // index cost proportional to the selected image instead of the whole app.
+    NSString *runtimeName = RYGIndexRuntimeNameForPath(canonical);
+    if (!runtimeName.length) return result;
     unsigned int imageClassCount = 0;
-    const char **imageClassNames = objc_copyClassNamesForImage(canonical.fileSystemRepresentation, &imageClassCount);
+    const char **imageClassNames = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &imageClassCount);
     if (!imageClassNames || imageClassCount == 0 || imageClassCount > 500000) {
         if (imageClassNames) free(imageClassNames);
         return result;

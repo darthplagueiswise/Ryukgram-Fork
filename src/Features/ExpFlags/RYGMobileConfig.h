@@ -69,6 +69,7 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 - (void)resetOverridesForConfig:(RYGMCConfig *)config;
 
 - (NSString *)callSiteFor:(RYGMCParam *)param;
+- (NSSet<NSNumber *> *)seenParamIDs;
 
 - (NSString *)noteFor:(RYGMCParam *)param;
 - (void)setNote:(NSString *)note for:(RYGMCParam *)param;
