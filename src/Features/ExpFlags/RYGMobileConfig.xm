@@ -145,13 +145,31 @@ static id new_getStringOptsDef(id self, SEL cmd, unsigned long long pid, id opts
 #pragma mark - Name catalog
 - (NSDictionary *)loadNameCatalog { NSDictionary *cached = RYGMCLoadCachedNameMappingCatalog(NULL); if (cached.count) return cached; NSMutableDictionary *catalog = [NSMutableDictionary dictionary]; [self mergeDiskNamesInto:catalog]; return catalog.copy; }
 - (NSString *)mcDirectory {
-    id manager = gManager; SEL selector = NSSelectorFromString(@"getOverridesTablePath"); Method method = manager ? class_getInstanceMethod([manager class], selector) : NULL;
-    if (!method || method_getNumberOfArguments(method) != 2) return nil; char ret[32] = {0}; method_getReturnType(method, ret, sizeof(ret)); if (*ret != '@') return nil;
-    id value = ((id (*)(id, SEL))objc_msgSend)(manager, selector); NSString *base = [value isKindOfClass:NSURL.class] ? [(NSURL *)value path] : ([value isKindOfClass:NSString.class] ? value : nil); if ([base hasPrefix:@"file://"]) base = [NSURL URLWithString:base].path; return base.length ? base.stringByDeletingLastPathComponent : nil;
+    id manager = gManager;
+    SEL selector = NSSelectorFromString(@"getOverridesTablePath");
+    Method method = manager ? class_getInstanceMethod([manager class], selector) : NULL;
+    if (!method || method_getNumberOfArguments(method) != 2) return nil;
+    char ret[32] = {0};
+    method_getReturnType(method, ret, sizeof(ret));
+    if (*ret != '@') return nil;
+
+    id value = ((id (*)(id, SEL))objc_msgSend)(manager, selector);
+    NSString *path = [value isKindOfClass:NSURL.class] ? [(NSURL *)value path] : ([value isKindOfClass:NSString.class] ? value : nil);
+    if ([path hasPrefix:@"file://"]) path = [NSURL URLWithString:path].path;
+    path = path.stringByStandardizingPath;
+    if (!path.length) return nil;
+
+    // The framework's getOverridesTablePath is the native authority. In the
+    // current FB/IG MobileConfig implementation it resolves the mc_overrides
+    // table inside Documents/mobileconfig/<user>.data. Accept either the table
+    // path or the data directory itself, but never synthesize sessionless paths.
+    if ([path.pathExtension.lowercaseString isEqualToString:@"data"]) return path;
+    NSString *directory = path.stringByDeletingLastPathComponent;
+    return [directory.pathExtension.lowercaseString isEqualToString:@"data"] ? directory : nil;
 }
 - (void)mergeDiskNamesInto:(NSMutableDictionary *)catalog {
     NSString *directory = [self mcDirectory]; if (!directory.length) return; NSFileManager *fm = NSFileManager.defaultManager; NSMutableArray *files = [NSMutableArray array];
-    for (NSString *sub in @[@"", @"sessionless.data"]) { NSString *candidate = sub.length ? [directory stringByAppendingPathComponent:sub] : directory; for (NSString *name in [fm contentsOfDirectoryAtPath:candidate error:nil]) if ([name isEqualToString:@"id_name_mapping.json"] || [name hasPrefix:@"mc_sync_response_dump"]) [files addObject:[candidate stringByAppendingPathComponent:name]]; }
+    for (NSString *name in [fm contentsOfDirectoryAtPath:directory error:nil]) if ([name isEqualToString:@"id_name_mapping.json"] || [name hasPrefix:@"mc_sync_response_dump"]) [files addObject:[directory stringByAppendingPathComponent:name]];
     for (NSString *path in files) {
         NSData *data = [NSData dataWithContentsOfFile:path]; if (!data.length) continue; id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil]; NSArray *entries = nil;
         if ([json isKindOfClass:NSArray.class]) entries = (NSArray *)json; else if ([json isKindOfClass:NSDictionary.class]) { id names = ((NSDictionary *)json)[@"id_to_names"]; if ([names isKindOfClass:NSArray.class]) entries = (NSArray *)names; }
