@@ -157,10 +157,24 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
     NSString *path = nil;
     @try { path = [self mcDirectory]; } @catch (__unused NSException *exception) {}
     if (![path isKindOfClass:NSString.class] || !path.length) return nil;
-    BOOL isDirectory = NO;
-    if (![NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDirectory] || !isDirectory) return nil;
-    // Instagram's native MobileConfig unit lives under Documents/mobileconfig/<user>.data/.
+
+    path = path.stringByStandardizingPath;
+    // getOverridesTablePath is the authority for the active MobileConfig unit.
+    // Its parent is the native Documents/mobileconfig/<user>.data directory;
+    // never synthesize an App Group UUID or a sessionless subdirectory here.
     if (![path.pathExtension.lowercaseString isEqualToString:@"data"]) return nil;
+
+    NSFileManager *fileManager = NSFileManager.defaultManager;
+    BOOL isDirectory = NO;
+    if ([fileManager fileExistsAtPath:path isDirectory:&isDirectory]) {
+        return isDirectory ? path : nil;
+    }
+
+    NSError *createError = nil;
+    if (![fileManager createDirectoryAtPath:path
+                withIntermediateDirectories:YES
+                                 attributes:nil
+                                      error:&createError]) return nil;
     return path;
 }
 
