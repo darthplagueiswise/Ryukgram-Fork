@@ -69,7 +69,7 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
 
     button.menu = menu;
     button.showsMenuAsPrimaryAction = YES;
-    button.changesSelectionAsPrimaryAction = NO;
+    button.changesSelectionAsPrimaryAction = (menu.options & UIMenuOptionsSingleSelection) != 0;
     RYGLiquidGlassConfigureButton(button, NO);
 
     UIButtonConfiguration *configuration = button.configuration;
@@ -105,13 +105,16 @@ static NSString *RYGSelectedTitleForMenu(UIMenu *menu) {
             continue;
         }
 
-        // UIAction already owns its handler and state. Keep the exact UIKit
-        // element instead of rebuilding it as UICommand and losing its state.
+        // UIAction owns its handler/state. Preserve the UIKit element so the
+        // native menu source can morph and update without a second renderer.
         [children addObject:element];
     }
 
-    UIMenuOptions options = submenu.options | UIMenuOptionsSingleSelection;
-    return [UIMenu menuWithTitle:submenu.title image:submenu.image identifier:submenu.identifier options:options children:children];
+    return [UIMenu menuWithTitle:submenu.title
+                           image:submenu.image
+                      identifier:submenu.identifier
+                         options:submenu.options
+                        children:children];
 }
 
 @end
