@@ -1,5 +1,5 @@
 #import "RYGMobileConfigToolsViewController.h"
-#import "RYGMobileConfigViewController.h"
+#import "RYGMobileConfigBrowserViewController.h"
 #import "RYGMobileConfig.h"
 #import "RYGMobileConfigJSONIO.h"
 #import "../../Utils.h"
@@ -28,22 +28,19 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    // Imports may have happened before Instagram exposed its context manager.
-    // Every time the native tools screen becomes active, flush the persisted
-    // canonical files into the manager-resolved <user>.data unit if available.
     [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory];
 }
 
 - (void)rebuildSections {
     __weak typeof(self) weakSelf = self;
 
-    // Keep the original RyukGram MobileConfig list/detail UI as the primary
-    // browser. Its BOOL editor is the native UISwitch-based control the tweak
-    // historically used; the newer experimental browser must not replace it.
+    // One browser only. It joins id_name_mapping by (configNumber,paramIndex),
+    // edits the canonical mc_overrides document for every mapped row, and also
+    // applies immediately when a validated native PID/type exists.
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
                                                      subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
-                                               viewController:[RYGMobileConfigViewController new]];
+                                               viewController:[RYGMobileConfigBrowserViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
                                                      subtitle:@""
