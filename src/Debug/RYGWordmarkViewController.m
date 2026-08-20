@@ -8,8 +8,6 @@
 #import <objc/runtime.h>
 #include <string.h>
 
-static const void *kRYGWordmarkMethodKey = &kRYGWordmarkMethodKey;
-
 static NSArray<NSDictionary<NSString *, NSString *> *> *RYGWordmarkVariants(void) {
     static NSArray *variants;
     static dispatch_once_t once;
@@ -200,6 +198,57 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     });
 }
 
+- (UIMenu *)menuForMethod:(RYGRuntimeBoolMethod *)method {
+    if (!method) return nil;
+    __weak typeof(self) weakSelf = self;
+
+    UIAction *observe = [UIAction actionWithTitle:@"Observe Native"
+                                            image:[UIImage systemImageNamed:@"waveform.path.ecg"]
+                                       identifier:nil
+                                          handler:^(__unused UIAction *action) {
+        RYGRuntimeBeginLiveObservation(@[method]);
+    }];
+
+    NSNumber *forced = method.overrideValue;
+    UIAction *nativeAction = [UIAction actionWithTitle:@"Native"
+                                                image:nil
+                                           identifier:nil
+                                              handler:^(__unused UIAction *action) {
+        [RYGRuntimeBrowserEngine setOverride:nil forMethod:method];
+        [weakSelf rebuildGrid];
+    }];
+    nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
+
+    UIAction *forceOn = [UIAction actionWithTitle:@"Force On"
+                                            image:nil
+                                       identifier:nil
+                                          handler:^(__unused UIAction *action) {
+        [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method];
+        [weakSelf rebuildGrid];
+    }];
+    forceOn.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+
+    UIAction *forceOff = [UIAction actionWithTitle:@"Force Off"
+                                             image:nil
+                                        identifier:nil
+                                           handler:^(__unused UIAction *action) {
+        [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method];
+        [weakSelf rebuildGrid];
+    }];
+    forceOff.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+
+    UIMenu *output = [UIMenu menuWithTitle:@"Output"
+                                     image:nil
+                                identifier:nil
+                                   options:UIMenuOptionsSingleSelection | UIMenuOptionsDisplayInline
+                                  children:@[nativeAction, forceOn, forceOff]];
+    return [UIMenu menuWithTitle:method.selectorName ?: @"IGWordMark"
+                           image:nil
+                      identifier:nil
+                         options:0
+                        children:@[observe, output]];
+}
+
 - (void)rebuildGrid {
     for (UIView *view in self.grid.arrangedSubviews.copy) {
         [self.grid removeArrangedSubview:view];
@@ -221,8 +270,14 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
             button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentFill;
             button.contentVerticalAlignment = UIControlContentVerticalAlignmentFill;
             button.accessibilityLabel = [NSString stringWithFormat:@"IGWordMark %@", variant[@"title"]];
-            objc_setAssociatedObject(button, kRYGWordmarkMethodKey, method, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [button addTarget:self action:@selector(wordmarkTapped:) forControlEvents:UIControlEventTouchUpInside];
+            button.enabled = method != nil;
+            if (method) {
+                button.menu = [self menuForMethod:method];
+                button.showsMenuAsPrimaryAction = YES;
+                button.changesSelectionAsPrimaryAction = NO;
+            }
+            // The menu must exist before configuring Glass so UIKit uses its
+            // default menu-source metrics and owns the closed→expanded morph.
             RYGLiquidGlassConfigureButton(button, NO);
 
             UIStackView *content = [UIStackView new];
@@ -260,39 +315,9 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
                 [content.topAnchor constraintEqualToAnchor:button.topAnchor constant:14.0],
                 [content.bottomAnchor constraintEqualToAnchor:button.bottomAnchor constant:-14.0],
             ]];
-            button.enabled = method != nil;
             [rowStack addArrangedSubview:button];
         }
     }
-}
-
-- (void)wordmarkTapped:(UIButton *)button {
-    RYGRuntimeBoolMethod *method = objc_getAssociatedObject(button, kRYGWordmarkMethodKey);
-    if (!method) return;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:button.accessibilityLabel ?: @"IGWordMark"
-                                                                    message:nil
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Observe Native" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        RYGRuntimeBeginLiveObservation(@[method]);
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force On" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf rebuildGrid];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force Off" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf rebuildGrid];
-    }]];
-    if (method.overrideValue) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-            [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf rebuildGrid];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = button;
-        sheet.popoverPresentationController.sourceRect = button.bounds;
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 @end
