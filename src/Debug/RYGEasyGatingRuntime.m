@@ -27,13 +27,12 @@ static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_platform_b
 // that lives in the same signed 16 KiB page as the later crash at +0x50d0ac.
 // iOS killed the process with CODESIGNING/Invalid Page. This implementation
 // only rebinds imported symbol slots and READS the wrapper's mapping table.
-typedef uint32_t (*RYGEasyGatingBoolFn)(uintptr_t context,
-                                        uint32_t selectorOrGateID,
-                                        uint32_t defaultValue,
-                                        uint32_t exposureValue);
+typedef uint32_t (*RYGEasyGatingWrapperFn)(uintptr_t context,
+                                           uint32_t selectorIndex,
+                                           uint32_t defaultValue,
+                                           uintptr_t exposureSource);
 
-static RYGEasyGatingBoolFn gRYGOriginalEasyGatingWrapper;
-static RYGEasyGatingBoolFn gRYGOriginalEasyGatingPlatformGetBoolean;
+static RYGEasyGatingWrapperFn gRYGOriginalEasyGatingWrapper;
 static os_unfair_lock gRYGEasyGatingLock = OS_UNFAIR_LOCK_INIT;
 static NSMutableDictionary<NSNumber *, RYGEasyGatingObservation *> *gRYGEasyGatingObservations;
 static NSDictionary<NSString *, NSNumber *> *gRYGEasyGatingOverrideCache;
@@ -123,7 +122,7 @@ static int64_t RYGSignExtend21(uint32_t value) {
     return (int64_t)((raw ^ sign) - sign);
 }
 
-static uintptr_t RYGStripFunctionPointer(RYGEasyGatingBoolFn function) {
+static uintptr_t RYGStripFunctionPointer(RYGEasyGatingWrapperFn function) {
     if (!function) return 0;
 #if __has_feature(ptrauth_calls)
     return (uintptr_t)ptrauth_strip((void *)function, ptrauth_key_function_pointer);
@@ -135,7 +134,7 @@ static uintptr_t RYGStripFunctionPointer(RYGEasyGatingBoolFn function) {
 // Decode the exact read-only mapper embedded in the current wrapper instead of
 // jumping into the middle of signed code. This remains safe with BTI/PAC because
 // no indirect branch targets an interior instruction.
-static BOOL RYGResolveFinalGateID(RYGEasyGatingBoolFn wrapper,
+static BOOL RYGResolveFinalGateID(RYGEasyGatingWrapperFn wrapper,
                                   uint32_t selectorIndex,
                                   uint32_t *finalGateID) {
     uintptr_t wrapperAddress = RYGStripFunctionPointer(wrapper);
@@ -195,28 +194,14 @@ static BOOL RYGResolveFinalGateID(RYGEasyGatingBoolFn wrapper,
 static uint32_t RYGEasyGatingWrapperReplacement(uintptr_t context,
                                                  uint32_t selectorIndex,
                                                  uint32_t defaultValue,
-                                                 uint32_t exposureValue) {
-    RYGEasyGatingBoolFn original = gRYGOriginalEasyGatingWrapper;
-    uint32_t native = original ? original(context, selectorIndex, defaultValue, exposureValue)
+                                                 uintptr_t exposureSource) {
+    RYGEasyGatingWrapperFn original = gRYGOriginalEasyGatingWrapper;
+    uint32_t native = original ? original(context, selectorIndex, defaultValue, exposureSource)
                                : (defaultValue ? 1u : 0u);
     uint32_t finalID = 0;
     if (!RYGResolveFinalGateID(original, selectorIndex, &finalID)) return native;
-    BOOL exposure = exposureValue == 1u;
-    RYGEasyGatingRecord(finalID, defaultValue != 0, exposure, native != 0);
+    RYGEasyGatingRecord(finalID, defaultValue != 0, exposureSource != 0, native != 0);
     NSNumber *forced = RYGEasyGatingCachedOverride(finalID);
-    return forced ? (forced.boolValue ? 1u : 0u) : native;
-}
-
-static uint32_t RYGEasyGatingPlatformReplacement(uintptr_t context,
-                                                  uint32_t finalGateID,
-                                                  uint32_t defaultValue,
-                                                  uint32_t exposureValue) {
-    RYGEasyGatingBoolFn original = gRYGOriginalEasyGatingPlatformGetBoolean;
-    uint32_t native = original ? original(context, finalGateID, defaultValue, exposureValue)
-                               : (defaultValue ? 1u : 0u);
-    if (!finalGateID) return native;
-    RYGEasyGatingRecord(finalGateID, defaultValue != 0, exposureValue != 0, native != 0);
-    NSNumber *forced = RYGEasyGatingCachedOverride(finalGateID);
     return forced ? (forced.boolValue ? 1u : 0u) : native;
 }
 
@@ -225,16 +210,14 @@ static BOOL RYGRegisterEasyGatingRebindings(void) {
     bool expected = false;
     if (!atomic_compare_exchange_strong(&gRYGEasyGatingRebindingRegistered, &expected, true)) return YES;
 
+    // Instagram(7) imports the wrapper; FBShared tail-branches internally to
+    // EasyGatingPlatformGetBoolean. Rebinding the platform import cannot catch
+    // that internal branch and only adds an unnecessary ABI surface.
     struct rebinding bindings[] = {
         {
             .name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
             .replacement = (void *)&RYGEasyGatingWrapperReplacement,
             .replaced = (void **)&gRYGOriginalEasyGatingWrapper,
-        },
-        {
-            .name = "EasyGatingPlatformGetBoolean",
-            .replacement = (void *)&RYGEasyGatingPlatformReplacement,
-            .replaced = (void **)&gRYGOriginalEasyGatingPlatformGetBoolean,
         },
     };
     if (rebind_symbols(bindings, sizeof(bindings) / sizeof(bindings[0])) != 0) {

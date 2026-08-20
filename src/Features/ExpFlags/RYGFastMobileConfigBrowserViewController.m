@@ -78,6 +78,12 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
     return [NSString stringWithFormat:@"%u:", configNumber];
 }
 
+static unsigned long long RYGFastMCCanonicalPid(unsigned long long pid) {
+    if (!pid) return 0;
+    unsigned long long type = (pid >> 48) & 0x0FULL;
+    return (pid & 0x0000FFFFFFFFFFFFULL) | ((0x40ULL | type) << 48);
+}
+
 @interface RYGFastMCDocumentStore : NSObject
 @property (nonatomic, strong) NSMutableDictionary<NSString *, id> *root;
 - (void)load;
@@ -85,6 +91,7 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
 - (BOOL)configIsOverridden:(RYGMCConfig *)config;
 - (NSSet<NSNumber *> *)overriddenConfigNumbers;
 - (BOOL)setValueText:(nullable NSString *)valueText forParam:(RYGMCParam *)param error:(NSError **)error;
+- (void)updateCachedValueText:(nullable NSString *)valueText forParam:(RYGMCParam *)param;
 @end
 
 @implementation RYGFastMCDocumentStore
@@ -126,6 +133,21 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
         if (end != raw && *end == '\0' && number <= UINT32_MAX) [numbers addObject:@((unsigned int)number)];
     }];
     return numbers.copy;
+}
+
+- (void)updateCachedValueText:(NSString *)valueText forParam:(RYGMCParam *)param {
+    if (!param) return;
+    NSString *key = RYGFastMCConfigKey(param.configNumber);
+    NSArray *existing = [self.root[key] isKindOfClass:NSArray.class] ? self.root[key] : @[];
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    for (id raw in existing) {
+        if (![raw isKindOfClass:NSString.class]) continue;
+        unsigned int index = 0;
+        if (RYGFastMCParseLine(raw, &index, NULL) && index == param.paramIndex) continue;
+        [lines addObject:raw];
+    }
+    if (valueText) [lines addObject:[NSString stringWithFormat:@"%u%@%@", param.paramIndex, kRYGFastMCSeparator, valueText]];
+    if (lines.count) self.root[key] = lines.copy; else [self.root removeObjectForKey:key];
 }
 
 - (BOOL)setValueText:(NSString *)valueText forParam:(RYGMCParam *)param error:(NSError **)error {
@@ -263,6 +285,7 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
         NSArray<RYGMCConfig *> *configs = engine.allConfigs ?: @[];
         RYGFastMCDocumentStore *store = [RYGFastMCDocumentStore new]; [store load];
         NSMutableDictionary<NSNumber *, NSString *> *blobs = [NSMutableDictionary dictionaryWithCapacity:configs.count];
+        NSSet<NSNumber *> *seenPIDs = [engine seenParamIDs];
         NSMutableSet<NSNumber *> *seen = [NSMutableSet set];
         for (RYGMCConfig *config in configs) {
             @autoreleasepool {
@@ -270,7 +293,7 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
                 BOOL configSeen = NO;
                 for (RYGMCParam *param in config.params) {
                     [blob appendFormat:@"%@ %u %llu ", RYGFastMCNormalize(param.name), param.paramIndex, param.paramID];
-                    if (!configSeen && param.isRuntimeBacked && [engine callSiteFor:param].length) configSeen = YES;
+                    if (!configSeen && param.isRuntimeBacked && param.paramID && [seenPIDs containsObject:@(RYGFastMCCanonicalPid(param.paramID))]) configSeen = YES;
                 }
                 blobs[@(config.number)] = blob.copy;
                 if (configSeen) [seen addObject:@(config.number)];
@@ -377,8 +400,30 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { (void)tableView; (void)section; return @"Seen is recorded only by Instagram's real MobileConfig getter calls. Values are read only for visible detail rows. Edits update canonical mc_overrides.json and then apply through the validated native MobileConfig bridge when a runtime PID exists."; }
 
 - (BOOL)setText:(NSString *)text forParam:(RYGMCParam *)param {
-    NSError *error = nil; BOOL ok = [self.documentStore setValueText:text forParam:param error:&error];
-    if (!ok) [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Could not update mc_overrides.json"];
+    NSError *error = nil;
+    BOOL ok = NO;
+    if (param.isRuntimeBacked && RYGMCTypeIsRuntimeValue(param.type)) {
+        RYGMobileConfig *engine = RYGMobileConfig.shared;
+        if (!text) {
+            [engine clearOverrideFor:param];
+            [self.documentStore updateCachedValueText:nil forParam:param];
+            ok = YES;
+        } else {
+            id value = nil;
+            switch (param.type) {
+                case RYGMCTypeBool: value = @([text.lowercaseString isEqualToString:@"true"]); break;
+                case RYGMCTypeInt: value = @([text longLongValue]); break;
+                case RYGMCTypeDouble: value = @([text doubleValue]); break;
+                case RYGMCTypeString: value = text; break;
+                default: break;
+            }
+            ok = value && [engine setOverride:value for:param];
+            if (ok) [self.documentStore updateCachedValueText:text forParam:param];
+        }
+    } else {
+        ok = [self.documentStore setValueText:text forParam:param error:&error];
+    }
+    if (!ok) [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Could not apply MobileConfig override"];
     else { if (self.documentDidChange) self.documentDidChange(); [self.tableView reloadData]; }
     return ok;
 }

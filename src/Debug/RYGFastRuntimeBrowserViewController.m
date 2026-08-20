@@ -224,10 +224,15 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     self.emptyLabel = [UILabel new]; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.numberOfLines = 0; self.emptyLabel.textColor = UIColor.secondaryLabelColor;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshTapped)];
 
-    [self refreshImages];
-    [self rebuildImageMenu];
     RYGLiquidGlassApplyToViewController(self);
-    [self loadSelectedImage];
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || !self.view.window) return;
+        [self refreshImages];
+        [self rebuildImageMenu];
+        [self loadSelectedImage];
+    });
 }
 
 - (void)refreshImages {

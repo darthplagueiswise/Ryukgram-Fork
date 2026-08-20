@@ -240,27 +240,57 @@ static BOOL rygMethodIsVoidQ(Method m) { if (!m || method_getNumberOfArguments(m
 - (BOOL)removeNativeForPid:(unsigned long long)pid { id startup = [self startupConfigs]; SEL sel = NSSelectorFromString(@"removeOverrideForParam:"); Method m = startup ? class_getInstanceMethod([startup class],sel) : NULL; if (!rygMethodIsVoidQ(m)) return NO; ((void (*)(id, SEL, unsigned long long))objc_msgSend)(startup,sel,pid); return YES; }
 - (void)removeNativeBothUnitsForPid:(unsigned long long)pid { [self removeNativeForPid:rygVariantPid(pid,0x40)]; [self removeNativeForPid:rygVariantPid(pid,0x80)]; }
 
+- (BOOL)updateCanonicalJSONForParam:(RYGMCParam *)param value:(id)value {
+    if (!param) return NO;
+    NSString *path = [self ryg_nativeOverridesJSONPath];
+    if (!path.length) return NO;
+    NSMutableDictionary *root = nil;
+    NSData *existingData = [NSData dataWithContentsOfFile:path options:0 error:nil];
+    if (existingData.length) {
+        id parsed = [NSJSONSerialization JSONObjectWithData:existingData options:NSJSONReadingMutableContainers error:nil];
+        if ([parsed isKindOfClass:NSDictionary.class]) root = [parsed mutableCopy];
+    }
+    if (!root) root = [NSMutableDictionary dictionary];
+    NSString *configKey = [NSString stringWithFormat:@"%u:", param.configNumber];
+    NSArray *existing = [root[configKey] isKindOfClass:NSArray.class] ? root[configKey] : @[];
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:existing.count + 1];
+    NSString *prefix = [NSString stringWithFormat:@"%u: : ", param.paramIndex];
+    for (id raw in existing) if ([raw isKindOfClass:NSString.class] && ![(NSString *)raw hasPrefix:prefix]) [lines addObject:raw];
+    if (value) {
+        NSString *text = nil;
+        if (param.type == RYGMCTypeBool) text = [value boolValue] ? @"true" : @"false";
+        else if (param.type == RYGMCTypeInt) text = [NSString stringWithFormat:@"%lld", [value longLongValue]];
+        else if (param.type == RYGMCTypeDouble) text = [NSString stringWithFormat:@"%.17g", [value doubleValue]];
+        else if (param.type == RYGMCTypeString && [value isKindOfClass:NSString.class]) text = value;
+        if (text) [lines addObject:[prefix stringByAppendingString:text]];
+    }
+    if (lines.count) root[configKey] = lines.copy; else [root removeObjectForKey:configKey];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:root options:0 error:nil];
+    return data.length && [data writeToFile:path options:NSDataWritingAtomic error:nil];
+}
+
 - (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)param { return (param.runtimeBacked && param.paramID && _overrides[@(rygCanonicalPid(param.paramID))]) ? RYGMCOverrideSet : RYGMCOverrideNone; }
 - (id)overrideValueFor:(RYGMCParam *)param { return (param.runtimeBacked && param.paramID) ? _overrides[@(rygCanonicalPid(param.paramID))] : nil; }
 - (BOOL)setOverride:(id)value for:(RYGMCParam *)param {
     if (!param.runtimeBacked || !param.paramID || !RYGMCTypeIsRuntimeValue(param.type)) return NO; BOOL valid = param.type == RYGMCTypeString ? [value isKindOfClass:NSString.class] : [value isKindOfClass:NSNumber.class]; if (!valid) return NO;
-    unsigned long long pid = rygCanonicalPid(param.paramID); if (![self writeNativeBothUnitsForPid:pid value:value]) return NO; rygActivateOverride(pid,value); _overrides[@(pid)] = value; [self saveOverrides]; return YES;
+    unsigned long long pid = rygCanonicalPid(param.paramID); if (![self writeNativeBothUnitsForPid:pid value:value]) return NO; rygActivateOverride(pid,value); _overrides[@(pid)] = value; [self saveOverrides]; (void)[self updateCanonicalJSONForParam:param value:value]; return YES;
 }
-- (void)clearOverrideFor:(RYGMCParam *)param { if (!param.runtimeBacked || !param.paramID) return; unsigned long long pid = rygCanonicalPid(param.paramID); [self removeNativeBothUnitsForPid:pid]; rygDeactivateOverride(pid); [_overrides removeObjectForKey:@(pid)]; [self saveOverrides]; }
+- (void)clearOverrideFor:(RYGMCParam *)param { if (!param.runtimeBacked || !param.paramID) return; unsigned long long pid = rygCanonicalPid(param.paramID); [self removeNativeBothUnitsForPid:pid]; rygDeactivateOverride(pid); [_overrides removeObjectForKey:@(pid)]; [self saveOverrides]; (void)[self updateCanonicalJSONForParam:param value:nil]; }
 - (void)resetOverridesForConfig:(RYGMCConfig *)config { for (RYGMCParam *p in config.params) if ([self overrideStateFor:p] == RYGMCOverrideSet) [self clearOverrideFor:p]; }
 - (NSUInteger)overrideCount { return _overrides.count; }
-- (void)resetAllOverrides { for (NSNumber *k in _overrides.allKeys.copy) { [self removeNativeBothUnitsForPid:k.unsignedLongLongValue]; rygDeactivateOverride(k.unsignedLongLongValue); } [_overrides removeAllObjects]; [self saveOverrides]; }
+- (void)resetAllOverrides { for (NSNumber *k in _overrides.allKeys.copy) { [self removeNativeBothUnitsForPid:k.unsignedLongLongValue]; rygDeactivateOverride(k.unsignedLongLongValue); } [_overrides removeAllObjects]; [self saveOverrides]; [self syncOverridesJSON]; }
 - (void)reapplyOverridesToNativeTable { for (NSNumber *k in _overrides.copy) { id v = _overrides[k]; if ([self writeNativeBothUnitsForPid:k.unsignedLongLongValue value:v]) rygActivateOverride(k.unsignedLongLongValue,v); } }
 
 #pragma mark - Seen, notes, persistence
 - (NSString *)callSiteFor:(RYGMCParam *)param { if (!param.runtimeBacked || !param.paramID) return nil; unsigned long long best = [self bestParamIDFor:param]; pthread_mutex_lock(&gLock); NSValue *v = gCallSites[@(best)] ?: gCallSites[@(rygVariantPid(param.paramID,0x40))] ?: gCallSites[@(rygVariantPid(param.paramID,0x80))]; pthread_mutex_unlock(&gLock); if (!v) return nil; Dl_info info = {0}; if (dladdr(v.pointerValue,&info) && info.dli_sname) return [NSString stringWithUTF8String:info.dli_sname]; return @"Instagram runtime"; }
+- (NSSet<NSNumber *> *)seenParamIDs { pthread_mutex_lock(&gLock); NSArray<NSNumber *> *keys = gCallSites.allKeys.copy ?: @[]; pthread_mutex_unlock(&gLock); NSMutableSet<NSNumber *> *out = [NSMutableSet setWithCapacity:keys.count]; for (NSNumber *key in keys) { unsigned long long raw = key.unsignedLongLongValue; if (raw) [out addObject:@(rygCanonicalPid(raw))]; } return out.copy; }
 - (NSNumber *)noteKeyForParam:(RYGMCParam *)param { return param.runtimeBacked && param.paramID ? @(param.paramID) : @(((unsigned long long)param.configNumber << 32) | param.paramIndex); }
 - (NSString *)noteFor:(RYGMCParam *)param { return _notes[[self noteKeyForParam:param]]; }
 - (void)setNote:(NSString *)note for:(RYGMCParam *)param { NSNumber *k = [self noteKeyForParam:param]; if (note.length) _notes[k] = note; else [_notes removeObjectForKey:k]; [self saveNotes]; }
 - (NSString *)storePathFor:(NSString *)name { NSString *d = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"RyukGram"]; [NSFileManager.defaultManager createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil]; return [d stringByAppendingPathComponent:name]; }
 - (NSMutableDictionary *)loadOverrides { NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self storePathFor:@"mc_overrides.plist"]]; NSMutableDictionary *out = [NSMutableDictionary dictionary]; for (id raw in disk) { if (![raw isKindOfClass:NSString.class]) continue; unsigned long long pid = strtoull([raw UTF8String],NULL,10); RYGMCType type = (RYGMCType)((pid >> 48) & 0x0F); id v = disk[raw]; BOOL valid = type == RYGMCTypeString ? [v isKindOfClass:NSString.class] : [v isKindOfClass:NSNumber.class]; if (pid && RYGMCTypeIsRuntimeValue(type) && valid) out[@(rygCanonicalPid(pid))] = v; } return out; }
 - (void)syncOverridesJSON { NSError *error = nil; NSData *data = [self ryg_exportOverridesData:&error]; NSString *path = [self ryg_nativeOverridesJSONPath]; if (data.length && path.length) [data writeToFile:path options:NSDataWritingAtomic error:nil]; }
-- (void)saveOverrides { NSMutableDictionary *disk = [NSMutableDictionary dictionary]; for (NSNumber *k in _overrides) disk[k.stringValue] = _overrides[k]; [disk writeToFile:[self storePathFor:@"mc_overrides.plist"] atomically:YES]; [self syncOverridesJSON]; }
+- (void)saveOverrides { NSMutableDictionary *disk = [NSMutableDictionary dictionary]; for (NSNumber *k in _overrides) disk[k.stringValue] = _overrides[k]; [disk writeToFile:[self storePathFor:@"mc_overrides.plist"] atomically:YES]; }
 - (NSMutableDictionary *)loadNotes { NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self storePathFor:@"mc_notes.plist"]]; NSMutableDictionary *out = [NSMutableDictionary dictionary]; for (id k in disk) { id v = disk[k]; if ([k isKindOfClass:NSString.class] && [v isKindOfClass:NSString.class]) { unsigned long long n = strtoull([k UTF8String],NULL,10); if (n) out[@(n)] = v; } } return out; }
 - (void)saveNotes { NSMutableDictionary *disk = [NSMutableDictionary dictionary]; for (NSNumber *k in _notes) disk[k.stringValue] = _notes[k]; [disk writeToFile:[self storePathFor:@"mc_notes.plist"] atomically:YES]; }
 - (BOOL)consumeCrashLoopFlag { return NO; }
@@ -269,7 +299,7 @@ static BOOL rygMethodIsVoidQ(Method m) { if (!m || method_getNumberOfArguments(m
 
 #pragma mark - Hook installation
 static const char *rygMCUnqualifiedType(const char *type) { while (type && strchr("rnNoORV",*type)) type++; return type; }
-static BOOL rygMCTypeMatches(const char *raw, char expected) { const char *t = rygMCUnqualifiedType(raw); if (!t || !*t) return NO; switch (expected) { case 'P': return *t == 'Q' || *t == 'q' || (*t == '{' && (strstr(t,"=Q}") || strstr(t,"=q}"))); case 'B': return *t == 'B' || *t == 'c' || *t == 'C'; case 'Q': return *t == 'q' || *t == 'Q'; case 'D': return *t == 'd'; case '@': return *t == '@'; default: return NO; } }
+static BOOL rygMCTypeMatches(const char *raw, char expected) { const char *t = rygMCUnqualifiedType(raw); if (!t || !*t) return NO; switch (expected) { case 'P': return *t == 'Q' || *t == 'q' || (*t == '{' && (strstr(t,"=Q}") || strstr(t,"=q}"))); case 'B': return *t == 'B'; case 'Q': return *t == 'q' || *t == 'Q'; case 'D': return *t == 'd'; case '@': return *t == '@'; default: return NO; } }
 static BOOL rygMCMethodMatches(Method m, char ret, const char *args) { if (!m || !args || method_getNumberOfArguments(m) != strlen(args) + 2) return NO; char e[128] = {0}; method_getReturnType(m,e,sizeof(e)); if (!rygMCTypeMatches(e,ret)) return NO; for (unsigned int i = 0; args[i]; i++) { memset(e,0,sizeof(e)); method_getArgumentType(m,i+2,e,sizeof(e)); if (!rygMCTypeMatches(e,args[i])) return NO; } return YES; }
 static BOOL rygHookMC(Class cls, NSString *name, IMP replacement, IMP *original, char ret, const char *args) { if (!cls || !replacement || !original || *original) return original && *original; SEL selector = NSSelectorFromString(name); Method method = class_getInstanceMethod(cls,selector); if (!rygMCMethodMatches(method,ret,args)) return NO; MSHookMessageEx(cls,selector,replacement,original); return *original != NULL; }
 static NSUInteger rygMCScore(Class cls) { NSUInteger score = 0; for (NSString *name in @[@"getBool:",@"getInt64:",@"getDouble:",@"getString:"]) if (class_getInstanceMethod(cls,NSSelectorFromString(name))) score++; return score; }

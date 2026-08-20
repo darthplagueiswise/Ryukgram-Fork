@@ -12,6 +12,7 @@
 static NSMutableDictionary<NSString *, NSNumber *> *gRYGOverrides;
 static NSMutableDictionary<NSString *, NSNumber *> *gRYGObservedValues;
 static NSMutableSet<NSString *> *gRYGInstalledKeys;
+static NSString *const kRYGRuntimePersistedOverridesKey = @"ryg_runtime_bool_overrides_v4";
 
 static NSString *RYGCanonicalImagePath(NSString *path) {
     if (!path.length) return @"";
@@ -63,7 +64,7 @@ static const char *RYGSkipTypeQualifiers(const char *type) {
 
 static BOOL RYGIsBoolType(const char *type) {
     type = RYGSkipTypeQualifiers(type);
-    return type && (*type == 'B' || *type == 'c' || *type == 'C');
+    return type && *type == 'B';
 }
 
 static BOOL RYGIsObjectRegisterType(const char *type) {
@@ -160,6 +161,35 @@ static void RYGForgetInstalledKey(NSString *key) {
     @synchronized(RYGRuntimeBrowserEngine.class) { [gRYGInstalledKeys removeObject:key]; }
 }
 
+static Method RYGDeclaredMethod(Class owner, SEL selector) {
+    if (!owner || !selector) return NULL;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(owner, &count);
+    Method found = NULL;
+    for (unsigned int index = 0; methods && index < count; index++) {
+        if (method_getName(methods[index]) == selector) { found = methods[index]; break; }
+    }
+    if (methods) free(methods);
+    return found;
+}
+
+static NSMutableDictionary *RYGReadPersistedOverrideSpecs(void) {
+    id raw = [NSUserDefaults.standardUserDefaults dictionaryForKey:kRYGRuntimePersistedOverridesKey];
+    return [raw isKindOfClass:NSDictionary.class] ? [(NSDictionary *)raw mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static void RYGPersistOverrideSpec(RYGRuntimeBoolMethod *method, NSNumber *value) {
+    if (!method.overrideKey.length) return;
+    NSMutableDictionary *specs = RYGReadPersistedOverrideSpecs();
+    if (!value) [specs removeObjectForKey:method.overrideKey];
+    else specs[method.overrideKey] = @{
+        @"value": @([value boolValue]),
+        @"encoding": method.typeEncoding ?: @"",
+        @"image": RYGCanonicalImagePath(method.imagePath ?: @"")
+    };
+    [NSUserDefaults.standardUserDefaults setObject:specs.copy forKey:kRYGRuntimePersistedOverridesKey];
+}
+
 static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
     if (!key.length) return NO;
     @synchronized(RYGRuntimeBrowserEngine.class) {
@@ -179,7 +209,7 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
     Class cls = objc_lookUpClass(className.UTF8String);
     SEL selector = selectorName.length ? NSSelectorFromString(selectorName) : NULL;
     Class owner = cls ? (classMethod ? object_getClass(cls) : cls) : Nil;
-    Method method = owner && selector ? class_getInstanceMethod(owner, selector) : NULL;
+    Method method = owner && selector ? RYGDeclaredMethod(owner, selector) : NULL;
     if (!cls || !owner || !selector || !RYGMethodHasSupportedBoolABI(method)) {
         RYGForgetInstalledKey(key);
         return NO;
@@ -219,7 +249,7 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
         return NO;
     }
 
-    Method current = class_getInstanceMethod(owner, selector);
+    Method current = RYGDeclaredMethod(owner, selector);
     if (!current || !RYGMethodHasSupportedBoolABI(current)) {
         imp_removeBlock(replacement);
         RYGForgetInstalledKey(key);
@@ -279,6 +309,21 @@ static void RYGCountHookableMembersForClass(Class cls,
 - (BOOL)method { return self.kind == RYGRuntimeMemberInstanceMethod || self.kind == RYGRuntimeMemberClassMethod; }
 - (BOOL)classMember { return self.kind == RYGRuntimeMemberClassMethod || self.kind == RYGRuntimeMemberClassProperty; }
 @end
+
+static void RYGRuntimePersistedImageDidLoad(const struct mach_header *header, intptr_t slide) {
+    (void)header; (void)slide;
+    dispatch_async(dispatch_get_main_queue(), ^{ [RYGRuntimeBrowserEngine reinstallPersistedOverrides]; });
+}
+
+__attribute__((constructor(230))) static void RYGRuntimePersistedBootstrap(void) {
+    @autoreleasepool {
+        NSDictionary *specs = [NSUserDefaults.standardUserDefaults dictionaryForKey:kRYGRuntimePersistedOverridesKey];
+        if (![specs isKindOfClass:NSDictionary.class] || !specs.count) return;
+        _dyld_register_func_for_add_image(RYGRuntimePersistedImageDidLoad);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ [RYGRuntimeBrowserEngine reinstallPersistedOverrides]; });
+    }
+}
 
 @implementation RYGRuntimeBoolMethod
 - (NSString *)overrideKey { return RYGMethodKey(self.className, self.selectorName, self.classMethod); }
@@ -514,8 +559,39 @@ static void RYGCountHookableMembersForClass(Class cls,
         if (value) gRYGOverrides[method.overrideKey] = @(value.boolValue);
         else [gRYGOverrides removeObjectForKey:method.overrideKey];
     }
+    RYGPersistOverrideSpec(method, value);
 }
 
-+ (void)reinstallPersistedOverrides { }
++ (void)reinstallPersistedOverrides {
+    NSDictionary *specs = [NSUserDefaults.standardUserDefaults dictionaryForKey:kRYGRuntimePersistedOverridesKey];
+    if (![specs isKindOfClass:NSDictionary.class] || !specs.count) return;
+    [specs enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *spec, BOOL *stop) {
+        (void)stop;
+        if (![key isKindOfClass:NSString.class] || ![spec isKindOfClass:NSDictionary.class]) return;
+        NSNumber *value = [spec[@"value"] isKindOfClass:NSNumber.class] ? spec[@"value"] : nil;
+        NSString *expectedEncoding = [spec[@"encoding"] isKindOfClass:NSString.class] ? spec[@"encoding"] : @"";
+        NSString *expectedImage = [spec[@"image"] isKindOfClass:NSString.class] ? spec[@"image"] : @"";
+        if (!value || !expectedEncoding.length || !expectedImage.length) return;
+        NSString *className = nil, *selectorName = nil; BOOL classMethod = NO;
+        if (!RYGParseMethodKey(key, &className, &selectorName, &classMethod)) return;
+        Class cls = objc_lookUpClass(className.UTF8String);
+        Class owner = cls ? (classMethod ? object_getClass(cls) : cls) : Nil;
+        SEL selector = selectorName.length ? NSSelectorFromString(selectorName) : NULL;
+        Method method = RYGDeclaredMethod(owner, selector);
+        const char *types = method ? method_getTypeEncoding(method) : NULL;
+        NSString *encoding = types ? [NSString stringWithUTF8String:types] : @"";
+        if (!method || !RYGMethodHasSupportedBoolABI(method) || ![encoding isEqualToString:expectedEncoding]) return;
+        IMP imp = method_getImplementation(method);
+        Dl_info info = {0};
+        NSString *actualImage = (imp && dladdr((const void *)imp, &info) && info.dli_fname)
+            ? RYGCanonicalImagePath([NSString stringWithUTF8String:info.dli_fname]) : @"";
+        if (![actualImage isEqualToString:expectedImage]) return;
+        if (!RYGInstallUnifiedBoolHook(key)) return;
+        @synchronized(self) {
+            if (!gRYGOverrides) gRYGOverrides = [NSMutableDictionary dictionary];
+            gRYGOverrides[key] = @([value boolValue]);
+        }
+    }];
+}
 
 @end
