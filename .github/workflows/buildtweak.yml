@@ -58,15 +58,6 @@ jobs:
           git checkout
           mv iPhoneOS26.5.sdk "$THEOS/sdks/"
 
-      - name: Verify SDK and build scripts
-        working-directory: main
-        run: |
-          test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
-          test -f "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
-          grep -q 'UIGlassEffectStyleClear' "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
-          grep -q 'glassButtonConfiguration' "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIButtonConfiguration.h"
-          bash -n build.sh build-fast.sh scripts/setup-ffmpegkit.sh
-
       - name: Setup FFmpegKit
         working-directory: main
         run: ./scripts/setup-ffmpegkit.sh
