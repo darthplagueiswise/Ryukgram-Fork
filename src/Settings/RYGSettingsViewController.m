@@ -2,6 +2,7 @@
 #import "RYGWhatsNew.h"
 #import "RYGDonatePrompt.h"
 #import "../UI/RYGPopupChrome.h"
+#import "../UI/RYGLiquidGlass.h"
 #import "RYGSearchBarStyler.h"
 #import "../Features/General/RYGCacheManager.h"
 #import "../RYGImageCache.h"
@@ -250,7 +251,11 @@ static char kRYGRowKey;
 	self.view.backgroundColor = [RYGPopupChrome backgroundColor];
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
-	else if (self.scopedSearch) [self setupScopedSearch];
+	else {
+		if (self.scopedSearch) [self setupScopedSearch];
+		if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
+	}
+	RYGLiquidGlassApplyToViewController(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(rygCacheSizeDidUpdate) name:RYGCacheSizeDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(rygReloadFromNotification) name:@"RYGSettingsShouldReload" object:nil];
@@ -267,7 +272,8 @@ static char kRYGRowKey;
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.backgroundColor = self.view.backgroundColor;
-	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
+	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
+	if (@available(iOS 13.0, *)) self.tableView.automaticallyAdjustsScrollIndicatorInsets = YES;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	[self.view addSubview:self.tableView];
@@ -299,6 +305,7 @@ static char kRYGRowKey;
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
 	if (self.isRoot) self.sections = [self filteredSections:[RYGTweakSettings sections]];
+	else if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
 	[self.tableView reloadData];
 	[self rygStyleSearchBar];
 }
@@ -627,10 +634,8 @@ static char kRYGRowKey;
 			b.showsMenuAsPrimaryAction = YES;
 			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			// Do not impose accessory-specific contentInsets. On iOS 26 the Glass
-			// button and UIMenu transition share geometry; fixed closed-state insets
-			// distort the expanded morph. RYGSetting configures the native Glass
-			// button, and UIKit owns its intrinsic/default content metrics.
+			// No accessory-specific insets: the same native Glass source owns both
+			// the collapsed selector and UIKit's expanded morphing menu geometry.
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
