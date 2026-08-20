@@ -269,7 +269,7 @@ static void RYGAppendMethodsForClass(NSMutableArray<RYGRuntimeBoolMethod *> *row
     if (rows.count == 0) {
         int total = objc_getClassList(NULL, 0);
         if (total > 0 && total < 500000) {
-            Class *classes = calloc((size_t)total, sizeof(Class));
+            Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
             int filled = classes ? objc_getClassList(classes, total) : 0;
             for (int i = 0; i < filled; i++) {
                 Class cls = classes[i];
