@@ -25,6 +25,11 @@ typedef NS_ENUM(NSInteger, RYGMCNameMappingImportMode) {
 - (nullable NSData *)ryg_exportNameMappingData:(NSError **)error;
 - (BOOL)ryg_importAndApplyOverridesData:(NSData *)data appliedCount:(NSUInteger *)appliedCount error:(NSError **)error;
 - (nullable NSData *)ryg_exportOverridesData:(NSError **)error;
+
+/// Flushes the persisted mapping and the current canonical override document to
+/// the exact <user>.data directory resolved by getOverridesTablePath. This is
+/// used when an import happened before Instagram had exposed its context manager.
+- (BOOL)ryg_syncPersistedJSONToNativeDataDirectory;
 @end
 
 NS_ASSUME_NONNULL_END
