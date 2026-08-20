@@ -22,16 +22,19 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
     if (!row.className.length || !row.imagePath.length) return @[];
     NSMutableArray<RYGRuntimeMethodRow *> *result = [NSMutableArray array];
     for (RYGRuntimeMemberRow *member in [RYGRuntimeBrowserEngine membersForClassName:row.className imagePath:row.imagePath]) {
-        if (!member.method) continue;
+        // This UI is an override browser, not a class-dump. Only materialize
+        // methods whose exact runtime ABI has a safe BOOL adapter.
+        if (!member.method || !member.hookableBool) continue;
         BOOL isClass = member.kind == RYGRuntimeMemberClassMethod;
         if (isClass != classMethods) continue;
+
         RYGRuntimeMethodRow *method = [RYGRuntimeMethodRow new];
         method.imagePath = member.imagePath ?: @"";
         method.className = member.className ?: @"";
         method.selectorName = member.name ?: @"";
         method.typeEncoding = member.typeEncoding ?: @"";
         method.classMethod = isClass;
-        method.hookableBool = member.hookableBool;
+        method.hookableBool = YES;
         method.argumentKind = member.argumentKind;
         [result addObject:method];
     }
@@ -39,17 +42,11 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
 }
 
 + (NSArray<RYGRuntimePropertyRow *> *)propertiesForClass:(RYGRuntimeClassRow *)row {
-    if (!row.className.length || !row.imagePath.length) return @[];
-    NSMutableArray<RYGRuntimePropertyRow *> *result = [NSMutableArray array];
-    for (RYGRuntimeMemberRow *member in [RYGRuntimeBrowserEngine membersForClassName:row.className imagePath:row.imagePath]) {
-        if (member.method) continue;
-        RYGRuntimePropertyRow *property = [RYGRuntimePropertyRow new];
-        property.name = member.name ?: @"";
-        property.attributes = member.typeEncoding ?: @"";
-        property.classProperty = member.kind == RYGRuntimeMemberClassProperty;
-        [result addObject:property];
-    }
-    return result.copy;
+    (void)row;
+    // A property is only useful here through its getter IMP. Safe BOOL getters
+    // already appear once in Instance/Class Methods, where Observe/Force has an
+    // exact adapter. Do not duplicate them as non-actionable property rows.
+    return @[];
 }
 
 + (RYGRuntimeBoolMethod *)boolDescriptorForMethod:(RYGRuntimeMethodRow *)method {
@@ -60,17 +57,13 @@ static BOOL RYGRTContainsTokens(NSString *haystack, NSString *query) {
     member.name = method.selectorName ?: @"";
     member.typeEncoding = method.typeEncoding ?: @"";
     member.kind = method.classMethod ? RYGRuntimeMemberClassMethod : RYGRuntimeMemberInstanceMethod;
-    member.hookableBool = method.hookableBool;
+    member.hookableBool = YES;
     member.argumentKind = method.argumentKind;
     return [RYGRuntimeBrowserEngine boolMethodForMember:member];
 }
 
 + (BOOL)methodRow:(RYGRuntimeMethodRow *)row matchesSearch:(NSString *)query {
-    return RYGRTContainsTokens([NSString stringWithFormat:@"%@ %@ %@",
-                               row.className ?: @"",
-                               row.selectorName ?: @"",
-                               row.typeEncoding ?: @""],
-                               query);
+    return RYGRTContainsTokens([NSString stringWithFormat:@"%@ %@ %@", row.className ?: @"", row.selectorName ?: @"", row.typeEncoding ?: @""], query);
 }
 
 @end
