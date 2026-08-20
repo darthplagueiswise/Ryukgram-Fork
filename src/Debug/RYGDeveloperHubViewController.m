@@ -1,10 +1,5 @@
 #import "RYGDeveloperHubViewController.h"
-#import "RYGDeveloperTopicViewController.h"
-#import "RYGWordmarkViewController.h"
-#import "RYGRuntimeBrowserViewController.h"
-#import "RYGEasyGatingViewController.h"
-#import "RYGMetaLocalExperimentBrowser.h"
-#import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
+#import "../Settings/RYGExpFlagsViewController.h"
 #import "../UI/RYGLiquidGlass.h"
 
 @implementation RYGDeveloperHubViewController
@@ -13,31 +8,28 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [RYGDeveloperTopicViewController activatePersistedNativeFeatures];
+    // Deliberately do not bootstrap the newer hard-coded Developer surfaces here.
+    // The vanilla architecture installs only its explicit hooks from %ctor when
+    // ryg_exp_flags_enabled is set, after a user-requested restart.
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
 
 - (void)rebuildSections {
-    RYGSetting *wordmark = [RYGSetting navigationCellWithTitle:@"IGWordMark" subtitle:nil icon:[RYGSymbol symbolWithName:@"instagram"] viewController:[RYGWordmarkViewController new]];
-    RYGSetting *easyGating = [RYGSetting navigationCellWithTitle:@"Easy Gating Internal" subtitle:@"Final mapped IDs observed live" icon:[RYGSymbol symbolWithName:@"key"] viewController:[RYGEasyGatingViewController new]];
-    RYGSetting *mobileConfig = [RYGSetting navigationCellWithTitle:@"MobileConfig" subtitle:@"Live table + id_name_mapping + native overrides" icon:[RYGSymbol symbolWithName:@"sliders"] viewController:[RYGMobileConfigToolsViewController new]];
-    RYGSetting *prism = [RYGSetting navigationCellWithTitle:@"Prism / Redesign" subtitle:@"Validated runtime owners" icon:[RYGSymbol symbolWithName:@"layout"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
-    RYGSetting *glass = [RYGSetting navigationCellWithTitle:@"Liquid Glass" subtitle:@"Navigation, Throwback Chrome and Throwback Feed" icon:[RYGSymbol symbolWithName:@"interface"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
-    // "stories" is not a valid SF Symbol on all supported systems and produced
-    // an empty image in the Developer menu. rectangle.stack is a real system
-    // symbol and matches the tray/stack semantics.
-    RYGSetting *stories = [RYGSetting navigationCellWithTitle:@"Stories / Story Tray" subtitle:@"Native Story Tray debug + redesign gates" icon:[RYGSymbol symbolWithName:@"rectangle.stack"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
-    RYGSetting *subs = [RYGSetting navigationCellWithTitle:@"SubsConsumer / IGPlus / Aura" subtitle:@"IGConsumerSubsService owner" icon:[RYGSymbol symbolWithName:@"heart"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceConsumerSubs]];
-    RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only" subtitle:@"Exact Bug Reporter menu visibility ABI" icon:[RYGSymbol symbolWithName:@"eye"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
-    RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Dogfooding Mode" subtitle:@"Native menu + resolved MobileConfig + EasyGating" icon:[RYGSymbol symbolWithName:@"paw"] viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
-    RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"MetaLocalExperiment" subtitle:nil icon:[RYGSymbol symbolWithName:@"insights"] action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Live" subtitle:@"Image → ABI-validated BOOL methods · native value + explicit override" icon:[RYGSymbol symbolWithName:@"search"] viewController:[RYGRuntimeBrowserViewController new]];
+    RYGSetting *enableHooks = [RYGSetting switchCellWithTitle:@"Enable hooks"
+                                                     subtitle:@"Vanilla MetaLocalExperiment + MobileConfig observers. Restart required."
+                                                  defaultsKey:@"ryg_exp_flags_enabled"
+                                              requiresRestart:YES];
+
+    RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Experimental flags"
+                                                     subtitle:@"Meta experiments, live MC IDs, scanned names and overrides"
+                                                         icon:[RYGSymbol symbolWithName:@"flag.2.crossed"]
+                                               viewController:[RYGExpFlagsViewController new]];
 
     [self applySettingSections:@[
-        [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, easyGating, mobileConfig]],
-        [RYGSettingsViewController sectionWithHeader:@"Validated surfaces" footer:nil rows:@[prism, glass, stories, subs, internalOnly, dogfood]],
-        [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
+        [RYGSettingsViewController sectionWithHeader:@"Vanilla developer engine"
+                                               footer:@"This is the lightweight developer path used by the vanilla branch: explicit MetaLocalExperiment hooks, live MobileConfig observations, and a lazy mmap string scan. The previous Runtime Browser and hard-coded Developer surfaces are not started from this menu."
+                                                 rows:@[enableHooks, browser]],
     ]];
 }
 
