@@ -152,21 +152,23 @@ UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
     pill.userInteractionEnabled = NO;
     pill.accessibilityLabel = title;
 
+    UIFont *font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+    NSAttributedString *attributed = [[NSAttributedString alloc]
+        initWithString:title
+            attributes:@{
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName: UIColor.labelColor,
+            }];
+
     if (@available(iOS 15.0, *)) {
         UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
-        configuration.title = title;
+        configuration.attributedTitle = attributed;
         configuration.baseForegroundColor = UIColor.labelColor;
         configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
         configuration.contentInsets = NSDirectionalEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
-        configuration.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *incoming) {
-            NSMutableDictionary *attributes = incoming.mutableCopy;
-            attributes[NSFontAttributeName] = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
-            return attributes.copy;
-        };
         pill.configuration = configuration;
     } else {
-        [pill setTitle:title forState:UIControlStateNormal];
-        pill.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+        [pill setAttributedTitle:attributed forState:UIControlStateNormal];
         pill.contentEdgeInsets = UIEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
     }
 
