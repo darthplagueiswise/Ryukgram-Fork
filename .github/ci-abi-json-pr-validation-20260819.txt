@@ -1,1 +1,0 @@
-Second validation marker for the mapped Easy Gating ABI and strict MobileConfig JSON work.
