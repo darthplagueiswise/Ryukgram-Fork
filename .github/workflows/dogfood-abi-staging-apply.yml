@@ -1,0 +1,38 @@
+name: Dogfood ABI staging transformer
+
+on:
+  push:
+    branches:
+      - dogfood-binary-abi-staging-20260820
+    paths:
+      - .ci/apply_binary_abi_fix.py
+      - .github/workflows/dogfood-abi-staging-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dogfood-binary-abi-staging-20260820
+          fetch-depth: 0
+      - name: Apply validated transformations
+        run: python3 .ci/apply_binary_abi_fix.py
+      - name: Verify expected source changes
+        run: |
+          git diff --check
+          grep -q 'uintptr_t exposureSource' src/Debug/RYGEasyGatingRuntime.m
+          grep -q 'objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation' src/Debug/RYGRuntimeIndex.m
+          ! grep -q 'strchr("cCsSiIlLqQ"' src/Debug/RYGRuntimeIndex.m
+          grep -q 'method_setImplementation(method, (IMP)RYGBugMenuInit)' src/Debug/RYGDeveloperTopicViewController.m
+          grep -q 'seenParamIDs' src/Features/ExpFlags/RYGMobileConfig.xm
+      - name: Commit transformed source
+        run: |
+          git config user.name 'dogfood-abi-staging'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/Debug/RYGEasyGatingRuntime.m src/Debug/RYGRuntimeIndex.m src/Debug/RYGRuntimeBrowserEngine.m src/Debug/RYGFastRuntimeBrowserViewController.m src/Debug/RYGDeveloperTopicViewController.m src/Features/ExpFlags/RYGFastMobileConfigBrowserViewController.m src/Features/ExpFlags/RYGMobileConfig.h src/Features/ExpFlags/RYGMobileConfig.xm
+          git commit -m 'Apply binary-validated Developer runtime fixes'
+          git push origin HEAD:dogfood-binary-abi-staging-20260820
