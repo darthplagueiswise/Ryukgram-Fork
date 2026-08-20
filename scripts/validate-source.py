@@ -64,6 +64,8 @@ for obsolete in (
     "src/Debug/RYGDeveloperEasyGatingControls.m",
     "src/Debug/RYGCFunctionOverrideEngine.m",
     "src/Debug/RYGDeveloperRuntimeScanner.m",
+    "src/Debug/RYGRuntimeClassBrowser.m",
+    "src/Debug/RYGRuntimeClassBrowser.h",
     "src/UI/RYGSettingsMenuGlassFix.m",
     "src/Settings/RYGSettingsMenuLiquidGlass.m",
     "src/Features/ExpFlags/RYGMobileConfigExternalSeenTracker.m",
@@ -76,8 +78,8 @@ mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
 mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
-runtime_class_path = ROOT / "src/Debug/RYGRuntimeClassBrowser.m"
 runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
+runtime_view_path = ROOT / "src/Debug/RYGRuntimeBrowserViewController.m"
 topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
 setting_path = ROOT / "src/Settings/RYGSetting.m"
 
@@ -133,29 +135,43 @@ if re.search(r'dlsym\s*\([^\n]*"EasyGatingGetBoolean_Internal_DoNotUseOrMock"', 
 if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
     fail("Easy Gating final-ID persistence namespace is missing")
 
-runtime_class = runtime_class_path.read_text(encoding="utf-8")
+runtime_engine = runtime_engine_path.read_text(encoding="utf-8")
 for marker in (
+    "objc_copyClassNamesForImage",
+    "objc_getClassList",
+    "class_getImageName",
     "method_getReturnType",
     "method_getArgumentType",
     "method_getNumberOfArguments",
-    "method_getImplementation",
-    "dladdr",
-    "objc_copyClassNamesForImage",
-    "class_getImageName",
     'strchr("BcC"',
-    "RYGRTHookableBool",
 ):
-    if marker not in runtime_class:
-        fail(f"live Runtime Class Browser ABI/ownership marker is missing: {marker}")
-
-runtime_engine = runtime_engine_path.read_text(encoding="utf-8")
-for marker in ("objc_getClassList", "class_getImageName", 'strchr("BcC"'):
     if marker not in runtime_engine:
-        fail(f"runtime image fallback/BOOL ABI marker is missing: {marker}")
+        fail(f"direct Runtime Browser ABI/image marker is missing: {marker}")
 if "__attribute__((constructor))" in runtime_engine or "_dyld_register_func_for_add_image" in runtime_engine:
     fail("Runtime Browser must not reinstall developer overrides at process startup/image load")
 if "NSUserDefaults" in runtime_engine and "ryg_runtime_bool_overrides" in runtime_engine:
     fail("generic Runtime Browser overrides must remain process-local")
+
+runtime_view = runtime_view_path.read_text(encoding="utf-8")
+for marker in (
+    "boolMethodsForImagePath",
+    "Observe visible original values",
+    "outputButtonForMethod",
+    "original not observed",
+    "Force On",
+    "Force Off",
+    "Use native value",
+):
+    if marker not in runtime_view:
+        fail(f"direct live BOOL Runtime Browser marker is missing: {marker}")
+for forbidden in (
+    "RYGRuntimeClassBrowser",
+    "RYGRuntimeClassDetailViewController",
+    "RYGRuntimeTopModeMachO",
+    'initWithItems:@[@"Classes", @"Mach-O"]',
+):
+    if forbidden in runtime_view:
+        fail(f"obsolete class/Mach-O Runtime Browser layer returned: {forbidden}")
 
 topic = topic_path.read_text(encoding="utf-8")
 for marker in (
@@ -226,7 +242,6 @@ required = (
     ROOT / "src/Settings/RYGSetting.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
     ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
-    ROOT / "src/Debug/RYGRuntimeClassBrowser.m",
     ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
     ROOT / "src/Debug/RYGWordmarkViewController.m",
     ROOT / "src/Debug/RYGEasyGatingRuntime.m",
@@ -237,4 +252,4 @@ for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: one Liquid Glass menu renderer, structural live runtime, exact Developer owners, final-ID EasyGating, current native MobileConfig StartupConfigs API, Replace/Merge mapping, integrated sideload compatibility")
+print("source validation OK: one Liquid Glass menu renderer, direct live BOOL Runtime Browser, exact Developer owners, final-ID EasyGating, current native MobileConfig StartupConfigs API, Replace/Merge mapping, integrated sideload compatibility")
