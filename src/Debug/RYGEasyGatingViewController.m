@@ -42,71 +42,79 @@
     else dispatch_async(dispatch_get_main_queue(), ^{ [self rebuildSections]; });
 }
 
+- (UIMenu *)menuForObservation:(RYGEasyGatingObservation *)observation {
+    NSNumber *forced = observation.overrideValue;
+    __weak typeof(self) weakSelf = self;
+
+    UIAction *nativeAction = [UIAction actionWithTitle:@"Native"
+                                                image:nil
+                                           identifier:nil
+                                              handler:^(__unused UIAction *action) {
+        [RYGEasyGatingRuntime.shared setOverride:nil forGateID:observation.gateID];
+        [weakSelf rebuildSections];
+    }];
+    nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
+
+    UIAction *forceTrue = [UIAction actionWithTitle:@"Force True"
+                                             image:nil
+                                        identifier:nil
+                                           handler:^(__unused UIAction *action) {
+        [RYGEasyGatingRuntime.shared setOverride:@YES forGateID:observation.gateID];
+        [weakSelf rebuildSections];
+    }];
+    forceTrue.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+
+    UIAction *forceFalse = [UIAction actionWithTitle:@"Force False"
+                                              image:nil
+                                         identifier:nil
+                                            handler:^(__unused UIAction *action) {
+        [RYGEasyGatingRuntime.shared setOverride:@NO forGateID:observation.gateID];
+        [weakSelf rebuildSections];
+    }];
+    forceFalse.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+
+    return [UIMenu menuWithTitle:@"Output"
+                           image:nil
+                      identifier:nil
+                         options:UIMenuOptionsSingleSelection
+                        children:@[nativeAction, forceTrue, forceFalse]];
+}
+
 - (RYGSetting *)settingForObservation:(RYGEasyGatingObservation *)observation {
     NSNumber *forced = observation.overrideValue;
     NSString *title = [NSString stringWithFormat:@"Gate %u", observation.gateID];
     NSString *subtitle = forced
-        ? [NSString stringWithFormat:@"original %@ · forced %@ · default %@ · exposure %@",
+        ? [NSString stringWithFormat:@"original %@ · forced %@ · default %@ · exposure %@ · %lu calls",
             observation.nativeValue ? @"true" : @"false",
             forced.boolValue ? @"true" : @"false",
             observation.defaultValue ? @"true" : @"false",
-            observation.exposureEnabled ? @"on" : @"off"]
-        : [NSString stringWithFormat:@"original %@ · default %@ · exposure %@",
+            observation.exposureEnabled ? @"on" : @"off",
+            (unsigned long)observation.callCount]
+        : [NSString stringWithFormat:@"original %@ · default %@ · exposure %@ · %lu calls",
             observation.nativeValue ? @"true" : @"false",
             observation.defaultValue ? @"true" : @"false",
-            observation.exposureEnabled ? @"on" : @"off"];
-    __weak typeof(self) weakSelf = self;
-    return [RYGSetting buttonCellWithTitle:title
-                                  subtitle:subtitle
-                                      icon:[RYGSymbol symbolWithName:forced ? @"slider_horizontal_3" : @"function"]
-                                    action:^{ [weakSelf presentActionsForObservation:observation]; }];
+            observation.exposureEnabled ? @"on" : @"off",
+            (unsigned long)observation.callCount];
+
+    return [RYGSetting menuCellWithTitle:title
+                                subtitle:subtitle
+                                    menu:[self menuForObservation:observation]];
 }
 
 - (void)rebuildSections {
     NSArray<RYGEasyGatingObservation *> *observations = RYGEasyGatingRuntime.shared.observations;
     NSMutableArray<RYGSetting *> *rows = [NSMutableArray arrayWithCapacity:observations.count];
-    for (RYGEasyGatingObservation *observation in observations) [rows addObject:[self settingForObservation:observation]];
+    for (RYGEasyGatingObservation *observation in observations) {
+        [rows addObject:[self settingForObservation:observation]];
+    }
     if (!rows.count) {
-        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live mapped gates" subtitle:nil icon:[RYGSymbol symbolWithName:@"function"]]];
+        [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live mapped gates"
+                                              subtitle:nil
+                                                  icon:[RYGSymbol symbolWithName:@"function"]]];
     }
     [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:nil
-                                                                       footer:@"IDs shown here are the final mapped IDs received by EasyGatingPlatformGetBoolean, not the pre-map selector/index passed to the public wrapper."
+                                                                       footer:@"IDs shown here are the final mapped IDs received by EasyGatingPlatformGetBoolean. Each selector changes only that exact mapped gate; the public pre-map wrapper is not hooked."
                                                                          rows:rows]]];
-}
-
-- (void)presentActionsForObservation:(RYGEasyGatingObservation *)observation {
-    NSNumber *forced = observation.overrideValue;
-    NSString *message = [NSString stringWithFormat:@"Mapped ID %u · default %@ · exposure %@ · original %@ · %lu call%@",
-        observation.gateID,
-        observation.defaultValue ? @"true" : @"false",
-        observation.exposureEnabled ? @"on" : @"off",
-        observation.nativeValue ? @"true" : @"false",
-        (unsigned long)observation.callCount,
-        observation.callCount == 1 ? @"" : @"s"];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Easy Gating"
-                                                                    message:message
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force True" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGEasyGatingRuntime.shared setOverride:@YES forGateID:observation.gateID]; [weakSelf rebuildSections];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Force False" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        [RYGEasyGatingRuntime.shared setOverride:@NO forGateID:observation.gateID]; [weakSelf rebuildSections];
-    }]];
-    if (forced) {
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
-            [RYGEasyGatingRuntime.shared setOverride:nil forGateID:observation.gateID]; [weakSelf rebuildSections];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy mapped ID" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = [NSString stringWithFormat:@"%u", observation.gateID];
-    }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        sheet.popoverPresentationController.sourceView = self.view;
-        sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), 90.0, 1.0, 1.0);
-    }
-    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 @end

@@ -8,6 +8,8 @@
 #import <objc/runtime.h>
 #include <string.h>
 
+static NSString *const kRYGWordmarkOwner = @"IGDSLauncherConfig";
+
 static NSArray<NSDictionary<NSString *, NSString *> *> *RYGWordmarkVariants(void) {
     static NSArray *variants;
     static dispatch_once_t once;
@@ -27,107 +29,55 @@ static const char *RYGWordmarkSkipQualifiers(const char *type) {
     return type;
 }
 
-static RYGRuntimeArgumentKind RYGWordmarkArgumentKind(Method method) {
-    if (!method) return (RYGRuntimeArgumentKind)-1;
-    unsigned int count = method_getNumberOfArguments(method);
-    if (count == 2) return RYGRuntimeArgumentNone;
-    if (count != 3) return (RYGRuntimeArgumentKind)-1;
-    char encoded[64] = {0};
-    method_getArgumentType(method, 2, encoded, sizeof(encoded));
-    const char *type = RYGWordmarkSkipQualifiers(encoded);
-    if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
-    if (*type == '@' || *type == '#' || *type == ':') return RYGRuntimeArgumentObject;
-    if (strchr("BcCsSiIlLqQ", *type)) return RYGRuntimeArgumentInteger;
-    return (RYGRuntimeArgumentKind)-1;
-}
-
-static BOOL RYGWordmarkBoolMethod(Method method) {
-    if (!method) return NO;
+static BOOL RYGWordmarkBoolNoArgumentMethod(Method method) {
+    if (!method || method_getNumberOfArguments(method) != 2) return NO;
     char encoded[32] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGWordmarkSkipQualifiers(encoded);
-    RYGRuntimeArgumentKind argument = RYGWordmarkArgumentKind(method);
-    return type && *type == 'B'
-        && argument >= RYGRuntimeArgumentNone
-        && argument <= RYGRuntimeArgumentInteger;
+    return type && strchr("BcC", *type) != NULL;
 }
 
-static BOOL RYGWordmarkContains(NSString *value, NSString *needle) {
-    return value.length && needle.length &&
-        [value rangeOfString:needle options:NSCaseInsensitiveSearch].location != NSNotFound;
-}
-
-static NSArray<NSString *> *RYGWordmarkPrimaryImages(void) {
-    NSArray<NSString *> *images = RYGRuntimeBrowserEngine.runtimeImagePaths;
-    NSMutableOrderedSet<NSString *> *selected = [NSMutableOrderedSet orderedSet];
-    NSString *main = NSBundle.mainBundle.executablePath;
-    for (NSString *path in images) {
-        if ([path isEqualToString:main] ||
-            [path.stringByResolvingSymlinksInPath isEqualToString:main.stringByResolvingSymlinksInPath]) {
-            [selected addObject:path];
-            break;
+// Avoid class_getInstanceMethod here: the Developer UI is inspecting a known
+// owner and should never invoke Objective-C method resolution as a side effect.
+static Method RYGWordmarkDeclaredMethod(Class cls, SEL selector) {
+    for (Class cursor = cls; cursor; cursor = class_getSuperclass(cursor)) {
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cursor, &count);
+        Method found = NULL;
+        for (unsigned int index = 0; methods && index < count; index++) {
+            if (method_getName(methods[index]) == selector) {
+                found = methods[index];
+                break;
+            }
         }
+        if (methods) free(methods);
+        if (found) return found;
     }
-    for (NSString *path in images) {
-        if (RYGWordmarkContains(path.lastPathComponent, @"FBShared")) [selected addObject:path];
-    }
-    return selected.array;
-}
-
-static const char **RYGWordmarkCopyClassNames(NSString *imagePath, unsigned int *count) {
-    if (count) *count = 0;
-    const char **names = objc_copyClassNamesForImage(imagePath.fileSystemRepresentation, count);
-    if (names) return names;
-    NSString *resolved = imagePath.stringByResolvingSymlinksInPath;
-    if (![resolved isEqualToString:imagePath])
-        return objc_copyClassNamesForImage(resolved.fileSystemRepresentation, count);
     return NULL;
 }
 
-static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
-    NSMutableSet<NSString *> *wantedSelectors = [NSMutableSet set];
-    for (NSDictionary *variant in RYGWordmarkVariants()) [wantedSelectors addObject:variant[@"selector"]];
+static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkResolveValidatedOwner(void) {
+    Class cls = objc_lookUpClass(kRYGWordmarkOwner.UTF8String);
+    if (!cls) return @{};
+    const char *rawImage = class_getImageName(cls);
+    NSString *imagePath = rawImage ? [NSString stringWithUTF8String:rawImage] : @"";
 
     NSMutableDictionary<NSString *, RYGRuntimeBoolMethod *> *found = [NSMutableDictionary dictionary];
-    for (NSString *imagePath in RYGWordmarkPrimaryImages()) {
-        unsigned int classCount = 0;
-        const char **classNames = RYGWordmarkCopyClassNames(imagePath, &classCount);
-        if (!classNames) continue;
+    for (NSDictionary<NSString *, NSString *> *variant in RYGWordmarkVariants()) {
+        NSString *selectorName = variant[@"selector"];
+        SEL selector = NSSelectorFromString(selectorName);
+        Method method = selector ? RYGWordmarkDeclaredMethod(cls, selector) : NULL;
+        if (!RYGWordmarkBoolNoArgumentMethod(method)) continue;
 
-        for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
-            const char *rawClassName = classNames[classIndex];
-            if (!rawClassName || !*rawClassName) continue;
-            Class cls = objc_lookUpClass(rawClassName);
-            if (!cls) continue;
-            NSString *className = [NSString stringWithUTF8String:rawClassName];
-
-            for (NSUInteger pass = 0; pass < 2; pass++) {
-                BOOL classMethod = pass == 1;
-                Class owner = classMethod ? object_getClass(cls) : cls;
-                unsigned int methodCount = 0;
-                Method *methods = owner ? class_copyMethodList(owner, &methodCount) : NULL;
-                for (unsigned int methodIndex = 0; methodIndex < methodCount; methodIndex++) {
-                    Method method = methods[methodIndex];
-                    if (!RYGWordmarkBoolMethod(method)) continue;
-                    SEL selector = method_getName(method);
-                    if (!selector) continue;
-                    NSString *selectorName = NSStringFromSelector(selector);
-                    if (![wantedSelectors containsObject:selectorName] || found[selectorName]) continue;
-
-                    RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
-                    runtimeMethod.imagePath = imagePath;
-                    runtimeMethod.className = className ?: @"";
-                    runtimeMethod.selectorName = selectorName;
-                    runtimeMethod.classMethod = classMethod;
-                    runtimeMethod.argumentKind = RYGWordmarkArgumentKind(method);
-                    const char *types = method_getTypeEncoding(method);
-                    runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
-                    found[selectorName] = runtimeMethod;
-                }
-                if (methods) free(methods);
-            }
-        }
-        free(classNames);
+        RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
+        runtimeMethod.imagePath = imagePath ?: @"";
+        runtimeMethod.className = kRYGWordmarkOwner;
+        runtimeMethod.selectorName = selectorName;
+        runtimeMethod.classMethod = NO;
+        runtimeMethod.argumentKind = RYGRuntimeArgumentNone;
+        const char *types = method_getTypeEncoding(method);
+        runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+        found[selectorName] = runtimeMethod;
     }
     return found.copy;
 }
@@ -177,7 +127,10 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     NSString *key = notification.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
     if (!key.length) return;
     for (RYGRuntimeBoolMethod *method in self.methodsBySelector.allValues) {
-        if ([method.overrideKey isEqualToString:key]) { [self rebuildGrid]; return; }
+        if ([method.overrideKey isEqualToString:key]) {
+            [self rebuildGrid];
+            return;
+        }
     }
 }
 
@@ -186,7 +139,7 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     [self.spinner startAnimating];
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSDictionary *methods = RYGWordmarkScan();
+        NSDictionary *methods = RYGWordmarkResolveValidatedOwner();
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self || generation != self.generation) return;
@@ -210,28 +163,19 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
     }];
 
     NSNumber *forced = method.overrideValue;
-    UIAction *nativeAction = [UIAction actionWithTitle:@"Native"
-                                                image:nil
-                                           identifier:nil
-                                              handler:^(__unused UIAction *action) {
+    UIAction *nativeAction = [UIAction actionWithTitle:@"Native" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:nil forMethod:method];
         [weakSelf rebuildGrid];
     }];
     nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
 
-    UIAction *forceOn = [UIAction actionWithTitle:@"Force On"
-                                            image:nil
-                                       identifier:nil
-                                          handler:^(__unused UIAction *action) {
+    UIAction *forceOn = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method];
         [weakSelf rebuildGrid];
     }];
     forceOn.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
 
-    UIAction *forceOff = [UIAction actionWithTitle:@"Force Off"
-                                             image:nil
-                                        identifier:nil
-                                           handler:^(__unused UIAction *action) {
+    UIAction *forceOff = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method];
         [weakSelf rebuildGrid];
     }];
@@ -276,8 +220,8 @@ static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkScan(void) {
                 button.showsMenuAsPrimaryAction = YES;
                 button.changesSelectionAsPrimaryAction = NO;
             }
-            // The menu must exist before configuring Glass so UIKit uses its
-            // default menu-source metrics and owns the closed→expanded morph.
+            // The menu exists before Glass is configured. UIKit therefore owns
+            // the closed capsule metrics and the expanded menu morphing geometry.
             RYGLiquidGlassConfigureButton(button, NO);
 
             UIStackView *content = [UIStackView new];

@@ -29,6 +29,8 @@ jobs:
 
       - name: Install build and binary-analysis dependencies
         run: |
+          brew untap aws/tap || true
+          brew untap azure/bicep || true
           brew install ldid dpkg make radare2
           python3 -m venv "$RUNNER_TEMP/ryg-python"
           "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --upgrade pip capstone lief r2pipe
@@ -134,6 +136,7 @@ jobs:
           test -n "$DYLIB"
           python3 scripts/validate-macho.py "$DYLIB"
           r2 -2qc 'ij' "$DYLIB" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("bin",{}).get("bits") == 64; print("radare2 rootful check: PASS")'
+          test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
           rm -rf "$STAGE"
 
       - name: Name rootful artifact

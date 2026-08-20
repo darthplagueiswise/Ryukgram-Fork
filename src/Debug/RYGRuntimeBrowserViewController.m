@@ -123,7 +123,7 @@ static NSArray<NSString *> *RYGRuntimeClassNamesForImage(NSString *imagePath) {
     if (!names.count) {
         int total = objc_getClassList(NULL, 0);
         if (total > 0 && total < 500000) {
-            Class __unsafe_unretained *classes = calloc((size_t)total, sizeof(Class));
+            Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
             int filled = classes ? objc_getClassList(classes, total) : 0;
             for (int index = 0; index < filled; index++) {
                 Class cls = classes[index];
