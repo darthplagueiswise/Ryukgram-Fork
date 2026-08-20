@@ -43,6 +43,28 @@ static const struct mach_header *RYGIndexHeaderForPath(NSString *path) {
     return NULL;
 }
 
+static NSString *RYGIndexRuntimeNameForPath(NSString *path) {
+    NSString *wanted = RYGIndexCanonicalPath(path);
+    if (!wanted.length) return nil;
+    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
+        const char *raw = _dyld_get_image_name(index);
+        if (!raw) continue;
+        NSString *loaded = [NSString stringWithUTF8String:raw];
+        if ([RYGIndexCanonicalPath(loaded) isEqualToString:wanted]) return loaded;
+    }
+    return nil;
+}
+
+static BOOL RYGIndexClassBelongsToImage(Class cls, NSString *runtimeName, NSString *canonical) {
+    if (!cls || !runtimeName.length || !canonical.length) return NO;
+    const char *raw = class_getImageName(cls);
+    if (!raw || !*raw) return NO;
+    const char *wanted = runtimeName.fileSystemRepresentation;
+    if (wanted && strcmp(raw, wanted) == 0) return YES;
+    NSString *runtimePath = [NSString stringWithUTF8String:raw];
+    return [RYGIndexCanonicalPath(runtimePath) isEqualToString:canonical];
+}
+
 static const char *RYGIndexSkipQualifiers(const char *type) {
     while (type && *type && strchr("rnNoORV", *type)) type++;
     return type;
@@ -53,7 +75,7 @@ static BOOL RYGIndexBoolReturn(Method method) {
     char encoded[64] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGIndexSkipQualifiers(encoded);
-    return type && (*type == 'B' || *type == 'c' || *type == 'C');
+    return type && *type == 'B';
 }
 
 static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
@@ -66,7 +88,7 @@ static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
     const char *type = RYGIndexSkipQualifiers(encoded);
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@') return RYGRuntimeArgumentObject;
-    if (strchr("cCsSiIlLqQ", *type) != NULL) return RYGRuntimeArgumentInteger;
+    if (*type == 'q' || *type == 'Q') return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
 
@@ -110,29 +132,50 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     result.methodsByClass = @{};
     if (!target) return result;
 
-    // Enumerate only classes defined by the selected Mach-O image. This keeps
-    // index cost proportional to the selected image instead of the whole app.
+    NSMutableArray<NSString *> *declaredNames = [NSMutableArray array];
+    NSString *runtimeName = RYGIndexRuntimeNameForPath(imagePath) ?: imagePath;
     unsigned int imageClassCount = 0;
-    const char **imageClassNames = objc_copyClassNamesForImage(canonical.fileSystemRepresentation, &imageClassCount);
-    if (!imageClassNames || imageClassCount == 0 || imageClassCount > 500000) {
-        if (imageClassNames) free(imageClassNames);
-        return result;
+    const char **imageClassNames = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &imageClassCount);
+    if (imageClassNames && imageClassCount > 0 && imageClassCount <= 500000) {
+        for (unsigned int index = 0; index < imageClassCount; index++) {
+            if (!imageClassNames[index] || !*imageClassNames[index]) continue;
+            NSString *name = [NSString stringWithUTF8String:imageClassNames[index]];
+            if (name.length) [declaredNames addObject:name];
+        }
+    }
+    if (imageClassNames) free(imageClassNames);
+
+    // Sideload paths can differ textually from dyld's registered image name.
+    // If the direct API returns nothing, fall back to the runtime class list and
+    // compare image ownership off-main-thread without touching executable pages.
+    if (!declaredNames.count) {
+        int total = objc_getClassList(NULL, 0);
+        if (total <= 0 || total > 500000) return result;
+        Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
+        if (!classes) return result;
+        int filled = objc_getClassList(classes, total);
+        for (int index = 0; index < filled; index++) {
+            Class cls = classes[index];
+            if (!RYGIndexClassBelongsToImage(cls, runtimeName, canonical)) continue;
+            const char *rawClass = class_getName(cls);
+            if (!rawClass || !*rawClass) continue;
+            NSString *name = [NSString stringWithUTF8String:rawClass];
+            if (name.length) [declaredNames addObject:name];
+        }
+        free(classes);
     }
 
+    if (!declaredNames.count) return result;
+    NSOrderedSet<NSString *> *uniqueNames = [NSOrderedSet orderedSetWithArray:declaredNames];
+    NSArray<NSString *> *orderedNames = [uniqueNames.array sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
     NSMutableArray<RYGRuntimeClassRow *> *classRows = [NSMutableArray array];
     NSMutableDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *methodsByClass = [NSMutableDictionary dictionary];
     NSUInteger methodsScanned = 0;
 
-    for (unsigned int classIndex = 0; classIndex < imageClassCount; classIndex++) {
+    for (NSString *className in orderedNames) {
         @autoreleasepool {
-            const char *declaredName = imageClassNames[classIndex];
-            if (!declaredName || !*declaredName) continue;
-            Class cls = objc_lookUpClass(declaredName);
-            if (!cls) continue;
-            const char *rawClass = class_getName(cls);
-            if (!rawClass || !*rawClass) continue;
-            NSString *className = [NSString stringWithUTF8String:rawClass];
-            if (!className.length) continue;
+            Class cls = objc_lookUpClass(className.UTF8String);
+            if (!cls || !RYGIndexClassBelongsToImage(cls, runtimeName, canonical)) continue;
 
             NSMutableArray<RYGRuntimeBoolMethod *> *rows = nil;
             NSUInteger instanceCount = 0;
@@ -170,14 +213,12 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
             [classRows addObject:classRow];
         }
     }
-    free(imageClassNames);
-
     [classRows sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
         return [left.className localizedCaseInsensitiveCompare:right.className];
     }];
     result.classes = classRows.copy;
     result.methodsByClass = methodsByClass.copy;
-    result.classesScanned = (NSUInteger)imageClassCount;
+    result.classesScanned = orderedNames.count;
     result.methodsScanned = methodsScanned;
     result.buildDuration = -[started timeIntervalSinceNow];
     return result;
