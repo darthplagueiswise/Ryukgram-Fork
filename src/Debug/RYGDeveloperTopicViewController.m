@@ -95,16 +95,16 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGRowsForSurface(RYGDeveloperRuntimeSur
             [rows addObjectsFromArray:RYGMethodsForOwner(@"IGFeedItemAdsFeedbackInterfaceCellParams", NO, @[@"isPrismEnabled"])];
             [rows addObjectsFromArray:RYGMethodsForOwner(@"IGTableViewCell", NO, @[@"isListRedesignOn"])]; break;
         case RYGDeveloperRuntimeSurfaceLiquidGlass:
-            [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC20IGLiquidGlassSwizzle26IGLiquidGlassSwizzleToggle", NO, @[@"isEnabled"])];
-            [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper", NO, @[@"isEnabled"])];
-            [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper", NO, @[@"isEnabled"])];
+            // Owners with a native setter/override are represented as native
+            // controls below. Only the launcher-set Throwback Feed gates use
+            // the generic ABI-checked observer/override path.
             [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC15IGThrowbackFeed21IGThrowbackFeedHelper", YES, nil)]; break;
         case RYGDeveloperRuntimeSurfaceStories:
             [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs", YES, nil)];
             [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC38IGStoryViewerRedesignExperimentHelpers38IGStoryViewerRedesignExperimentHelpers", YES, nil)]; break;
         case RYGDeveloperRuntimeSurfaceConsumerSubs:
             [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC21IGConsumerSubsService21IGConsumerSubsService", NO, nil)];
-            [rows addObjectsFromArray:RYGMethodsForOwner(@"IGProfileGatingService", YES, @[@"isAuraQuietPostingEnabledWithConsumerSubsService:"])]; break;
+            [rows addObjectsFromArray:RYGMethodsForOwner(@"_TtC22IGProfileGatingService22IGProfileGatingService", YES, @[@"isAuraQuietPostingEnabledWithConsumerSubsService:"])]; break;
         default: break;
     }
     return rows.copy;
@@ -196,11 +196,13 @@ static NSNumber *RYGNativeHelperEnabled(NSString *className) {
     id helper = RYGSharedHelper(className); SEL selector = NSSelectorFromString(@"isEnabled"); Method method = helper ? class_getInstanceMethod([helper class], selector) : NULL;
     return method && method_getNumberOfArguments(method) == 2 && RYGMethodReturns(method, 'B') ? @(((BOOL (*)(id, SEL))objc_msgSend)(helper, selector)) : nil;
 }
-static BOOL RYGOverrideNativeHelper(NSString *className, BOOL enabled) {
-    id helper = RYGSharedHelper(className); SEL selector = NSSelectorFromString(@"overrideIsEnabled:"); Method method = helper ? class_getInstanceMethod([helper class], selector) : NULL;
+static BOOL RYGSetNativeHelperBool(NSString *className, NSString *selectorName, BOOL enabled) {
+    id helper = RYGSharedHelper(className); SEL selector = NSSelectorFromString(selectorName); Method method = helper ? class_getInstanceMethod([helper class], selector) : NULL;
     if (!method || method_getNumberOfArguments(method) != 3 || !RYGMethodReturns(method, 'v') || !RYGMethodArgumentMatches(method, 2, 'B')) return NO;
     ((void (*)(id, SEL, BOOL))objc_msgSend)(helper, selector, enabled); return YES;
 }
+static BOOL RYGOverrideNativeHelper(NSString *className, BOOL enabled) { return RYGSetNativeHelperBool(className, @"overrideIsEnabled:", enabled); }
+static BOOL RYGSetNativeHelperEnabled(NSString *className, BOOL enabled) { return RYGSetNativeHelperBool(className, @"setIsEnabled:", enabled); }
 
 #pragma mark - Global dogfood MobileConfig
 static BOOL RYGDogfoodStrongName(NSString *value) {
@@ -253,7 +255,11 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
 - (void)rebuildNativeControls {
     NSMutableArray *rows = [NSMutableArray array];
     if (self.surface == RYGDeveloperRuntimeSurfaceStories) [rows addObject:@{@"kind":@"storyDebug", @"title":@"Open native Story Tray Debug", @"subtitle":@"Uses the live isTrayAttachedToHeaderEnabled: value; never invents the current state"}];
-    else if (self.surface == RYGDeveloperRuntimeSurfaceLiquidGlass) { [rows addObject:@{@"kind":@"throwback", @"title":@"Throwback Chrome", @"subtitle":@"Native overrideIsEnabled:"}]; [rows addObject:@{@"kind":@"navGlass", @"title":@"Liquid Glass Navigation", @"subtitle":@"Native overrideIsEnabled:"}]; }
+    else if (self.surface == RYGDeveloperRuntimeSurfaceLiquidGlass) {
+        [rows addObject:@{@"kind":@"swizzleGlass", @"title":@"Liquid Glass Swizzle", @"subtitle":@"Native setIsEnabled:"}];
+        [rows addObject:@{@"kind":@"throwback", @"title":@"Throwback Chrome", @"subtitle":@"Native overrideIsEnabled:"}];
+        [rows addObject:@{@"kind":@"navGlass", @"title":@"Liquid Glass Navigation", @"subtitle":@"Native overrideIsEnabled:"}];
+    }
     else if (self.surface == RYGDeveloperRuntimeSurfaceInternalOnly || self.surface == RYGDeveloperRuntimeSurfaceBugReport || self.surface == RYGDeveloperRuntimeSurfaceSettingsRows) [rows addObject:@{@"kind":@"internal", @"title":@"Expose Internal Settings", @"subtitle":@"Exact IGBugReportMenu initializer flags"}];
     else if (self.surface == RYGDeveloperRuntimeSurfaceDirectDogfood) {
         [rows addObject:@{@"kind":@"dogfood", @"title":@"Global Dogfooding Mode", @"subtitle":@"Internal menu + native launcher + resolved MobileConfig + EasyGating"}];
@@ -271,20 +277,34 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
 
 - (UIButton *)selectorButtonForMethod:(RYGRuntimeBoolMethod *)method {
     NSNumber *forced = method.overrideValue, *native = method.liveValue; NSString *title = forced ? (forced.boolValue ? @"On" : @"Off") : (native ? (native.boolValue ? @"Native On" : @"Native Off") : @"Native");
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem]; RYGLiquidGlassConfigureButton(button, NO); UIButtonConfiguration *cfg = button.configuration; if (cfg) { cfg.title = title; if (@available(iOS 26.0, *)) [cfg setDefaultContentInsets]; button.configuration = cfg; } else [button setTitle:title forState:UIControlStateNormal];
     __weak typeof(self) weakSelf = self;
     UIAction *nativeAction = [UIAction actionWithTitle:@"Native" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData]; }]; nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
     UIAction *on = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData]; }]; on.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
     UIAction *off = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *a) { [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData]; }]; off.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
-    button.menu = [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[nativeAction, on, off]]; button.showsMenuAsPrimaryAction = YES; button.changesSelectionAsPrimaryAction = YES; return button;
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.menu = [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[nativeAction, on, off]];
+    button.showsMenuAsPrimaryAction = YES;
+    button.changesSelectionAsPrimaryAction = YES;
+    // Configure Glass only after the button is a menu source so the helper uses
+    // UIKit's native menu metrics/default insets for the closed→expanded morph.
+    RYGLiquidGlassConfigureButton(button, NO);
+    UIButtonConfiguration *cfg = button.configuration; if (cfg) { cfg.title = title; if (@available(iOS 26.0, *)) [cfg setDefaultContentInsets]; button.configuration = cfg; } else [button setTitle:title forState:UIControlStateNormal];
+    return button;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (self.nativeControls.count && indexPath.section == 0) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGNativeControl"]; if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RYGNativeControl"];
         NSDictionary *row = self.nativeControls[(NSUInteger)indexPath.row]; cell.textLabel.text = row[@"title"]; cell.detailTextLabel.text = row[@"subtitle"]; cell.detailTextLabel.numberOfLines = 2; cell.accessoryView = nil; cell.accessoryType = UITableViewCellAccessoryNone; cell.selectionStyle = UITableViewCellSelectionStyleDefault; NSString *kind = row[@"kind"];
-        if ([kind isEqualToString:@"internal"] || [kind isEqualToString:@"dogfood"] || [kind isEqualToString:@"throwback"] || [kind isEqualToString:@"navGlass"]) {
-            UISwitch *toggle = [UISwitch new]; if ([kind isEqualToString:@"internal"]) toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:kRYGInternalMenuPref]; else if ([kind isEqualToString:@"dogfood"]) toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:kRYGDogfoodModePref]; else if ([kind isEqualToString:@"throwback"]) toggle.on = [RYGNativeHelperEnabled(@"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper") boolValue]; else toggle.on = [RYGNativeHelperEnabled(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper") boolValue]; objc_setAssociatedObject(toggle, kRYGNativeControlKey, kind, OBJC_ASSOCIATION_COPY_NONATOMIC); [toggle addTarget:self action:@selector(nativeSwitchChanged:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView = toggle; cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        if ([kind isEqualToString:@"internal"] || [kind isEqualToString:@"dogfood"] || [kind isEqualToString:@"swizzleGlass"] || [kind isEqualToString:@"throwback"] || [kind isEqualToString:@"navGlass"]) {
+            UISwitch *toggle = [UISwitch new];
+            if ([kind isEqualToString:@"internal"]) toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:kRYGInternalMenuPref];
+            else if ([kind isEqualToString:@"dogfood"]) toggle.on = [NSUserDefaults.standardUserDefaults boolForKey:kRYGDogfoodModePref];
+            else if ([kind isEqualToString:@"swizzleGlass"]) toggle.on = [RYGNativeHelperEnabled(@"_TtC20IGLiquidGlassSwizzle26IGLiquidGlassSwizzleToggle") boolValue];
+            else if ([kind isEqualToString:@"throwback"]) toggle.on = [RYGNativeHelperEnabled(@"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper") boolValue];
+            else toggle.on = [RYGNativeHelperEnabled(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper") boolValue];
+            objc_setAssociatedObject(toggle, kRYGNativeControlKey, kind, OBJC_ASSOCIATION_COPY_NONATOMIC); [toggle addTarget:self action:@selector(nativeSwitchChanged:) forControlEvents:UIControlEventValueChanged]; cell.accessoryView = toggle; cell.selectionStyle = UITableViewCellSelectionStyleNone;
         } else cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator; return cell;
     }
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGKnownMethod"]; if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RYGKnownMethod"];
@@ -295,6 +315,7 @@ static NSUInteger RYGApplyDogfoodMobileConfig(BOOL enabled) {
     NSString *kind = objc_getAssociatedObject(toggle, kRYGNativeControlKey);
     if ([kind isEqualToString:@"internal"]) { [NSUserDefaults.standardUserDefaults setBool:toggle.isOn forKey:kRYGInternalMenuPref]; if (toggle.isOn) RYGInstallBugMenuHook(); }
     else if ([kind isEqualToString:@"dogfood"]) { [NSUserDefaults.standardUserDefaults setBool:toggle.isOn forKey:kRYGDogfoodModePref]; if (toggle.isOn) { RYGInstallBugMenuHook(); RYGInstallDogfoodConfigCapture(); RYGInstallDogfoodLauncherCapture(); [RYGEasyGatingRuntime.shared installIfNeeded]; (void)RYGReapplyCapturedDogfoodLauncher(); NSUInteger count = RYGApplyDogfoodMobileConfig(YES); [RYGUtils showToastForDuration:2.0 title:@"Dogfooding enabled" subtitle:[NSString stringWithFormat:@"%lu resolved MobileConfig BOOLs", (unsigned long)count]]; } else { NSUInteger count = RYGApplyDogfoodMobileConfig(NO); [RYGUtils showToastForDuration:1.5 title:@"Dogfooding disabled" subtitle:[NSString stringWithFormat:@"%lu RyukGram overrides cleared", (unsigned long)count]]; } }
+    else if ([kind isEqualToString:@"swizzleGlass"]) { if (!RYGSetNativeHelperEnabled(@"_TtC20IGLiquidGlassSwizzle26IGLiquidGlassSwizzleToggle", toggle.isOn)) toggle.on = !toggle.isOn; }
     else if ([kind isEqualToString:@"throwback"]) { if (!RYGOverrideNativeHelper(@"_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper", toggle.isOn)) toggle.on = !toggle.isOn; }
     else if ([kind isEqualToString:@"navGlass"]) { if (!RYGOverrideNativeHelper(@"_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper", toggle.isOn)) toggle.on = !toggle.isOn; }
 }
