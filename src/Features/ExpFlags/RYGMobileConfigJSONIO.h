@@ -29,4 +29,11 @@ typedef NS_ENUM(NSInteger, RYGMCNameMappingImportMode) {
 - (nullable NSData *)ryg_exportOverridesData:(NSError **)error;
 @end
 
+/// Persistence-to-native bridge kept separate from JSON parsing/import. It has
+/// no constructor and installs no hooks; callers explicitly request a flush
+/// after the context manager has exposed its authoritative <user>.data path.
+@interface RYGMobileConfig (RYGPersistedJSONSync)
+- (BOOL)ryg_syncPersistedJSONToNativeDataDirectory;
+@end
+
 NS_ASSUME_NONNULL_END
