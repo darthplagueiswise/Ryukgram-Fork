@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Validate and inspect a built RyukGram Mach-O using LIEF + Capstone."""
+"""Validate and inspect a built RyukGram Mach-O using LIEF + Capstone.
+
+This validator follows the runtime architecture actually compiled into dogfood.
+It intentionally does not require legacy FBMobileConfigManager/OverridesTable C++
+override entry points: the current implementation uses Instagram's native
+FBMobileConfigStartupConfigs Objective-C override API after resolving the live
+parameter table.
+"""
 
 from __future__ import annotations
 
@@ -17,15 +24,15 @@ FORBIDDEN = (
     b"NoPluginsPatch.dylib",
     b"SideloadPatch.dylib",
 )
+
+# Markers that must survive class obfuscation/stripping because the runtime uses
+# them dynamically (dlsym / NSClassFromString / NSSelectorFromString) or because
+# they are canonical file-format contracts.
 REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # Runtime Browser implementation is guarded structurally by
-    # validate-source.py. Class names cannot be required in the stripped dylib
-    # because obfuscate-classes intentionally renames them after linking.
-    # Binary-validated Easy Gating target. The public wrapper maps its selector
-    # before branching here, so overrides are keyed at the platform layer.
+    # EasyGating is hooked after selector/index -> final gate-ID mapping.
     b"EasyGatingPlatformGetBoolean",
     b"ryg_easy_gating_platform_bool_overrides_v2",
     # Canonical MobileConfig file formats.
@@ -33,12 +40,22 @@ REQUIRED = (
     b"mc_overrides.json",
     b"_qe_overrides_",
     b": : ",
-    # Native MobileConfig metadata and typed C++ override paths. These strings
-    # are the dlsym contracts consumed by the compiled tweak; requiring all of
-    # them prevents a build from silently falling back to guessed value ABIs.
+    # Live MobileConfig metadata contracts validated against current FBShared.
     b"_ZN12mobileconfig17typeFromParameterEy",
     b"_ZN12mobileconfig23kMobileConfigParamsListE",
     b"_ZN12mobileconfig23kMobileConfigParamsSizeE",
+    # Native, typed MobileConfig override owner/API.  These replace the old
+    # handcrafted std::shared_ptr/C++ OverridesTable call path.
+    b"FBMobileConfigStartupConfigs",
+    b"getInstance",
+    b"setOverrideForParam:andValue:",
+    b"removeOverrideForParam:",
+)
+
+# The rebuild deliberately removed these fragile direct C++ override paths.
+# Seeing them in RyukGram again would indicate a regression back to the old ABI
+# assumptions rather than use of StartupConfigs' native typed dispatcher.
+LEGACY_MOBILECONFIG_OVERRIDE_MARKERS = (
     b"_ZN12mobileconfig21FBMobileConfigManager25getOrCreateOverridesTableEb",
     b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEybb",
     b"_ZN12mobileconfig28FBMobileConfigOverridesTable22updateOverrideForParamEyxb",
@@ -99,12 +116,22 @@ def main() -> int:
         die(f"file not found: {path}")
 
     raw = path.read_bytes()
+    lower_raw = raw.lower()
     for marker in FORBIDDEN:
-        if marker.lower() in raw.lower():
+        if marker.lower() in lower_raw:
             die(f"external helper marker remains: {marker.decode(errors='replace')}")
+
     missing = [marker.decode(errors="replace") for marker in REQUIRED if marker not in raw]
     if missing:
         die("required integrated marker(s) missing: " + ", ".join(missing))
+
+    legacy = [
+        marker.decode(errors="replace")
+        for marker in LEGACY_MOBILECONFIG_OVERRIDE_MARKERS
+        if marker in raw
+    ]
+    if legacy:
+        die("legacy direct MobileConfig override ABI returned: " + ", ".join(legacy))
 
     try:
         parsed = lief.MachO.parse(str(path))
@@ -140,7 +167,12 @@ def main() -> int:
     print(f"Capstone: decoded {len(instructions)} instruction(s) from {byte_count} __text bytes")
     for line in instructions:
         print(f"  {line}")
-    print("Integrated markers: sideload compatibility, App Group routing, UIGlassEffect, final Easy Gating platform ABI, canonical MobileConfig JSON, typed native MobileConfig C++ paths")
+    print(
+        "Integrated markers: sideload compatibility, App Group routing, "
+        "UIGlassEffect, final EasyGating platform ABI, canonical MobileConfig "
+        "JSON, live parameter metadata, native FBMobileConfigStartupConfigs "
+        "typed override API"
+    )
     return 0
 
 
