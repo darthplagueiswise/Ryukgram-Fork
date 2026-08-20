@@ -329,30 +329,103 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
     NSData *canonical = [NSJSONSerialization dataWithJSONObject:json options:0 error:error];
     if (!canonical) return NO;
 
-    // Persist the complete canonical document before applying its supported
-    // rows. This sidecar is the round-trip source for mapping-only / unknown
-    // rows and _qe_overrides_ even when the native *.data path is not available
-    // yet during early app startup.
-    if (![canonical writeToFile:RYGMCCanonicalOverridesCachePath()
-                        options:NSDataWritingAtomic
-                          error:error]) return NO;
+    NSString *cachePath = RYGMCCanonicalOverridesCachePath();
     NSString *nativePath = [self ryg_nativeOverridesJSONPath];
-    if (nativePath.length &&
-        ![canonical writeToFile:nativePath options:NSDataWritingAtomic error:error]) return NO;
+    NSFileManager *fileManager = NSFileManager.defaultManager;
+
+    // Snapshot both disk representations before touching live state. If an
+    // existing file cannot even be read, abort rather than lose the last known
+    // good canonical document during rollback.
+    BOOL cacheExisted = [fileManager fileExistsAtPath:cachePath];
+    BOOL nativeExisted = nativePath.length && [fileManager fileExistsAtPath:nativePath];
+    NSError *snapshotError = nil;
+    NSData *previousCache = cacheExisted
+        ? [NSData dataWithContentsOfFile:cachePath options:0 error:&snapshotError]
+        : nil;
+    if (cacheExisted && !previousCache) {
+        if (error) *error = snapshotError ?: RYGMCJSONError(@"Could not snapshot the existing canonical overrides cache.");
+        return NO;
+    }
+    snapshotError = nil;
+    NSData *previousNative = nativeExisted
+        ? [NSData dataWithContentsOfFile:nativePath options:0 error:&snapshotError]
+        : nil;
+    if (nativeExisted && !previousNative) {
+        if (error) *error = snapshotError ?: RYGMCJSONError(@"Could not snapshot the existing native mc_overrides.json.");
+        return NO;
+    }
+
+    NSMutableArray<NSDictionary *> *previousOverrides = [NSMutableArray arrayWithCapacity:actions.count];
+    for (NSDictionary *action in actions) {
+        RYGMCParam *param = action[@"param"];
+        BOOL hadOverride = [self overrideStateFor:param] == RYGMCOverrideSet;
+        id previousValue = hadOverride ? [self overrideValueFor:param] : nil;
+        [previousOverrides addObject:@{
+            @"param": param,
+            @"had": @(hadOverride),
+            @"value": previousValue ?: NSNull.null,
+        }];
+    }
+
+    void (^rollbackLiveState)(void) = ^{
+        for (NSInteger index = (NSInteger)previousOverrides.count - 1; index >= 0; index--) {
+            NSDictionary *snapshot = previousOverrides[(NSUInteger)index];
+            RYGMCParam *param = snapshot[@"param"];
+            if ([snapshot[@"had"] boolValue]) {
+                id previousValue = snapshot[@"value"];
+                if (previousValue != NSNull.null) [self setOverride:previousValue for:param];
+            } else {
+                [self clearOverrideFor:param];
+            }
+        }
+        [self reapplyOverridesToNativeTable];
+    };
+
+    void (^restoreDiskState)(void) = ^{
+        if (cacheExisted) {
+            [previousCache writeToFile:cachePath options:NSDataWritingAtomic error:nil];
+        } else {
+            [fileManager removeItemAtPath:cachePath error:nil];
+        }
+        if (nativePath.length) {
+            if (nativeExisted) {
+                [previousNative writeToFile:nativePath options:NSDataWritingAtomic error:nil];
+            } else {
+                [fileManager removeItemAtPath:nativePath error:nil];
+            }
+        }
+    };
 
     NSUInteger applied = 0;
     for (NSDictionary *action in actions) {
         RYGMCParam *param = action[@"param"];
         id value = action[@"value"];
         if (![self setOverride:value for:param]) {
-            if (error) *error = RYGMCJSONError([NSString stringWithFormat:@"Could not apply %@:%u.",
-                                                [NSString stringWithFormat:@"%u", param.configNumber],
+            rollbackLiveState();
+            if (error) *error = RYGMCJSONError([NSString stringWithFormat:@"Could not apply %u:%u; the previous override state was restored.",
+                                                param.configNumber,
                                                 param.paramIndex]);
             return NO;
         }
         applied++;
     }
     [self reapplyOverridesToNativeTable];
+
+    NSError *writeError = nil;
+    if (![canonical writeToFile:cachePath options:NSDataWritingAtomic error:&writeError]) {
+        restoreDiskState();
+        rollbackLiveState();
+        if (error) *error = writeError ?: RYGMCJSONError(@"Could not persist the canonical overrides cache.");
+        return NO;
+    }
+    if (nativePath.length &&
+        ![canonical writeToFile:nativePath options:NSDataWritingAtomic error:&writeError]) {
+        restoreDiskState();
+        rollbackLiveState();
+        if (error) *error = writeError ?: RYGMCJSONError(@"Could not persist the native mc_overrides.json.");
+        return NO;
+    }
+
     if (appliedCount) *appliedCount = applied;
     return YES;
 }
@@ -397,8 +470,6 @@ static BOOL RYGMCParseCanonicalLine(NSString *line,
                                             RYGMCJSONValueString(value, param.type)];
                 }
             } else {
-                // Clearing a supported live override must also remove its old
-                // imported row instead of resurrecting it during export.
                 [knownLines removeObjectForKey:indexKey];
             }
         }
