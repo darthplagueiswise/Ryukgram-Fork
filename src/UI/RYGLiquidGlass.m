@@ -145,6 +145,45 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
     }
 }
 
+UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
+    if (!title.length) return [UIView new];
+
+    UIButton *pill = [UIButton buttonWithType:UIButtonTypeSystem];
+    pill.userInteractionEnabled = NO;
+    pill.accessibilityLabel = title;
+
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *configuration = [UIButtonConfiguration plainButtonConfiguration];
+        configuration.title = title;
+        configuration.baseForegroundColor = UIColor.labelColor;
+        configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+        configuration.contentInsets = NSDirectionalEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
+        configuration.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *incoming) {
+            NSMutableDictionary *attributes = incoming.mutableCopy;
+            attributes[NSFontAttributeName] = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+            return attributes.copy;
+        };
+        pill.configuration = configuration;
+    } else {
+        [pill setTitle:title forState:UIControlStateNormal];
+        pill.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
+        pill.contentEdgeInsets = UIEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
+    }
+
+    if (@available(iOS 26.0, *)) {
+        if (RYGLiquidGlassIsAvailable()) {
+            RYGLiquidGlassConfigureButton(pill, NO);
+            UIButtonConfiguration *configuration = pill.configuration;
+            configuration.baseForegroundColor = UIColor.labelColor;
+            configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
+            pill.configuration = configuration;
+        }
+    }
+
+    [pill sizeToFit];
+    return pill;
+}
+
 static BOOL RYGViewLivesInsideContentCell(UIView *view) {
     for (UIView *ancestor = view.superview; ancestor; ancestor = ancestor.superview) {
         if ([ancestor isKindOfClass:UITableViewCell.class] ||
@@ -183,10 +222,9 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
 
     if (@available(iOS 26.0, *)) {
         // UINavigationBar, UIToolbar, UISearchController and standard bar-button
-        // items already participate in the system Liquid Glass layer. Do not
-        // clear their backgrounds, inject an extra glass titleView, or force
-        // translucency: that creates stacked materials and illegible titles.
-        // A pre-existing custom title view owned by the screen is respected.
+        // items already participate in the system Liquid Glass layer. Keep the
+        // system bar itself native; screens that need a readable title pill use
+        // RYGLiquidGlassNavigationTitleView rather than a global navbar swizzle.
     } else {
         // Pre-iOS 26 keeps the normal UIKit appearance; RYGLiquidGlassView has a
         // thin-material fallback for the few custom surfaces that request it.
