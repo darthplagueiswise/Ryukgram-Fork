@@ -318,4 +318,4 @@ for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, exact Developer owners, sideload-safe final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")
+print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, declared runtime-owner contracts, sideload-safe final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")

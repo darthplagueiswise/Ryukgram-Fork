@@ -32,8 +32,11 @@ REQUIRED = (
     b"RyukGramSideloadCompatibility",
     b"containerURLForSecurityApplicationGroupIdentifier:",
     b"UIGlassEffect",
-    # EasyGating is hooked after selector/index -> final gate-ID mapping.
-    b"EasyGatingPlatformGetBoolean",
+    # EasyGating is hooked at the internal wrapper after selector/index ->
+    # final gate-ID mapping.  Requiring the platform getter here would accept
+    # a dylib that carries only a stale diagnostic string and never installs
+    # the wrapper hook used by RYGEasyGatingRuntime.
+    b"EasyGatingGetBoolean_Internal_DoNotUseOrMock",
     b"ryg_easy_gating_platform_bool_overrides_v2",
     # Canonical MobileConfig file formats.
     b"id_name_mapping.json",
