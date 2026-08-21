@@ -1,11 +1,15 @@
 #import "RYGDeveloperTopicViewController.h"
+#import "RYGEasyGatingRuntime.h"
 #import <UIKit/UIKit.h>
 #import <mach-o/dyld.h>
 
+static NSString *const kRYGPersistedEasyGatingOverridesKey = @"ryg_easy_gating_platform_bool_overrides_v2";
 static BOOL gRYGDeveloperRestoreScheduled;
 
 static void RYGRestorePersistedDeveloperModes(void) {
     [RYGDeveloperTopicViewController activatePersistedNativeFeatures];
+    NSDictionary *easyGating = [NSUserDefaults.standardUserDefaults dictionaryForKey:kRYGPersistedEasyGatingOverridesKey];
+    if (easyGating.count) [RYGEasyGatingRuntime.shared installIfNeeded];
 }
 
 static void RYGScheduleDeveloperRestore(void) {
