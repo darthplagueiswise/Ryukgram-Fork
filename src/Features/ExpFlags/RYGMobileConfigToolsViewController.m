@@ -1,5 +1,5 @@
 #import "RYGMobileConfigToolsViewController.h"
-#import "RYGMobileConfigBrowserViewController.h"
+#import "RYGFastMobileConfigBrowserViewController.h"
 #import "RYGMobileConfig.h"
 #import "RYGMobileConfigJSONIO.h"
 #import "../../Utils.h"
@@ -34,13 +34,10 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 - (void)rebuildSections {
     __weak typeof(self) weakSelf = self;
 
-    // One browser only. It joins id_name_mapping by (configNumber,paramIndex),
-    // edits the canonical mc_overrides document for every mapped row, and also
-    // applies immediately when a validated native PID/type exists.
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
                                                      subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
-                                               viewController:[RYGMobileConfigBrowserViewController new]];
+                                               viewController:[RYGFastMobileConfigBrowserViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
                                                      subtitle:@""
@@ -85,11 +82,11 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
                                                                     message:nil
                                                              preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDefault handler:^(__unused UIAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeReplace;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge" style:UIAlertActionStyleDefault handler:^(__unused UIAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeMerge;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
@@ -203,7 +200,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear overrides?" message:nil preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [alert addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAction *action) {
         [RYGMobileConfig.shared resetAllOverrides];
         [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory];
         [weakSelf rebuildSections];
