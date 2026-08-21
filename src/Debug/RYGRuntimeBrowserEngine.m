@@ -12,6 +12,7 @@
 static NSMutableDictionary<NSString *, NSNumber *> *gRYGOverrides;
 static NSMutableDictionary<NSString *, NSNumber *> *gRYGObservedValues;
 static NSMutableSet<NSString *> *gRYGInstalledKeys;
+static NSMutableDictionary<NSString *, NSArray<RYGMachOSymbol *> *> *gRYGSymbolIndexes;
 
 static NSString *RYGCanonicalImagePath(NSString *path) {
     if (!path.length) return @"";
@@ -346,29 +347,26 @@ static void RYGCountHookableMembersForClass(Class cls,
 
     if (!names.count) {
         int total = objc_getClassList(NULL, 0);
-        if (total > 0 && total < 500000) {
-            Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
-            int filled = classes ? objc_getClassList(classes, total) : 0;
-            for (int index = 0; index < filled; index++) {
-                Class cls = classes[index];
-                if (!cls || !RYGClassDefinedInImage(cls, imagePath)) continue;
-                const char *rawName = class_getName(cls);
-                if (!rawName || !*rawName) continue;
-                NSString *name = [NSString stringWithUTF8String:rawName];
-                if (name.length) [names addObject:name];
-            }
-            if (classes) free(classes);
+        if (total <= 0 || total > 500000) return @[];
+        Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
+        if (!classes) return @[];
+        int filled = objc_getClassList(classes, total);
+        for (int index = 0; index < filled; index++) {
+            Class cls = classes[index];
+            if (!RYGClassDefinedInImage(cls, imagePath)) continue;
+            NSString *name = NSStringFromClass(cls);
+            if (name.length) [names addObject:name];
         }
+        free(classes);
     }
 
-    NSArray<NSString *> *ordered = [names.allObjects sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
     NSMutableArray<RYGRuntimeClassRow *> *rows = [NSMutableArray array];
-    for (NSString *name in ordered) {
+    for (NSString *name in names) {
         Class cls = objc_lookUpClass(name.UTF8String);
         if (!cls) continue;
         NSUInteger instanceCount = 0, classCount = 0;
         RYGCountHookableMembersForClass(cls, imagePath, &instanceCount, &classCount);
-        if (!instanceCount && !classCount) continue;
+        if (instanceCount + classCount == 0) continue;
         RYGRuntimeClassRow *row = [RYGRuntimeClassRow new];
         row.imagePath = imagePath;
         row.className = name;
@@ -377,32 +375,33 @@ static void RYGCountHookableMembersForClass(Class cls,
         row.propertyCount = 0;
         [rows addObject:row];
     }
+    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
+        return [left.className localizedCaseInsensitiveCompare:right.className];
+    }];
     return rows.copy;
 }
 
 + (NSArray<RYGRuntimeMemberRow *> *)membersForClassName:(NSString *)className imagePath:(NSString *)imagePath {
     Class cls = className.length ? objc_lookUpClass(className.UTF8String) : Nil;
-    if (!cls || !imagePath.length || !RYGDyldHeaderForImagePath(imagePath)) return @[];
+    if (!cls || !RYGClassDefinedInImage(cls, imagePath)) return @[];
     NSMutableArray<RYGRuntimeMemberRow *> *rows = [NSMutableArray array];
     for (NSUInteger pass = 0; pass < 2; pass++) {
-        BOOL classMember = pass == 1;
-        Class owner = classMember ? object_getClass(cls) : cls;
-        unsigned int methodCount = 0;
-        Method *methods = owner ? class_copyMethodList(owner, &methodCount) : NULL;
-        for (unsigned int index = 0; methods && index < methodCount; index++) {
+        BOOL classMethod = pass == 1;
+        Class owner = classMethod ? object_getClass(cls) : cls;
+        unsigned int count = 0;
+        Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+        for (unsigned int index = 0; methods && index < count; index++) {
             Method method = methods[index];
-            if (!RYGMethodHasSupportedBoolABI(method)) continue;
-            if (!RYGMethodIMPBelongsToImage(method, imagePath)) continue;
-            SEL selector = method_getName(method);
-            NSString *name = selector ? NSStringFromSelector(selector) : @"";
+            if (!RYGMethodHasSupportedBoolABI(method) || !RYGMethodIMPBelongsToImage(method, imagePath)) continue;
+            NSString *name = NSStringFromSelector(method_getName(method));
             if ([self isStructuralNoiseSelectorName:name]) continue;
             RYGRuntimeMemberRow *row = [RYGRuntimeMemberRow new];
             row.imagePath = imagePath;
             row.className = className;
-            row.name = name;
-            row.kind = classMember ? RYGRuntimeMemberClassMethod : RYGRuntimeMemberInstanceMethod;
+            row.name = name ?: @"";
             const char *types = method_getTypeEncoding(method);
             row.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+            row.kind = classMethod ? RYGRuntimeMemberClassMethod : RYGRuntimeMemberInstanceMethod;
             row.hookableBool = YES;
             row.argumentKind = RYGArgumentKindForMethod(method);
             [rows addObject:row];
@@ -417,11 +416,12 @@ static void RYGCountHookableMembersForClass(Class cls,
 }
 
 + (RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member {
-    if (!member.method || !member.hookableBool || !member.className.length || !member.name.length) return nil;
+    if (![member isKindOfClass:RYGRuntimeMemberRow.class] || !member.method || !member.hookableBool) return nil;
     Class cls = objc_lookUpClass(member.className.UTF8String);
     BOOL classMethod = member.kind == RYGRuntimeMemberClassMethod;
     Class owner = cls ? (classMethod ? object_getClass(cls) : cls) : Nil;
-    Method method = owner ? class_getInstanceMethod(owner, NSSelectorFromString(member.name)) : NULL;
+    SEL selector = member.name.length ? NSSelectorFromString(member.name) : NULL;
+    Method method = owner && selector ? class_getInstanceMethod(owner, selector) : NULL;
     if (!method || !RYGMethodHasSupportedBoolABI(method) || !RYGMethodIMPBelongsToImage(method, member.imagePath)) return nil;
     return RYGBoolRow(cls, method, classMethod, member.imagePath);
 }
@@ -446,6 +446,8 @@ static void RYGCountHookableMembersForClass(Class cls,
 }
 
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath {
+    NSString *symbolCacheKey = RYGCanonicalImagePath(imagePath);
+    @synchronized(self) { NSArray<RYGMachOSymbol *> *cached = gRYGSymbolIndexes[symbolCacheKey]; if (cached) return cached; }
     NSInteger imageIndex = [self dyldIndexForImagePath:imagePath];
     if (imageIndex == NSNotFound) return @[];
     const struct mach_header *generic = _dyld_get_image_header((uint32_t)imageIndex);
@@ -496,8 +498,12 @@ static void RYGCountHookableMembersForClass(Class cls,
     [rows sortUsingComparator:^NSComparisonResult(RYGMachOSymbol *left, RYGMachOSymbol *right) {
         return [left.name localizedCaseInsensitiveCompare:right.name];
     }];
-    return rows.copy;
+    NSArray<RYGMachOSymbol *> *snapshot = rows.copy;
+    @synchronized(self) { if (!gRYGSymbolIndexes) gRYGSymbolIndexes = [NSMutableDictionary dictionary]; if (symbolCacheKey.length) gRYGSymbolIndexes[symbolCacheKey] = snapshot; }
+    return snapshot;
 }
+
++ (void)invalidateMachOSymbolCache { @synchronized(self) { [gRYGSymbolIndexes removeAllObjects]; } }
 
 + (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method {
     return [method isKindOfClass:RYGRuntimeBoolMethod.class] && RYGInstallUnifiedBoolHook(method.overrideKey);
