@@ -10,10 +10,11 @@ static BOOL gRYGRuntimeRestoreScheduled;
 static NSString *RYGPersistenceImageID(NSString *path) {
     if (!path.length) return @"";
     NSString *standard = path.stringByStandardizingPath;
+    NSString *executable = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    if ([standard isEqualToString:executable]) return @"@executable";
     NSString *root = NSBundle.mainBundle.bundlePath.stringByStandardizingPath;
     NSString *prefix = [root stringByAppendingString:@"/"];
     if ([standard hasPrefix:prefix]) return [standard substringFromIndex:prefix.length];
-    if ([standard isEqualToString:NSBundle.mainBundle.executablePath.stringByStandardizingPath]) return @"@executable";
     return standard.lastPathComponent ?: @"";
 }
 
@@ -35,6 +36,8 @@ static void RYGPersistDefaultsDictionary(NSMutableDictionary *dictionary, NSStri
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     if (dictionary.count) [defaults setObject:dictionary.copy forKey:key];
     else [defaults removeObjectForKey:key];
+    // A runtime override is an explicit user action. Flush it before returning
+    // so a force-quit immediately afterwards does not silently lose the choice.
     [defaults synchronize];
 }
 
@@ -105,10 +108,8 @@ static void RYGRestoreCOverrides(void) {
     }];
 }
 
-static void RYGScheduleRuntimeRestoreAfter(NSTimeInterval delay) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [RYGRuntimeBrowserEngine reinstallPersistedOverrides];
-    });
+static void RYGRestorePersistedRuntimeOverrides(void) {
+    [RYGRuntimeBrowserEngine reinstallPersistedOverrides];
 }
 
 static void RYGScheduleRuntimeRestore(void) {
@@ -116,14 +117,17 @@ static void RYGScheduleRuntimeRestore(void) {
         if (gRYGRuntimeRestoreScheduled) return;
         gRYGRuntimeRestoreScheduled = YES;
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
         @synchronized(RYGRuntimeBrowserEngine.class) { gRYGRuntimeRestoreScheduled = NO; }
-        [RYGRuntimeBrowserEngine reinstallPersistedOverrides];
+        RYGRestorePersistedRuntimeOverrides();
     });
 }
 
 static void RYGRuntimePersistenceImageDidLoad(const struct mach_header *header, intptr_t slide) {
     (void)header; (void)slide;
+    // dyld invokes this for existing images at registration and for genuinely
+    // late-loaded frameworks. Coalescing onto the main queue makes restore
+    // deterministic without clock-based retries.
     RYGScheduleRuntimeRestore();
 }
 
@@ -188,14 +192,13 @@ static void RYGRuntimePersistenceImageDidLoad(const struct mach_header *header, 
 
 __attribute__((constructor)) static void RYGInstallRuntimePersistenceCompat(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-        [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(__unused NSNotification *note) {
             RYGScheduleRuntimeRestore();
         }];
-        RYGScheduleRuntimeRestoreAfter(0.15);
-        RYGScheduleRuntimeRestoreAfter(0.75);
-        RYGScheduleRuntimeRestoreAfter(2.0);
-        RYGScheduleRuntimeRestoreAfter(4.0);
+        RYGScheduleRuntimeRestore();
     });
     _dyld_register_func_for_add_image(RYGRuntimePersistenceImageDidLoad);
 }
