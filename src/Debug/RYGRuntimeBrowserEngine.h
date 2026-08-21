@@ -8,6 +8,18 @@ typedef NS_ENUM(NSInteger, RYGRuntimeArgumentKind) {
     RYGRuntimeArgumentInteger,
 };
 
+typedef NS_ENUM(NSInteger, RYGCFunctionABI) {
+    RYGCFunctionABIUnknown = 0,
+    // C symbols do not carry a function prototype in Mach-O.  These profiles
+    // are therefore explicit: integer/pointer-register arguments only, BOOL
+    // result in x0/w0.  No float/vector/struct ABI is ever guessed.
+    RYGCFunctionABIBool0,
+    RYGCFunctionABIBool1,
+    RYGCFunctionABIBool2,
+    RYGCFunctionABIBool3,
+    RYGCFunctionABIBool4,
+};
+
 typedef NS_ENUM(NSInteger, RYGRuntimeBrowserScope) {
     RYGRuntimeBrowserScopeRelevant = 0,
     RYGRuntimeBrowserScopeEmployee,
@@ -54,10 +66,14 @@ typedef NS_ENUM(NSInteger, RYGRuntimeMemberKind) {
 @end
 
 @interface RYGMachOSymbol : NSObject
+@property (nonatomic, copy) NSString *imagePath;
 @property (nonatomic, copy) NSString *name;
 @property (nonatomic, copy) NSString *kind;
 @property (nonatomic, assign) uint64_t address;
 @property (nonatomic, assign) BOOL external;
+@property (nonatomic, assign, getter=isRebindableImport) BOOL rebindableImport;
+@property (nonatomic, readonly) NSString *overrideKey;
+@property (nonatomic, readonly, nullable) NSNumber *overrideValue;
 @end
 
 @interface RYGRuntimeBrowserEngine : NSObject
@@ -68,6 +84,9 @@ typedef NS_ENUM(NSInteger, RYGRuntimeMemberKind) {
 + (nullable RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member;
 + (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath scope:(RYGRuntimeBrowserScope)scope;
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath;
++ (BOOL)setCOverride:(nullable NSNumber *)value forSymbol:(RYGMachOSymbol *)symbol abi:(RYGCFunctionABI)abi;
++ (nullable NSNumber *)cOverrideForSymbol:(RYGMachOSymbol *)symbol;
++ (void)invalidateRuntimeCaches;
 + (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method;
 + (nullable NSNumber *)observedNativeValueForKey:(NSString *)overrideKey;
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;

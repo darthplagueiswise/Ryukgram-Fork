@@ -15,7 +15,7 @@
 #import "Features/FollowRequests/RYGFollowRequestTracker.h"
 #import "Features/General/RYGMessagesOnlySchedule.h"
 #import "Settings/RYGDonatePrompt.h"
-#import "Debug/RYGRuntimeBrowserViewController.h"
+#import "Debug/RYGFastRuntimeBrowserViewController.h"
 #import "UI/RYGPopupChrome.h"
 #include "../modules/fishhook/fishhook.h"
 #import <objc/runtime.h>
@@ -46,9 +46,9 @@ static void rygPresentRuntimeBrowser(void) {
 		if (!top) return;
 		UIViewController *visible = [top isKindOfClass:UINavigationController.class]
 			? ((UINavigationController *)top).visibleViewController : top;
-		if ([visible isKindOfClass:RYGRuntimeBrowserViewController.class]) return;
+		if ([visible isKindOfClass:RYGFastRuntimeBrowserViewController.class]) return;
 		sRYGRuntimeBrowserPresentationPending = YES;
-		[RYGPopupChrome presentVC:[RYGRuntimeBrowserViewController new] from:top];
+		[RYGPopupChrome presentVC:[RYGFastRuntimeBrowserViewController new] from:top];
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
 			sRYGRuntimeBrowserPresentationPending = NO;
 		});

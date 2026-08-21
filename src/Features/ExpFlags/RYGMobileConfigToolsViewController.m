@@ -1,5 +1,5 @@
 #import "RYGMobileConfigToolsViewController.h"
-#import "RYGMobileConfigBrowserViewController.h"
+#import "RYGFastMobileConfigBrowserViewController.h"
 #import "RYGMobileConfig.h"
 #import "RYGMobileConfigJSONIO.h"
 #import "../../Utils.h"
@@ -40,7 +40,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
                                                      subtitle:@""
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
-                                               viewController:[RYGMobileConfigBrowserViewController new]];
+                                               viewController:[RYGFastMobileConfigBrowserViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
                                                      subtitle:@""
