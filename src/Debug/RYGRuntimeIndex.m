@@ -66,7 +66,7 @@ static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
     const char *type = RYGIndexSkipQualifiers(encoded);
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@') return RYGRuntimeArgumentObject;
-    if (strchr("cCsSiIlLqQ", *type) != NULL) return RYGRuntimeArgumentInteger;
+    if (*type == 'q' || *type == 'Q') return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
 
@@ -110,8 +110,6 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     result.methodsByClass = @{};
     if (!target) return result;
 
-    // Enumerate only classes defined by the selected Mach-O image. This keeps
-    // index cost proportional to the selected image instead of the whole app.
     unsigned int imageClassCount = 0;
     const char **imageClassNames = objc_copyClassNamesForImage(canonical.fileSystemRepresentation, &imageClassCount);
     if (!imageClassNames || imageClassCount == 0 || imageClassCount > 500000) {
@@ -188,10 +186,9 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (void)requestIndexForImagePath:(NSString *)imagePath completion:(RYGRuntimeIndexCompletion)completion {
     NSString *requested = [imagePath copy] ?: @"";
     dispatch_async(RYGIndexQueue(), ^{
-        uint32_t currentDyldCount = _dyld_image_count();
-        if (!gRYGIndexes || gRYGIndexDyldCount != currentDyldCount) {
+        if (!gRYGIndexes) {
             gRYGIndexes = [NSMutableDictionary dictionary];
-            gRYGIndexDyldCount = currentDyldCount;
+            gRYGIndexDyldCount = _dyld_image_count();
         }
         NSString *key = RYGIndexCanonicalPath(requested);
         RYGRuntimeImageIndex *index = gRYGIndexes[key];
@@ -207,9 +204,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (RYGRuntimeImageIndex *)cachedIndexForImagePath:(NSString *)imagePath {
     __block RYGRuntimeImageIndex *index = nil;
     NSString *key = RYGIndexCanonicalPath(imagePath);
-    dispatch_sync(RYGIndexQueue(), ^{
-        if (gRYGIndexDyldCount == _dyld_image_count()) index = gRYGIndexes[key];
-    });
+    dispatch_sync(RYGIndexQueue(), ^{ index = gRYGIndexes[key]; });
     return index;
 }
 
