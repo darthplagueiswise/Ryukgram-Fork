@@ -5,6 +5,12 @@
 
 static atomic_bool gRYGMCStartupSyncReady = false;
 
+static void RYGMCArmNativeSync(void) {
+    atomic_store_explicit(&gRYGMCStartupSyncReady, true, memory_order_release);
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+    if (mobileConfig.overrideCount) [mobileConfig reapplyOverridesToNativeTable];
+}
+
 @implementation RYGMobileConfig (RYGMobileConfigStartupSyncGate)
 
 + (void)load {
@@ -29,12 +35,11 @@ __attribute__((constructor)) static void RYGInstallMobileConfigStartupSyncGate(v
         [center addObserverForName:UIApplicationDidFinishLaunchingNotification
                             object:nil
                              queue:NSOperationQueue.mainQueue
-                        usingBlock:^(__unused NSNotification *note) {
-            atomic_store_explicit(&gRYGMCStartupSyncReady, true, memory_order_release);
-            if (RYGMobileConfig.shared.overrideCount) [RYGMobileConfig.shared reapplyOverridesToNativeTable];
-        }];
-        if (UIApplication.sharedApplication.applicationState != UIApplicationStateInactive) {
-            atomic_store_explicit(&gRYGMCStartupSyncReady, true, memory_order_release);
-        }
+                        usingBlock:^(__unused NSNotification *note) { RYGMCArmNativeSync(); }];
+        [center addObserverForName:UIApplicationDidBecomeActiveNotification
+                            object:nil
+                             queue:NSOperationQueue.mainQueue
+                        usingBlock:^(__unused NSNotification *note) { RYGMCArmNativeSync(); }];
+        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) RYGMCArmNativeSync();
     });
 }
