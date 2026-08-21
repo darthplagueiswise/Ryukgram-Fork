@@ -1,9 +1,10 @@
 #import "RYGMobileConfig.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <string.h>
 
 // The runtime parser stores a canonical PID, while the manager tells us which
-// unit (0x40 or 0x80) Instagram actually used for a given ordinal/index.  Keep
+// unit (0x40 or 0x80) Instagram actually used for a given ordinal/index. Keep
 // the persisted canonical representation, but after native StartupConfigs writes
 // remove the unobserved mirror unit so the on-disk/native override table matches
 // the real session instead of blindly populating both namespaces.
@@ -25,7 +26,7 @@ static unsigned long long RYGObservedPID(id owner, RYGMCParam *param) {
     while (*type && strchr("rnNoORV", *type)) type++;
     if (*type != 'Q' && *type != 'q') return param.paramID;
     unsigned long long value = ((unsigned long long (*)(id, SEL, RYGMCParam *))objc_msgSend)(owner, selector, param);
-    return value ?: param.paramID;
+    return value ? value : param.paramID;
 }
 
 static unsigned long long RYGMirrorPID(unsigned long long pid) {
