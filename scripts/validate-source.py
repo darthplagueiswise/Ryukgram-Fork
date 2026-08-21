@@ -205,11 +205,14 @@ for marker in (
     "Force Off",
     "Native",
     "machOSymbolsForImagePath",
+    "self.view.layoutMarginsGuide",
 ):
     if marker not in runtime_view:
         fail(f"structural live Runtime Browser marker is missing: {marker}")
 if "preloaded" in runtime_view.lower() or "bundled table" in runtime_view.lower():
     fail("Runtime Browser must not ship a preloaded class/method table")
+if re.search(r"imageButton\.(?:leading|trailing)Anchor[^\n]*constant:", runtime_view):
+    fail("Runtime Browser image menu must use adaptive system layout margins")
 
 topic = topic_path.read_text(encoding="utf-8")
 for marker in (
@@ -232,6 +235,14 @@ if 'initialQuery:@"settings ishidden|' in topic:
     fail("hidden Settings browser incorrectly requires every visibility gate to contain the word settings")
 if 'initialQuery:@"ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable|shoulddisplay"' not in topic:
     fail("hidden Settings browser live visibility query is missing")
+for marker in (
+    'initialQuery:@"prism"',
+    'initialQuery:@"liquidglass|throwback|glass"',
+    'initialQuery:@"storytray|storiestray|storygrid|storiesgrid"',
+    'initialQuery:@"dogfood|employee|internal"',
+):
+    if marker not in topic:
+        fail(f"Developer live cross-image surface query is missing: {marker}")
 
 setting = setting_path.read_text(encoding="utf-8")
 for marker in ("UIAction.class", "UICommand.class", "RYGLiquidGlassConfigureButton", "setDefaultContentInsets"):

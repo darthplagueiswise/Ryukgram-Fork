@@ -231,13 +231,14 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     [self.view addSubview:self.tableView];
 
     UILayoutGuide *guide = self.view.safeAreaLayoutGuide;
+    UILayoutGuide *contentGuide = self.view.layoutMarginsGuide;
     [NSLayoutConstraint activateConstraints:@[
         [self.imageButton.topAnchor constraintEqualToAnchor:guide.topAnchor constant:8],
-        [self.imageButton.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16],
-        [self.imageButton.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16],
+        [self.imageButton.leadingAnchor constraintEqualToAnchor:contentGuide.leadingAnchor],
+        [self.imageButton.trailingAnchor constraintEqualToAnchor:contentGuide.trailingAnchor],
         [self.modeControl.topAnchor constraintEqualToAnchor:self.imageButton.bottomAnchor constant:8],
-        [self.modeControl.leadingAnchor constraintEqualToAnchor:guide.leadingAnchor constant:16],
-        [self.modeControl.trailingAnchor constraintEqualToAnchor:guide.trailingAnchor constant:-16],
+        [self.modeControl.leadingAnchor constraintEqualToAnchor:contentGuide.leadingAnchor],
+        [self.modeControl.trailingAnchor constraintEqualToAnchor:contentGuide.trailingAnchor],
         [self.tableView.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:4],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],

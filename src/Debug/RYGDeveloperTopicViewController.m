@@ -740,14 +740,19 @@ static void RYGScheduleDeveloperNativeActivation(void);
     NSMutableArray *rows = [NSMutableArray array];
     switch (self.surface) {
         case RYGDeveloperRuntimeSurfacePrism:
+            [rows addObject:@{@"kind":@"prismSetter", @"title":@"Prism follow-button rendering", @"subtitle":@"Runtime-validated -setPrismEnabled: setter"}];
+            [rows addObject:@{@"kind":@"redesignSetter", @"title":@"Prism list redesign", @"subtitle":@"Runtime-validated -setListRedesignOn: setter"}];
+            [rows addObject:@{@"kind":@"prismRuntime", @"title":@"All Prism runtime gates", @"subtitle":@"Select Instagram or any loaded framework; results are rebuilt from live BOOL methods"}];
             break;
         case RYGDeveloperRuntimeSurfaceLiquidGlass:
             [rows addObject:@{@"kind":@"swizzleGlass", @"title":@"Liquid Glass Swizzle", @"subtitle":@"Native -setIsEnabled:"}];
             [rows addObject:@{@"kind":@"throwback", @"title":@"Throwback Chrome", @"subtitle":@"Native -overrideIsEnabled:"}];
             [rows addObject:@{@"kind":@"navGlass", @"title":@"Liquid Glass Navigation", @"subtitle":@"Native -overrideIsEnabled:"}];
+            [rows addObject:@{@"kind":@"glassRuntime", @"title":@"Liquid Glass runtime", @"subtitle":@"Live Throwback / Liquid Glass gates in the selected loaded image"}];
             break;
         case RYGDeveloperRuntimeSurfaceStories:
             [rows addObject:@{@"kind":@"storyDebug", @"title":@"Open native Story Tray Debug", @"subtitle":@"Uses the actual observed isTrayAttachedToHeaderEnabled: value"}];
+            [rows addObject:@{@"kind":@"storyRuntime", @"title":@"Story Tray / Story Grid runtime", @"subtitle":@"Live singular/plural Story Tray and Story Grid gates in the selected image"}];
             break;
         case RYGDeveloperRuntimeSurfaceInternalOnly:
             [rows addObject:@{@"kind":@"internal", @"title":@"Expose Internal Settings", @"subtitle":@"Hooks both validated IGBugReportMenu initializers; only visibility BOOL arguments change"}];
@@ -769,6 +774,7 @@ static void RYGScheduleDeveloperNativeActivation(void);
             [rows addObject:@{@"kind":@"dogfoodSessionBrowser", @"title":@"Dogfooding Assistant Sessions", @"subtitle":@"Validated native sessionBrowserViewController:userSession:"}];
             [rows addObject:@{@"kind":@"dogfoodLauncher", @"title":@"Reapply native Dogfooding launcher", @"subtitle":@"Reuses the exact captured userSession / launcher / parameters"}];
             [rows addObject:@{@"kind":@"easyGating", @"title":@"EasyGating final-ID observer", @"subtitle":@"Observes the final mapped IDs; no pre-map selector guessing"}];
+            [rows addObject:@{@"kind":@"dogfoodRuntime", @"title":@"All Dogfood runtime gates", @"subtitle":@"Live dogfood / employee / internal BOOL methods in the selected loaded image"}];
             break;
         default:
             break;
@@ -1007,6 +1013,22 @@ static void RYGScheduleDeveloperNativeActivation(void);
         } else if ([kind isEqualToString:@"easyGating"]) {
             [RYGEasyGatingRuntime.shared installIfNeeded];
             [RYGUtils showToastForDuration:1.2 title:@"EasyGating observer installed" subtitle:[NSString stringWithFormat:@"%lu final IDs observed", (unsigned long)RYGEasyGatingRuntime.shared.observations.count]];
+        } else if ([kind isEqualToString:@"prismRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Prism UI Runtime"
+                  initialQuery:@"prism"] animated:YES];
+        } else if ([kind isEqualToString:@"glassRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Liquid Glass Runtime"
+                  initialQuery:@"liquidglass|throwback|glass"] animated:YES];
+        } else if ([kind isEqualToString:@"storyRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Story Tray / Story Grid Runtime"
+                  initialQuery:@"storytray|storiestray|storygrid|storiesgrid"] animated:YES];
+        } else if ([kind isEqualToString:@"dogfoodRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Dogfood Runtime"
+                  initialQuery:@"dogfood|employee|internal"] animated:YES];
         } else if ([kind isEqualToString:@"internalRuntime"]) {
             [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
                 initWithTitle:@"IG-only / Internal-only"
