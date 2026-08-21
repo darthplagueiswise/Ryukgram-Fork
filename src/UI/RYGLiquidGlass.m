@@ -118,6 +118,8 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
         // expanded menu geometry.
         [glass setDefaultContentInsets];
     } else if (old) {
+        // Preserve author-owned metrics only for ordinary action buttons.
+        // Menu source controls always use UIKit's intrinsic Glass geometry.
         glass.contentInsets = old.contentInsets;
     }
     return glass;
@@ -176,11 +178,14 @@ UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
         configuration.attributedTitle = attributed;
         configuration.baseForegroundColor = UIColor.labelColor;
         configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
-        configuration.contentInsets = NSDirectionalEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
+        // The navigation title is itself a standard Glass control. Let UIKit
+        // choose its intrinsic capsule metrics so Dynamic Type and iOS 26's
+        // navigation transitions do not inherit fixed tweak-side margins.
+        [configuration setDefaultContentInsets];
         pill.configuration = configuration;
     } else {
         [pill setAttributedTitle:attributed forState:UIControlStateNormal];
-        pill.contentEdgeInsets = UIEdgeInsetsMake(5.0, 12.0, 5.0, 12.0);
+        pill.contentEdgeInsets = UIEdgeInsetsZero;
     }
 
     if (@available(iOS 26.0, *)) {

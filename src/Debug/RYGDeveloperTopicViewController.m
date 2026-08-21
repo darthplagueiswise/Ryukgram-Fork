@@ -2,6 +2,7 @@
 #import "RYGRuntimeBrowserEngine.h"
 #import "RYGRuntimeLiveObserver.h"
 #import "RYGEasyGatingRuntime.h"
+#import "RYGFastRuntimeBrowserViewController.h"
 #import "../Features/ExpFlags/RYGMobileConfig.h"
 #import "../UI/RYGLiquidGlass.h"
 #import "../UI/RYGPopupChrome.h"
@@ -138,7 +139,10 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGAllBoolMethodsForOwner(NSString *clas
     for (unsigned int index = 0; methods && index < count; index++) {
         SEL selector = method_getName(methods[index]);
         if (!selector) continue;
-        RYGRuntimeBoolMethod *row = RYGRuntimeMethodForOwner(className, NSStringFromSelector(selector), classMethods);
+        NSString *selectorName = NSStringFromSelector(selector);
+        if ([RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:selectorName] ||
+            [selectorName hasPrefix:@"isIGWordmark"]) continue;
+        RYGRuntimeBoolMethod *row = RYGRuntimeMethodForOwner(className, selectorName, classMethods);
         if (row) [rows addObject:row];
     }
     if (methods) free(methods);
@@ -146,6 +150,35 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGAllBoolMethodsForOwner(NSString *clas
         return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
     }];
     return rows.copy;
+}
+
+static RYGRuntimeBoolMethod *RYGFindExactBoolSelector(NSString *selectorName) {
+    if (!selectorName.length) return nil;
+    SEL wanted = NSSelectorFromString(selectorName);
+    int total = objc_getClassList(NULL, 0);
+    if (total <= 0 || total > 500000) return nil;
+    Class __unsafe_unretained *classes = calloc((size_t)total, sizeof(Class));
+    int filled = classes ? objc_getClassList(classes, total) : 0;
+    RYGRuntimeBoolMethod *result = nil;
+    for (int index = 0; index < filled && !result; index++) {
+        Class cls = classes[index];
+        if (!cls) continue;
+        NSString *className = NSStringFromClass(cls);
+        for (NSUInteger pass = 0; pass < 2 && !result; pass++) {
+            BOOL classMethod = pass == 1;
+            Class owner = classMethod ? object_getClass(cls) : cls;
+            unsigned int count = 0;
+            Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+            for (unsigned int methodIndex = 0; methods && methodIndex < count; methodIndex++) {
+                if (method_getName(methods[methodIndex]) != wanted) continue;
+                result = RYGRuntimeMethodForOwner(className, selectorName, classMethod);
+                break;
+            }
+            if (methods) free(methods);
+        }
+    }
+    if (classes) free(classes);
+    return result;
 }
 
 static void RYGAppendExact(NSMutableArray<RYGRuntimeBoolMethod *> *rows,
@@ -160,14 +193,14 @@ static void RYGAppendExact(NSMutableArray<RYGRuntimeBoolMethod *> *rows,
 
 static NSString *RYGSurfaceTitle(RYGDeveloperRuntimeSurface surface) {
     switch (surface) {
-        case RYGDeveloperRuntimeSurfacePrism: return @"Prism / Redesign";
-        case RYGDeveloperRuntimeSurfaceLiquidGlass: return @"Liquid Glass";
-        case RYGDeveloperRuntimeSurfaceStories: return @"Stories / Story Tray";
+        case RYGDeveloperRuntimeSurfacePrism: return @"Prism UI";
+        case RYGDeveloperRuntimeSurfaceLiquidGlass: return @"Liquid Glass Throwback";
+        case RYGDeveloperRuntimeSurfaceStories: return @"Story Tray / Story Grid";
         case RYGDeveloperRuntimeSurfaceConsumerSubs: return @"SubsConsumer / IGPlus / Aura";
-        case RYGDeveloperRuntimeSurfaceInternalOnly:
-        case RYGDeveloperRuntimeSurfaceBugReport: return @"IG-only / Internal-only";
-        case RYGDeveloperRuntimeSurfaceDirectDogfood: return @"Dogfooding";
-        case RYGDeveloperRuntimeSurfaceSettingsRows: return @"Internal Settings";
+        case RYGDeveloperRuntimeSurfaceInternalOnly: return @"IG-only / Internal-only";
+        case RYGDeveloperRuntimeSurfaceBugReport: return @"Bug Report Menu";
+        case RYGDeveloperRuntimeSurfaceDirectDogfood: return @"Direct / Dogfooding";
+        case RYGDeveloperRuntimeSurfaceSettingsRows: return @"Hidden Settings Rows";
     }
     return @"Developer";
 }
@@ -176,8 +209,12 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGRowsForSurface(RYGDeveloperRuntimeSur
     NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
     switch (surface) {
         case RYGDeveloperRuntimeSurfacePrism:
-            RYGAppendExact(rows, @"IGFeedItemAdsFeedbackInterfaceCellParams", @"isPrismEnabled", NO);
-            RYGAppendExact(rows, @"IGTableViewCell", @"isListRedesignOn", NO);
+            // The Prism surface is built from the currently loaded IGDS/BDSL
+            // owners. There is no bundled method list or stale table.
+            [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"IGDSLauncherConfig", NO)];
+            [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"IGDSLauncherConfig", YES)];
+            [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"_TtC11BSLDSConfig11BSLDSConfig", NO)];
+            [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"_TtC11BSLDSConfig11BSLDSConfig", YES)];
             break;
         case RYGDeveloperRuntimeSurfaceLiquidGlass:
             [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"_TtC15IGThrowbackFeed21IGThrowbackFeedHelper", YES)];
@@ -185,6 +222,10 @@ static NSArray<RYGRuntimeBoolMethod *> *RYGRowsForSurface(RYGDeveloperRuntimeSur
         case RYGDeveloperRuntimeSurfaceStories:
             RYGAppendExact(rows, @"_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs", @"isTrayAttachedToHeaderEnabled:", YES);
             RYGAppendExact(rows, @"_TtC38IGStoryViewerRedesignExperimentHelpers38IGStoryViewerRedesignExperimentHelpers", @"isStoryViewerCardAnimationEnabledWithLauncherSet:", YES);
+            {
+                RYGRuntimeBoolMethod *storyGrid = RYGFindExactBoolSelector(@"isDynamicTabStoryGridEnabled");
+                if (storyGrid) [rows addObject:storyGrid];
+            }
             break;
         case RYGDeveloperRuntimeSurfaceConsumerSubs:
             [rows addObjectsFromArray:RYGAllBoolMethodsForOwner(@"_TtC21IGConsumerSubsService21IGConsumerSubsService", NO)];
@@ -230,8 +271,8 @@ static id RYGBugMenuInit(id self, SEL cmd, id deviceSession, id userSession, id 
                                style, availability,
                                internalMode ? YES : showInternal,
                                internalMode ? YES : showLoggedOutInternal,
-                               showShake,
-                               dogfoodMode ? YES : showDogfood,
+                               internalMode ? YES : showShake,
+                               internalMode ? YES : showDogfood,
                                maisaVariant) : nil;
 }
 
@@ -246,7 +287,7 @@ static id RYGBugMenuLegacyInit(id self, SEL cmd, id deviceSession, id userSessio
                                style, availability,
                                internalMode ? YES : showInternal,
                                internalMode ? YES : showLoggedOutInternal,
-                               showShake) : nil;
+                               internalMode ? YES : showShake) : nil;
 }
 
 static void RYGInstallBugMenuHooks(void) {
@@ -398,6 +439,33 @@ static BOOL RYGOpenDogfoodSettings(void) {
     return YES;
 }
 
+static BOOL RYGOpenDirectNotesDogfood(void) {
+    UIViewController *top = RYGTopViewController();
+    if (!top || !gRYGDogfoodUserSession) return NO;
+    Class cls = objc_lookUpClass("_TtC31IGDirectNotesDogfoodingSettings42IGDirectNotesDogfoodingSettingsStaticFuncs");
+    SEL selector = NSSelectorFromString(@"notesDogfoodingSettingsOpenOnViewController:userSession:");
+    Method method = cls ? class_getClassMethod(cls, selector) : NULL;
+    if (!method || method_getNumberOfArguments(method) != 4 || !RYGMethodReturns(method, 'v') ||
+        !RYGMethodArgumentMatches(method, 2, '@') || !RYGMethodArgumentMatches(method, 3, '@')) return NO;
+    ((void (*)(id, SEL, id, id))objc_msgSend)((id)cls, selector, top, gRYGDogfoodUserSession);
+    return YES;
+}
+
+static BOOL RYGOpenDogfoodSessionBrowser(void) {
+    UIViewController *top = RYGTopViewController();
+    id session = gRYGDogfoodLauncherSession ?: gRYGDogfoodUserSession;
+    if (!top || !gRYGDogfoodLauncherClient || !session) return NO;
+    SEL selector = NSSelectorFromString(@"sessionBrowserViewController:userSession:");
+    Method method = class_getInstanceMethod([gRYGDogfoodLauncherClient class], selector);
+    if (!method || method_getNumberOfArguments(method) != 4 || !RYGMethodReturns(method, '@') ||
+        !RYGMethodArgumentMatches(method, 2, '@') || !RYGMethodArgumentMatches(method, 3, '@')) return NO;
+    UIViewController *browser = ((id (*)(id, SEL, id, id))objc_msgSend)(gRYGDogfoodLauncherClient, selector, top, session);
+    if (![browser isKindOfClass:UIViewController.class]) return NO;
+    if (top.navigationController) [top.navigationController pushViewController:browser animated:YES];
+    else [top presentViewController:[[UINavigationController alloc] initWithRootViewController:browser] animated:YES completion:nil];
+    return YES;
+}
+
 static RYGRuntimeBoolMethod *RYGStoryTrayGateMethod(void) {
     return RYGRuntimeMethodForOwner(@"_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs",
                                     @"isTrayAttachedToHeaderEnabled:", YES);
@@ -452,31 +520,6 @@ static BOOL RYGSetNativeHelperBool(NSString *className, NSString *selectorName, 
 
 #pragma mark - Resolved MobileConfig dogfood integration
 
-typedef struct {
-    unsigned int configNumber;
-    unsigned int paramIndex;
-    const char *label;
-} RYGDogfoodMCTarget;
-
-static const RYGDogfoodMCTarget kRYGDogfoodCoreMCTargets[] = {
-    {56474, 0, "ig_is_employee.is_employee"},
-    {56474, 1, "ig_is_employee.is_employee_or_employee_test_account"},
-    {90775, 1, "ig_dogfooding_assistant.show_in_bug_report_menu"},
-    {58792, 0, "ig_dogfooding_first_client.is_enabled"},
-};
-
-static RYGMCParam *RYGFindMCParamByIdentity(RYGMobileConfig *mobileConfig, unsigned int configNumber, unsigned int paramIndex) {
-    if (!mobileConfig) return nil;
-    for (RYGMCConfig *config in mobileConfig.allConfigs) {
-        if (config.number != configNumber) continue;
-        for (RYGMCParam *param in config.params) {
-            if (param.paramIndex == paramIndex && param.isRuntimeBacked) return param;
-        }
-        break;
-    }
-    return nil;
-}
-
 static NSString *RYGDogfoodMCIdentity(unsigned int configNumber, unsigned int paramIndex) {
     return [NSString stringWithFormat:@"%u:%u", configNumber, paramIndex];
 }
@@ -486,17 +529,56 @@ static NSDictionary *RYGDogfoodOwnedMCState(void) {
     return [value isKindOfClass:NSDictionary.class] ? value : @{};
 }
 
+static BOOL RYGDogfoodCandidateName(NSString *name) {
+    NSString *value = name.lowercaseString ?: @"";
+    return [value containsString:@"dogfood"] || [value containsString:@"employee"] || [value containsString:@"internal"];
+}
+
+static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+    [mobileConfig prepare];
+    NSMutableArray<RYGMCParam *> *out = [NSMutableArray array];
+    for (RYGMCConfig *config in mobileConfig.allConfigs) {
+        BOOL configMatch = RYGDogfoodCandidateName(config.name);
+        for (RYGMCParam *param in config.params) {
+            if (!param.isRuntimeBacked || param.type != RYGMCTypeBool || !param.name.length) continue;
+            if (configMatch || RYGDogfoodCandidateName(param.name)) [out addObject:param];
+        }
+    }
+    [out sortUsingComparator:^NSComparisonResult(RYGMCParam *left, RYGMCParam *right) {
+        if (left.configNumber != right.configNumber) return left.configNumber < right.configNumber ? NSOrderedAscending : NSOrderedDescending;
+        return left.paramIndex == right.paramIndex ? NSOrderedSame : (left.paramIndex < right.paramIndex ? NSOrderedAscending : NSOrderedDescending);
+    }];
+    return out.copy;
+}
+
+static BOOL RYGIsDogfoodCoreCandidate(RYGMCParam *param) {
+    if (!param.name.length) return NO;
+    NSString *paramName = param.name.lowercaseString;
+    NSString *configName = @"";
+    for (RYGMCConfig *config in RYGMobileConfig.shared.allConfigs) {
+        if (config.number == param.configNumber) { configName = config.name.lowercaseString ?: @""; break; }
+    }
+    if ([configName containsString:@"ig_is_employee"] &&
+        ([paramName isEqualToString:@"is_employee"] ||
+         [paramName isEqualToString:@"is_employee_or_employee_test_account"])) return YES;
+    if ([configName containsString:@"dogfooding_assistant"] &&
+        [paramName containsString:@"show_in_bug_report_menu"]) return YES;
+    return [configName containsString:@"dogfooding_first_client"] &&
+           [paramName isEqualToString:@"is_enabled"];
+}
+
 static NSUInteger RYGApplyDogfoodCoreMobileConfig(BOOL enabled, NSUInteger *availableCount) {
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
     [mobileConfig prepare];
     NSMutableDictionary *owned = [RYGDogfoodOwnedMCState() mutableCopy];
     NSUInteger available = 0, changed = 0;
 
-    for (NSUInteger index = 0; index < sizeof(kRYGDogfoodCoreMCTargets) / sizeof(kRYGDogfoodCoreMCTargets[0]); index++) {
-        const RYGDogfoodMCTarget target = kRYGDogfoodCoreMCTargets[index];
-        NSString *identity = RYGDogfoodMCIdentity(target.configNumber, target.paramIndex);
-        RYGMCParam *param = RYGFindMCParamByIdentity(mobileConfig, target.configNumber, target.paramIndex);
-        if (!param || param.type != RYGMCTypeBool) continue;
+    // Resolve the active runtime table and imported/native mapping by name.
+    // Numeric IDs are version-specific and must never be bundled here.
+    for (RYGMCParam *param in RYGResolvedDogfoodMCCandidates()) {
+        if (!RYGIsDogfoodCoreCandidate(param)) continue;
+        NSString *identity = RYGDogfoodMCIdentity(param.configNumber, param.paramIndex);
         available++;
 
         if (enabled) {
@@ -509,7 +591,7 @@ static NSUInteger RYGApplyDogfoodCoreMobileConfig(BOOL enabled, NSUInteger *avai
                 BOOL hadOverride = [mobileConfig overrideStateFor:param] == RYGMCOverrideSet;
                 record[@"hadOverride"] = @(hadOverride);
                 if (hadOverride && existing) record[@"previousValue"] = @([existing boolValue]);
-                record[@"label"] = [NSString stringWithUTF8String:target.label] ?: identity;
+                record[@"label"] = param.name.length ? param.name : identity;
                 ownership = record.copy;
             }
 
@@ -539,49 +621,6 @@ static NSUInteger RYGApplyDogfoodCoreMobileConfig(BOOL enabled, NSUInteger *avai
     else [NSUserDefaults.standardUserDefaults removeObjectForKey:kRYGDogfoodOwnedMCStatePref];
     if (availableCount) *availableCount = available;
     return changed;
-}
-
-static NSArray<RYGMCParam *> *RYGExactPrismMCCandidates(void) {
-    static const unsigned int targets[][2] = {
-        {111146, 1},
-        {111146, 3},
-        {76504, 1},
-        {76504, 19},
-        {76504, 21},
-        {44021, 9},
-        {44021, 18},
-    };
-    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig prepare];
-    NSMutableArray<RYGMCParam *> *rows = [NSMutableArray array];
-    for (NSUInteger index = 0; index < sizeof(targets) / sizeof(targets[0]); index++) {
-        RYGMCParam *param = RYGFindMCParamByIdentity(mobileConfig, targets[index][0], targets[index][1]);
-        if (param && param.type == RYGMCTypeBool) [rows addObject:param];
-    }
-    return rows.copy;
-}
-
-static BOOL RYGDogfoodCandidateName(NSString *name) {
-    NSString *value = name.lowercaseString ?: @"";
-    return [value containsString:@"dogfood"] || [value containsString:@"employee"] || [value containsString:@"internal"];
-}
-
-static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
-    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig prepare];
-    NSMutableArray<RYGMCParam *> *out = [NSMutableArray array];
-    for (RYGMCConfig *config in mobileConfig.allConfigs) {
-        BOOL configMatch = RYGDogfoodCandidateName(config.name);
-        for (RYGMCParam *param in config.params) {
-            if (!param.isRuntimeBacked || param.type != RYGMCTypeBool || !param.name.length) continue;
-            if (configMatch || RYGDogfoodCandidateName(param.name)) [out addObject:param];
-        }
-    }
-    [out sortUsingComparator:^NSComparisonResult(RYGMCParam *left, RYGMCParam *right) {
-        if (left.configNumber != right.configNumber) return left.configNumber < right.configNumber ? NSOrderedAscending : NSOrderedDescending;
-        return left.paramIndex == right.paramIndex ? NSOrderedSame : (left.paramIndex < right.paramIndex ? NSOrderedAscending : NSOrderedDescending);
-    }];
-    return out.copy;
 }
 
 #pragma mark - Controller
@@ -663,7 +702,6 @@ static void RYGScheduleDeveloperNativeActivation(void);
     self.allRows = RYGRowsForSurface(self.surface);
     [self rebuildNativeControls];
     if (self.surface == RYGDeveloperRuntimeSurfaceDirectDogfood) self.mobileConfigCandidates = RYGResolvedDogfoodMCCandidates();
-    else if (self.surface == RYGDeveloperRuntimeSurfacePrism) self.mobileConfigCandidates = RYGExactPrismMCCandidates();
     else self.mobileConfigCandidates = @[];
     [self rebuildFilteredModel];
 }
@@ -701,8 +739,6 @@ static void RYGScheduleDeveloperNativeActivation(void);
     NSMutableArray *rows = [NSMutableArray array];
     switch (self.surface) {
         case RYGDeveloperRuntimeSurfacePrism:
-            [rows addObject:@{@"kind":@"prismSetter", @"title":@"Follow Button Prism setter", @"subtitle":@"Exact -setPrismEnabled: · Native / Force On / Force Off"}];
-            [rows addObject:@{@"kind":@"redesignSetter", @"title":@"List Redesign setter", @"subtitle":@"Exact -setListRedesignOn: · Native / Force On / Force Off"}];
             break;
         case RYGDeveloperRuntimeSurfaceLiquidGlass:
             [rows addObject:@{@"kind":@"swizzleGlass", @"title":@"Liquid Glass Swizzle", @"subtitle":@"Native -setIsEnabled:"}];
@@ -713,13 +749,23 @@ static void RYGScheduleDeveloperNativeActivation(void);
             [rows addObject:@{@"kind":@"storyDebug", @"title":@"Open native Story Tray Debug", @"subtitle":@"Uses the actual observed isTrayAttachedToHeaderEnabled: value"}];
             break;
         case RYGDeveloperRuntimeSurfaceInternalOnly:
-        case RYGDeveloperRuntimeSurfaceBugReport:
-        case RYGDeveloperRuntimeSurfaceSettingsRows:
             [rows addObject:@{@"kind":@"internal", @"title":@"Expose Internal Settings", @"subtitle":@"Hooks both validated IGBugReportMenu initializers; only visibility BOOL arguments change"}];
+            [rows addObject:@{@"kind":@"internalRuntime", @"title":@"IG-only / Internal-only Runtime", @"subtitle":@"Live loaded-image browser; ABI-validated BOOL gates only"}];
+            break;
+        case RYGDeveloperRuntimeSurfaceBugReport:
+            [rows addObject:@{@"kind":@"internal", @"title":@"Expose every Bug Report row", @"subtitle":@"Logged out + internal settings + shake preference + Dogfooding Assistant"}];
+            [rows addObject:@{@"kind":@"bugReportRuntime", @"title":@"Bug Report hidden gates", @"subtitle":@"Live loaded-image browser for every matching ABI-safe BOOL"}];
+            [rows addObject:@{@"kind":@"sandboxRuntime", @"title":@"Sandbox runtime", @"subtitle":@"FOA/IG sandbox owners and selectors from the selected loaded image"}];
+            break;
+        case RYGDeveloperRuntimeSurfaceSettingsRows:
+            [rows addObject:@{@"kind":@"internal", @"title":@"Enable internal settings visibility", @"subtitle":@"Validated IGBugReportMenu initializer arguments"}];
+            [rows addObject:@{@"kind":@"settingsRuntime", @"title":@"All hidden Settings rows", @"subtitle":@"Live shouldShow/isHidden/canShow gates; no bundled row table"}];
             break;
         case RYGDeveloperRuntimeSurfaceDirectDogfood:
             [rows addObject:@{@"kind":@"dogfood", @"title":@"Global Dogfooding Mode", @"subtitle":@"Internal menu + native launcher capture + EasyGating final IDs + exact dogfooding-assistant MobileConfig"}];
             [rows addObject:@{@"kind":@"dogfoodOpen", @"title":@"Open Dogfooding Settings", @"subtitle":@"Reuses a real IGDogfoodingSettingsConfig captured from Instagram"}];
+            [rows addObject:@{@"kind":@"directNotesDogfood", @"title":@"Direct Notes Dogfooding", @"subtitle":@"Validated native static opener + captured IGUserSession"}];
+            [rows addObject:@{@"kind":@"dogfoodSessionBrowser", @"title":@"Dogfooding Assistant Sessions", @"subtitle":@"Validated native sessionBrowserViewController:userSession:"}];
             [rows addObject:@{@"kind":@"dogfoodLauncher", @"title":@"Reapply native Dogfooding launcher", @"subtitle":@"Reuses the exact captured userSession / launcher / parameters"}];
             [rows addObject:@{@"kind":@"easyGating", @"title":@"EasyGating final-ID observer", @"subtitle":@"Observes the final mapped IDs; no pre-map selector guessing"}];
             break;
@@ -752,9 +798,7 @@ static void RYGScheduleDeveloperNativeActivation(void);
     NSInteger classIndex = section - [self nativeSectionCount];
     if (classIndex >= 0 && classIndex < (NSInteger)self.classSections.count) return self.classSections[(NSUInteger)classIndex];
     if (self.mobileConfigCandidates.count && section == [self mobileConfigSectionIndex]) {
-        return self.surface == RYGDeveloperRuntimeSurfacePrism
-            ? @"Validated Prism MobileConfig"
-            : @"Resolved MobileConfig · dogfood / employee / internal";
+        return @"Resolved live MobileConfig · dogfood / employee / internal";
     }
     return nil;
 }
@@ -955,9 +999,30 @@ static void RYGScheduleDeveloperNativeActivation(void);
             if (!RYGOpenDogfoodSettings()) [RYGUtils showErrorHUDWithDescription:@"No real IGDogfoodingSettingsConfig has been captured yet. Open Instagram's native Dogfooding Assistant once; the validated opener will then reuse that config."];
         } else if ([kind isEqualToString:@"dogfoodLauncher"]) {
             if (!RYGReapplyCapturedDogfoodLauncher()) [RYGUtils showErrorHUDWithDescription:@"No native Dogfooding launcher invocation has been captured yet"];
+        } else if ([kind isEqualToString:@"directNotesDogfood"]) {
+            if (!RYGOpenDirectNotesDogfood()) [RYGUtils showErrorHUDWithDescription:@"Direct Notes opener is unavailable or no real IGUserSession has been captured yet"];
+        } else if ([kind isEqualToString:@"dogfoodSessionBrowser"]) {
+            if (!RYGOpenDogfoodSessionBrowser()) [RYGUtils showErrorHUDWithDescription:@"Dogfooding Assistant client/session has not been captured, or the runtime ABI does not match"];
         } else if ([kind isEqualToString:@"easyGating"]) {
             [RYGEasyGatingRuntime.shared installIfNeeded];
             [RYGUtils showToastForDuration:1.2 title:@"EasyGating observer installed" subtitle:[NSString stringWithFormat:@"%lu final IDs observed", (unsigned long)RYGEasyGatingRuntime.shared.observations.count]];
+        } else if ([kind isEqualToString:@"internalRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"IG-only / Internal-only"
+                  initialQuery:@"igonly|ig-only|internalonly|internal-only"] animated:YES];
+        } else if ([kind isEqualToString:@"bugReportRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Bug Report Runtime"
+                  initialQuery:@"bugreport|bugreporting"] animated:YES];
+        } else if ([kind isEqualToString:@"sandboxRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Sandbox Runtime"
+                  initialQuery:@"sandbox"] animated:YES];
+        } else if ([kind isEqualToString:@"settingsRuntime"]) {
+            [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
+                initWithTitle:@"Hidden Settings Rows"
+                  initialQuery:@"settings ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable"
+    allowsBulkVisibilityOverride:YES] animated:YES];
         }
         return;
     }

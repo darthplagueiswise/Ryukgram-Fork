@@ -8,7 +8,11 @@
 #import <objc/runtime.h>
 #include <string.h>
 
-static NSString *const kRYGWordmarkOwner = @"IGDSLauncherConfig";
+static NSArray<NSString *> *RYGWordmarkOwners(void) {
+    // Both owners are present in the supplied executable. Resolve them at
+    // runtime because framework loading order differs between launches.
+    return @[@"IGDSLauncherConfig", @"_TtC11BSLDSConfig11BSLDSConfig"];
+}
 
 static NSArray<NSDictionary<NSString *, NSString *> *> *RYGWordmarkVariants(void) {
     static NSArray *variants;
@@ -57,27 +61,30 @@ static Method RYGWordmarkDeclaredMethod(Class cls, SEL selector) {
 }
 
 static NSDictionary<NSString *, RYGRuntimeBoolMethod *> *RYGWordmarkResolveValidatedOwner(void) {
-    Class cls = objc_lookUpClass(kRYGWordmarkOwner.UTF8String);
-    if (!cls) return @{};
-    const char *rawImage = class_getImageName(cls);
-    NSString *imagePath = rawImage ? [NSString stringWithUTF8String:rawImage] : @"";
-
     NSMutableDictionary<NSString *, RYGRuntimeBoolMethod *> *found = [NSMutableDictionary dictionary];
-    for (NSDictionary<NSString *, NSString *> *variant in RYGWordmarkVariants()) {
-        NSString *selectorName = variant[@"selector"];
-        SEL selector = NSSelectorFromString(selectorName);
-        Method method = selector ? RYGWordmarkDeclaredMethod(cls, selector) : NULL;
-        if (!RYGWordmarkBoolNoArgumentMethod(method)) continue;
+    for (NSString *ownerName in RYGWordmarkOwners()) {
+        Class cls = objc_lookUpClass(ownerName.UTF8String);
+        if (!cls) continue;
+        const char *rawImage = class_getImageName(cls);
+        NSString *imagePath = rawImage ? [NSString stringWithUTF8String:rawImage] : @"";
 
-        RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
-        runtimeMethod.imagePath = imagePath ?: @"";
-        runtimeMethod.className = kRYGWordmarkOwner;
-        runtimeMethod.selectorName = selectorName;
-        runtimeMethod.classMethod = NO;
-        runtimeMethod.argumentKind = RYGRuntimeArgumentNone;
-        const char *types = method_getTypeEncoding(method);
-        runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
-        found[selectorName] = runtimeMethod;
+        for (NSDictionary<NSString *, NSString *> *variant in RYGWordmarkVariants()) {
+            NSString *selectorName = variant[@"selector"];
+            if (found[selectorName]) continue;
+            SEL selector = NSSelectorFromString(selectorName);
+            Method method = selector ? RYGWordmarkDeclaredMethod(cls, selector) : NULL;
+            if (!RYGWordmarkBoolNoArgumentMethod(method)) continue;
+
+            RYGRuntimeBoolMethod *runtimeMethod = [RYGRuntimeBoolMethod new];
+            runtimeMethod.imagePath = imagePath ?: @"";
+            runtimeMethod.className = ownerName;
+            runtimeMethod.selectorName = selectorName;
+            runtimeMethod.classMethod = NO;
+            runtimeMethod.argumentKind = RYGRuntimeArgumentNone;
+            const char *types = method_getTypeEncoding(method);
+            runtimeMethod.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+            found[selectorName] = runtimeMethod;
+        }
     }
     return found.copy;
 }

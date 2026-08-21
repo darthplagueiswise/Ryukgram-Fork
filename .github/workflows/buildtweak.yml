@@ -30,6 +30,9 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install ldid dpkg make
+          python3 -m venv "$RUNNER_TEMP/ryg-python"
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --upgrade pip capstone lief r2pipe
+          echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Setup Theos
@@ -55,6 +58,12 @@ jobs:
           git sparse-checkout set --no-cone iPhoneOS26.5.sdk
           git checkout
           mv iPhoneOS26.5.sdk "$THEOS/sdks/"
+
+      - name: Verify SDK 26.5 and source/runtime contracts
+        working-directory: main
+        run: |
+          test -f "$THEOS/sdks/iPhoneOS26.5.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIGlassEffect.h"
+          python3 scripts/validate-source.py
 
       - name: Setup FFmpegKit
         working-directory: main
@@ -87,6 +96,20 @@ jobs:
         run: |
           DEB="$(ls -t packages/*_rootful.deb | head -n1)"
           mv "$DEB" "packages/RyukGram_${VERSION}+dogfood.${GITHUB_RUN_NUMBER}_rootful.deb"
+
+      - name: Validate both self-contained Mach-O packages
+        working-directory: main
+        run: |
+          set -euo pipefail
+          for DEB in packages/RyukGram_*_rootless.deb packages/RyukGram_*_rootful.deb; do
+            STAGE="$(mktemp -d)"
+            dpkg-deb -x "$DEB" "$STAGE"
+            DYLIB="$(find "$STAGE" -type f -name RyukGram.dylib | head -n1)"
+            test -n "$DYLIB"
+            python3 scripts/validate-macho.py "$DYLIB"
+            test "$(find "$STAGE" -type f \( -name 'pluginsinject.dylib' -o -name 'zxPluginsInject.dylib' -o -name 'NoPluginsPatch.dylib' -o -name 'SideloadPatch.dylib' \) | wc -l | tr -d ' ')" = 0
+            rm -rf "$STAGE"
+          done
 
       - name: Upload build logs
         if: always()

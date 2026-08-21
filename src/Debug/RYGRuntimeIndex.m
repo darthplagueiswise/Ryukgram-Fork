@@ -52,7 +52,7 @@ static BOOL RYGIndexBoolReturn(Method method) {
     char encoded[64] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGIndexSkipQualifiers(encoded);
-    return type && *type == 'B';
+    return type && strchr("BcC", *type) != NULL;
 }
 
 static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {

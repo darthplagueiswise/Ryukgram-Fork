@@ -28,12 +28,20 @@ does not permanently disable the monitor.
 
 ## Names, values, and overrides
 
-Names are read at refresh time from Instagram's own current
-`id_name_mapping.json` or MobileConfig sync dumps beside the real overrides
-path. Live values are read through the captured manager only when the expected
-getter exists. The in-process force table covers the ABI-validated Objective-C
-getter path; when the matching private C++ symbols and `_configManager` ivar are
-present, RyukGram also writes through Instagram's native overrides table.
+Names are joined at refresh time from Instagram's current
+`id_name_mapping.json`, MobileConfig sync dumps, or the user's explicitly
+imported mapping overlay. Live values are read through the captured manager
+only when the expected getter exists. Writes use the runtime-validated
+`FBMobileConfigStartupConfigs` override bridge and then synchronize canonical
+JSON beside Instagram's active table. The old direct private-C++/`_configManager`
+path is not used.
+
+`getOverridesTablePath` is the only authority for disk placement. Its result is
+normalized to the actual `Documents/mobileconfig/<native-id>.data` directory;
+RyukGram accepts either the native table path or that exact `.data` directory.
+It never guesses an account/user id and never writes into the parent
+`Documents/mobileconfig` directory. Canonical filenames inside the resolved
+directory are `id_name_mapping.json` and `mc_overrides.json`.
 
 The UI is instantiated with `[RYGMobileConfig shared]`, followed by `prepare` or
 `reloadFromRuntime`. The manager itself is intentionally never instantiated by
@@ -45,6 +53,11 @@ Only explicit user intent persists:
   canonical opaque parameter ID;
 - `mc_notes.plist` stores user notes;
 - `mc_launch.plist` is the crash-loop guard.
+
+The Developer UI can import or export `id_name_mapping.json`, import/apply or
+export `mc_overrides.json`, and explicitly reapply the active in-process
+overrides. Import is transactional: the complete document is validated first,
+and a failed native application restores the previous override state.
 
 Enumerated configs, parameter names, live values, call sites, rows, pointers,
 and addresses remain memory-only and are rebuilt from the running app.

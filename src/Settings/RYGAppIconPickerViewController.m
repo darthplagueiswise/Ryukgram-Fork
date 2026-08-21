@@ -56,7 +56,7 @@ static NSString *const RYGPrimaryAppIconKey = @"__primary__";
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	self.tableView.rowHeight = 76.0;
-	self.tableView.contentInset = UIEdgeInsetsMake(-10.0, 0.0, 0.0, 0.0);
+	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 
 	[self.view addSubview:self.tableView];
 }

@@ -66,7 +66,7 @@ static const char *RYGSkipTypeQualifiers(const char *type) {
 
 static BOOL RYGIsBoolType(const char *type) {
     type = RYGSkipTypeQualifiers(type);
-    return type && *type == 'B';
+    return type && strchr("BcC", *type) != NULL;
 }
 
 static BOOL RYGIsObjectRegisterType(const char *type) {
@@ -448,7 +448,28 @@ static BOOL RYGCUnbindSlot(NSUInteger slot) {
             @"debugDescription", @"retainCount", @"zone"
         ]];
     });
-    return [noise containsObject:selectorName];
+    if ([noise containsObject:selectorName]) return YES;
+
+    // Swift/Objective-C bridges expose spelling variants of NSObject
+    // introspection (for example canRespondToSelector:) that are BOOL-shaped
+    // but are not product gates. Normalize punctuation/case and exclude the
+    // semantic family instead of showing misleading on/off rows.
+    NSString *normalized = [[[selectorName lowercaseString]
+        componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
+        componentsJoinedByString:@""];
+    static NSArray<NSString *> *structuralPrefixes;
+    static dispatch_once_t semanticOnce;
+    dispatch_once(&semanticOnce, ^{
+        structuralPrefixes = @[
+            @"isequal", @"equalto", @"canrespond", @"respondstoselector",
+            @"iskindofclass", @"ismemberofclass", @"conformstoprotocol",
+            @"isproxy", @"allowsweakreference", @"retainweakreference"
+        ];
+    });
+    for (NSString *prefix in structuralPrefixes) {
+        if ([normalized hasPrefix:prefix]) return YES;
+    }
+    return NO;
 }
 
 + (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath {

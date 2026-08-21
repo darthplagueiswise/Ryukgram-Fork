@@ -83,8 +83,8 @@ mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
 runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
-runtime_class_path = ROOT / "src/Debug/RYGRuntimeClassBrowser.m"
-runtime_view_path = ROOT / "src/Debug/RYGRuntimeBrowserViewController.m"
+runtime_index_path = ROOT / "src/Debug/RYGRuntimeIndex.m"
+runtime_view_path = ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.m"
 topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
 setting_path = ROOT / "src/Settings/RYGSetting.m"
 
@@ -133,10 +133,16 @@ if "RYGMCNameMappingImportModeMerge" not in json_header or "mode:(RYGMCNameMappi
     fail("id_name_mapping Replace/Merge import contract is missing")
 
 easy = easy_path.read_text(encoding="utf-8")
-if 'dlsym(RTLD_DEFAULT, "EasyGatingPlatformGetBoolean")' not in easy:
-    fail("Easy Gating must hook the validated final platform entry point")
-if re.search(r'dlsym\s*\([^\n]*"EasyGatingGetBoolean_Internal_DoNotUseOrMock"', easy):
-    fail("pre-map Easy Gating public wrapper must not be hooked")
+for marker in (
+    'name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock"',
+    "rebind_symbols_image",
+    "RYGResolveFinalGateID",
+    "wrapperAddress + 0x34",
+):
+    if marker not in easy:
+        fail(f"sideload-safe Easy Gating wrapper/final-ID contract is missing: {marker}")
+if re.search(r'dlsym\s*\([^\n]*"EasyGatingPlatformGetBoolean"', easy):
+    fail("Easy Gating must not patch the signed FBSharedFramework platform function")
 if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
     fail("Easy Gating final-ID persistence namespace is missing")
 
@@ -157,32 +163,26 @@ if "__attribute__((constructor))" in runtime_engine or "_dyld_register_func_for_
 if "NSUserDefaults" in runtime_engine and "ryg_runtime_bool_overrides" in runtime_engine:
     fail("generic Runtime Browser overrides must remain process-local")
 
-runtime_class = runtime_class_path.read_text(encoding="utf-8")
+runtime_index = runtime_index_path.read_text(encoding="utf-8")
 for marker in (
-    "classesForImagePath",
-    "class_copyMethodList",
-    "class_copyPropertyList",
     "objc_copyClassNamesForImage",
-    "objc_getClassList",
-    "class_getImageName",
+    "class_copyMethodList",
     'strchr("BcC"',
-    "boolDescriptorForMethod",
+    "RYGIndexIMPBelongsToHeader",
+    "isStructuralNoiseSelectorName",
+    "requestIndexForImagePath",
+    "invalidate",
 ):
-    if marker not in runtime_class:
-        fail(f"structural Runtime Class Browser marker is missing: {marker}")
-for forbidden in ("keywords:", "employee", "dogfood", "prism", "liquidglass"):
-    if forbidden in runtime_class.lower():
-        fail(f"Runtime Class Browser must not preclassify classes/methods: {forbidden}")
+    if marker not in runtime_index:
+        fail(f"live Runtime index marker is missing: {marker}")
 
 runtime_view = runtime_view_path.read_text(encoding="utf-8")
 for marker in (
-    'initWithItems:@[@"Classes", @"Mach-O"]',
-    "RYGRuntimeClassBrowser",
-    "RYGRuntimeClassDetailViewController",
-    "Instance Methods",
-    "Class Methods",
-    "Properties",
-    "boolDescriptorForMethod",
+    'initWithItems:@[@"Objective-C", @"C Symbols"]',
+    "RYGRuntimeIndex",
+    "requestIndexForImagePath",
+    "runtimeImagePaths",
+    "refreshTapped",
     "Force On",
     "Force Off",
     "Native",
@@ -190,8 +190,8 @@ for marker in (
 ):
     if marker not in runtime_view:
         fail(f"structural live Runtime Browser marker is missing: {marker}")
-if "boolMethodsForImagePath" in runtime_view:
-    fail("Runtime Browser root must enumerate classes first, not pre-filter BOOL methods")
+if "preloaded" in runtime_view.lower() or "bundled table" in runtime_view.lower():
+    fail("Runtime Browser must not ship a preloaded class/method table")
 
 topic = topic_path.read_text(encoding="utf-8")
 for marker in (
@@ -261,18 +261,19 @@ required = (
     ROOT / "src/UI/RYGLiquidGlass.m",
     ROOT / "src/Settings/RYGSetting.m",
     ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
-    ROOT / "src/Debug/RYGRuntimeClassBrowser.h",
-    ROOT / "src/Debug/RYGRuntimeClassBrowser.m",
-    ROOT / "src/Debug/RYGRuntimeBrowserViewController.m",
+    ROOT / "src/Debug/RYGRuntimeIndex.h",
+    ROOT / "src/Debug/RYGRuntimeIndex.m",
+    ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.h",
+    ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.m",
     ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
     ROOT / "src/Debug/RYGWordmarkViewController.m",
     ROOT / "src/Debug/RYGEasyGatingRuntime.m",
     ROOT / "src/Features/ExpFlags/RYGMobileConfigNameMappingStore.m",
-    ROOT / "src/Features/ExpFlags/RYGMobileConfigNativeBrowser.m",
+    ROOT / "src/Features/ExpFlags/RYGFastMobileConfigBrowserViewController.m",
     ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONSync.m",
 )
 for path in required:
     if not path.is_file():
         fail(f"required implementation missing: {path.relative_to(ROOT)}")
 
-print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, exact Developer owners, final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")
+print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, exact Developer owners, sideload-safe final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")

@@ -32,9 +32,18 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     if (!tokens.count) return YES;
     NSString *lower = text.lowercaseString ?: @"";
     NSString *compact = [[lower componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
-    for (NSString *token in tokens) {
-        NSString *compactToken = [[token componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
-        if ([lower rangeOfString:token].location == NSNotFound && [compact rangeOfString:compactToken].location == NSNotFound) return NO;
+    for (NSString *tokenGroup in tokens) {
+        BOOL groupMatched = NO;
+        for (NSString *token in [tokenGroup componentsSeparatedByString:@"|"]) {
+            if (!token.length) continue;
+            NSString *compactToken = [[token componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
+            if ([lower rangeOfString:token].location != NSNotFound ||
+                (compactToken.length && [compact rangeOfString:compactToken].location != NSNotFound)) {
+                groupMatched = YES;
+                break;
+            }
+        }
+        if (!groupMatched) return NO;
     }
     return YES;
 }
@@ -173,13 +182,33 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
 @property (nonatomic, copy) NSArray<RYGMachOSymbol *> *symbols;
 @property (nonatomic, copy) NSArray<RYGMachOSymbol *> *visibleSymbols;
 @property (nonatomic, assign) NSUInteger generation;
+@property (nonatomic, copy) NSString *browserTitle;
+@property (nonatomic, copy) NSString *initialQuery;
+@property (nonatomic, assign) BOOL allowsBulkVisibilityOverride;
 @end
 
 @implementation RYGFastRuntimeBrowserViewController
 
+- (instancetype)init { return [self initWithTitle:@"Runtime Browser" initialQuery:@""]; }
+
+- (instancetype)initWithTitle:(NSString *)title initialQuery:(NSString *)initialQuery {
+    return [self initWithTitle:title initialQuery:initialQuery allowsBulkVisibilityOverride:NO];
+}
+
+- (instancetype)initWithTitle:(NSString *)title
+                  initialQuery:(NSString *)initialQuery
+    allowsBulkVisibilityOverride:(BOOL)allowsBulkVisibilityOverride {
+    if ((self = [super initWithNibName:nil bundle:nil])) {
+        _browserTitle = [title copy].length ? [title copy] : @"Runtime Browser";
+        _initialQuery = [initialQuery copy] ?: @"";
+        _allowsBulkVisibilityOverride = allowsBulkVisibilityOverride;
+    }
+    return self;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Runtime Browser";
+    self.title = self.browserTitle ?: @"Runtime Browser";
     self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
     self.view.backgroundColor = [RYGPopupChrome backgroundColor];
     self.visibleClasses = @[]; self.symbols = @[]; self.visibleSymbols = @[];
@@ -218,11 +247,18 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.searchBar.placeholder = @"Class or BOOL selector";
+    self.searchController.searchBar.text = self.initialQuery;
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.emptyLabel = [UILabel new]; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.numberOfLines = 0; self.emptyLabel.textColor = UIColor.secondaryLabelColor;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshTapped)];
+    UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshTapped)];
+    if (self.allowsBulkVisibilityOverride) {
+        UIBarButtonItem *reveal = [[UIBarButtonItem alloc] initWithTitle:@"Reveal All" style:UIBarButtonItemStylePlain target:self action:@selector(revealAllVisibilityRows)];
+        self.navigationItem.rightBarButtonItems = @[refresh, reveal];
+    } else {
+        self.navigationItem.rightBarButtonItem = refresh;
+    }
 
     [self refreshImages];
     [self rebuildImageMenu];
@@ -264,6 +300,33 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
 
 - (void)modeChanged:(UISegmentedControl *)sender { (void)sender; self.searchController.searchBar.text = @""; self.searchController.searchBar.placeholder = self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeObjC ? @"Class or BOOL selector" : @"C symbol"; [self loadSelectedImage]; }
 - (void)refreshTapped { [RYGRuntimeIndex invalidate]; [RYGRuntimeBrowserEngine invalidateRuntimeCaches]; [self refreshImages]; [self rebuildImageMenu]; [self loadSelectedImage]; }
+
+- (void)revealAllVisibilityRows {
+    if (!self.allowsBulkVisibilityOverride || !self.index) return;
+    NSArray *tokens = RYGFastTokens(self.searchController.searchBar.text ?: @"");
+    NSUInteger changed = 0;
+    for (RYGRuntimeClassRow *classRow in self.index.classes) {
+        for (RYGRuntimeBoolMethod *method in [self.index methodsForClassName:classRow.className]) {
+            NSString *text = [NSString stringWithFormat:@"%@ %@ %@", method.className ?: @"", method.selectorName ?: @"", method.typeEncoding ?: @""];
+            if (!RYGFastMatches(text, tokens)) continue;
+            NSString *normalized = [[[method.selectorName lowercaseString]
+                componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
+                componentsJoinedByString:@""];
+            NSNumber *desired = nil;
+            if ([normalized hasPrefix:@"ishidden"] || [normalized hasPrefix:@"shouldhide"] || [normalized hasPrefix:@"hide"]) desired = @NO;
+            else if ([normalized hasPrefix:@"shouldshow"] || [normalized hasPrefix:@"canshow"] ||
+                     [normalized hasPrefix:@"isvisible"] || [normalized hasPrefix:@"isavailable"] ||
+                     [normalized hasPrefix:@"shoulddisplay"]) desired = @YES;
+            if (!desired) continue;
+            [RYGRuntimeBrowserEngine setOverride:desired forMethod:method];
+            changed++;
+        }
+    }
+    [self.tableView reloadData];
+    [RYGUtils showToastForDuration:1.3
+                             title:@"Settings visibility applied"
+                          subtitle:[NSString stringWithFormat:@"%lu ABI-validated row gate(s) in %@", (unsigned long)changed, [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath]]];
+}
 
 - (void)loadSelectedImage {
     NSString *path = self.selectedImagePath.copy;

@@ -41,7 +41,7 @@
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.backgroundColor = self.view.backgroundColor;
-	self.tableView.contentInset = UIEdgeInsetsMake(-10.0, 0.0, 0.0, 0.0);
+	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
 	self.tableView.estimatedRowHeight = 58.0;
 	self.tableView.rowHeight = UITableViewAutomaticDimension;
 	self.tableView.dataSource = self;
