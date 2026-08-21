@@ -21,8 +21,11 @@ static dispatch_queue_t RYGIndexQueue(void) {
     return queue;
 }
 
+// Discovery is intentionally snapshot-based. A loaded image is indexed once and
+// reused until the user explicitly presses Refresh. Loading some unrelated dylib
+// must not invalidate the selected image and trigger a full rescan.
 static NSMutableDictionary<NSString *, RYGRuntimeImageIndex *> *gRYGIndexes;
-static uint32_t gRYGIndexDyldCount;
+static NSMutableDictionary<NSString *, NSValue *> *gRYGIndexHeaders;
 
 static NSString *RYGIndexCanonicalPath(NSString *path) {
     if (!path.length) return @"";
@@ -41,6 +44,18 @@ static const struct mach_header *RYGIndexHeaderForPath(NSString *path) {
         if ([loaded isEqualToString:wanted]) return _dyld_get_image_header(index);
     }
     return NULL;
+}
+
+static NSString *RYGIndexRuntimeNameForPath(NSString *path) {
+    NSString *wanted = RYGIndexCanonicalPath(path);
+    if (!wanted.length) return nil;
+    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
+        const char *raw = _dyld_get_image_name(index);
+        if (!raw) continue;
+        NSString *loaded = [NSString stringWithUTF8String:raw];
+        if ([RYGIndexCanonicalPath(loaded) isEqualToString:wanted]) return loaded;
+    }
+    return nil;
 }
 
 static const char *RYGIndexSkipQualifiers(const char *type) {
@@ -66,7 +81,9 @@ static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
     const char *type = RYGIndexSkipQualifiers(encoded);
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@') return RYGRuntimeArgumentObject;
-    if (strchr("cCsSiIlLqQ", *type) != NULL) return RYGRuntimeArgumentInteger;
+    // Do not widen c/C/s/S/i/I/l/L to a uint64_t trampoline. The generic
+    // runtime hook is only ABI-safe for an actual 64-bit integer register value.
+    if (*type == 'q' || *type == 'Q') return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
 
@@ -77,10 +94,7 @@ static BOOL RYGIndexIMPBelongsToHeader(Method method, const struct mach_header *
     return dladdr((const void *)imp, &info) && info.dli_fbase == (const void *)target;
 }
 
-static RYGRuntimeBoolMethod *RYGIndexMethodRow(Class cls,
-                                                Method method,
-                                                BOOL classMethod,
-                                                NSString *imagePath) {
+static RYGRuntimeBoolMethod *RYGIndexMethodRow(Class cls, Method method, BOOL classMethod, NSString *imagePath) {
     RYGRuntimeArgumentKind kind = RYGIndexArgumentKind(method);
     if (kind < RYGRuntimeArgumentNone || kind > RYGRuntimeArgumentInteger) return nil;
     SEL selector = method_getName(method);
@@ -110,10 +124,9 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     result.methodsByClass = @{};
     if (!target) return result;
 
-    // Enumerate only classes defined by the selected Mach-O image. This keeps
-    // index cost proportional to the selected image instead of the whole app.
+    NSString *runtimeName = RYGIndexRuntimeNameForPath(canonical) ?: canonical;
     unsigned int imageClassCount = 0;
-    const char **imageClassNames = objc_copyClassNamesForImage(canonical.fileSystemRepresentation, &imageClassCount);
+    const char **imageClassNames = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &imageClassCount);
     if (!imageClassNames || imageClassCount == 0 || imageClassCount > 500000) {
         if (imageClassNames) free(imageClassNames);
         return result;
@@ -129,14 +142,11 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
             if (!declaredName || !*declaredName) continue;
             Class cls = objc_lookUpClass(declaredName);
             if (!cls) continue;
-            const char *rawClass = class_getName(cls);
-            if (!rawClass || !*rawClass) continue;
-            NSString *className = [NSString stringWithUTF8String:rawClass];
+            NSString *className = NSStringFromClass(cls);
             if (!className.length) continue;
 
             NSMutableArray<RYGRuntimeBoolMethod *> *rows = nil;
-            NSUInteger instanceCount = 0;
-            NSUInteger classCount = 0;
+            NSUInteger instanceCount = 0, classCount = 0;
             for (NSUInteger pass = 0; pass < 2; pass++) {
                 BOOL classMethod = pass == 1;
                 Class owner = classMethod ? object_getClass(cls) : cls;
@@ -145,7 +155,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
                 methodsScanned += methodCount;
                 for (unsigned int methodIndex = 0; methods && methodIndex < methodCount; methodIndex++) {
                     Method method = methods[methodIndex];
-                    if (!RYGIndexBoolReturn(method) || !RYGIndexIMPBelongsToHeader(method, target)) continue;
+                    if (!RYGIndexIMPBelongsToHeader(method, target)) continue;
                     RYGRuntimeBoolMethod *row = RYGIndexMethodRow(cls, method, classMethod, canonical);
                     if (!row) continue;
                     if (!rows) rows = [NSMutableArray array];
@@ -160,7 +170,6 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
                 return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
             }];
             methodsByClass[className] = rows.copy;
-
             RYGRuntimeClassRow *classRow = [RYGRuntimeClassRow new];
             classRow.imagePath = canonical;
             classRow.className = className;
@@ -177,7 +186,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     }];
     result.classes = classRows.copy;
     result.methodsByClass = methodsByClass.copy;
-    result.classesScanned = (NSUInteger)imageClassCount;
+    result.classesScanned = imageClassCount;
     result.methodsScanned = methodsScanned;
     result.buildDuration = -[started timeIntervalSinceNow];
     return result;
@@ -188,16 +197,18 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (void)requestIndexForImagePath:(NSString *)imagePath completion:(RYGRuntimeIndexCompletion)completion {
     NSString *requested = [imagePath copy] ?: @"";
     dispatch_async(RYGIndexQueue(), ^{
-        uint32_t currentDyldCount = _dyld_image_count();
-        if (!gRYGIndexes || gRYGIndexDyldCount != currentDyldCount) {
-            gRYGIndexes = [NSMutableDictionary dictionary];
-            gRYGIndexDyldCount = currentDyldCount;
-        }
+        if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
+        if (!gRYGIndexHeaders) gRYGIndexHeaders = [NSMutableDictionary dictionary];
         NSString *key = RYGIndexCanonicalPath(requested);
+        const struct mach_header *header = RYGIndexHeaderForPath(key);
+        NSValue *headerValue = header ? [NSValue valueWithPointer:header] : nil;
         RYGRuntimeImageIndex *index = gRYGIndexes[key];
-        if (!index) {
+        if (!index || ![gRYGIndexHeaders[key] isEqual:headerValue]) {
             index = RYGBuildIndex(requested);
-            if (key.length && index) gRYGIndexes[key] = index;
+            if (key.length && index && headerValue) {
+                gRYGIndexes[key] = index;
+                gRYGIndexHeaders[key] = headerValue;
+            }
         }
         RYGRuntimeImageIndex *snapshot = index ?: [RYGRuntimeImageIndex new];
         dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(snapshot); });
@@ -208,7 +219,9 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     __block RYGRuntimeImageIndex *index = nil;
     NSString *key = RYGIndexCanonicalPath(imagePath);
     dispatch_sync(RYGIndexQueue(), ^{
-        if (gRYGIndexDyldCount == _dyld_image_count()) index = gRYGIndexes[key];
+        const struct mach_header *header = RYGIndexHeaderForPath(key);
+        NSValue *current = header ? [NSValue valueWithPointer:header] : nil;
+        if (current && [gRYGIndexHeaders[key] isEqual:current]) index = gRYGIndexes[key];
     });
     return index;
 }
@@ -216,7 +229,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (void)invalidate {
     dispatch_async(RYGIndexQueue(), ^{
         [gRYGIndexes removeAllObjects];
-        gRYGIndexDyldCount = _dyld_image_count();
+        [gRYGIndexHeaders removeAllObjects];
     });
 }
 
