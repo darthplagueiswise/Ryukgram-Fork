@@ -3,7 +3,6 @@
 #import "RYGMobileConfigNameMappingStore.h"
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <dlfcn.h>
 
 @interface RYGMobileConfig (RYGBridgePrivate)
 - (NSDictionary *)loadNameCatalog;
@@ -15,96 +14,11 @@ static BOOL RYGBridgeDirectoryExists(NSString *path) {
     return [NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&directory] && directory;
 }
 
-static NSInteger RYGBridgeDataDirectoryScore(NSString *path) {
-    if (!RYGBridgeDirectoryExists(path)) return NSIntegerMin;
-    NSString *name = path.lastPathComponent.lowercaseString;
-    if (![name hasSuffix:@".data"]) return NSIntegerMin;
-
-    NSInteger score = 100;
-    if (![name isEqualToString:@"sessionless.data"]) score += 40;
-    if ([NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingPathComponent:@"mc_overrides.json"]]) score += 30;
-    if ([NSFileManager.defaultManager fileExistsAtPath:[path stringByAppendingPathComponent:@"id_name_mapping.json"]]) score += 20;
-
-    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil];
-    NSDate *modified = attributes[NSFileModificationDate];
-    if (modified && -modified.timeIntervalSinceNow < 86400.0) score += 10;
-    return score;
-}
-
 static NSString *RYGBridgeResolveDataDirectoryFromCandidate(NSString *candidate) {
     if (![candidate isKindOfClass:NSString.class] || !candidate.length) return nil;
     NSString *path = candidate.stringByResolvingSymlinksInPath.stringByStandardizingPath;
-    if (!RYGBridgeDirectoryExists(path)) return nil;
-    if ([path.lastPathComponent.lowercaseString hasSuffix:@".data"]) return path;
-
-    NSString *best = nil;
-    NSInteger bestScore = NSIntegerMin;
-    for (NSString *child in [NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:nil]) {
-        NSString *childPath = [path stringByAppendingPathComponent:child];
-        NSInteger score = RYGBridgeDataDirectoryScore(childPath);
-        if (score > bestScore) {
-            bestScore = score;
-            best = childPath;
-        }
-    }
-    if (best.length) return best;
-
-    NSString *cursor = path;
-    while (cursor.length > 1) {
-        if ([cursor.lastPathComponent.lowercaseString hasSuffix:@".data"] && RYGBridgeDirectoryExists(cursor)) return cursor;
-        NSString *parent = cursor.stringByDeletingLastPathComponent;
-        if ([parent isEqualToString:cursor]) break;
-        cursor = parent;
-    }
-    return nil;
-}
-
-typedef CFTypeRef (*RYGSecTaskCreateFromSelfFn)(CFAllocatorRef allocator);
-typedef CFTypeRef (*RYGSecTaskCopyValueForEntitlementFn)(CFTypeRef task,
-                                                         CFStringRef entitlement,
-                                                         CFErrorRef *error);
-
-static NSArray<NSString *> *RYGBridgeSignedApplicationGroups(void) {
-    RYGSecTaskCreateFromSelfFn createTask = (RYGSecTaskCreateFromSelfFn)dlsym(RTLD_DEFAULT, "SecTaskCreateFromSelf");
-    RYGSecTaskCopyValueForEntitlementFn copyValue = (RYGSecTaskCopyValueForEntitlementFn)dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
-    if (!createTask || !copyValue) return @[];
-
-    CFTypeRef task = createTask(kCFAllocatorDefault);
-    if (!task) return @[];
-    CFTypeRef raw = copyValue(task, CFSTR("com.apple.security.application-groups"), NULL);
-    NSMutableArray<NSString *> *groups = [NSMutableArray array];
-    if (raw && CFGetTypeID(raw) == CFArrayGetTypeID()) {
-        for (id value in (__bridge NSArray *)raw) {
-            if ([value isKindOfClass:NSString.class] && [value length]) [groups addObject:value];
-        }
-    }
-    if (raw) CFRelease(raw);
-    CFRelease(task);
-    return groups.copy;
-}
-
-static NSString *RYGBridgeResolveSignedAppGroupDataDirectory(void) {
-    NSString *best = nil;
-    NSInteger bestScore = NSIntegerMin;
-    NSFileManager *fm = NSFileManager.defaultManager;
-
-    for (NSString *group in RYGBridgeSignedApplicationGroups()) {
-        NSURL *container = [fm containerURLForSecurityApplicationGroupIdentifier:group];
-        if (!container.path.length) continue;
-        NSString *mobileConfig = [[container.path stringByAppendingPathComponent:@"Documents"]
-            stringByAppendingPathComponent:@"mobileconfig"];
-        if (!RYGBridgeDirectoryExists(mobileConfig)) continue;
-
-        for (NSString *child in [fm contentsOfDirectoryAtPath:mobileConfig error:nil]) {
-            NSString *candidate = [mobileConfig stringByAppendingPathComponent:child];
-            NSInteger score = RYGBridgeDataDirectoryScore(candidate);
-            if (score > bestScore) {
-                bestScore = score;
-                best = candidate;
-            }
-        }
-    }
-    return best;
+    if (![path.lastPathComponent.lowercaseString hasSuffix:@".data"]) return nil;
+    return RYGBridgeDirectoryExists(path) ? path : nil;
 }
 
 static void RYGBridgeMirrorMappingCache(NSString *dataDirectory) {
@@ -123,12 +37,11 @@ static void RYGBridgeMirrorMappingCache(NSString *dataDirectory) {
 
 - (NSString *)ryg_bridgeNativeDataDirectory {
     // After exchange this invokes the original JSONIO implementation first.
-    // Normalize that result to the actual Documents/mobileconfig/*.data folder;
-    // only if Instagram has not exposed one do we inspect the app groups that
-    // are actually present in this signed process.
+    // Accept only its exact Documents/mobileconfig/*.data result. Selecting a
+    // recently modified directory from another App Group/account can apply an
+    // override to the wrong user, so there is deliberately no guessed fallback.
     NSString *candidate = [self ryg_bridgeNativeDataDirectory];
     NSString *resolved = RYGBridgeResolveDataDirectoryFromCandidate(candidate);
-    if (!resolved.length) resolved = RYGBridgeResolveSignedAppGroupDataDirectory();
     if (resolved.length) RYGBridgeMirrorMappingCache(resolved);
     return resolved;
 }

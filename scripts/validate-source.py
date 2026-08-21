@@ -82,11 +82,14 @@ mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
 mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
 mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
 easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
+mobile_config_bridge_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigBridge.m"
 runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
 runtime_index_path = ROOT / "src/Debug/RYGRuntimeIndex.m"
 runtime_view_path = ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.m"
 topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
 setting_path = ROOT / "src/Settings/RYGSetting.m"
+settings_entry_path = ROOT / "src/Features/General/RYGSettingsMenuEntry.x"
+liquid_glass_path = ROOT / "src/UI/RYGLiquidGlass.m"
 
 mc_header = mc_header_path.read_text(encoding="utf-8")
 for type_name, discriminator in (
@@ -138,6 +141,8 @@ for marker in (
     "rebind_symbols_image",
     "RYGResolveFinalGateID",
     "wrapperAddress + 0x34",
+    "RYGEasyGatingImageRangeHasProtection",
+    "VM_PROT_READ | VM_PROT_EXECUTE",
 ):
     if marker not in easy:
         fail(f"sideload-safe Easy Gating wrapper/final-ID contract is missing: {marker}")
@@ -145,6 +150,19 @@ if re.search(r'dlsym\s*\([^\n]*"EasyGatingPlatformGetBoolean"', easy):
     fail("Easy Gating must not patch the signed FBSharedFramework platform function")
 if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
     fail("Easy Gating final-ID persistence namespace is missing")
+
+mobile_config_bridge = mobile_config_bridge_path.read_text(encoding="utf-8")
+for forbidden in (
+    "RYGBridgeDataDirectoryScore",
+    "RYGBridgeResolveSignedAppGroupDataDirectory",
+    "RYGBridgeSignedApplicationGroups",
+    "containerURLForSecurityApplicationGroupIdentifier",
+):
+    if forbidden in mobile_config_bridge:
+        fail(f"MobileConfig guessed App Group/account fallback returned: {forbidden}")
+for marker in ("hasSuffix:@\".data\"", "there is deliberately no guessed fallback"):
+    if marker not in mobile_config_bridge:
+        fail(f"exact native MobileConfig data-directory contract is missing: {marker}")
 
 runtime_engine = runtime_engine_path.read_text(encoding="utf-8")
 for marker in (
@@ -210,11 +228,35 @@ for marker in (
 for forbidden in ("keywords:", "RYGDevContainsAny", "boolMethodsForSurface"):
     if forbidden in topic:
         fail(f"Developer topic preclassification returned: {forbidden}")
+if 'initialQuery:@"settings ishidden|' in topic:
+    fail("hidden Settings browser incorrectly requires every visibility gate to contain the word settings")
+if 'initialQuery:@"ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable|shoulddisplay"' not in topic:
+    fail("hidden Settings browser live visibility query is missing")
 
 setting = setting_path.read_text(encoding="utf-8")
 for marker in ("UIAction.class", "UICommand.class", "RYGLiquidGlassConfigureButton", "setDefaultContentInsets"):
     if marker not in setting:
         fail(f"settings menu Liquid Glass/state marker is missing: {marker}")
+
+settings_entry = settings_entry_path.read_text(encoding="utf-8")
+for marker in (
+    "kRYGProfileSettingsLongPressKey",
+    "kRYGTabSettingsLongPressKey",
+    "objc_getAssociatedObject",
+    "ryg_settingsShortcutLongPress:",
+):
+    if marker not in settings_entry:
+        fail(f"idempotent settings long-press contract is missing: {marker}")
+if "gestureRecognizers.count == 0" in settings_entry:
+    fail("profile settings long-press must coexist with Instagram's native recognizers")
+if "@selector(handleLongPress:)" in settings_entry:
+    fail("settings shortcut reintroduced a collision-prone generic long-press selector")
+
+liquid_glass = liquid_glass_path.read_text(encoding="utf-8")
+if 'return ![RYGUtils getBoolPref:@"liquid_glass_force_off"]' not in liquid_glass:
+    fail("Liquid Glass availability must preserve UIKit's automatic accessibility adaptations")
+if "return !UIAccessibilityIsReduceTransparencyEnabled()" in liquid_glass:
+    fail("Liquid Glass must not be disabled when Reduce Transparency is enabled")
 
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))

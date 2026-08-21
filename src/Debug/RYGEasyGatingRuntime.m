@@ -5,10 +5,13 @@
 #import <stdint.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
+#import <mach-o/loader.h>
+#import <mach/vm_prot.h>
 #if __has_include(<ptrauth.h>)
 #import <ptrauth.h>
 #endif
 #include <stdlib.h>
+#include <string.h>
 
 NSString *const RYGEasyGatingDidObserveNotification = @"RYGEasyGatingDidObserveNotification";
 NSString *const RYGEasyGatingGateIDUserInfoKey = @"gateID";
@@ -123,6 +126,20 @@ static int64_t RYGSignExtend21(uint32_t value) {
     return (int64_t)((raw ^ sign) - sign);
 }
 
+static BOOL RYGAddSignedOffset(uintptr_t base, int64_t offset, uintptr_t *result) {
+    if (!result) return NO;
+    if (offset >= 0) {
+        uint64_t positive = (uint64_t)offset;
+        if (positive > UINTPTR_MAX - base) return NO;
+        *result = base + (uintptr_t)positive;
+        return YES;
+    }
+    uint64_t magnitude = (uint64_t)(-(offset + 1)) + 1u;
+    if (magnitude > base) return NO;
+    *result = base - (uintptr_t)magnitude;
+    return YES;
+}
+
 static uintptr_t RYGStripFunctionPointer(RYGEasyGatingBoolFn function) {
     if (!function) return 0;
 #if __has_feature(ptrauth_calls)
@@ -130,6 +147,53 @@ static uintptr_t RYGStripFunctionPointer(RYGEasyGatingBoolFn function) {
 #else
     return (uintptr_t)function;
 #endif
+}
+
+static BOOL RYGEasyGatingImageRangeHasProtection(const void *imageBase,
+                                                   uintptr_t start,
+                                                   size_t length,
+                                                   vm_prot_t requiredProtection) {
+    if (!imageBase || !start || !length || start > UINTPTR_MAX - length) return NO;
+    const struct mach_header *rawHeader = (const struct mach_header *)imageBase;
+    if (rawHeader->magic != MH_MAGIC_64) return NO;
+    const struct mach_header_64 *header = (const struct mach_header_64 *)rawHeader;
+    if (!header->sizeofcmds || header->sizeofcmds > 16 * 1024 * 1024 || header->ncmds > 65535) return NO;
+
+    const uint8_t *commands = (const uint8_t *)(header + 1);
+    const uint8_t *commandsEnd = commands + header->sizeofcmds;
+    const uint8_t *cursor = commands;
+    uint64_t textVMAddress = UINT64_MAX;
+    for (uint32_t index = 0; index < header->ncmds; index++) {
+        if (cursor > commandsEnd || (size_t)(commandsEnd - cursor) < sizeof(struct load_command)) return NO;
+        const struct load_command *command = (const struct load_command *)cursor;
+        if (command->cmdsize < sizeof(*command) || command->cmdsize > (size_t)(commandsEnd - cursor)) return NO;
+        if (command->cmd == LC_SEGMENT_64 && command->cmdsize >= sizeof(struct segment_command_64)) {
+            const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
+            if (strncmp(segment->segname, SEG_TEXT, sizeof(segment->segname)) == 0) textVMAddress = segment->vmaddr;
+        }
+        cursor += command->cmdsize;
+    }
+    if (textVMAddress == UINT64_MAX || (uintptr_t)header < (uintptr_t)textVMAddress) return NO;
+
+    uintptr_t slide = (uintptr_t)header - (uintptr_t)textVMAddress;
+    uintptr_t end = start + length;
+    cursor = commands;
+    for (uint32_t index = 0; index < header->ncmds; index++) {
+        const struct load_command *command = (const struct load_command *)cursor;
+        if (command->cmd == LC_SEGMENT_64 && command->cmdsize >= sizeof(struct segment_command_64)) {
+            const struct segment_command_64 *segment = (const struct segment_command_64 *)command;
+            if ((segment->initprot & requiredProtection) == requiredProtection &&
+                segment->vmaddr <= UINTPTR_MAX - slide) {
+                uintptr_t segmentStart = slide + (uintptr_t)segment->vmaddr;
+                if ((uintptr_t)segment->vmsize <= UINTPTR_MAX - segmentStart) {
+                    uintptr_t segmentEnd = segmentStart + (uintptr_t)segment->vmsize;
+                    if (start >= segmentStart && end <= segmentEnd) return YES;
+                }
+            }
+        }
+        cursor += command->cmdsize;
+    }
+    return NO;
 }
 
 // Decode the exact read-only mapper embedded in the current wrapper instead of
@@ -150,36 +214,58 @@ static BOOL RYGResolveFinalGateID(RYGEasyGatingBoolFn wrapper,
     // Validate ARM64 ADRP/ADD/ADR instructions before trusting any address so a
     // future build simply becomes unobservable instead of reading arbitrary data.
     uintptr_t helper = wrapperAddress + 0x34;
-    uint32_t adrp = *(const uint32_t *)(helper + 0x0c);
-    uint32_t add  = *(const uint32_t *)(helper + 0x10);
-    uint32_t adr  = *(const uint32_t *)(helper + 0x14);
+    if (helper < wrapperAddress ||
+        !RYGEasyGatingImageRangeHasProtection(info.dli_fbase, helper, 0x24, VM_PROT_READ | VM_PROT_EXECUTE)) return NO;
+    uint32_t instructions[9] = {0};
+    memcpy(instructions, (const void *)helper, sizeof(instructions));
+    if (instructions[0] != 0x2a0003ebu || // mov w11, w0
+        instructions[1] != 0xa9bf7bfdu || // stp x29, x30, [sp, #-0x10]!
+        instructions[2] != 0x910003fdu || // mov x29, sp
+        instructions[6] != 0x786b7928u || // ldrh w8, [x9, x11, lsl #1]
+        instructions[7] != 0x8b08094au || // add x10, x10, x8, lsl #2
+        instructions[8] != 0xd61f0140u) return NO; // br x10
+    uint32_t adrp = instructions[3];
+    uint32_t add  = instructions[4];
+    uint32_t adr  = instructions[5];
     if ((adrp & 0x9f000000u) != 0x90000000u || (adrp & 0x1fu) != 9u) return NO;
     if ((add & 0x7f000000u) != 0x11000000u || (add & 0x1fu) != 9u || ((add >> 5) & 0x1fu) != 9u) return NO;
     if ((adr & 0x9f000000u) != 0x10000000u || (adr & 0x1fu) != 10u) return NO;
 
     uint32_t adrpImm21 = (((adrp >> 5) & 0x7ffffu) << 2) | ((adrp >> 29) & 0x3u);
     uintptr_t adrpPC = helper + 0x0c;
-    intptr_t pageDelta = (intptr_t)(RYGSignExtend21(adrpImm21) << 12);
-    uintptr_t table = (uintptr_t)((intptr_t)(adrpPC & ~(uintptr_t)0xfff) + pageDelta);
+    int64_t pageDelta = RYGSignExtend21(adrpImm21) * 4096;
+    uintptr_t table = 0;
+    if (!RYGAddSignedOffset(adrpPC & ~(uintptr_t)0xfff, pageDelta, &table)) return NO;
     uint32_t addImm = (add >> 10) & 0xfffu;
     if ((add >> 22) & 1u) addImm <<= 12;
+    if (table > UINTPTR_MAX - addImm) return NO;
     table += addImm;
 
     uint32_t adrImm21 = (((adr >> 5) & 0x7ffffu) << 2) | ((adr >> 29) & 0x3u);
     uintptr_t adrPC = helper + 0x14;
-    uintptr_t jumpBase = (uintptr_t)((intptr_t)adrPC + RYGSignExtend21(adrImm21));
+    uintptr_t jumpBase = 0;
+    if (!RYGAddSignedOffset(adrPC, RYGSignExtend21(adrImm21), &jumpBase)) return NO;
 
-    uint16_t jumpUnits = *(const uint16_t *)(table + (uintptr_t)selectorIndex * sizeof(uint16_t));
+    uintptr_t tableOffset = (uintptr_t)selectorIndex * sizeof(uint16_t);
+    if (table > UINTPTR_MAX - tableOffset) return NO;
+    uintptr_t tableEntry = table + tableOffset;
+    if (!RYGEasyGatingImageRangeHasProtection(info.dli_fbase, tableEntry, sizeof(uint16_t), VM_PROT_READ)) return NO;
+    uint16_t jumpUnits = 0;
+    memcpy(&jumpUnits, (const void *)tableEntry, sizeof(jumpUnits));
+    if ((uintptr_t)jumpUnits > (UINTPTR_MAX - jumpBase) / 4u) return NO;
     uintptr_t target = jumpBase + (uintptr_t)jumpUnits * 4u;
     if (target < wrapperAddress + 0x34 || target >= wrapperAddress + 0x2000) return NO;
+    if (!RYGEasyGatingImageRangeHasProtection(info.dli_fbase, target, 8, VM_PROT_READ | VM_PROT_EXECUTE)) return NO;
 
-    uint32_t movz = *(const uint32_t *)target;
+    uint32_t targetInstructions[2] = {0};
+    memcpy(targetInstructions, (const void *)target, sizeof(targetInstructions));
+    uint32_t movz = targetInstructions[0];
     if ((movz & 0x7f80001fu) != 0x52800000u) return NO; // MOVZ W0, #imm
     uint32_t hw = (movz >> 21) & 0x3u;
     if (hw > 1u) return NO;
     uint32_t value = ((movz >> 5) & 0xffffu) << (hw * 16u);
 
-    uint32_t next = *(const uint32_t *)(target + 4);
+    uint32_t next = targetInstructions[1];
     if ((next & 0x7f80001fu) == 0x72800000u) { // optional MOVK W0
         uint32_t nextHW = (next >> 21) & 0x3u;
         if (nextHW > 1u) return NO;

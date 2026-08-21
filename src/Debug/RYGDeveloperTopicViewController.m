@@ -1022,7 +1022,7 @@ static void RYGScheduleDeveloperNativeActivation(void);
         } else if ([kind isEqualToString:@"settingsRuntime"]) {
             [self.navigationController pushViewController:[[RYGFastRuntimeBrowserViewController alloc]
                 initWithTitle:@"Hidden Settings Rows"
-                  initialQuery:@"settings ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable"
+                  initialQuery:@"ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable|shoulddisplay"
     allowsBulkVisibilityOverride:YES] animated:YES];
         }
         return;

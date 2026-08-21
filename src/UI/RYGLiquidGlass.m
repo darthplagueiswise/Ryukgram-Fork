@@ -52,8 +52,12 @@ BOOL RYGIsOwnedViewController(UIViewController *controller) {
 
 BOOL RYGLiquidGlassIsAvailable(void) {
     if (@available(iOS 26.0, *)) {
-        return !UIAccessibilityIsReduceTransparencyEnabled()
-            && ![RYGUtils getBoolPref:@"liquid_glass_force_off"];
+        // UIGlassEffect owns its accessibility adaptations. iOS makes the
+        // material frostier for Reduce Transparency, raises contrast when
+        // requested, and reduces its motion automatically. Replacing it with
+        // a plain view here removed the closed-menu/title material precisely
+        // for users who need the stronger legibility treatment.
+        return ![RYGUtils getBoolPref:@"liquid_glass_force_off"];
     }
     return NO;
 }
