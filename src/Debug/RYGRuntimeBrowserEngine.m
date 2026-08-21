@@ -109,6 +109,13 @@ static BOOL RYGMethodIMPBelongsToImage(Method method, NSString *imagePath) {
     return RYGImagePathMatches([NSString stringWithUTF8String:info.dli_fname], imagePath);
 }
 
+static BOOL RYGClassDefinedInImage(Class cls, NSString *imagePath) {
+    if (!cls || !imagePath.length) return NO;
+    const char *raw = class_getImageName(cls);
+    if (!raw) return NO;
+    return RYGImagePathMatches([NSString stringWithUTF8String:raw], imagePath);
+}
+
 static NSNumber *RYGOverrideForKey(NSString *key) {
     @synchronized(RYGRuntimeBrowserEngine.class) { return gRYGOverrides[key]; }
 }
@@ -228,16 +235,58 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
     return YES;
 }
 
+static RYGRuntimeBoolMethod *RYGBoolRow(Class cls, Method method, BOOL classMethod, NSString *imagePath) {
+    if (!cls || !method || !RYGMethodHasSupportedBoolABI(method)) return nil;
+    SEL selector = method_getName(method);
+    if (!selector) return nil;
+    RYGRuntimeBoolMethod *row = [RYGRuntimeBoolMethod new];
+    row.imagePath = imagePath ?: @"";
+    row.className = NSStringFromClass(cls) ?: @"";
+    row.selectorName = NSStringFromSelector(selector) ?: @"";
+    row.classMethod = classMethod;
+    row.argumentKind = RYGArgumentKindForMethod(method);
+    const char *types = method_getTypeEncoding(method);
+    row.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+    return row;
+}
+
+static void RYGCountHookableMembersForClass(Class cls,
+                                             NSString *imagePath,
+                                             NSUInteger *instanceCount,
+                                             NSUInteger *classCount) {
+    NSUInteger counts[2] = {0, 0};
+    for (NSUInteger pass = 0; pass < 2; pass++) {
+        Class owner = pass ? object_getClass(cls) : cls;
+        unsigned int count = 0;
+        Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+        for (unsigned int index = 0; methods && index < count; index++) {
+            Method method = methods[index];
+            if (!RYGMethodHasSupportedBoolABI(method)) continue;
+            if (!RYGMethodIMPBelongsToImage(method, imagePath)) continue;
+            SEL selector = method_getName(method);
+            NSString *name = selector ? NSStringFromSelector(selector) : @"";
+            if ([RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:name]) continue;
+            counts[pass]++;
+        }
+        if (methods) free(methods);
+    }
+    if (instanceCount) *instanceCount = counts[0];
+    if (classCount) *classCount = counts[1];
+}
+
 @implementation RYGRuntimeClassRow @end
+
 @implementation RYGRuntimeMemberRow
 - (BOOL)method { return self.kind == RYGRuntimeMemberInstanceMethod || self.kind == RYGRuntimeMemberClassMethod; }
 - (BOOL)classMember { return self.kind == RYGRuntimeMemberClassMethod || self.kind == RYGRuntimeMemberClassProperty; }
 @end
+
 @implementation RYGRuntimeBoolMethod
 - (NSString *)overrideKey { return RYGMethodKey(self.className, self.selectorName, self.classMethod); }
 - (NSNumber *)overrideValue { return [RYGRuntimeBrowserEngine overrideForKey:self.overrideKey]; }
 - (NSNumber *)liveValue { return [RYGRuntimeBrowserEngine observedNativeValueForKey:self.overrideKey]; }
 @end
+
 @implementation RYGMachOSymbol @end
 
 @implementation RYGRuntimeBrowserEngine
@@ -264,22 +313,130 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
     }];
 }
 
-+ (NSString *)shortNameForImagePath:(NSString *)imagePath { return imagePath.lastPathComponent.length ? imagePath.lastPathComponent : @"Image"; }
++ (NSString *)shortNameForImagePath:(NSString *)imagePath {
+    return imagePath.lastPathComponent.length ? imagePath.lastPathComponent : @"Image";
+}
 
 + (BOOL)isStructuralNoiseSelectorName:(NSString *)selectorName {
     if (!selectorName.length) return YES;
     static NSSet<NSString *> *noise;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        noise = [NSSet setWithArray:@[@"isEqual:", @"hash", @"class", @"self", @"superclass", @"respondsToSelector:", @"isKindOfClass:", @"isMemberOfClass:", @"conformsToProtocol:", @"methodForSelector:", @"description", @"debugDescription", @"retainCount", @"zone"]];
+        noise = [NSSet setWithArray:@[
+            @"isEqual:", @"hash", @"class", @"self", @"superclass",
+            @"respondsToSelector:", @"isKindOfClass:", @"isMemberOfClass:",
+            @"conformsToProtocol:", @"methodForSelector:", @"description",
+            @"debugDescription", @"retainCount", @"zone"
+        ]];
     });
     return [noise containsObject:selectorName];
 }
 
-+ (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath { return @[]; }
-+ (NSArray<RYGRuntimeMemberRow *> *)membersForClassName:(NSString *)className imagePath:(NSString *)imagePath { (void)className; (void)imagePath; return @[]; }
-+ (RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member { (void)member; return nil; }
-+ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath scope:(RYGRuntimeBrowserScope)scope { (void)imagePath; (void)scope; return @[]; }
++ (NSArray<RYGRuntimeClassRow *> *)classesForImagePath:(NSString *)imagePath {
+    if (!imagePath.length || !RYGDyldHeaderForImagePath(imagePath)) return @[];
+    NSMutableSet<NSString *> *names = [NSMutableSet set];
+    NSString *runtimeName = RYGDyldRuntimeNameForImagePath(imagePath) ?: imagePath;
+    unsigned int directCount = 0;
+    const char **directNames = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &directCount);
+    for (unsigned int index = 0; directNames && index < directCount; index++) {
+        if (!directNames[index] || !*directNames[index]) continue;
+        NSString *name = [NSString stringWithUTF8String:directNames[index]];
+        if (name.length) [names addObject:name];
+    }
+    if (directNames) free(directNames);
+
+    if (!names.count) {
+        int total = objc_getClassList(NULL, 0);
+        if (total <= 0 || total > 500000) return @[];
+        Class __unsafe_unretained *classes = (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
+        if (!classes) return @[];
+        int filled = objc_getClassList(classes, total);
+        for (int index = 0; index < filled; index++) {
+            Class cls = classes[index];
+            if (!RYGClassDefinedInImage(cls, imagePath)) continue;
+            NSString *name = NSStringFromClass(cls);
+            if (name.length) [names addObject:name];
+        }
+        free(classes);
+    }
+
+    NSMutableArray<RYGRuntimeClassRow *> *rows = [NSMutableArray array];
+    for (NSString *name in names) {
+        Class cls = objc_lookUpClass(name.UTF8String);
+        if (!cls) continue;
+        NSUInteger instanceCount = 0, classCount = 0;
+        RYGCountHookableMembersForClass(cls, imagePath, &instanceCount, &classCount);
+        if (instanceCount + classCount == 0) continue;
+        RYGRuntimeClassRow *row = [RYGRuntimeClassRow new];
+        row.imagePath = imagePath;
+        row.className = name;
+        row.instanceMethodCount = instanceCount;
+        row.classMethodCount = classCount;
+        row.propertyCount = 0;
+        [rows addObject:row];
+    }
+    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
+        return [left.className localizedCaseInsensitiveCompare:right.className];
+    }];
+    return rows.copy;
+}
+
++ (NSArray<RYGRuntimeMemberRow *> *)membersForClassName:(NSString *)className imagePath:(NSString *)imagePath {
+    Class cls = className.length ? objc_lookUpClass(className.UTF8String) : Nil;
+    if (!cls || !RYGClassDefinedInImage(cls, imagePath)) return @[];
+    NSMutableArray<RYGRuntimeMemberRow *> *rows = [NSMutableArray array];
+    for (NSUInteger pass = 0; pass < 2; pass++) {
+        BOOL classMethod = pass == 1;
+        Class owner = classMethod ? object_getClass(cls) : cls;
+        unsigned int count = 0;
+        Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+        for (unsigned int index = 0; methods && index < count; index++) {
+            Method method = methods[index];
+            if (!RYGMethodHasSupportedBoolABI(method) || !RYGMethodIMPBelongsToImage(method, imagePath)) continue;
+            NSString *name = NSStringFromSelector(method_getName(method));
+            if ([self isStructuralNoiseSelectorName:name]) continue;
+            RYGRuntimeMemberRow *row = [RYGRuntimeMemberRow new];
+            row.imagePath = imagePath;
+            row.className = className;
+            row.name = name ?: @"";
+            const char *types = method_getTypeEncoding(method);
+            row.typeEncoding = types ? [NSString stringWithUTF8String:types] : @"";
+            row.kind = classMethod ? RYGRuntimeMemberClassMethod : RYGRuntimeMemberInstanceMethod;
+            row.hookableBool = YES;
+            row.argumentKind = RYGArgumentKindForMethod(method);
+            [rows addObject:row];
+        }
+        if (methods) free(methods);
+    }
+    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeMemberRow *left, RYGRuntimeMemberRow *right) {
+        if (left.kind != right.kind) return left.kind < right.kind ? NSOrderedAscending : NSOrderedDescending;
+        return [left.name localizedCaseInsensitiveCompare:right.name];
+    }];
+    return rows.copy;
+}
+
++ (RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member {
+    if (![member isKindOfClass:RYGRuntimeMemberRow.class] || !member.method || !member.hookableBool) return nil;
+    Class cls = objc_lookUpClass(member.className.UTF8String);
+    BOOL classMethod = member.kind == RYGRuntimeMemberClassMethod;
+    Class owner = cls ? (classMethod ? object_getClass(cls) : cls) : Nil;
+    SEL selector = member.name.length ? NSSelectorFromString(member.name) : NULL;
+    Method method = owner && selector ? class_getInstanceMethod(owner, selector) : NULL;
+    if (!method || !RYGMethodHasSupportedBoolABI(method) || !RYGMethodIMPBelongsToImage(method, member.imagePath)) return nil;
+    return RYGBoolRow(cls, method, classMethod, member.imagePath);
+}
+
++ (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath scope:(RYGRuntimeBrowserScope)scope {
+    (void)scope;
+    NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
+    for (RYGRuntimeClassRow *classRow in [self classesForImagePath:imagePath]) {
+        for (RYGRuntimeMemberRow *member in [self membersForClassName:classRow.className imagePath:imagePath]) {
+            RYGRuntimeBoolMethod *method = [self boolMethodForMember:member];
+            if (method) [rows addObject:method];
+        }
+    }
+    return rows.copy;
+}
 
 + (NSInteger)dyldIndexForImagePath:(NSString *)imagePath {
     const struct mach_header *target = RYGDyldHeaderForImagePath(imagePath);
@@ -290,10 +447,7 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
 
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath {
     NSString *symbolCacheKey = RYGCanonicalImagePath(imagePath);
-    @synchronized(self) {
-        NSArray<RYGMachOSymbol *> *cached = gRYGSymbolIndexes[symbolCacheKey];
-        if (cached) return cached;
-    }
+    @synchronized(self) { NSArray<RYGMachOSymbol *> *cached = gRYGSymbolIndexes[symbolCacheKey]; if (cached) return cached; }
     NSInteger imageIndex = [self dyldIndexForImagePath:imagePath];
     if (imageIndex == NSNotFound) return @[];
     const struct mach_header *generic = _dyld_get_image_header((uint32_t)imageIndex);
@@ -333,27 +487,31 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
         row.name = [NSString stringWithUTF8String:name] ?: @"";
         row.external = (entry.n_type & N_EXT) != 0;
         uint8_t type = entry.n_type & N_TYPE;
-        if (type == N_UNDF) row.kind = @"import";
+        if (type == N_UNDF) row.kind = @"undefined";
         else if (type == N_ABS) row.kind = @"absolute";
-        else if (type == N_SECT) row.kind = @"local/export";
+        else if (type == N_SECT) row.kind = @"section";
         else if (type == N_INDR) row.kind = @"indirect";
         else row.kind = @"symbol";
         if (entry.n_value) row.address = type == N_ABS ? entry.n_value : (uint64_t)((intptr_t)entry.n_value + slide);
         [rows addObject:row];
     }
-    [rows sortUsingComparator:^NSComparisonResult(RYGMachOSymbol *left, RYGMachOSymbol *right) { return [left.name localizedCaseInsensitiveCompare:right.name]; }];
+    [rows sortUsingComparator:^NSComparisonResult(RYGMachOSymbol *left, RYGMachOSymbol *right) {
+        return [left.name localizedCaseInsensitiveCompare:right.name];
+    }];
     NSArray<RYGMachOSymbol *> *snapshot = rows.copy;
-    @synchronized(self) {
-        if (!gRYGSymbolIndexes) gRYGSymbolIndexes = [NSMutableDictionary dictionary];
-        if (symbolCacheKey.length) gRYGSymbolIndexes[symbolCacheKey] = snapshot;
-    }
+    @synchronized(self) { if (!gRYGSymbolIndexes) gRYGSymbolIndexes = [NSMutableDictionary dictionary]; if (symbolCacheKey.length) gRYGSymbolIndexes[symbolCacheKey] = snapshot; }
     return snapshot;
 }
 
 + (void)invalidateMachOSymbolCache { @synchronized(self) { [gRYGSymbolIndexes removeAllObjects]; } }
-+ (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method { return [method isKindOfClass:RYGRuntimeBoolMethod.class] && RYGInstallUnifiedBoolHook(method.overrideKey); }
+
++ (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method {
+    return [method isKindOfClass:RYGRuntimeBoolMethod.class] && RYGInstallUnifiedBoolHook(method.overrideKey);
+}
+
 + (NSNumber *)observedNativeValueForKey:(NSString *)overrideKey { return RYGObservedForKey(overrideKey); }
 + (NSNumber *)overrideForKey:(NSString *)overrideKey { return RYGOverrideForKey(overrideKey); }
+
 + (void)setOverride:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method {
     if (![method isKindOfClass:RYGRuntimeBoolMethod.class] || !method.overrideKey.length) return;
     if (value && !RYGInstallUnifiedBoolHook(method.overrideKey)) return;
@@ -363,6 +521,7 @@ static BOOL RYGInstallUnifiedBoolHook(NSString *key) {
         else [gRYGOverrides removeObjectForKey:method.overrideKey];
     }
 }
+
 + (void)reinstallPersistedOverrides { }
 
 @end
