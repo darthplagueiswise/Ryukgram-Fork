@@ -6,7 +6,7 @@
 #import "../../modules/fishhook/fishhook.h"
 
 // Runtime compatibility layer for the symbols actually exported/imported by
-// Instagram(9) + FBSharedFramework(20260821-132949).  It deliberately does not
+// Instagram(9) + FBSharedFramework(20260821-132949). It deliberately does not
 // patch signed __TEXT pages; only the main executable's import slots are rebound.
 typedef BOOL (*RYGIGContextBoolFn)(id context);
 typedef NSInteger (*RYGIGContextStyleFn)(id context);
@@ -15,6 +15,10 @@ static RYGIGContextBoolFn gRYGNativeFloatingTabBarEnabled;
 static RYGIGContextBoolFn gRYGNativeDynamicSizingEnabled;
 static RYGIGContextBoolFn gRYGNativeHomecomingFloatingEnabled;
 static RYGIGContextStyleFn gRYGNativeTabBarStyleForLauncherSet;
+static void *gRYGPreviousFloatingSlot;
+static void *gRYGPreviousDynamicSlot;
+static void *gRYGPreviousHomecomingSlot;
+static void *gRYGPreviousStyleSlot;
 static BOOL gRYGInstagramBinaryCompatInstalled;
 
 static BOOL RYGIGForceLiquidGlassOff(void) {
@@ -93,24 +97,31 @@ static void RYGInstallInstagramBinaryCompat(void) {
         if (!RYGIGMainExecutableImage(&mainHeader, &mainSlide)) return;
 
         struct rebinding bindings[4];
+        void **replacedSlots[4];
         size_t count = 0;
         if (gRYGNativeFloatingTabBarEnabled) {
-            bindings[count++] = (struct rebinding){"IGFloatingTabBarEnabled", (void *)RYGIGFloatingTabBarEnabledReplacement, NULL};
+            replacedSlots[count] = &gRYGPreviousFloatingSlot;
+            bindings[count++] = (struct rebinding){"IGFloatingTabBarEnabled", (void *)RYGIGFloatingTabBarEnabledReplacement, &gRYGPreviousFloatingSlot};
         }
         if (gRYGNativeDynamicSizingEnabled) {
-            bindings[count++] = (struct rebinding){"IGTabBarDynamicSizingEnabled", (void *)RYGIGTabBarDynamicSizingEnabledReplacement, NULL};
+            replacedSlots[count] = &gRYGPreviousDynamicSlot;
+            bindings[count++] = (struct rebinding){"IGTabBarDynamicSizingEnabled", (void *)RYGIGTabBarDynamicSizingEnabledReplacement, &gRYGPreviousDynamicSlot};
         }
         if (gRYGNativeHomecomingFloatingEnabled) {
-            bindings[count++] = (struct rebinding){"IGTabBarHomecomingWithFloatingTabEnabled", (void *)RYGIGTabBarHomecomingWithFloatingTabEnabledReplacement, NULL};
+            replacedSlots[count] = &gRYGPreviousHomecomingSlot;
+            bindings[count++] = (struct rebinding){"IGTabBarHomecomingWithFloatingTabEnabled", (void *)RYGIGTabBarHomecomingWithFloatingTabEnabledReplacement, &gRYGPreviousHomecomingSlot};
         }
         if (gRYGNativeTabBarStyleForLauncherSet) {
-            bindings[count++] = (struct rebinding){"IGTabBarStyleForLauncherSet", (void *)RYGIGTabBarStyleForLauncherSetReplacement, NULL};
+            replacedSlots[count] = &gRYGPreviousStyleSlot;
+            bindings[count++] = (struct rebinding){"IGTabBarStyleForLauncherSet", (void *)RYGIGTabBarStyleForLauncherSetReplacement, &gRYGPreviousStyleSlot};
         }
         if (!count) return;
 
-        if (rebind_symbols_image((void *)mainHeader, mainSlide, bindings, count) == 0) {
-            gRYGInstagramBinaryCompatInstalled = YES;
+        if (rebind_symbols_image((void *)mainHeader, mainSlide, bindings, count) != 0) return;
+        for (size_t index = 0; index < count; index++) {
+            if (!*replacedSlots[index]) return;
         }
+        gRYGInstagramBinaryCompatInstalled = YES;
     }
 }
 
