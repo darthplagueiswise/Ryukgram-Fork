@@ -254,13 +254,15 @@ for marker in (
     "kRYGProfileSettingsLongPressKey",
     "kRYGTabSettingsLongPressKey",
     "objc_getAssociatedObject",
-    "ryg_settingsShortcutLongPress:",
+    "ryg_tabBarSettingsLongPress:",
+    "_dyld_register_func_for_add_image",
+    "RYGInstallSettingsLongPressHooks",
 ):
     if marker not in settings_entry:
         fail(f"idempotent settings long-press contract is missing: {marker}")
 if "gestureRecognizers.count == 0" in settings_entry:
     fail("profile settings long-press must coexist with Instagram's native recognizers")
-if "@selector(handleLongPress:)" in settings_entry:
+if "@selector(handleLongPress:)" in settings_entry or "@selector(ryg_settingsShortcutLongPress:)" in settings_entry:
     fail("settings shortcut reintroduced a collision-prone generic long-press selector")
 
 liquid_glass = liquid_glass_path.read_text(encoding="utf-8")
