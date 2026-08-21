@@ -172,7 +172,7 @@ def main() -> int:
         print(f"  {line}")
     print(
         "Integrated markers: sideload compatibility, App Group routing, "
-        "UIGlassEffect, final EasyGating platform ABI, canonical MobileConfig "
+        "UIGlassEffect, final-ID EasyGating wrapper ABI, canonical MobileConfig "
         "JSON, live parameter metadata, native FBMobileConfigStartupConfigs "
         "typed override API"
     )
