@@ -1,0 +1,30 @@
+name: Apply MobileConfig compile fix
+on:
+  push:
+    branches: [dogfood-runtime-mc-staging-20260821]
+    paths: [.github/workflows/apply-mc-compile-fix.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dogfood-runtime-mc-staging-20260821
+          fetch-depth: 0
+      - name: Apply verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .ryg-staging/mcfix.b64 | gzip -dc > /tmp/mcfix.patch
+          echo 'eddd286a0ab599ec90de47a1031a0351a538b050005a3fff6e6bf5f5a858dd0d  /tmp/mcfix.patch' | sha256sum -c -
+          git apply --check /tmp/mcfix.patch
+          git apply /tmp/mcfix.patch
+          rm -rf .ryg-staging
+          rm -f .github/workflows/apply-mc-compile-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix MobileConfig debounce capture for Objective-C++ build'
+          git push origin HEAD:dogfood-runtime-mc-staging-20260821
