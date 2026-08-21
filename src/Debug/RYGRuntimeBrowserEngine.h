@@ -68,6 +68,7 @@ typedef NS_ENUM(NSInteger, RYGRuntimeMemberKind) {
 + (nullable RYGRuntimeBoolMethod *)boolMethodForMember:(RYGRuntimeMemberRow *)member;
 + (NSArray<RYGRuntimeBoolMethod *> *)boolMethodsForImagePath:(NSString *)imagePath scope:(RYGRuntimeBrowserScope)scope;
 + (NSArray<RYGMachOSymbol *> *)machOSymbolsForImagePath:(NSString *)imagePath;
++ (void)invalidateMachOSymbolCache;
 + (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method;
 + (nullable NSNumber *)observedNativeValueForKey:(NSString *)overrideKey;
 + (nullable NSNumber *)overrideForKey:(NSString *)overrideKey;
