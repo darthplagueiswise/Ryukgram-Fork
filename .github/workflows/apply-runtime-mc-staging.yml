@@ -1,0 +1,39 @@
+name: Apply Runtime and MobileConfig staging patch
+
+on:
+  push:
+    branches:
+      - dogfood-runtime-mc-staging-20260821
+    paths:
+      - .github/workflows/apply-runtime-mc-staging.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dogfood-runtime-mc-staging-20260821
+          fetch-depth: 0
+      - name: Reconstruct and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ryg-staging/chunk00 .ryg-staging/chunk01 .ryg-staging/chunk02 .ryg-staging/chunk03 .ryg-staging/chunk04 .ryg-staging/chunk05 | base64 --decode | gzip -dc > /tmp/ryg.patch
+          echo '04da8e4400a5c462862cd681a6acda3b4bf432f2c20f58d431f9a1e4e7e81bc0  /tmp/ryg.patch' | sha256sum -c -
+          git apply --check /tmp/ryg.patch
+      - name: Apply patch and remove staging transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply /tmp/ryg.patch
+          rm -rf .ryg-staging
+          rm -f .github/workflows/apply-runtime-mc-staging.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Rebuild cached ABI-safe Runtime and MobileConfig browsers'
+          git push origin HEAD:dogfood-runtime-mc-staging-20260821
