@@ -269,10 +269,10 @@ static BOOL rygMethodIsVoidQ(Method m) { if (!m || method_getNumberOfArguments(m
     // Canonical JSON is a backup/export concern and is coalesced off-main.
     static atomic_uint_fast64_t generation = 0;
     uint64_t mine = atomic_fetch_add_explicit(&generation, 1, memory_order_relaxed) + 1;
-    __weak typeof(self) weakSelf = self;
+    RYGMobileConfig *target = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         if (atomic_load_explicit(&generation, memory_order_relaxed) != mine) return;
-        [weakSelf syncOverridesJSON];
+        [target syncOverridesJSON];
     });
 }
 - (NSMutableDictionary *)loadNotes { NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self storePathFor:@"mc_notes.plist"]]; NSMutableDictionary *out = [NSMutableDictionary dictionary]; for (id k in disk) { id v = disk[k]; if ([k isKindOfClass:NSString.class] && [v isKindOfClass:NSString.class]) { unsigned long long n = strtoull([k UTF8String],NULL,10); if (n) out[@(n)] = v; } } return out; }
