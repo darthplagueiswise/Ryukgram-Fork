@@ -157,7 +157,8 @@ static RYGRuntimeBoolMethod *RYGFindExactBoolSelector(NSString *selectorName) {
     SEL wanted = NSSelectorFromString(selectorName);
     int total = objc_getClassList(NULL, 0);
     if (total <= 0 || total > 500000) return nil;
-    Class __unsafe_unretained *classes = calloc((size_t)total, sizeof(Class));
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)total, sizeof(Class));
     int filled = classes ? objc_getClassList(classes, total) : 0;
     RYGRuntimeBoolMethod *result = nil;
     for (int index = 0; index < filled && !result; index++) {

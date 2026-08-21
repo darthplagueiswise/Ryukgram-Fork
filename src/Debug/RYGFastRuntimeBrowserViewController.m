@@ -199,7 +199,8 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
                   initialQuery:(NSString *)initialQuery
     allowsBulkVisibilityOverride:(BOOL)allowsBulkVisibilityOverride {
     if ((self = [super initWithNibName:nil bundle:nil])) {
-        _browserTitle = [title copy].length ? [title copy] : @"Runtime Browser";
+        NSString *copiedTitle = [title copy];
+        _browserTitle = copiedTitle.length ? copiedTitle : @"Runtime Browser";
         _initialQuery = [initialQuery copy] ?: @"";
         _allowsBulkVisibilityOverride = allowsBulkVisibilityOverride;
     }
