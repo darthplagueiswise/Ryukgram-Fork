@@ -22,7 +22,6 @@ static dispatch_queue_t RYGIndexQueue(void) {
 }
 
 static NSMutableDictionary<NSString *, RYGRuntimeImageIndex *> *gRYGIndexes;
-static uint32_t gRYGIndexDyldCount;
 
 static NSString *RYGIndexCanonicalPath(NSString *path) {
     if (!path.length) return @"";
@@ -53,7 +52,7 @@ static BOOL RYGIndexBoolReturn(Method method) {
     char encoded[64] = {0};
     method_getReturnType(method, encoded, sizeof(encoded));
     const char *type = RYGIndexSkipQualifiers(encoded);
-    return type && (*type == 'B' || *type == 'c' || *type == 'C');
+    return type && *type == 'B';
 }
 
 static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
@@ -66,7 +65,7 @@ static RYGRuntimeArgumentKind RYGIndexArgumentKind(Method method) {
     const char *type = RYGIndexSkipQualifiers(encoded);
     if (!type || !*type) return (RYGRuntimeArgumentKind)-1;
     if (*type == '@') return RYGRuntimeArgumentObject;
-    if (strchr("cCsSiIlLqQ", *type) != NULL) return RYGRuntimeArgumentInteger;
+    if (*type == 'q' || *type == 'Q') return RYGRuntimeArgumentInteger;
     return (RYGRuntimeArgumentKind)-1;
 }
 
@@ -188,11 +187,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (void)requestIndexForImagePath:(NSString *)imagePath completion:(RYGRuntimeIndexCompletion)completion {
     NSString *requested = [imagePath copy] ?: @"";
     dispatch_async(RYGIndexQueue(), ^{
-        uint32_t currentDyldCount = _dyld_image_count();
-        if (!gRYGIndexes || gRYGIndexDyldCount != currentDyldCount) {
-            gRYGIndexes = [NSMutableDictionary dictionary];
-            gRYGIndexDyldCount = currentDyldCount;
-        }
+        if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
         NSString *key = RYGIndexCanonicalPath(requested);
         RYGRuntimeImageIndex *index = gRYGIndexes[key];
         if (!index) {
@@ -208,7 +203,7 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
     __block RYGRuntimeImageIndex *index = nil;
     NSString *key = RYGIndexCanonicalPath(imagePath);
     dispatch_sync(RYGIndexQueue(), ^{
-        if (gRYGIndexDyldCount == _dyld_image_count()) index = gRYGIndexes[key];
+        index = gRYGIndexes[key];
     });
     return index;
 }
@@ -216,7 +211,6 @@ static RYGRuntimeImageIndex *RYGBuildIndex(NSString *imagePath) {
 + (void)invalidate {
     dispatch_async(RYGIndexQueue(), ^{
         [gRYGIndexes removeAllObjects];
-        gRYGIndexDyldCount = _dyld_image_count();
     });
 }
 

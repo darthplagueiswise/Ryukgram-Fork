@@ -188,7 +188,7 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     self.imageButton.translatesAutoresizingMaskIntoConstraints = NO;
     self.imageButton.showsMenuAsPrimaryAction = YES;
     [self.view addSubview:self.imageButton];
-    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"Objective-C", @"Mach-O"]];
+    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"Objective-C", @"C Symbols"]];
     self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
     self.modeControl.selectedSegmentIndex = 0;
     [self.modeControl addTarget:self action:@selector(modeChanged:) forControlEvents:UIControlEventValueChanged];
@@ -227,7 +227,8 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     [self refreshImages];
     [self rebuildImageMenu];
     RYGLiquidGlassApplyToViewController(self);
-    [self loadSelectedImage];
+    // Let the push transition finish before the first background index request.
+    dispatch_async(dispatch_get_main_queue(), ^{ [self loadSelectedImage]; });
 }
 
 - (void)refreshImages {
@@ -261,8 +262,8 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     if (configuration) { configuration.title = [NSString stringWithFormat:@"Image: %@", self.selectedImagePath.length ? [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath] : @"None"]; configuration.baseForegroundColor = UIColor.labelColor; self.imageButton.configuration = configuration; }
 }
 
-- (void)modeChanged:(UISegmentedControl *)sender { (void)sender; self.searchController.searchBar.text = @""; self.searchController.searchBar.placeholder = self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeObjC ? @"Class or BOOL selector" : @"Mach-O symbol"; [self loadSelectedImage]; }
-- (void)refreshTapped { [RYGRuntimeIndex invalidate]; [self refreshImages]; [self rebuildImageMenu]; [self loadSelectedImage]; }
+- (void)modeChanged:(UISegmentedControl *)sender { (void)sender; self.searchController.searchBar.text = @""; self.searchController.searchBar.placeholder = self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeObjC ? @"Class or BOOL selector" : @"C symbol"; [self loadSelectedImage]; }
+- (void)refreshTapped { [RYGRuntimeIndex invalidate]; [RYGRuntimeBrowserEngine invalidateRuntimeCaches]; [self refreshImages]; [self rebuildImageMenu]; [self loadSelectedImage]; }
 
 - (void)loadSelectedImage {
     NSString *path = self.selectedImagePath.copy;
@@ -294,7 +295,7 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
     NSArray *tokens = RYGFastTokens(self.searchController.searchBar.text ?: @"");
     if (self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeMachO) {
         self.visibleSymbols = !tokens.count ? self.symbols : [self.symbols filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGMachOSymbol *symbol, NSDictionary *bindings) { (void)bindings; return RYGFastMatches([NSString stringWithFormat:@"%@ %@", symbol.name ?: @"", symbol.kind ?: @""], tokens); }]];
-        self.emptyLabel.text = @"No Mach-O symbol matches.";
+        self.emptyLabel.text = @"No C symbol matches.";
         self.tableView.backgroundView = self.visibleSymbols.count ? nil : self.emptyLabel;
         [self.tableView reloadData]; return;
     }
@@ -318,7 +319,7 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     (void)tableView; (void)section;
-    if (self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeMachO) return [NSString stringWithFormat:@"%lu Mach-O symbols", (unsigned long)self.visibleSymbols.count];
+    if (self.modeControl.selectedSegmentIndex == RYGFastRuntimeModeMachO) { NSUInteger ready=0; for (RYGMachOSymbol *s in self.visibleSymbols) if (s.isRebindableImport) ready++; return [NSString stringWithFormat:@"%lu C symbols · %lu rebindable imports", (unsigned long)self.visibleSymbols.count, (unsigned long)ready]; }
     return [NSString stringWithFormat:@"%lu classes · %lu classes scanned · %lu methods scanned · %.2fs", (unsigned long)self.visibleClasses.count, (unsigned long)self.index.classesScanned, (unsigned long)self.index.methodsScanned, self.index.buildDuration];
 }
 
@@ -335,10 +336,28 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
         RYGMachOSymbol *symbol = self.visibleSymbols[(NSUInteger)indexPath.row];
         cell.textLabel.text = symbol.name;
         cell.textLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightMedium];
-        cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · 0x%llx", symbol.kind ?: @"symbol", (unsigned long long)symbol.address];
+        NSString *state = symbol.overrideValue ? (symbol.overrideValue.boolValue ? @"Forced On" : @"Forced Off") : @"Native";
+        cell.detailTextLabel.text = symbol.isRebindableImport
+            ? [NSString stringWithFormat:@"rebindable import · %@", state]
+            : [NSString stringWithFormat:@"%@ · 0x%llx", symbol.kind ?: @"symbol", (unsigned long long)symbol.address];
     }
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     return cell;
+}
+
+- (void)presentCABIForSymbol:(RYGMachOSymbol *)symbol value:(NSNumber *)value source:(UIView *)source {
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"C BOOL ABI" message:@"No C prototype exists in the Mach-O symbol table. Select only the integer/pointer-register argument count confirmed by disassembly. Float/vector/struct ABIs are intentionally unsupported." preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray<NSString *> *titles = @[@"BOOL f(void)", @"BOOL f(x0)", @"BOOL f(x0,x1)", @"BOOL f(x0,x1,x2)", @"BOOL f(x0,x1,x2,x3)"];
+    for (NSInteger i=0;i<(NSInteger)titles.count;i++) {
+        [sheet addAction:[UIAlertAction actionWithTitle:titles[(NSUInteger)i] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+            RYGCFunctionABI abi=(RYGCFunctionABI)(RYGCFunctionABIBool0+i);
+            if (![RYGRuntimeBrowserEngine setCOverride:value forSymbol:symbol abi:abi]) [RYGUtils showErrorHUDWithDescription:@"C import rebinding failed or no free safe wrapper slot is available"];
+            [self.tableView reloadData];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) { sheet.popoverPresentationController.sourceView=source ?: self.view; sheet.popoverPresentationController.sourceRect=source ? source.bounds : self.view.bounds; }
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -351,8 +370,21 @@ static BOOL RYGFastMatches(NSString *text, NSArray<NSString *> *tokens) {
         return;
     }
     RYGMachOSymbol *symbol = self.visibleSymbols[(NSUInteger)indexPath.row];
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:symbol.name message:[NSString stringWithFormat:@"%@\n0x%llx\n\nNo C override is exposed without a resolved calling convention.", symbol.kind ?: @"symbol", (unsigned long long)symbol.address] preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *message = symbol.isRebindableImport
+        ? @"This import can be rebound in this image without modifying __TEXT. Choose an ABI only when disassembly confirms a BOOL result and integer/pointer-register arguments."
+        : @"This symbol is not backed by a lazy/non-lazy import slot in this image, so the sideload-safe browser will not patch it.";
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:symbol.name message:message preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Copy symbol" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = symbol.name ?: @""; }]];
+    if (symbol.isRebindableImport) {
+        if (symbol.overrideValue) {
+            [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native / remove rebinding" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+                if (![RYGRuntimeBrowserEngine setCOverride:nil forSymbol:symbol abi:RYGCFunctionABIUnknown]) [RYGUtils showErrorHUDWithDescription:@"Could not restore the original import binding"];
+                [self.tableView reloadData];
+            }]];
+        }
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force On…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self presentCABIForSymbol:symbol value:@YES source:cell]; }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force Off…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self presentCABIForSymbol:symbol value:@NO source:cell]; }]];
+    }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) { sheet.popoverPresentationController.sourceView = cell; sheet.popoverPresentationController.sourceRect = cell.bounds; }
     [self presentViewController:sheet animated:YES completion:nil];

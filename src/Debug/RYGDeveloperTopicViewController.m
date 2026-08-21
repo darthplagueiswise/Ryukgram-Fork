@@ -15,6 +15,9 @@
 static NSString *const kRYGInternalMenuPref = @"ryg_dev_internal_menu_enabled";
 static NSString *const kRYGDogfoodModePref = @"ryg_dev_dogfood_mode_enabled";
 static NSString *const kRYGDogfoodOwnedMCStatePref = @"ryg_dev_dogfood_owned_mc_state_v2";
+static NSString *const kRYGPrismSetterModePref = @"ryg_dev_prism_setter_mode";
+static NSString *const kRYGRedesignSetterModePref = @"ryg_dev_redesign_setter_mode";
+static NSString *const kRYGStoryTrayOverridePref = @"ryg_dev_story_tray_override";
 static const void *kRYGNativeControlKey = &kRYGNativeControlKey;
 static const void *kRYGMCParamKey = &kRYGMCParamKey;
 
@@ -37,6 +40,11 @@ static NSInteger gRYGRedesignSetterMode = -1;
 static BOOL gRYGDeveloperBootstrapScheduled;
 static BOOL gRYGDeveloperImageCallbackRegistered;
 
+static BOOL RYGInstallBoolSetterHook(NSString *className, NSString *selectorName, IMP replacement, IMP *original);
+static void RYGPrismSetter(id self, SEL cmd, BOOL enabled);
+static void RYGRedesignSetter(id self, SEL cmd, BOOL enabled);
+static RYGRuntimeBoolMethod *RYGStoryTrayGateMethod(void);
+
 #pragma mark - ABI validation
 
 static const char *RYGUnqualifiedType(const char *type) {
@@ -46,17 +54,17 @@ static const char *RYGUnqualifiedType(const char *type) {
 
 static BOOL RYGTypeIsBool(const char *type) {
     type = RYGUnqualifiedType(type);
-    return type && strchr("BcC", *type) != NULL;
+    return type && *type == 'B';
 }
 
 static BOOL RYGTypeIsObject(const char *type) {
     type = RYGUnqualifiedType(type);
-    return type && (*type == '@' || *type == '#' || *type == ':');
+    return type && *type == '@';
 }
 
 static BOOL RYGTypeIsInteger(const char *type) {
     type = RYGUnqualifiedType(type);
-    return type && strchr("cCsSiIlLqQ", *type) != NULL;
+    return type && (*type == 'q' || *type == 'Q');
 }
 
 static BOOL RYGTypeIsInt64(const char *type) {
@@ -408,7 +416,11 @@ static BOOL RYGOpenStoryTrayDebug(void) {
     if (!top || !method || method_getNumberOfArguments(method) != 5 || !RYGMethodReturns(method, 'v') ||
         !RYGMethodArgumentMatches(method, 2, '@') || !RYGMethodArgumentMatches(method, 3, 'B') ||
         !RYGMethodArgumentMatches(method, 4, '@')) return NO;
-    void (^completion)(void) = ^{};
+    void (^completion)(BOOL) = ^(BOOL enabled) {
+        [NSUserDefaults.standardUserDefaults setObject:@(enabled) forKey:kRYGStoryTrayOverridePref];
+        RYGRuntimeBoolMethod *resolvedGate = RYGStoryTrayGateMethod();
+        if (resolvedGate) [RYGRuntimeBrowserEngine setOverride:@(enabled) forMethod:resolvedGate];
+    };
     ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)((id)cls, selector, top, current.boolValue, completion);
     return YES;
 }
@@ -476,7 +488,7 @@ static NSDictionary *RYGDogfoodOwnedMCState(void) {
 
 static NSUInteger RYGApplyDogfoodCoreMobileConfig(BOOL enabled, NSUInteger *availableCount) {
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig reloadFromRuntime];
+    [mobileConfig prepare];
     NSMutableDictionary *owned = [RYGDogfoodOwnedMCState() mutableCopy];
     NSUInteger available = 0, changed = 0;
 
@@ -540,7 +552,7 @@ static NSArray<RYGMCParam *> *RYGExactPrismMCCandidates(void) {
         {44021, 18},
     };
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig reloadFromRuntime];
+    [mobileConfig prepare];
     NSMutableArray<RYGMCParam *> *rows = [NSMutableArray array];
     for (NSUInteger index = 0; index < sizeof(targets) / sizeof(targets[0]); index++) {
         RYGMCParam *param = RYGFindMCParamByIdentity(mobileConfig, targets[index][0], targets[index][1]);
@@ -556,7 +568,7 @@ static BOOL RYGDogfoodCandidateName(NSString *name) {
 
 static NSArray<RYGMCParam *> *RYGResolvedDogfoodMCCandidates(void) {
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    [mobileConfig reloadFromRuntime];
+    [mobileConfig prepare];
     NSMutableArray<RYGMCParam *> *out = [NSMutableArray array];
     for (RYGMCConfig *config in mobileConfig.allConfigs) {
         BOOL configMatch = RYGDogfoodCandidateName(config.name);
@@ -594,6 +606,12 @@ static void RYGScheduleDeveloperNativeActivation(void);
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     BOOL dogfoodMode = [defaults boolForKey:kRYGDogfoodModePref];
     BOOL internalMode = dogfoodMode || [defaults boolForKey:kRYGInternalMenuPref];
+    NSNumber *prismMode = [defaults objectForKey:kRYGPrismSetterModePref];
+    NSNumber *redesignMode = [defaults objectForKey:kRYGRedesignSetterModePref];
+    NSNumber *storyMode = [defaults objectForKey:kRYGStoryTrayOverridePref];
+    if ([prismMode isKindOfClass:NSNumber.class]) { gRYGPrismSetterMode = prismMode.integerValue; (void)RYGInstallBoolSetterHook(@"IGBloksFollowButtonView", @"setPrismEnabled:", (IMP)RYGPrismSetter, &gRYGPrismSetterOriginal); }
+    if ([redesignMode isKindOfClass:NSNumber.class]) { gRYGRedesignSetterMode = redesignMode.integerValue; (void)RYGInstallBoolSetterHook(@"IGTableViewCell", @"setListRedesignOn:", (IMP)RYGRedesignSetter, &gRYGRedesignSetterOriginal); }
+    if ([storyMode isKindOfClass:NSNumber.class]) { RYGRuntimeBoolMethod *gate = RYGStoryTrayGateMethod(); if (gate) [RYGRuntimeBrowserEngine setOverride:@(storyMode.boolValue) forMethod:gate]; }
     if (internalMode) RYGInstallBugMenuHooks();
     if (dogfoodMode) {
         RYGInstallDogfoodConfigCapture();
@@ -784,12 +802,16 @@ static void RYGScheduleDeveloperNativeActivation(void);
                     return;
                 }
                 gRYGPrismSetterMode = value;
+                if (value < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:kRYGPrismSetterModePref];
+                else [NSUserDefaults.standardUserDefaults setInteger:value forKey:kRYGPrismSetterModePref];
             } else {
                 if (!RYGInstallBoolSetterHook(@"IGTableViewCell", @"setListRedesignOn:", (IMP)RYGRedesignSetter, &gRYGRedesignSetterOriginal)) {
                     [RYGUtils showErrorHUDWithDescription:@"IGTableViewCell -setListRedesignOn: is not loaded with the validated v20@0:8B16 ABI"];
                     return;
                 }
                 gRYGRedesignSetterMode = value;
+                if (value < 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:kRYGRedesignSetterModePref];
+                else [NSUserDefaults.standardUserDefaults setInteger:value forKey:kRYGRedesignSetterModePref];
             }
             [weakSelf.tableView reloadData];
         }];

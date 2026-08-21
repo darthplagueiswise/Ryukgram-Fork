@@ -5,11 +5,19 @@
 #import "../../UI/RYGPopupChrome.h"
 #import "../../Utils.h"
 #import <objc/runtime.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <stdlib.h>
 #include <math.h>
 
 static NSString *const kRYGFastMCSeparator = @": : ";
 static const void *kRYGFastMCParamKey = &kRYGFastMCParamKey;
+
+typedef NS_ENUM(NSInteger, RYGFastMCImportOperation) {
+    RYGFastMCImportNone = 0,
+    RYGFastMCImportNamesReplace,
+    RYGFastMCImportNamesMerge,
+    RYGFastMCImportOverrides,
+};
 
 typedef NS_ENUM(NSInteger, RYGFastMCScope) {
     RYGFastMCScopeAll = 0,
@@ -80,6 +88,8 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
 
 @interface RYGFastMCDocumentStore : NSObject
 @property (nonatomic, strong) NSMutableDictionary<NSString *, id> *root;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *valuesByIdentity;
+@property (nonatomic, strong) NSMutableSet<NSNumber *> *overriddenConfigs;
 - (void)load;
 - (nullable NSString *)valueTextForParam:(RYGMCParam *)param;
 - (BOOL)configIsOverridden:(RYGMCConfig *)config;
@@ -89,51 +99,56 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
 
 @implementation RYGFastMCDocumentStore
 
-- (instancetype)init { if ((self = [super init])) _root = [NSMutableDictionary dictionary]; return self; }
+- (instancetype)init {
+    if ((self = [super init])) {
+        _root = [NSMutableDictionary dictionary];
+        _valuesByIdentity = [NSMutableDictionary dictionary];
+        _overriddenConfigs = [NSMutableSet set];
+    }
+    return self;
+}
+
+- (NSString *)identityForConfig:(unsigned int)config param:(unsigned int)param { return [NSString stringWithFormat:@"%u:%u", config, param]; }
+
+- (void)rebuildIndexes {
+    [self.valuesByIdentity removeAllObjects];
+    [self.overriddenConfigs removeAllObjects];
+    [self.root enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
+        (void)stop;
+        if (![key isKindOfClass:NSString.class] || ![value isKindOfClass:NSArray.class]) return;
+        NSString *digits = [key hasSuffix:@":"] ? [key substringToIndex:key.length-1] : key;
+        const char *raw = digits.UTF8String; if (!raw || !*raw) return;
+        char *endp=NULL; unsigned long long cfg=strtoull(raw,&endp,10);
+        if (endp==raw || *endp!='\0' || cfg>UINT32_MAX) return;
+        BOOL any=NO;
+        for (id line in (NSArray *)value) {
+            unsigned int idx=0; NSString *text=nil;
+            if (RYGFastMCParseLine(line,&idx,&text)) { self.valuesByIdentity[[self identityForConfig:(unsigned int)cfg param:idx]]=text ?: @""; any=YES; }
+        }
+        if (any) [self.overriddenConfigs addObject:@((unsigned int)cfg)];
+    }];
+}
 
 - (void)load {
     NSError *error = nil;
     NSData *data = [RYGMobileConfig.shared ryg_exportOverridesData:&error];
-    if (!data.length) { self.root = [NSMutableDictionary dictionary]; return; }
+    if (!data.length) { self.root = [NSMutableDictionary dictionary]; [self rebuildIndexes]; return; }
     id object = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:&error];
     self.root = [object isKindOfClass:NSMutableDictionary.class] ? object :
                 ([object isKindOfClass:NSDictionary.class] ? [(NSDictionary *)object mutableCopy] : [NSMutableDictionary dictionary]);
+    [self rebuildIndexes];
 }
 
-- (NSString *)valueTextForParam:(RYGMCParam *)param {
-    if (!param) return nil;
-    NSArray *lines = [self.root[RYGFastMCConfigKey(param.configNumber)] isKindOfClass:NSArray.class] ? self.root[RYGFastMCConfigKey(param.configNumber)] : @[];
-    for (id raw in lines) {
-        unsigned int index = 0; NSString *value = nil;
-        if (RYGFastMCParseLine(raw, &index, &value) && index == param.paramIndex) return value;
-    }
-    return nil;
-}
-
-- (BOOL)configIsOverridden:(RYGMCConfig *)config {
-    NSArray *lines = [self.root[RYGFastMCConfigKey(config.number)] isKindOfClass:NSArray.class] ? self.root[RYGFastMCConfigKey(config.number)] : nil;
-    return lines.count > 0;
-}
-
-- (NSSet<NSNumber *> *)overriddenConfigNumbers {
-    NSMutableSet *numbers = [NSMutableSet set];
-    [self.root enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
-        (void)stop;
-        if (![key isKindOfClass:NSString.class] || ![value isKindOfClass:NSArray.class] || ![(NSArray *)value count]) return;
-        NSString *digits = [key hasSuffix:@":"] ? [key substringToIndex:key.length - 1] : key;
-        const char *raw = digits.UTF8String; if (!raw || !*raw) return;
-        char *end = NULL; unsigned long long number = strtoull(raw, &end, 10);
-        if (end != raw && *end == '\0' && number <= UINT32_MAX) [numbers addObject:@((unsigned int)number)];
-    }];
-    return numbers.copy;
-}
+- (NSString *)valueTextForParam:(RYGMCParam *)param { return param ? self.valuesByIdentity[[self identityForConfig:param.configNumber param:param.paramIndex]] : nil; }
+- (BOOL)configIsOverridden:(RYGMCConfig *)config { return config ? [self.overriddenConfigs containsObject:@(config.number)] : NO; }
+- (NSSet<NSNumber *> *)overriddenConfigNumbers { return self.overriddenConfigs.copy; }
 
 - (BOOL)setValueText:(NSString *)valueText forParam:(RYGMCParam *)param error:(NSError **)error {
     if (!param) return NO;
     NSMutableDictionary *next = [self.root mutableCopy] ?: [NSMutableDictionary dictionary];
     NSString *key = RYGFastMCConfigKey(param.configNumber);
     NSArray *existing = [next[key] isKindOfClass:NSArray.class] ? next[key] : @[];
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:existing.count + 1];
     for (id raw in existing) {
         if (![raw isKindOfClass:NSString.class]) continue;
         unsigned int index = 0;
@@ -142,18 +157,36 @@ static NSString *RYGFastMCConfigKey(unsigned int configNumber) {
     }
     if (valueText) [lines addObject:[NSString stringWithFormat:@"%u%@%@", param.paramIndex, kRYGFastMCSeparator, valueText]];
     [lines sortUsingComparator:^NSComparisonResult(NSString *left, NSString *right) {
-        unsigned int li = UINT32_MAX, ri = UINT32_MAX;
-        RYGFastMCParseLine(left, &li, NULL); RYGFastMCParseLine(right, &ri, NULL);
+        unsigned int li = UINT32_MAX, ri = UINT32_MAX; RYGFastMCParseLine(left,&li,NULL); RYGFastMCParseLine(right,&ri,NULL);
         if (li < ri) return NSOrderedAscending; if (li > ri) return NSOrderedDescending; return [left compare:right];
     }];
     if (lines.count) next[key] = lines.copy; else [next removeObjectForKey:key];
 
+    // Runtime-backed rows use the validated FBMobileConfigStartupConfigs bridge
+    // directly.  Do NOT parse/reapply the complete mc_overrides document for a
+    // single switch tap.
+    if (param.isRuntimeBacked && RYGMCTypeIsRuntimeValue(param.type)) {
+        if (!valueText) [RYGMobileConfig.shared clearOverrideFor:param];
+        else {
+            NSString *trim=[valueText stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            id value=nil;
+            if (param.type==RYGMCTypeBool) { NSString *l=trim.lowercaseString; if ([l isEqualToString:@"true"]) value=@YES; else if ([l isEqualToString:@"false"]) value=@NO; }
+            else if (param.type==RYGMCTypeInt) { const char *r=trim.UTF8String; char *e=NULL; long long v=r?strtoll(r,&e,10):0; if (r && e!=r && *e=='\0') value=@(v); }
+            else if (param.type==RYGMCTypeDouble) { const char *r=trim.UTF8String; char *e=NULL; double v=r?strtod(r,&e):0; if (r && e!=r && *e=='\0' && isfinite(v)) value=@(v); }
+            else if (param.type==RYGMCTypeString) value=valueText ?: @"";
+            if (!value || ![RYGMobileConfig.shared setOverride:value for:param]) {
+                if (error) *error=[NSError errorWithDomain:@"RYGFastMobileConfig" code:2 userInfo:@{NSLocalizedDescriptionKey:@"Native MobileConfig override rejected this value"}];
+                return NO;
+            }
+        }
+    }
+
     NSData *data = [NSJSONSerialization dataWithJSONObject:next options:0 error:error];
     if (!data) return NO;
-    NSUInteger applied = 0;
-    if (![RYGMobileConfig.shared ryg_importAndApplyOverridesData:data appliedCount:&applied error:error]) return NO;
-    [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory];
+    NSString *nativePath = [RYGMobileConfig.shared ryg_nativeOverridesJSONPath];
+    if (nativePath.length && ![data writeToFile:nativePath options:NSDataWritingAtomic error:error]) return NO;
     self.root = next;
+    [self rebuildIndexes];
     return YES;
 }
 
@@ -194,7 +227,7 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
 @property (nonatomic, copy) void (^documentDidChange)(void);
 @end
 
-@interface RYGFastMobileConfigBrowserViewController () <UISearchResultsUpdating>
+@interface RYGFastMobileConfigBrowserViewController () <UISearchResultsUpdating, UIDocumentPickerDelegate>
 @property (nonatomic, copy) NSArray<RYGMCConfig *> *allConfigs;
 @property (nonatomic, copy) NSArray<RYGMCConfig *> *visibleConfigs;
 @property (nonatomic, copy) NSDictionary<NSNumber *, NSString *> *searchBlobs;
@@ -205,6 +238,7 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
 @property (nonatomic, assign) NSUInteger loadGeneration;
 @property (nonatomic, assign) NSUInteger searchGeneration;
 @property (nonatomic, assign) BOOL loading;
+@property (nonatomic, assign) RYGFastMCImportOperation pendingImport;
 @end
 
 @implementation RYGFastMobileConfigBrowserViewController
@@ -226,7 +260,9 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
     self.searchController.searchBar.placeholder = @"Config, parameter or ID";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self scopeMenu]];
+    UIBarButtonItem *filter = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"line.3.horizontal.decrease.circle"] menu:[self scopeMenu]];
+    UIBarButtonItem *tools = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[self toolsMenu]];
+    self.navigationItem.rightBarButtonItems = @[tools, filter];
     self.tableView.refreshControl = [UIRefreshControl new];
     [self.tableView.refreshControl addTarget:self action:@selector(forceReload) forControlEvents:UIControlEventValueChanged];
     RYGLiquidGlassApplyToViewController(self);
@@ -239,13 +275,51 @@ static RYGFastMCValueType RYGFastMCTypeForParam(RYGMCParam *param, NSString *doc
     for (NSInteger index = 0; index < (NSInteger)titles.count; index++) {
         UIAction *action = [UIAction actionWithTitle:titles[(NSUInteger)index] image:nil identifier:nil handler:^(__unused UIAction *item) {
             weakSelf.scope = (RYGFastMCScope)index;
-            weakSelf.navigationItem.rightBarButtonItem.menu = [weakSelf scopeMenu];
+            weakSelf.navigationItem.rightBarButtonItems.lastObject.menu = [weakSelf scopeMenu];
             [weakSelf applyFilter];
         }];
         action.state = self.scope == index ? UIMenuElementStateOn : UIMenuElementStateOff;
         [actions addObject:action];
     }
     return [UIMenu menuWithTitle:@"Filter" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:actions];
+}
+
+- (UIMenu *)toolsMenu {
+    __weak typeof(self) weakSelf=self;
+    UIAction *apply=[UIAction actionWithTitle:@"Apply overrides" image:[UIImage systemImageNamed:@"checkmark.circle"] identifier:nil handler:^(__unused UIAction *a){ [RYGMobileConfig.shared reapplyOverridesToNativeTable]; [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory]; [RYGUtils showToastForDuration:1.0 title:@"Overrides applied" subtitle:nil]; }];
+    UIAction *exportOverrides=[UIAction actionWithTitle:@"Export mc_overrides.json" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf exportDataKind:NO]; }];
+    UIAction *exportNames=[UIAction actionWithTitle:@"Export id_name_mapping.json" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf exportDataKind:YES]; }];
+    UIAction *importOverrides=[UIAction actionWithTitle:@"Import mc_overrides.json" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf presentPicker:RYGFastMCImportOverrides]; }];
+    UIAction *importNames=[UIAction actionWithTitle:@"Import / replace IDs" image:[UIImage systemImageNamed:@"square.and.arrow.down"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf presentPicker:RYGFastMCImportNamesReplace]; }];
+    UIAction *mergeNames=[UIAction actionWithTitle:@"Import / merge IDs" image:[UIImage systemImageNamed:@"arrow.triangle.merge"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf presentPicker:RYGFastMCImportNamesMerge]; }];
+    UIAction *update=[UIAction actionWithTitle:@"Update IDs / rematch runtime" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__unused UIAction *a){ [weakSelf loadModel:YES]; }];
+    return [UIMenu menuWithTitle:@"MobileConfig" children:@[apply,[UIMenu menuWithTitle:@"Import" children:@[importOverrides,importNames,mergeNames]],[UIMenu menuWithTitle:@"Export" children:@[exportOverrides,exportNames]],update]];
+}
+
+- (void)shareData:(NSData *)data name:(NSString *)name {
+    if (!data.length) return; NSURL *url=[NSFileManager.defaultManager.temporaryDirectory URLByAppendingPathComponent:name]; NSError *error=nil;
+    if (![data writeToURL:url options:NSDataWritingAtomic error:&error]) { [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Could not create export"]; return; }
+    UIActivityViewController *vc=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+    if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad) { vc.popoverPresentationController.sourceView=self.view; vc.popoverPresentationController.sourceRect=CGRectMake(CGRectGetMidX(self.view.bounds),80,1,1); }
+    [self presentViewController:vc animated:YES completion:nil];
+}
+
+- (void)exportDataKind:(BOOL)names {
+    [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory]; NSError *error=nil; NSData *data=names ? [RYGMobileConfig.shared ryg_exportNameMappingData:&error] : [RYGMobileConfig.shared ryg_exportOverridesData:&error];
+    if (!data.length) { [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Nothing to export"]; return; }
+    [self shareData:data name:names ? @"id_name_mapping.json" : @"mc_overrides.json"];
+}
+
+- (void)presentPicker:(RYGFastMCImportOperation)operation { self.pendingImport=operation; UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES]; picker.delegate=self; picker.allowsMultipleSelection=NO; [self presentViewController:picker animated:YES completion:nil]; }
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller { (void)controller; self.pendingImport=RYGFastMCImportNone; }
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    (void)controller; NSURL *url=urls.firstObject; RYGFastMCImportOperation op=self.pendingImport; self.pendingImport=RYGFastMCImportNone; if (!url) return;
+    BOOL access=[url startAccessingSecurityScopedResource]; NSError *error=nil; NSData *data=[NSData dataWithContentsOfURL:url options:0 error:&error]; if (access) [url stopAccessingSecurityScopedResource];
+    if (!data.length) { [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Could not read JSON"]; return; }
+    if (op==RYGFastMCImportOverrides) { NSUInteger applied=0; if (![RYGMobileConfig.shared ryg_importAndApplyOverridesData:data appliedCount:&applied error:&error]) { [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Override import failed"]; return; } [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory]; [RYGUtils showToastForDuration:1.0 title:@"Overrides imported" subtitle:[NSString stringWithFormat:@"%lu applied",(unsigned long)applied]]; [self loadModel:NO]; return; }
+    RYGMCNameMappingImportMode mode=op==RYGFastMCImportNamesMerge ? RYGMCNameMappingImportModeMerge : RYGMCNameMappingImportModeReplace;
+    if (![RYGMobileConfig.shared ryg_importNameMappingData:data mode:mode error:&error]) { [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"ID mapping import failed"]; return; }
+    [RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory]; [self loadModel:YES];
 }
 
 - (void)forceReload { [self loadModel:YES]; }

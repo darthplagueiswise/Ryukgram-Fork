@@ -12,6 +12,7 @@
 #import <mach-o/loader.h>
 #import <mach/vm_prot.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <string.h>
 
 // One MobileConfig owner: one getter-hook chain, one runtime metadata parser,
@@ -260,7 +261,20 @@ static BOOL rygMethodIsVoidQ(Method m) { if (!m || method_getNumberOfArguments(m
 - (NSString *)storePathFor:(NSString *)name { NSString *d = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"RyukGram"]; [NSFileManager.defaultManager createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil]; return [d stringByAppendingPathComponent:name]; }
 - (NSMutableDictionary *)loadOverrides { NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self storePathFor:@"mc_overrides.plist"]]; NSMutableDictionary *out = [NSMutableDictionary dictionary]; for (id raw in disk) { if (![raw isKindOfClass:NSString.class]) continue; unsigned long long pid = strtoull([raw UTF8String],NULL,10); RYGMCType type = (RYGMCType)((pid >> 48) & 0x0F); id v = disk[raw]; BOOL valid = type == RYGMCTypeString ? [v isKindOfClass:NSString.class] : [v isKindOfClass:NSNumber.class]; if (pid && RYGMCTypeIsRuntimeValue(type) && valid) out[@(rygCanonicalPid(pid))] = v; } return out; }
 - (void)syncOverridesJSON { NSError *error = nil; NSData *data = [self ryg_exportOverridesData:&error]; NSString *path = [self ryg_nativeOverridesJSONPath]; if (data.length && path.length) [data writeToFile:path options:NSDataWritingAtomic error:nil]; }
-- (void)saveOverrides { NSMutableDictionary *disk = [NSMutableDictionary dictionary]; for (NSNumber *k in _overrides) disk[k.stringValue] = _overrides[k]; [disk writeToFile:[self storePathFor:@"mc_overrides.plist"] atomically:YES]; [self syncOverridesJSON]; }
+- (void)saveOverrides {
+    NSMutableDictionary *disk = [NSMutableDictionary dictionary];
+    for (NSNumber *k in _overrides) disk[k.stringValue] = _overrides[k];
+    [disk writeToFile:[self storePathFor:@"mc_overrides.plist"] atomically:YES];
+    // A switch must only update the native PID + tiny plist synchronously.
+    // Canonical JSON is a backup/export concern and is coalesced off-main.
+    static atomic_uint_fast64_t generation = 0;
+    uint64_t mine = atomic_fetch_add_explicit(&generation, 1, memory_order_relaxed) + 1;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        if (atomic_load_explicit(&generation, memory_order_relaxed) != mine) return;
+        [weakSelf syncOverridesJSON];
+    });
+}
 - (NSMutableDictionary *)loadNotes { NSDictionary *disk = [NSDictionary dictionaryWithContentsOfFile:[self storePathFor:@"mc_notes.plist"]]; NSMutableDictionary *out = [NSMutableDictionary dictionary]; for (id k in disk) { id v = disk[k]; if ([k isKindOfClass:NSString.class] && [v isKindOfClass:NSString.class]) { unsigned long long n = strtoull([k UTF8String],NULL,10); if (n) out[@(n)] = v; } } return out; }
 - (void)saveNotes { NSMutableDictionary *disk = [NSMutableDictionary dictionary]; for (NSNumber *k in _notes) disk[k.stringValue] = _notes[k]; [disk writeToFile:[self storePathFor:@"mc_notes.plist"] atomically:YES]; }
 - (BOOL)consumeCrashLoopFlag { return NO; }

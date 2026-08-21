@@ -4,6 +4,7 @@
 #import <stdatomic.h>
 #import <stdint.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
 #if __has_include(<ptrauth.h>)
 #import <ptrauth.h>
 #endif
@@ -30,10 +31,9 @@ static NSString *const kRYGEasyGatingOverridesKey = @"ryg_easy_gating_platform_b
 typedef uint32_t (*RYGEasyGatingBoolFn)(uintptr_t context,
                                         uint32_t selectorOrGateID,
                                         uint32_t defaultValue,
-                                        uint32_t exposureValue);
+                                        uintptr_t exposureSource);
 
 static RYGEasyGatingBoolFn gRYGOriginalEasyGatingWrapper;
-static RYGEasyGatingBoolFn gRYGOriginalEasyGatingPlatformGetBoolean;
 static os_unfair_lock gRYGEasyGatingLock = OS_UNFAIR_LOCK_INIT;
 static NSMutableDictionary<NSNumber *, RYGEasyGatingObservation *> *gRYGEasyGatingObservations;
 static NSDictionary<NSString *, NSNumber *> *gRYGEasyGatingOverrideCache;
@@ -195,28 +195,15 @@ static BOOL RYGResolveFinalGateID(RYGEasyGatingBoolFn wrapper,
 static uint32_t RYGEasyGatingWrapperReplacement(uintptr_t context,
                                                  uint32_t selectorIndex,
                                                  uint32_t defaultValue,
-                                                 uint32_t exposureValue) {
+                                                 uintptr_t exposureSource) {
     RYGEasyGatingBoolFn original = gRYGOriginalEasyGatingWrapper;
-    uint32_t native = original ? original(context, selectorIndex, defaultValue, exposureValue)
+    uint32_t native = original ? original(context, selectorIndex, defaultValue, exposureSource)
                                : (defaultValue ? 1u : 0u);
     uint32_t finalID = 0;
     if (!RYGResolveFinalGateID(original, selectorIndex, &finalID)) return native;
-    BOOL exposure = exposureValue == 1u;
+    BOOL exposure = exposureSource != 0;
     RYGEasyGatingRecord(finalID, defaultValue != 0, exposure, native != 0);
     NSNumber *forced = RYGEasyGatingCachedOverride(finalID);
-    return forced ? (forced.boolValue ? 1u : 0u) : native;
-}
-
-static uint32_t RYGEasyGatingPlatformReplacement(uintptr_t context,
-                                                  uint32_t finalGateID,
-                                                  uint32_t defaultValue,
-                                                  uint32_t exposureValue) {
-    RYGEasyGatingBoolFn original = gRYGOriginalEasyGatingPlatformGetBoolean;
-    uint32_t native = original ? original(context, finalGateID, defaultValue, exposureValue)
-                               : (defaultValue ? 1u : 0u);
-    if (!finalGateID) return native;
-    RYGEasyGatingRecord(finalGateID, defaultValue != 0, exposureValue != 0, native != 0);
-    NSNumber *forced = RYGEasyGatingCachedOverride(finalGateID);
     return forced ? (forced.boolValue ? 1u : 0u) : native;
 }
 
@@ -225,19 +212,24 @@ static BOOL RYGRegisterEasyGatingRebindings(void) {
     bool expected = false;
     if (!atomic_compare_exchange_strong(&gRYGEasyGatingRebindingRegistered, &expected, true)) return YES;
 
-    struct rebinding bindings[] = {
-        {
-            .name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
-            .replacement = (void *)&RYGEasyGatingWrapperReplacement,
-            .replaced = (void **)&gRYGOriginalEasyGatingWrapper,
-        },
-        {
-            .name = "EasyGatingPlatformGetBoolean",
-            .replacement = (void *)&RYGEasyGatingPlatformReplacement,
-            .replaced = (void **)&gRYGOriginalEasyGatingPlatformGetBoolean,
-        },
+    const struct mach_header *mainHeader = NULL; intptr_t mainSlide = 0;
+    NSString *wanted = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
+    for (uint32_t i=0; i<_dyld_image_count(); i++) {
+        const char *raw=_dyld_get_image_name(i); if (!raw) continue;
+        NSString *path=[[NSString stringWithUTF8String:raw] stringByStandardizingPath];
+        if ([path isEqualToString:wanted]) { mainHeader=_dyld_get_image_header(i); mainSlide=_dyld_get_image_vmaddr_slide(i); break; }
+    }
+    if (!mainHeader) { atomic_store(&gRYGEasyGatingRebindingRegistered, false); return NO; }
+
+    struct rebinding binding = {
+        .name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock",
+        .replacement = (void *)&RYGEasyGatingWrapperReplacement,
+        .replaced = (void **)&gRYGOriginalEasyGatingWrapper,
     };
-    if (rebind_symbols(bindings, sizeof(bindings) / sizeof(bindings[0])) != 0) {
+    // Instagram(7) imports/calls this wrapper directly. Rebind only the main
+    // executable's import slot; do not register a process-wide hook and do not
+    // modify FBSharedFramework.__TEXT.
+    if (rebind_symbols_image((void *)mainHeader, mainSlide, &binding, 1) != 0 || !gRYGOriginalEasyGatingWrapper) {
         atomic_store(&gRYGEasyGatingRebindingRegistered, false);
         return NO;
     }
