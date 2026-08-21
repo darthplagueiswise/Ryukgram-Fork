@@ -28,6 +28,7 @@ static dispatch_queue_t RYGIndexWorkerQueue(void) {
 static NSMutableDictionary<NSString *, RYGRuntimeImageIndex *> *gRYGIndexes;
 static NSMutableDictionary<NSString *, NSMutableArray *> *gRYGListeners;
 static NSMutableSet<NSString *> *gRYGInFlight;
+static NSMutableSet<NSString *> *gRYGCompleted;
 static atomic_uint_fast64_t gRYGIndexEpoch = 1;
 
 static NSString *RYGIndexCanonicalPath(NSString *path) {
@@ -163,10 +164,12 @@ static void RYGIndexPublish(NSString *key,
     dispatch_async(RYGIndexStateQueue(), ^{
         if (atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed) != epoch) return;
         if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
+        if (!gRYGCompleted) gRYGCompleted = [NSMutableSet set];
         gRYGIndexes[key] = snapshot;
         NSArray *listeners = [gRYGListeners[key] copy] ?: @[];
         if (finalSnapshot) {
             [gRYGInFlight removeObject:key];
+            [gRYGCompleted addObject:key];
             [gRYGListeners removeObjectForKey:key];
         }
         if (!listeners.count) return;
@@ -211,8 +214,8 @@ static void RYGBuildIndexIncrementally(NSString *requested, NSString *key, uint6
         for (NSString *name in names) [classRows addObject:RYGIndexClassRow(name, canonical, 0, 0)];
         NSMutableDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *methodsByClass = [NSMutableDictionary dictionary];
 
-        // First paint: class discovery only. No class_copyMethodList/dladdr pass
-        // is allowed to hold the Runtime Browser behind a spinner.
+        // Second paint: the class list is usable before any class_copyMethodList
+        // or dladdr pass. Method eligibility fills progressively afterwards.
         RYGIndexPublish(key, RYGIndexSnapshot(canonical, classRows, methodsByClass, 0, 0, started, NO), epoch, NO);
 
         NSUInteger methodsScanned = 0;
@@ -296,6 +299,14 @@ static void RYGBuildIndexIncrementally(NSString *requested, NSString *key, uint6
         if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
         if (!gRYGListeners) gRYGListeners = [NSMutableDictionary dictionary];
         if (!gRYGInFlight) gRYGInFlight = [NSMutableSet set];
+        if (!gRYGCompleted) gRYGCompleted = [NSMutableSet set];
+
+        RYGRuntimeImageIndex *cached = gRYGIndexes[key];
+        if ([gRYGCompleted containsObject:key]) {
+            RYGRuntimeImageIndex *finalSnapshot = cached ?: RYGIndexSnapshot(key, @[], @{}, 0, 0, nil, YES);
+            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(finalSnapshot); });
+            return;
+        }
 
         if (completion) {
             NSMutableArray *listeners = gRYGListeners[key];
@@ -306,12 +317,17 @@ static void RYGBuildIndexIncrementally(NSString *requested, NSString *key, uint6
             [listeners addObject:[completion copy]];
         }
 
-        RYGRuntimeImageIndex *cached = gRYGIndexes[key];
         if (cached && completion) {
             dispatch_async(dispatch_get_main_queue(), ^{ completion(cached); });
+        } else if (completion) {
+            // First paint is deliberately empty and immediate. This guarantees
+            // navigation never waits on Objective-C metadata traversal.
+            RYGRuntimeImageIndex *bootstrap = RYGIndexSnapshot(key, @[], @{}, 0, 0, nil, NO);
+            gRYGIndexes[key] = bootstrap;
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(bootstrap); });
         }
-        if ([gRYGInFlight containsObject:key]) return;
 
+        if ([gRYGInFlight containsObject:key]) return;
         [gRYGInFlight addObject:key];
         dispatch_async(RYGIndexWorkerQueue(), ^{
             RYGBuildIndexIncrementally(requested, key, epoch);
@@ -334,6 +350,7 @@ static void RYGBuildIndexIncrementally(NSString *requested, NSString *key, uint6
         [gRYGIndexes removeAllObjects];
         [gRYGListeners removeAllObjects];
         [gRYGInFlight removeAllObjects];
+        [gRYGCompleted removeAllObjects];
     });
 }
 
