@@ -15,6 +15,10 @@ static BOOL gRYGDeveloperBootstrapActive;
 static BOOL gRYGDeveloperBootstrapScheduled;
 static char kRYGDeveloperBootstrapQueueSpecific;
 
+@interface RYGDeveloperTopicViewController (RYGBackgroundPersistedActivation)
++ (void)ryg_background_activatePersistedNativeFeatures;
+@end
+
 static dispatch_queue_t RYGDeveloperBootstrapQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
