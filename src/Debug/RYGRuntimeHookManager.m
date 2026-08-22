@@ -17,9 +17,8 @@ static NSString *const kRYGRuntimeCV6Key = @"ryg_runtime_c_hook_specs_v6";
 static NSString *const kRYGRuntimeCLegacyV5Key = @"ryg_runtime_c_overrides_v5";
 static NSString *const kRYGRuntimeCLegacyV4Key = @"ryg_runtime_c_overrides_v4";
 
-// A generic browser is not allowed to turn into a launch-time global hook sweep.
-// Explicit Developer features have their own targeted owners. Generic Runtime
-// Browser persistence is therefore deliberately bounded.
+// Generic Runtime Browser persistence is bounded by design. Exact dedicated
+// Developer features have their own tiny owners and are not subject to this cap.
 static const NSUInteger kRYGRuntimePersistentSpecLimit = 128;
 static const NSUInteger kRYGRuntimeCPersistentSpecLimit = 8;
 
@@ -39,7 +38,13 @@ static NSMutableDictionary<NSString *, NSNumber *> *gRYGRuntimeValues;
 static NSMutableDictionary<NSString *, NSNumber *> *gRYGRuntimeObserved;
 static NSMutableDictionary<NSString *, RYGRuntimeHookRecord *> *gRYGRuntimeHooks;
 static NSMutableDictionary<NSString *, NSDictionary *> *gRYGRuntimeSpecs;
+static NSMutableSet<NSString *> *gRYGRuntimePending;
 static dispatch_once_t gRYGRuntimeStoreOnce;
+
+static NSMutableDictionary<NSString *, NSDictionary *> *gRYGCRecords;
+static NSMutableSet<NSString *> *gRYGCPending;
+static dispatch_once_t gRYGCStoreOnce;
+
 static os_unfair_lock gRYGRestoreLock = OS_UNFAIR_LOCK_INIT;
 static BOOL gRYGRestoreScheduled;
 
@@ -80,8 +85,7 @@ static RYGRuntimeArgumentKind RYGHookArgumentKind(Method method) {
     return (RYGRuntimeArgumentKind)-1;
 }
 
-// Direct method-list lookup intentionally avoids +resolveInstanceMethod: and
-// keeps persisted replay deterministic.
+// Direct lookup avoids +resolveInstanceMethod: and makes replay deterministic.
 static Method RYGHookDirectMethod(Class owner, SEL selector) {
     if (!owner || !selector) return NULL;
     unsigned int count = 0;
@@ -126,7 +130,6 @@ static NSDictionary *RYGHookValidatedSpec(id raw, NSString *fallbackKey, NSNumbe
         kind = [input[@"kind"] isKindOfClass:NSNumber.class] ? input[@"kind"] : nil;
         value = [input[@"value"] isKindOfClass:NSNumber.class] ? input[@"value"] : value;
     }
-
     if ((!className.length || !selectorName.length || !meta) && fallbackKey.length) {
         BOOL classMethod = NO;
         if (!RYGHookParseLegacyKey(fallbackKey, &className, &selectorName, &classMethod)) return nil;
@@ -142,14 +145,7 @@ static NSDictionary *RYGHookValidatedSpec(id raw, NSString *fallbackKey, NSNumbe
         rawKind = RYGHookArgumentKind(method);
     }
     if (rawKind < RYGRuntimeArgumentNone || rawKind > RYGRuntimeArgumentInteger) return nil;
-
-    return @{
-        @"class": className,
-        @"selector": selectorName,
-        @"meta": @(meta.boolValue),
-        @"kind": @(rawKind),
-        @"value": @(value.boolValue),
-    };
+    return @{@"class":className, @"selector":selectorName, @"meta":@(meta.boolValue), @"kind":@(rawKind), @"value":@(value.boolValue)};
 }
 
 static NSArray<NSString *> *RYGSortedStringKeys(NSDictionary *dictionary) {
@@ -161,8 +157,7 @@ static NSArray<NSString *> *RYGSortedStringKeys(NSDictionary *dictionary) {
 
 static void RYGWriteQuarantine(NSUInteger originalCount, NSUInteger keptCount, NSString *source) {
     if (originalCount <= keptCount) return;
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    [defaults setObject:@{
+    [NSUserDefaults.standardUserDefaults setObject:@{
         @"reason": @"pathological generic Runtime Browser persistence was bounded to protect launch time",
         @"source": source ?: @"unknown",
         @"original_count": @(originalCount),
@@ -187,6 +182,7 @@ static void RYGHookLoadStore(void) {
         gRYGRuntimeObserved = [NSMutableDictionary dictionary];
         gRYGRuntimeHooks = [NSMutableDictionary dictionary];
         gRYGRuntimeSpecs = [NSMutableDictionary dictionary];
+        gRYGRuntimePending = [NSMutableSet set];
 
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         NSDictionary *source = [defaults dictionaryForKey:kRYGRuntimeSpecsV7Key];
@@ -209,10 +205,8 @@ static void RYGHookLoadStore(void) {
             NSString *key = RYGHookKey(spec[@"class"], spec[@"selector"], [spec[@"meta"] boolValue]);
             gRYGRuntimeSpecs[key] = spec;
             gRYGRuntimeValues[key] = spec[@"value"];
+            [gRYGRuntimePending addObject:key];
         }
-
-        // Rewrite once into the bounded v7 schema. This is the migration that
-        // permanently removes multi-minute replay sets created by old Reveal All.
         RYGWritePersistedSpecs(gRYGRuntimeSpecs.copy);
     });
 }
@@ -231,59 +225,40 @@ static void RYGHookRememberNative(NSString *key, BOOL value) {
     BOOL changed = NO;
     os_unfair_lock_lock(&gRYGRuntimeLock);
     NSNumber *previous = gRYGRuntimeObserved[key];
-    if (!previous || previous.boolValue != value) {
-        gRYGRuntimeObserved[key] = @(value);
-        changed = YES;
-    }
+    if (!previous || previous.boolValue != value) { gRYGRuntimeObserved[key] = @(value); changed = YES; }
     os_unfair_lock_unlock(&gRYGRuntimeLock);
-    if (changed) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSNotificationCenter.defaultCenter postNotificationName:RYGRuntimeNativeValueDidChangeNotification
-                                                               object:nil
-                                                             userInfo:@{RYGRuntimeNativeValueKeyUserInfoKey:key}];
-        });
-    }
+    if (changed) dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:RYGRuntimeNativeValueDidChangeNotification object:nil userInfo:@{RYGRuntimeNativeValueKeyUserInfoKey:key}];
+    });
 }
 
 static RYGRuntimeHookRecord *RYGHookCreateRecord(NSString *key, Class owner, SEL selector, BOOL classMethod, RYGRuntimeArgumentKind kind, IMP upstream) {
     RYGRuntimeHookRecord *record = [RYGRuntimeHookRecord new];
-    record.key = key;
-    record.owner = owner;
-    record.selector = selector;
-    record.classMethod = classMethod;
-    record.kind = kind;
-    record.upstream = upstream;
-
+    record.key = key; record.owner = owner; record.selector = selector; record.classMethod = classMethod; record.kind = kind; record.upstream = upstream;
     __weak RYGRuntimeHookRecord *weakRecord = record;
     if (kind == RYGRuntimeArgumentNone) {
         record.replacement = imp_implementationWithBlock(^BOOL(id receiver) {
-            RYGRuntimeHookRecord *strongRecord = weakRecord;
-            if (!strongRecord) return NO;
+            RYGRuntimeHookRecord *strongRecord = weakRecord; if (!strongRecord) return NO;
             IMP nativeIMP = strongRecord.upstream;
-            BOOL native = nativeIMP ? ((BOOL (*)(id, SEL))nativeIMP)(receiver, strongRecord.selector) : NO;
-            RYGHookRememberNative(strongRecord.key, native);
-            NSNumber *forced = RYGHookOverride(strongRecord.key);
-            return forced ? forced.boolValue : native;
+            BOOL native = nativeIMP ? ((BOOL (*)(id,SEL))nativeIMP)(receiver,strongRecord.selector) : NO;
+            RYGHookRememberNative(strongRecord.key,native);
+            NSNumber *forced = RYGHookOverride(strongRecord.key); return forced ? forced.boolValue : native;
         });
     } else if (kind == RYGRuntimeArgumentObject) {
         record.replacement = imp_implementationWithBlock(^BOOL(id receiver, id argument) {
-            RYGRuntimeHookRecord *strongRecord = weakRecord;
-            if (!strongRecord) return NO;
+            RYGRuntimeHookRecord *strongRecord = weakRecord; if (!strongRecord) return NO;
             IMP nativeIMP = strongRecord.upstream;
-            BOOL native = nativeIMP ? ((BOOL (*)(id, SEL, id))nativeIMP)(receiver, strongRecord.selector, argument) : NO;
-            RYGHookRememberNative(strongRecord.key, native);
-            NSNumber *forced = RYGHookOverride(strongRecord.key);
-            return forced ? forced.boolValue : native;
+            BOOL native = nativeIMP ? ((BOOL (*)(id,SEL,id))nativeIMP)(receiver,strongRecord.selector,argument) : NO;
+            RYGHookRememberNative(strongRecord.key,native);
+            NSNumber *forced = RYGHookOverride(strongRecord.key); return forced ? forced.boolValue : native;
         });
     } else if (kind == RYGRuntimeArgumentInteger) {
         record.replacement = imp_implementationWithBlock(^BOOL(id receiver, uint64_t argument) {
-            RYGRuntimeHookRecord *strongRecord = weakRecord;
-            if (!strongRecord) return NO;
+            RYGRuntimeHookRecord *strongRecord = weakRecord; if (!strongRecord) return NO;
             IMP nativeIMP = strongRecord.upstream;
-            BOOL native = nativeIMP ? ((BOOL (*)(id, SEL, uint64_t))nativeIMP)(receiver, strongRecord.selector, argument) : NO;
-            RYGHookRememberNative(strongRecord.key, native);
-            NSNumber *forced = RYGHookOverride(strongRecord.key);
-            return forced ? forced.boolValue : native;
+            BOOL native = nativeIMP ? ((BOOL (*)(id,SEL,uint64_t))nativeIMP)(receiver,strongRecord.selector,argument) : NO;
+            RYGHookRememberNative(strongRecord.key,native);
+            NSNumber *forced = RYGHookOverride(strongRecord.key); return forced ? forced.boolValue : native;
         });
     }
     return record.replacement ? record : nil;
@@ -291,49 +266,33 @@ static RYGRuntimeHookRecord *RYGHookCreateRecord(NSString *key, Class owner, SEL
 
 static BOOL RYGHookInstallExact(NSString *className, NSString *selectorName, BOOL classMethod, RYGRuntimeArgumentKind expectedKind, NSString *key) {
     if (!className.length || !selectorName.length || !key.length) return NO;
-    Class cls = objc_lookUpClass(className.UTF8String);
-    if (!cls) return NO;
+    Class cls = objc_lookUpClass(className.UTF8String); if (!cls) return NO;
     Class owner = classMethod ? object_getClass(cls) : cls;
     SEL selector = NSSelectorFromString(selectorName);
-    Method method = RYGHookDirectMethod(owner, selector);
+    Method method = RYGHookDirectMethod(owner,selector);
     RYGRuntimeArgumentKind runtimeKind = RYGHookArgumentKind(method);
     if (!owner || !method || runtimeKind < RYGRuntimeArgumentNone || runtimeKind > RYGRuntimeArgumentInteger) return NO;
     if (expectedKind >= RYGRuntimeArgumentNone && expectedKind <= RYGRuntimeArgumentInteger && runtimeKind != expectedKind) return NO;
-    IMP current = method_getImplementation(method);
-    if (!current) return NO;
+    IMP current = method_getImplementation(method); if (!current) return NO;
 
     RYGHookLoadStore();
     os_unfair_lock_lock(&gRYGRuntimeLock);
     RYGRuntimeHookRecord *record = gRYGRuntimeHooks[key];
-    if (record && current == record.replacement) {
-        os_unfair_lock_unlock(&gRYGRuntimeLock);
-        return YES;
-    }
+    if (record && current == record.replacement) { os_unfair_lock_unlock(&gRYGRuntimeLock); return YES; }
     if (!record || record.owner != owner || record.selector != selector || record.kind != runtimeKind) {
-        record = RYGHookCreateRecord(key, owner, selector, classMethod, runtimeKind, current);
+        record = RYGHookCreateRecord(key,owner,selector,classMethod,runtimeKind,current);
         if (!record) { os_unfair_lock_unlock(&gRYGRuntimeLock); return NO; }
         gRYGRuntimeHooks[key] = record;
-    } else {
-        record.upstream = current;
-    }
+    } else record.upstream = current;
     IMP replacement = record.replacement;
     os_unfair_lock_unlock(&gRYGRuntimeLock);
-
-    (void)method_setImplementation(method, replacement);
+    (void)method_setImplementation(method,replacement);
     return method_getImplementation(method) == replacement;
 }
 
 static BOOL RYGHookInstallMethod(RYGRuntimeBoolMethod *method) {
     if (![method isKindOfClass:RYGRuntimeBoolMethod.class] || !method.className.length || !method.selectorName.length) return NO;
-    return RYGHookInstallExact(method.className, method.selectorName, method.classMethod, method.argumentKind, method.overrideKey);
-}
-
-static NSDictionary *RYGPersistedSnapshot(void) {
-    RYGHookLoadStore();
-    os_unfair_lock_lock(&gRYGRuntimeLock);
-    NSDictionary *snapshot = gRYGRuntimeSpecs.copy ?: @{};
-    os_unfair_lock_unlock(&gRYGRuntimeLock);
-    return snapshot;
+    return RYGHookInstallExact(method.className,method.selectorName,method.classMethod,method.argumentKind,method.overrideKey);
 }
 
 static NSString *RYGCImageID(NSString *path) {
@@ -350,33 +309,16 @@ static NSString *RYGCImageID(NSString *path) {
 static NSString *RYGCLoadedPath(NSString *imageID) {
     if (!imageID.length) return nil;
     if ([imageID isEqualToString:@"@executable"]) return NSBundle.mainBundle.executablePath;
-    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
-        const char *raw = _dyld_get_image_name(index);
-        if (!raw) continue;
-        NSString *path = [[NSString stringWithUTF8String:raw] stringByStandardizingPath];
+    for (uint32_t index=0; index<_dyld_image_count(); index++) {
+        const char *raw=_dyld_get_image_name(index); if (!raw) continue;
+        NSString *path=[[NSString stringWithUTF8String:raw] stringByStandardizingPath];
         if ([RYGCImageID(path) caseInsensitiveCompare:imageID] == NSOrderedSame) return path;
     }
     return nil;
 }
 
-static NSMutableDictionary *RYGCStoredMutable(void) {
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    NSDictionary *source = [defaults dictionaryForKey:kRYGRuntimeCSpecsV7Key];
-    if (!source.count) source = [defaults dictionaryForKey:kRYGRuntimeCV6Key];
-    if (!source.count) source = [defaults dictionaryForKey:kRYGRuntimeCLegacyV5Key];
-    if (!source.count) source = [defaults dictionaryForKey:kRYGRuntimeCLegacyV4Key];
-    if (!source.count) return [NSMutableDictionary dictionary];
-
-    NSArray<NSString *> *keys = RYGSortedStringKeys(source);
-    NSUInteger limit = MIN(keys.count, kRYGRuntimeCPersistentSpecLimit);
-    NSMutableDictionary *out = [NSMutableDictionary dictionaryWithCapacity:limit];
-    for (NSUInteger index = 0; index < limit; index++) out[keys[index]] = source[keys[index]];
-    if (source.count > limit) RYGWriteQuarantine(source.count, limit, @"C-import persistence");
-    return out;
-}
-
-static void RYGCWrite(NSDictionary *records) {
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+static void RYGCWriteDefaults(NSDictionary *records) {
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
     if (records.count) [defaults setObject:records forKey:kRYGRuntimeCSpecsV7Key];
     else [defaults removeObjectForKey:kRYGRuntimeCSpecsV7Key];
     [defaults removeObjectForKey:kRYGRuntimeCV6Key];
@@ -385,77 +327,98 @@ static void RYGCWrite(NSDictionary *records) {
     [defaults synchronize];
 }
 
+static void RYGCLoadStore(void) {
+    dispatch_once(&gRYGCStoreOnce, ^{
+        gRYGCRecords=[NSMutableDictionary dictionary];
+        gRYGCPending=[NSMutableSet set];
+        NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+        NSDictionary *source=[defaults dictionaryForKey:kRYGRuntimeCSpecsV7Key];
+        if (!source.count) source=[defaults dictionaryForKey:kRYGRuntimeCV6Key];
+        if (!source.count) source=[defaults dictionaryForKey:kRYGRuntimeCLegacyV5Key];
+        if (!source.count) source=[defaults dictionaryForKey:kRYGRuntimeCLegacyV4Key];
+        NSArray *keys=RYGSortedStringKeys(source ?: @{});
+        NSUInteger limit=MIN(keys.count,kRYGRuntimeCPersistentSpecLimit);
+        if (keys.count>limit) RYGWriteQuarantine(keys.count,limit,@"C-import persistence");
+        for (NSUInteger index=0; index<limit; index++) {
+            id record=source[keys[index]];
+            if (![record isKindOfClass:NSDictionary.class]) continue;
+            gRYGCRecords[keys[index]]=record;
+            [gRYGCPending addObject:keys[index]];
+        }
+        RYGCWriteDefaults(gRYGCRecords.copy);
+    });
+}
+
+static NSMutableDictionary *RYGCStoredMutable(void) {
+    RYGCLoadStore();
+    @synchronized(RYGRuntimeHookManager.class) { return gRYGCRecords.mutableCopy ?: [NSMutableDictionary dictionary]; }
+}
+
+static void RYGCWrite(NSDictionary *records) {
+    RYGCLoadStore();
+    @synchronized(RYGRuntimeHookManager.class) { gRYGCRecords=[records mutableCopy] ?: [NSMutableDictionary dictionary]; }
+    RYGCWriteDefaults(records ?: @{});
+}
+
+static BOOL RYGHasPendingRestore(void) {
+    RYGHookLoadStore(); RYGCLoadStore();
+    os_unfair_lock_lock(&gRYGRuntimeLock); BOOL methodPending=gRYGRuntimePending.count>0; os_unfair_lock_unlock(&gRYGRuntimeLock);
+    @synchronized(RYGRuntimeHookManager.class) { return methodPending || gRYGCPending.count>0; }
+}
+
 @implementation RYGRuntimeHookManager
 
-+ (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method {
-    RYGHookLoadStore();
-    return RYGHookInstallMethod(method);
-}
++ (BOOL)observeMethod:(RYGRuntimeBoolMethod *)method { RYGHookLoadStore(); return RYGHookInstallMethod(method); }
 
 + (NSNumber *)observedNativeValueForKey:(NSString *)overrideKey {
-    if (!overrideKey.length) return nil;
-    RYGHookLoadStore();
-    os_unfair_lock_lock(&gRYGRuntimeLock);
-    NSNumber *value = gRYGRuntimeObserved[overrideKey];
-    os_unfair_lock_unlock(&gRYGRuntimeLock);
-    return value;
+    if (!overrideKey.length) return nil; RYGHookLoadStore();
+    os_unfair_lock_lock(&gRYGRuntimeLock); NSNumber *value=gRYGRuntimeObserved[overrideKey]; os_unfair_lock_unlock(&gRYGRuntimeLock); return value;
 }
-
-+ (NSNumber *)overrideForKey:(NSString *)overrideKey {
-    return overrideKey.length ? RYGHookOverride(overrideKey) : nil;
-}
++ (NSNumber *)overrideForKey:(NSString *)overrideKey { return overrideKey.length ? RYGHookOverride(overrideKey) : nil; }
 
 + (BOOL)setSessionOverride:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method {
     if (![method isKindOfClass:RYGRuntimeBoolMethod.class] || !method.overrideKey.length) return NO;
     if (value && !RYGHookInstallMethod(method)) return NO;
     RYGHookLoadStore();
     os_unfair_lock_lock(&gRYGRuntimeLock);
-    if (value) gRYGRuntimeValues[method.overrideKey] = @(value.boolValue);
-    else [gRYGRuntimeValues removeObjectForKey:method.overrideKey];
-    os_unfair_lock_unlock(&gRYGRuntimeLock);
-    return YES;
+    if (value) gRYGRuntimeValues[method.overrideKey]=@(value.boolValue); else [gRYGRuntimeValues removeObjectForKey:method.overrideKey];
+    os_unfair_lock_unlock(&gRYGRuntimeLock); return YES;
 }
 
 + (BOOL)setOverride:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method {
     if (![method isKindOfClass:RYGRuntimeBoolMethod.class] || !method.overrideKey.length) return NO;
     if (value && !RYGHookInstallMethod(method)) return NO;
-    RYGHookLoadStore();
-    NSString *key = method.overrideKey;
-    NSDictionary *snapshot = nil;
+    RYGHookLoadStore(); NSString *key=method.overrideKey; NSDictionary *snapshot=nil;
     os_unfair_lock_lock(&gRYGRuntimeLock);
     if (value) {
-        NSNumber *normalized = @(value.boolValue);
-        gRYGRuntimeValues[key] = normalized;
-        BOOL alreadyPersisted = gRYGRuntimeSpecs[key] != nil;
-        if (alreadyPersisted || gRYGRuntimeSpecs.count < kRYGRuntimePersistentSpecLimit) {
-            gRYGRuntimeSpecs[key] = @{
-                @"class": method.className ?: @"",
-                @"selector": method.selectorName ?: @"",
-                @"meta": @(method.classMethod),
-                @"kind": @(method.argumentKind),
-                @"value": normalized,
-            };
-        }
+        NSNumber *normalized=@(value.boolValue); gRYGRuntimeValues[key]=normalized;
+        BOOL already=gRYGRuntimeSpecs[key]!=nil;
+        if (already || gRYGRuntimeSpecs.count<kRYGRuntimePersistentSpecLimit)
+            gRYGRuntimeSpecs[key]=@{@"class":method.className ?: @"",@"selector":method.selectorName ?: @"",@"meta":@(method.classMethod),@"kind":@(method.argumentKind),@"value":normalized};
+        [gRYGRuntimePending removeObject:key];
     } else {
-        [gRYGRuntimeValues removeObjectForKey:key];
-        [gRYGRuntimeSpecs removeObjectForKey:key];
+        [gRYGRuntimeValues removeObjectForKey:key]; [gRYGRuntimeSpecs removeObjectForKey:key]; [gRYGRuntimePending removeObject:key];
     }
-    snapshot = gRYGRuntimeSpecs.copy ?: @{};
-    os_unfair_lock_unlock(&gRYGRuntimeLock);
-    RYGWritePersistedSpecs(snapshot);
-    return YES;
+    snapshot=gRYGRuntimeSpecs.copy ?: @{}; os_unfair_lock_unlock(&gRYGRuntimeLock);
+    RYGWritePersistedSpecs(snapshot); return YES;
 }
 
 + (void)restorePersistedOverrides {
-    NSDictionary<NSString *, NSDictionary *> *snapshot = RYGPersistedSnapshot();
-    [snapshot enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *spec, BOOL *stop) {
-        (void)stop;
-        (void)RYGHookInstallExact(spec[@"class"], spec[@"selector"], [spec[@"meta"] boolValue], (RYGRuntimeArgumentKind)[spec[@"kind"] integerValue], key);
-    }];
+    RYGHookLoadStore();
+    os_unfair_lock_lock(&gRYGRuntimeLock);
+    NSArray<NSString *> *pending=gRYGRuntimePending.allObjects.copy ?: @[];
+    NSDictionary *specs=gRYGRuntimeSpecs.copy ?: @{};
+    os_unfair_lock_unlock(&gRYGRuntimeLock);
+    for (NSString *key in pending) {
+        NSDictionary *spec=specs[key]; if (!spec) continue;
+        if (RYGHookInstallExact(spec[@"class"],spec[@"selector"],[spec[@"meta"] boolValue],(RYGRuntimeArgumentKind)[spec[@"kind"] integerValue],key)) {
+            os_unfair_lock_lock(&gRYGRuntimeLock); [gRYGRuntimePending removeObject:key]; os_unfair_lock_unlock(&gRYGRuntimeLock);
+        }
+    }
 }
 
 + (NSUInteger)persistedOverrideCount {
-    return RYGPersistedSnapshot().count;
+    RYGHookLoadStore(); os_unfair_lock_lock(&gRYGRuntimeLock); NSUInteger count=gRYGRuntimeSpecs.count; os_unfair_lock_unlock(&gRYGRuntimeLock); return count;
 }
 
 @end
@@ -470,98 +433,75 @@ static void RYGCWrite(NSDictionary *records) {
 @end
 
 @implementation RYGRuntimeBrowserEngine (RYGRuntimeHookManagerBridge)
-
 + (void)load {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        struct { SEL original; SEL replacement; } swaps[] = {
-            {@selector(observeMethod:), @selector(ryg_manager_observeMethod:)},
-            {@selector(observedNativeValueForKey:), @selector(ryg_manager_observedNativeValueForKey:)},
-            {@selector(overrideForKey:), @selector(ryg_manager_overrideForKey:)},
-            {@selector(setOverride:forMethod:), @selector(ryg_manager_setOverride:forMethod:)},
-            {@selector(reinstallPersistedOverrides), @selector(ryg_manager_reinstallPersistedOverrides)},
-            {@selector(setCOverride:forSymbol:abi:), @selector(ryg_manager_setCOverride:forSymbol:abi:)},
+    static dispatch_once_t onceToken; dispatch_once(&onceToken, ^{
+        struct { SEL original; SEL replacement; } swaps[]={
+            {@selector(observeMethod:),@selector(ryg_manager_observeMethod:)},
+            {@selector(observedNativeValueForKey:),@selector(ryg_manager_observedNativeValueForKey:)},
+            {@selector(overrideForKey:),@selector(ryg_manager_overrideForKey:)},
+            {@selector(setOverride:forMethod:),@selector(ryg_manager_setOverride:forMethod:)},
+            {@selector(reinstallPersistedOverrides),@selector(ryg_manager_reinstallPersistedOverrides)},
+            {@selector(setCOverride:forSymbol:abi:),@selector(ryg_manager_setCOverride:forSymbol:abi:)},
         };
-        for (NSUInteger index = 0; index < sizeof(swaps) / sizeof(swaps[0]); index++) {
-            Method original = class_getClassMethod(self, swaps[index].original);
-            Method replacement = class_getClassMethod(self, swaps[index].replacement);
-            if (original && replacement) method_exchangeImplementations(original, replacement);
+        for (NSUInteger index=0;index<sizeof(swaps)/sizeof(swaps[0]);index++) {
+            Method original=class_getClassMethod(self,swaps[index].original), replacement=class_getClassMethod(self,swaps[index].replacement);
+            if (original&&replacement) method_exchangeImplementations(original,replacement);
         }
     });
 }
-
 + (BOOL)ryg_manager_observeMethod:(RYGRuntimeBoolMethod *)method { return [RYGRuntimeHookManager observeMethod:method]; }
 + (NSNumber *)ryg_manager_observedNativeValueForKey:(NSString *)overrideKey { return [RYGRuntimeHookManager observedNativeValueForKey:overrideKey]; }
 + (NSNumber *)ryg_manager_overrideForKey:(NSString *)overrideKey { return [RYGRuntimeHookManager overrideForKey:overrideKey]; }
 + (void)ryg_manager_setOverride:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method { (void)[RYGRuntimeHookManager setOverride:value forMethod:method]; }
 
 + (void)ryg_manager_reinstallPersistedOverrides {
-    [RYGRuntimeHookManager restorePersistedOverrides];
-    NSDictionary *stored = RYGCStoredMutable().copy;
-    [stored enumerateKeysAndObjectsUsingBlock:^(id rawKey, id rawRecord, BOOL *stop) {
-        (void)rawKey; (void)stop;
-        if (![rawRecord isKindOfClass:NSDictionary.class]) return;
-        NSDictionary *record = rawRecord;
-        NSString *imageID = [record[@"image"] isKindOfClass:NSString.class] ? record[@"image"] : nil;
-        NSString *name = [record[@"name"] isKindOfClass:NSString.class] ? record[@"name"] : nil;
-        NSNumber *abi = [record[@"abi"] isKindOfClass:NSNumber.class] ? record[@"abi"] : nil;
-        NSNumber *value = [record[@"value"] isKindOfClass:NSNumber.class] ? record[@"value"] : nil;
-        NSString *path = RYGCLoadedPath(imageID);
-        if (!path.length || !name.length || !abi || !value) return;
-        RYGMachOSymbol *symbol = [RYGMachOSymbol new];
-        symbol.imagePath = path;
-        symbol.name = name;
-        symbol.external = YES;
-        symbol.rebindableImport = YES;
-        (void)[self ryg_manager_setCOverride:value forSymbol:symbol abi:(RYGCFunctionABI)abi.integerValue];
-    }];
-    if (stored.count) RYGCWrite(stored);
+    [RYGRuntimeHookManager restorePersistedOverrides]; RYGCLoadStore();
+    @synchronized(RYGRuntimeHookManager.class) {
+        NSArray *pending=gRYGCPending.allObjects.copy ?: @[]; NSDictionary *records=gRYGCRecords.copy ?: @{};
+        for (NSString *key in pending) {
+            NSDictionary *record=records[key]; if (![record isKindOfClass:NSDictionary.class]) continue;
+            NSString *imageID=[record[@"image"] isKindOfClass:NSString.class] ? record[@"image"] : nil;
+            NSString *name=[record[@"name"] isKindOfClass:NSString.class] ? record[@"name"] : nil;
+            NSNumber *abi=[record[@"abi"] isKindOfClass:NSNumber.class] ? record[@"abi"] : nil;
+            NSNumber *value=[record[@"value"] isKindOfClass:NSNumber.class] ? record[@"value"] : nil;
+            NSString *path=RYGCLoadedPath(imageID); if (!path.length||!name.length||!abi||!value) continue;
+            RYGMachOSymbol *symbol=[RYGMachOSymbol new]; symbol.imagePath=path; symbol.name=name; symbol.external=YES; symbol.rebindableImport=YES;
+            if ([self ryg_manager_setCOverride:value forSymbol:symbol abi:(RYGCFunctionABI)abi.integerValue]) [gRYGCPending removeObject:key];
+        }
+    }
 }
 
 + (BOOL)ryg_manager_setCOverride:(NSNumber *)value forSymbol:(RYGMachOSymbol *)symbol abi:(RYGCFunctionABI)abi {
-    // After exchange this selector calls the engine's original fishhook path.
-    BOOL success = [self ryg_manager_setCOverride:value forSymbol:symbol abi:abi];
-    NSString *imageID = RYGCImageID(symbol.imagePath);
-    NSString *name = symbol.name ?: @"";
-    if (!imageID.length || !name.length) return success;
-    NSMutableDictionary *stored = RYGCStoredMutable();
-    NSString *recordKey = [NSString stringWithFormat:@"%@|%@", imageID, name];
-    if (!value) [stored removeObjectForKey:recordKey];
-    else if (success) stored[recordKey] = @{@"image":imageID, @"name":name, @"abi":@(abi), @"value":@(value.boolValue)};
-    RYGCWrite(stored);
-    return success;
+    BOOL success=[self ryg_manager_setCOverride:value forSymbol:symbol abi:abi];
+    NSString *imageID=RYGCImageID(symbol.imagePath), *name=symbol.name ?: @""; if (!imageID.length||!name.length) return success;
+    NSMutableDictionary *stored=RYGCStoredMutable(); NSString *recordKey=[NSString stringWithFormat:@"%@|%@",imageID,name];
+    if (!value) { [stored removeObjectForKey:recordKey]; @synchronized(RYGRuntimeHookManager.class){[gRYGCPending removeObject:recordKey];} }
+    else if (success) { stored[recordKey]=@{@"image":imageID,@"name":name,@"abi":@(abi),@"value":@(value.boolValue)}; @synchronized(RYGRuntimeHookManager.class){[gRYGCPending removeObject:recordKey];} }
+    RYGCWrite(stored); return success;
 }
-
 @end
 
 static void RYGScheduleExactRuntimeRestore(void) {
-    if (![RYGRuntimeHookManager persistedOverrideCount] && !RYGCStoredMutable().count) return;
-    os_unfair_lock_lock(&gRYGRestoreLock);
-    if (gRYGRestoreScheduled) { os_unfair_lock_unlock(&gRYGRestoreLock); return; }
-    gRYGRestoreScheduled = YES;
-    os_unfair_lock_unlock(&gRYGRestoreLock);
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_MSEC)), RYGRuntimeRestoreQueue(), ^{
+    if (!RYGHasPendingRestore()) return;
+    os_unfair_lock_lock(&gRYGRestoreLock); if (gRYGRestoreScheduled) { os_unfair_lock_unlock(&gRYGRestoreLock); return; } gRYGRestoreScheduled=YES; os_unfair_lock_unlock(&gRYGRestoreLock);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(120*NSEC_PER_MSEC)),RYGRuntimeRestoreQueue(), ^{
         [RYGRuntimeBrowserEngine reinstallPersistedOverrides];
-        os_unfair_lock_lock(&gRYGRestoreLock);
-        gRYGRestoreScheduled = NO;
-        os_unfair_lock_unlock(&gRYGRestoreLock);
+        os_unfair_lock_lock(&gRYGRestoreLock); gRYGRestoreScheduled=NO; os_unfair_lock_unlock(&gRYGRestoreLock);
     });
 }
 
 static void RYGRuntimeExactImageDidLoad(const struct mach_header *header, intptr_t slide) {
     (void)header; (void)slide;
-    // O(1) callback. Exact persisted identities are retried after late framework
-    // loads; no image/class/method catalogue is built here.
+    // Once all exact persisted identities resolve, every later dyld callback is
+    // just a cached count check and returns immediately.
     RYGScheduleExactRuntimeRestore();
 }
 
 __attribute__((constructor(205))) static void RYGRuntimeHookManagerBootstrap(void) {
     @autoreleasepool {
-        RYGHookLoadStore();
-        // Bounded exact replay is safe before launch and preserves early gates.
-        [RYGRuntimeHookManager restorePersistedOverrides];
-        _dyld_register_func_for_add_image(RYGRuntimeExactImageDidLoad);
+        RYGHookLoadStore(); RYGCLoadStore();
+        [RYGRuntimeBrowserEngine reinstallPersistedOverrides];
+        if (RYGHasPendingRestore()) _dyld_register_func_for_add_image(RYGRuntimeExactImageDidLoad);
         RYGScheduleExactRuntimeRestore();
     }
 }
