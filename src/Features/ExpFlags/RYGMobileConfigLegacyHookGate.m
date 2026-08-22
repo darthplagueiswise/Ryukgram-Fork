@@ -4,15 +4,14 @@
 #import <stdatomic.h>
 
 // RYGMobileConfigHookOwner installs the RAM-only getter owner from +load, before
-// C/Logos constructors run.  The older RYGMobileConfig.xm %ctor is still kept as
+// C/Logos constructors run. The older RYGMobileConfig.xm %ctor is still kept as
 // a compatibility fallback, but when ryg_metaconfig_enabled is true it would
 // otherwise wrap the same sixteen getters again during cold launch.
 //
-// Do not mutate the user's preference.  For the constructor window only, make
-// RYGUtils report this one legacy bootstrap key as disabled.  The fast owner has
-// already captured the real preference from +load.  Once the application is
-// active the method exchange is removed entirely, so there is no steady-state
-// cost and the saved preference remains unchanged.
+// Do not mutate the user's preference. For the constructor window only, make
+// RYGUtils report this one legacy bootstrap key as disabled. The fast owner has
+// already captured the real preference from +load. Once launch completes the
+// method exchange is removed entirely, so there is no steady-state read cost.
 
 static atomic_bool gRYGMCLegacyGateInstalled = false;
 static atomic_bool gRYGMCLegacyGateOpen = false;
@@ -60,21 +59,20 @@ __attribute__((constructor(90))) static void RYGInstallMobileConfigLegacyHookGat
     atomic_store_explicit(&gRYGMCLegacyGateInstalled, true, memory_order_release);
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-        __block id token = nil;
-        token = [center addObserverForName:UIApplicationDidFinishLaunchingNotification
-                                    object:nil
-                                     queue:NSOperationQueue.mainQueue
-                                usingBlock:^(__unused NSNotification *note) {
+        // didFinishLaunching fires once. Keeping this inert observer for the
+        // remainder of the process is cheaper and safer than a self-retaining
+        // observer token just to unregister it from inside its own block.
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidFinishLaunchingNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(__unused NSNotification *note) {
             RYGMCLegacyGateRemove();
-            if (token) [center removeObserver:token];
         }];
+
         // If injection happens after didFinishLaunching, remove the gate on the
-        // first main-queue turn rather than leaving it installed until another
-        // lifecycle notification.
+        // first main-queue turn rather than waiting for a lifecycle notification.
         if (UIApplication.sharedApplication.applicationState != UIApplicationStateInactive) {
             RYGMCLegacyGateRemove();
-            if (token) [center removeObserver:token];
         }
     });
 }
