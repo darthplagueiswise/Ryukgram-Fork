@@ -32,8 +32,8 @@
             if (![rawMember isKindOfClass:RYGRuntimeMemberRow.class]) continue;
             RYGRuntimeBoolMethod *method = [RYGRuntimeBrowserEngine boolMethodForMember:(RYGRuntimeMemberRow *)rawMember];
             if (!method) continue;
-            NSString *name = [[[method.selectorName.lowercaseString ?: @""]
-                componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
+            NSString *lower = method.selectorName.lowercaseString ?: @"";
+            NSString *name = [[lower componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
                 componentsJoinedByString:@""];
             NSNumber *desired = nil;
             if ([name hasPrefix:@"ishidden"] || [name hasPrefix:@"shouldhide"] || [name hasPrefix:@"hide"]) desired = @NO;
