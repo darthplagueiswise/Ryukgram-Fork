@@ -1,5 +1,6 @@
 #import "RYGLoadedImageCatalog.h"
 #import <mach-o/dyld.h>
+#import <crt_externs.h>
 #import <stdatomic.h>
 
 @implementation RYGLoadedImageRecord
