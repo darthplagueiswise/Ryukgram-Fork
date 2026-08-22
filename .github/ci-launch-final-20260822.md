@@ -1,1 +1,1 @@
-CI-only marker. Executable sources are the current dogfood launch-hot-path revision; do not merge this marker.
+CI-only marker. Validate current dogfood atomic runtime/MobileConfig launch-hot-path sources. Do not merge this marker.
