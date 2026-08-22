@@ -35,7 +35,7 @@
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, easyGating, mobileConfig]],
-        [RYGSettingsViewController sectionWithHeader:@"Native / live surfaces" footer:@"Startup only replays exact persisted identities. Runtime and MobileConfig discovery happen only after an explicit Developer action." rows:@[prism, stories, glass, internalOnly, bugReport, settingsRows, dogfood]],
+        [RYGSettingsViewController sectionWithHeader:@"Native / live surfaces" footer:@"Startup only replays exact persisted identities. Opening Developer never performs restore; Runtime and MobileConfig discovery require an explicit action." rows:@[prism, stories, glass, internalOnly, bugReport, settingsRows, dogfood]],
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
     ]];
 }
