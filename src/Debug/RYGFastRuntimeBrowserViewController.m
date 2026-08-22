@@ -30,13 +30,13 @@ static NSString *RYGBrowserImageID(NSString *path) {
     return standard.lastPathComponent ?: @"";
 }
 
-static NSString *RYGBrowserRuntimeNameForPath(NSString *path) {
-    NSString *wanted = RYGBrowserCanonicalPath(path);
+static NSString *RYGBrowserRuntimeName(NSString *imagePath) {
+    NSString *wanted = RYGBrowserCanonicalPath(imagePath);
     for (uint32_t index = 0; index < _dyld_image_count(); index++) {
         const char *raw = _dyld_get_image_name(index);
         if (!raw) continue;
-        NSString *loaded = [NSString stringWithUTF8String:raw] ?: @"";
-        if ([RYGBrowserCanonicalPath(loaded) isEqualToString:wanted]) return loaded;
+        NSString *path = [NSString stringWithUTF8String:raw] ?: @"";
+        if ([RYGBrowserCanonicalPath(path) isEqualToString:wanted]) return path;
     }
     return nil;
 }
@@ -54,23 +54,24 @@ static BOOL RYGBrowserMatches(NSString *text, NSArray<NSString *> *tokens) {
     NSString *lower = text.lowercaseString ?: @"";
     NSString *compact = [[lower componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
     for (NSString *group in tokens) {
-        BOOL groupMatched = NO;
+        BOOL matched = NO;
         for (NSString *token in [group componentsSeparatedByString:@"|"]) {
             if (!token.length) continue;
             NSString *compactToken = [[token componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
             if ([lower rangeOfString:token].location != NSNotFound ||
                 (compactToken.length && [compact rangeOfString:compactToken].location != NSNotFound)) {
-                groupMatched = YES;
+                matched = YES;
                 break;
             }
         }
-        if (!groupMatched) return NO;
+        if (!matched) return NO;
     }
     return YES;
 }
 
+// First stage is intentionally class names only. Methods are not indexed until needed.
 static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *imagePath) {
-    NSString *runtimeName = RYGBrowserRuntimeNameForPath(imagePath);
+    NSString *runtimeName = RYGBrowserRuntimeName(imagePath);
     if (!runtimeName.length) return @[];
     unsigned int count = 0;
     const char **names = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &count);
@@ -82,15 +83,10 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     for (unsigned int index = 0; index < count; index++) {
         const char *raw = names[index];
         if (!raw || !*raw) continue;
-        NSString *name = [NSString stringWithUTF8String:raw];
-        if (!name.length) continue;
         RYGRuntimeClassRow *row = [RYGRuntimeClassRow new];
         row.imagePath = imagePath ?: @"";
-        row.className = name;
-        row.instanceMethodCount = 0;
-        row.classMethodCount = 0;
-        row.propertyCount = 0;
-        [rows addObject:row];
+        row.className = [NSString stringWithUTF8String:raw] ?: @"";
+        if (row.className.length) [rows addObject:row];
     }
     free(names);
     [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
@@ -98,6 +94,8 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     }];
     return rows.copy;
 }
+
+#pragma mark - Class detail
 
 @interface RYGRuntimeClassDetailViewController : UITableViewController <UISearchResultsUpdating>
 @property (nonatomic, copy) NSString *imagePath;
@@ -144,31 +142,29 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     [self.spinner startAnimating];
     self.tableView.backgroundView = self.spinner;
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(nativeValueChanged:) name:RYGRuntimeNativeValueDidChangeNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(nativeChanged:) name:RYGRuntimeNativeValueDidChangeNotification object:nil];
     RYGLiquidGlassApplyToViewController(self);
     [self loadMembers];
 }
 
-- (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
-}
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 
-- (void)nativeValueChanged:(NSNotification *)note {
+- (void)nativeChanged:(NSNotification *)note {
     NSString *key = note.userInfo[RYGRuntimeNativeValueKeyUserInfoKey];
     if (!key.length || [key containsString:self.className]) [self.tableView reloadData];
 }
 
 - (void)loadMembers {
-    NSString *imagePath = self.imagePath;
-    NSString *className = self.className;
+    NSString *path = self.imagePath.copy;
+    NSString *className = self.className.copy;
     NSUInteger generation = ++self.generation;
     __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray<RYGRuntimeMemberRow *> *rows = [RYGRuntimeBrowserEngine membersForClassName:className imagePath:imagePath] ?: @[];
+        NSArray<RYGRuntimeMemberRow *> *members = [RYGRuntimeBrowserEngine membersForClassName:className imagePath:path] ?: @[];
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self || generation != self.generation) return;
-            self.members = rows;
+            self.members = members;
             [self.spinner stopAnimating];
             [self applyFilter];
         });
@@ -181,14 +177,13 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 }
 
 - (void)applyFilter {
-    NSArray *tokens = RYGBrowserTokens(self.searchController.searchBar.text ?: @"");
+    NSArray<NSString *> *tokens = RYGBrowserTokens(self.searchController.searchBar.text ?: @"");
     if (!tokens.count) self.visibleMembers = self.members;
     else self.visibleMembers = [self.members filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeMemberRow *member, NSDictionary *bindings) {
         (void)bindings;
-        NSString *text = [NSString stringWithFormat:@"%@ %@ %@", member.className ?: @"", member.name ?: @"", member.typeEncoding ?: @""];
-        return RYGBrowserMatches(text, tokens);
+        return RYGBrowserMatches([NSString stringWithFormat:@"%@ %@ %@", member.className ?: @"", member.name ?: @"", member.typeEncoding ?: @""], tokens);
     }]];
-    self.tableView.backgroundView = self.visibleMembers.count ? nil : self.spinner;
+    self.tableView.backgroundView = nil;
     [self.tableView reloadData];
 }
 
@@ -202,7 +197,7 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     return [NSString stringWithFormat:@"%lu ABI-validated BOOL methods", (unsigned long)self.visibleMembers.count];
 }
 
-- (UIButton *)overrideButtonForMethod:(RYGRuntimeBoolMethod *)method {
+- (UIButton *)buttonForMethod:(RYGRuntimeBoolMethod *)method {
     NSNumber *forced = method.overrideValue;
     NSNumber *native = method.liveValue;
     NSString *title = forced ? (forced.boolValue ? @"Forced On" : @"Forced Off") : (native ? (native.boolValue ? @"Native On" : @"Native Off") : @"Native");
@@ -211,26 +206,26 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
         RYGRuntimeBeginLiveObservation(@[method]);
         [weakSelf.tableView reloadData];
     }];
-    UIAction *nativeAction = [UIAction actionWithTitle:@"Use Native" image:nil identifier:nil handler:^(__unused UIAction *action) {
+    UIAction *useNative = [UIAction actionWithTitle:@"Use Native" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:nil forMethod:method];
         [weakSelf.tableView reloadData];
     }];
-    UIAction *on = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *action) {
+    UIAction *forceOn = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method];
         [weakSelf.tableView reloadData];
     }];
-    UIAction *off = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *action) {
+    UIAction *forceOff = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *action) {
         [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method];
         [weakSelf.tableView reloadData];
     }];
-    nativeAction.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
-    on.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
-    off.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+    useNative.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
+    forceOn.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+    forceOff.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
 
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.menu = [UIMenu menuWithTitle:method.selectorName ?: @"BOOL" image:nil identifier:nil options:0 children:@[
         observe,
-        [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[nativeAction, on, off]],
+        [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[useNative, forceOn, forceOff]],
     ]];
     button.showsMenuAsPrimaryAction = YES;
     RYGLiquidGlassConfigureButton(button, NO);
@@ -256,12 +251,14 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     cell.detailTextLabel.text = member.typeEncoding ?: @"";
     cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:10.5 weight:UIFontWeightRegular];
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.accessoryView = method ? [self overrideButtonForMethod:method] : nil;
+    cell.accessoryView = method ? [self buttonForMethod:method] : nil;
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     return cell;
 }
 
 @end
+
+#pragma mark - Browser root
 
 @interface RYGFastRuntimeBrowserViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
 @property (nonatomic, copy) NSString *browserTitle;
@@ -286,17 +283,12 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 
 @implementation RYGFastRuntimeBrowserViewController
 
-- (instancetype)init {
-    return [self initWithTitle:@"Runtime Browser" initialQuery:@"" allowsBulkVisibilityOverride:NO];
-}
-
+- (instancetype)init { return [self initWithTitle:@"Runtime Browser" initialQuery:@"" allowsBulkVisibilityOverride:NO]; }
 - (instancetype)initWithTitle:(NSString *)title initialQuery:(NSString *)initialQuery {
     return [self initWithTitle:title initialQuery:initialQuery allowsBulkVisibilityOverride:NO];
 }
 
-- (instancetype)initWithTitle:(NSString *)title
-                  initialQuery:(NSString *)initialQuery
-    allowsBulkVisibilityOverride:(BOOL)allowsBulkVisibilityOverride {
+- (instancetype)initWithTitle:(NSString *)title initialQuery:(NSString *)initialQuery allowsBulkVisibilityOverride:(BOOL)allowsBulkVisibilityOverride {
     if ((self = [super initWithNibName:nil bundle:nil])) {
         NSString *copied = [title copy];
         _browserTitle = copied.length ? copied : @"Runtime Browser";
@@ -361,8 +353,8 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 
     self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
     self.emptyLabel = [UILabel new];
-    self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.numberOfLines = 0;
+    self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.textColor = UIColor.secondaryLabelColor;
 
     UIBarButtonItem *refresh = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"] style:UIBarButtonItemStylePlain target:self action:@selector(refreshTapped)];
@@ -376,8 +368,6 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     [self refreshImages];
     [self rebuildImageMenu];
     RYGLiquidGlassApplyToViewController(self);
-    // Only class names are loaded here. No method catalogue is built until a
-    // query explicitly needs selector search or a class is opened.
     [self loadSelectedImage];
 }
 
@@ -385,28 +375,18 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     self.images = [RYGRuntimeBrowserEngine runtimeImagePaths] ?: @[];
     NSString *stored = [NSUserDefaults.standardUserDefaults stringForKey:kRYGRuntimeSelectedImageKey];
     NSString *main = NSBundle.mainBundle.executablePath.stringByStandardizingPath;
-    if (!self.selectedImagePath.length || ![self.images containsObject:self.selectedImagePath]) {
-        self.selectedImagePath = nil;
-        for (NSString *path in self.images) {
-            if (stored.length && [RYGBrowserImageID(path) isEqualToString:stored]) { self.selectedImagePath = path; break; }
-        }
-        if (!self.selectedImagePath.length) {
-            for (NSString *path in self.images) {
-                if ([path.stringByStandardizingPath isEqualToString:main]) { self.selectedImagePath = path; break; }
-            }
-        }
-        if (!self.selectedImagePath.length) self.selectedImagePath = self.images.firstObject;
-    }
+    if (self.selectedImagePath.length && [self.images containsObject:self.selectedImagePath]) return;
+    self.selectedImagePath = nil;
+    for (NSString *path in self.images) if (stored.length && [RYGBrowserImageID(path) isEqualToString:stored]) { self.selectedImagePath = path; break; }
+    if (!self.selectedImagePath.length) for (NSString *path in self.images) if ([path.stringByStandardizingPath isEqualToString:main]) { self.selectedImagePath = path; break; }
+    if (!self.selectedImagePath.length) self.selectedImagePath = self.images.firstObject;
 }
 
 - (void)rebuildImageMenu {
     NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
     __weak typeof(self) weakSelf = self;
     for (NSString *path in self.images) {
-        UIAction *action = [UIAction actionWithTitle:[RYGRuntimeBrowserEngine shortNameForImagePath:path]
-                                              image:nil
-                                         identifier:nil
-                                            handler:^(__unused UIAction *item) {
+        UIAction *action = [UIAction actionWithTitle:[RYGRuntimeBrowserEngine shortNameForImagePath:path] image:nil identifier:nil handler:^(__unused UIAction *item) {
             __strong typeof(weakSelf) self = weakSelf;
             if (!self) return;
             self.selectedImagePath = path;
@@ -419,19 +399,20 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     }
     self.imageButton.menu = [UIMenu menuWithTitle:@"Loaded executable and frameworks" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:actions];
     RYGLiquidGlassConfigureButton(self.imageButton, NO);
+    NSString *name = self.selectedImagePath.length ? [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath] : @"None";
     UIButtonConfiguration *configuration = self.imageButton.configuration;
-    NSString *shortName = self.selectedImagePath.length ? [RYGRuntimeBrowserEngine shortNameForImagePath:self.selectedImagePath] : @"None";
     if (configuration) {
-        configuration.title = [NSString stringWithFormat:@"Image: %@", shortName];
+        configuration.title = [NSString stringWithFormat:@"Image: %@", name];
         configuration.baseForegroundColor = UIColor.labelColor;
         self.imageButton.configuration = configuration;
     } else {
-        [self.imageButton setTitle:[NSString stringWithFormat:@"Image: %@", shortName] forState:UIControlStateNormal];
+        [self.imageButton setTitle:[NSString stringWithFormat:@"Image: %@", name] forState:UIControlStateNormal];
     }
 }
 
 - (void)modeChanged:(UISegmentedControl *)sender {
     (void)sender;
+    self.searchGeneration++;
     self.searchController.searchBar.placeholder = self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC ? @"Class or BOOL selector" : @"C symbol";
     [self loadSelectedImage];
 }
@@ -472,7 +453,7 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
                 if (!self || generation != self.loadGeneration || ![self.selectedImagePath isEqualToString:path]) return;
                 self.classRows = rows;
                 [self.spinner stopAnimating];
-                [self applyFilterAndScheduleSelectorSearch];
+                [self applyObjectiveCFilter];
             });
         });
     } else {
@@ -491,12 +472,12 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     (void)searchController;
-    if (self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC) [self applyFilterAndScheduleSelectorSearch];
+    if (self.modeControl.selectedSegmentIndex == RYGRuntimeBrowserModeObjectiveC) [self applyObjectiveCFilter];
     else [self applyCSymbolFilter];
 }
 
 - (void)applyCSymbolFilter {
-    NSArray *tokens = RYGBrowserTokens(self.searchController.searchBar.text ?: @"");
+    NSArray<NSString *> *tokens = RYGBrowserTokens(self.searchController.searchBar.text ?: @"");
     if (!tokens.count) self.visibleSymbols = self.symbols;
     else self.visibleSymbols = [self.symbols filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGMachOSymbol *symbol, NSDictionary *bindings) {
         (void)bindings;
@@ -507,11 +488,10 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     [self.tableView reloadData];
 }
 
-- (void)applyFilterAndScheduleSelectorSearch {
+- (void)applyObjectiveCFilter {
     NSString *query = self.searchController.searchBar.text ?: @"";
-    NSArray *tokens = RYGBrowserTokens(query);
-    self.searchGeneration++;
-    NSUInteger generation = self.searchGeneration;
+    NSArray<NSString *> *tokens = RYGBrowserTokens(query);
+    NSUInteger generation = ++self.searchGeneration;
 
     if (!tokens.count) {
         self.selectorMatches = @{};
@@ -532,18 +512,22 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 
     NSString *path = self.selectedImagePath.copy;
     NSArray<RYGRuntimeClassRow *> *classes = self.classRows.copy;
+    NSArray<RYGRuntimeClassRow *> *nameMatches = classNameMatches.copy;
     __weak typeof(self) weakSelf = self;
+
+    // Cross-class selector scan is on-demand and starts only for a non-empty query.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(220 * NSEC_PER_MSEC)), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf || generation != strongSelf.searchGeneration) return;
+        RYGFastRuntimeBrowserViewController *owner = weakSelf;
+        if (!owner || generation != owner.searchGeneration) return;
+
         NSMutableDictionary<NSString *, NSArray<RYGRuntimeMemberRow *> *> *matches = [NSMutableDictionary dictionary];
-        NSMutableOrderedSet<NSString *> *classNames = [NSMutableOrderedSet orderedSet];
-        for (RYGRuntimeClassRow *row in classNameMatches) if (row.className.length) [classNames addObject:row.className];
+        NSMutableOrderedSet<NSString *> *matchedNames = [NSMutableOrderedSet orderedSet];
+        for (RYGRuntimeClassRow *row in nameMatches) if (row.className.length) [matchedNames addObject:row.className];
 
         NSUInteger inspected = 0;
         for (RYGRuntimeClassRow *row in classes) {
-            strongSelf = weakSelf;
-            if (!strongSelf || generation != strongSelf.searchGeneration) return;
+            RYGFastRuntimeBrowserViewController *currentOwner = weakSelf;
+            if (!currentOwner || generation != currentOwner.searchGeneration) return;
             NSArray<RYGRuntimeMemberRow *> *members = [RYGRuntimeBrowserEngine membersForClassName:row.className imagePath:path] ?: @[];
             NSMutableArray<RYGRuntimeMemberRow *> *memberMatches = nil;
             for (RYGRuntimeMemberRow *member in members) {
@@ -554,27 +538,27 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
             }
             if (memberMatches.count) {
                 matches[row.className] = memberMatches.copy;
-                [classNames addObject:row.className];
+                [matchedNames addObject:row.className];
             }
             inspected++;
-            if ((inspected % 128) == 0 && generation != strongSelf.searchGeneration) return;
+            if ((inspected % 128) == 0 && generation != currentOwner.searchGeneration) return;
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) self = weakSelf;
             if (!self || generation != self.searchGeneration || ![self.selectedImagePath isEqualToString:path]) return;
-            NSMutableDictionary<NSString *, RYGRuntimeClassRow *> *rowByName = [NSMutableDictionary dictionary];
-            for (RYGRuntimeClassRow *row in self.classRows) if (row.className.length) rowByName[row.className] = row;
-            NSMutableArray<RYGRuntimeClassRow *> *out = [NSMutableArray array];
-            for (NSString *name in classNames) {
-                RYGRuntimeClassRow *row = rowByName[name];
-                if (row) [out addObject:row];
+            NSMutableDictionary<NSString *, RYGRuntimeClassRow *> *rowsByName = [NSMutableDictionary dictionary];
+            for (RYGRuntimeClassRow *row in self.classRows) if (row.className.length) rowsByName[row.className] = row;
+            NSMutableArray<RYGRuntimeClassRow *> *visible = [NSMutableArray array];
+            for (NSString *name in matchedNames) {
+                RYGRuntimeClassRow *row = rowsByName[name];
+                if (row) [visible addObject:row];
             }
-            [out sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
+            [visible sortUsingComparator:^NSComparisonResult(RYGRuntimeClassRow *left, RYGRuntimeClassRow *right) {
                 return [left.className localizedCaseInsensitiveCompare:right.className];
             }];
             self.selectorMatches = matches.copy;
-            self.visibleClasses = out.copy;
+            self.visibleClasses = visible.copy;
             self.emptyLabel.text = @"No class or ABI-validated BOOL selector matched this image.";
             self.tableView.backgroundView = self.visibleClasses.count ? nil : self.emptyLabel;
             [self.tableView reloadData];
@@ -589,13 +573,10 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
         for (RYGRuntimeMemberRow *member in members) {
             RYGRuntimeBoolMethod *method = [RYGRuntimeBrowserEngine boolMethodForMember:member];
             if (!method) continue;
-            NSString *normalized = [[[method.selectorName lowercaseString]
-                componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet]
-                componentsJoinedByString:@""];
+            NSString *name = [[[method.selectorName lowercaseString] componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
             NSNumber *desired = nil;
-            if ([normalized hasPrefix:@"ishidden"] || [normalized hasPrefix:@"shouldhide"] || [normalized hasPrefix:@"hide"]) desired = @NO;
-            else if ([normalized hasPrefix:@"shouldshow"] || [normalized hasPrefix:@"canshow"] || [normalized hasPrefix:@"isvisible"] ||
-                     [normalized hasPrefix:@"isavailable"] || [normalized hasPrefix:@"shoulddisplay"]) desired = @YES;
+            if ([name hasPrefix:@"ishidden"] || [name hasPrefix:@"shouldhide"] || [name hasPrefix:@"hide"]) desired = @NO;
+            else if ([name hasPrefix:@"shouldshow"] || [name hasPrefix:@"canshow"] || [name hasPrefix:@"isvisible"] || [name hasPrefix:@"isavailable"] || [name hasPrefix:@"shoulddisplay"]) desired = @YES;
             if (!desired) continue;
             [RYGRuntimeBrowserEngine setOverride:desired forMethod:method];
             changed++;
@@ -630,8 +611,8 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
         RYGRuntimeClassRow *row = self.visibleClasses[(NSUInteger)indexPath.row];
         cell.textLabel.text = row.className;
         cell.textLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightMedium];
-        NSUInteger matches = self.selectorMatches[row.className].count;
-        cell.detailTextLabel.text = matches ? [NSString stringWithFormat:@"%lu matching BOOL selector(s)", (unsigned long)matches] : @"Tap to inspect this class only";
+        NSUInteger matchCount = self.selectorMatches[row.className].count;
+        cell.detailTextLabel.text = matchCount ? [NSString stringWithFormat:@"%lu matching BOOL selector(s)", (unsigned long)matchCount] : @"Tap to inspect this class only";
     } else {
         RYGMachOSymbol *symbol = self.visibleSymbols[(NSUInteger)indexPath.row];
         cell.textLabel.text = symbol.name;
@@ -644,9 +625,7 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
 }
 
 - (void)presentCABIForSymbol:(RYGMachOSymbol *)symbol value:(NSNumber *)value source:(UIView *)source {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"C BOOL ABI"
-                                                                    message:@"Mach-O has no C prototype. Select only the integer/pointer-register argument count confirmed by disassembly. Float/vector/struct ABIs remain unsupported."
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"C BOOL ABI" message:@"Mach-O has no C prototype. Select only an integer/pointer-register BOOL ABI confirmed by disassembly." preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray<NSString *> *titles = @[@"BOOL f(void)", @"BOOL f(x0)", @"BOOL f(x0,x1)", @"BOOL f(x0,x1,x2)", @"BOOL f(x0,x1,x2,x3)"];
     for (NSInteger index = 0; index < (NSInteger)titles.count; index++) {
         [sheet addAction:[UIAlertAction actionWithTitle:titles[(NSUInteger)index] style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
@@ -674,11 +653,9 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
     }
 
     RYGMachOSymbol *symbol = self.visibleSymbols[(NSUInteger)indexPath.row];
-    NSString *message = symbol.isRebindableImport ? @"This import can be rebound in this image without modifying __TEXT." : @"This symbol has no lazy/non-lazy import slot in this image, so it will not be patched.";
+    NSString *message = symbol.isRebindableImport ? @"This import can be rebound in this image without modifying __TEXT." : @"This symbol has no lazy/non-lazy import slot in this image and will not be patched.";
     UIAlertController *sheet = [UIAlertController alertControllerWithTitle:symbol.name message:message preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy symbol" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-        UIPasteboard.generalPasteboard.string = symbol.name ?: @"";
-    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Copy symbol" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { UIPasteboard.generalPasteboard.string = symbol.name ?: @""; }]];
     if (symbol.isRebindableImport) {
         if (symbol.overrideValue) {
             [sheet addAction:[UIAlertAction actionWithTitle:@"Use Native / remove rebinding" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
@@ -686,12 +663,8 @@ static NSArray<RYGRuntimeClassRow *> *RYGBrowserClassNamesForImage(NSString *ima
                 [self.tableView reloadData];
             }]];
         }
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Force On…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-            [self presentCABIForSymbol:symbol value:@YES source:cell];
-        }]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Force Off…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
-            [self presentCABIForSymbol:symbol value:@NO source:cell];
-        }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force On…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self presentCABIForSymbol:symbol value:@YES source:cell]; }]];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Force Off…" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) { [self presentCABIForSymbol:symbol value:@NO source:cell]; }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
