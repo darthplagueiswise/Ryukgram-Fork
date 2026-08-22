@@ -2,6 +2,7 @@
 #import "RYGRuntimeBrowserEngine.h"
 #import "RYGEasyGatingRuntime.h"
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import <mach-o/dyld.h>
 #import <os/lock.h>
 
@@ -12,14 +13,23 @@
 static os_unfair_lock gRYGDeveloperBootstrapLock = OS_UNFAIR_LOCK_INIT;
 static BOOL gRYGDeveloperBootstrapActive;
 static BOOL gRYGDeveloperBootstrapScheduled;
+static char kRYGDeveloperBootstrapQueueSpecific;
 
 static dispatch_queue_t RYGDeveloperBootstrapQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         queue = dispatch_queue_create("com.ryukgram.developer-bootstrap", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(queue,
+                                    &kRYGDeveloperBootstrapQueueSpecific,
+                                    &kRYGDeveloperBootstrapQueueSpecific,
+                                    NULL);
     });
     return queue;
+}
+
+static BOOL RYGDeveloperIsOnBootstrapQueue(void) {
+    return dispatch_get_specific(&kRYGDeveloperBootstrapQueueSpecific) == &kRYGDeveloperBootstrapQueueSpecific;
 }
 
 static BOOL RYGDeveloperHasPersistedEasyGating(void) {
@@ -46,6 +56,13 @@ static BOOL RYGDeveloperHasPersistedRuntimeState(void) {
     return methods.count || legacyMethods.count || c.count || legacyC.count;
 }
 
+// After the class-method exchange below, this alias invokes the original
+// activatePersistedNativeFeatures implementation. Calling the public selector
+// from UI code only schedules this work; it never blocks viewDidLoad.
+static void RYGDeveloperRunOriginalNativeActivation(void) {
+    [RYGDeveloperTopicViewController ryg_background_activatePersistedNativeFeatures];
+}
+
 static void RYGDeveloperBootstrapRun(void) {
     @autoreleasepool {
         if (RYGDeveloperHasPersistedRuntimeState()) {
@@ -55,7 +72,7 @@ static void RYGDeveloperBootstrapRun(void) {
             [RYGEasyGatingRuntime.shared installIfNeeded];
         }
         if (RYGDeveloperHasPersistedNativeState()) {
-            [RYGDeveloperTopicViewController activatePersistedNativeFeatures];
+            RYGDeveloperRunOriginalNativeActivation();
         }
     }
 }
@@ -84,7 +101,32 @@ static void RYGDeveloperBootstrapImageDidLoad(const struct mach_header *header, 
     RYGDeveloperBootstrapSchedule();
 }
 
+@implementation RYGDeveloperTopicViewController (RYGBackgroundPersistedActivation)
+
++ (void)load {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Method original = class_getClassMethod(self, @selector(activatePersistedNativeFeatures));
+        Method replacement = class_getClassMethod(self, @selector(ryg_background_activatePersistedNativeFeatures));
+        if (original && replacement) method_exchangeImplementations(original, replacement);
+    });
+}
+
++ (void)ryg_background_activatePersistedNativeFeatures {
+    if (RYGDeveloperIsOnBootstrapQueue()) {
+        // After exchange, the alias points at the original implementation.
+        [self ryg_background_activatePersistedNativeFeatures];
+        return;
+    }
+    dispatch_async(RYGDeveloperBootstrapQueue(), ^{
+        [self ryg_background_activatePersistedNativeFeatures];
+    });
+}
+
+@end
+
 __attribute__((constructor)) static void RYGInstallDeveloperBootstrapOwner(void) {
+    (void)RYGDeveloperBootstrapQueue();
     _dyld_register_func_for_add_image(RYGDeveloperBootstrapImageDidLoad);
     dispatch_async(dispatch_get_main_queue(), ^{
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
