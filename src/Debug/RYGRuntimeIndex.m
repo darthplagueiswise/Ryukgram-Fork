@@ -1,10 +1,10 @@
 #import "RYGRuntimeIndex.h"
+#import "RYGLoadedImageCatalog.h"
 #import <objc/runtime.h>
-#import <mach-o/dyld.h>
 #import <dlfcn.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
 
 @implementation RYGRuntimeImageIndex
 - (NSArray<RYGRuntimeBoolMethod *> *)methodsForClassName:(NSString *)className {
@@ -15,51 +15,35 @@
 static dispatch_queue_t RYGIndexStateQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.ryukgram.runtime-index.state", DISPATCH_QUEUE_SERIAL);
-    });
+    dispatch_once(&onceToken, ^{ queue = dispatch_queue_create("com.ryukgram.runtime-index.state", DISPATCH_QUEUE_SERIAL); });
     return queue;
 }
 
 static dispatch_queue_t RYGIndexWorkerQueue(void) {
-    return dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ queue = dispatch_queue_create("com.ryukgram.runtime-index.worker", DISPATCH_QUEUE_CONCURRENT); });
+    return queue;
 }
 
 static NSMutableDictionary<NSString *, RYGRuntimeImageIndex *> *gRYGIndexes;
-static NSMutableDictionary<NSString *, NSMutableArray *> *gRYGListeners;
-static NSMutableSet<NSString *> *gRYGInFlight;
-static NSMutableSet<NSString *> *gRYGCompleted;
+static NSMutableDictionary<NSString *, NSMutableArray<RYGRuntimeIndexCompletion> *> *gRYGIndexListeners;
+static NSMutableSet<NSString *> *gRYGIndexInFlight;
+static NSMutableSet<NSString *> *gRYGIndexComplete;
+static NSMutableDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *gRYGMethodCache;
+static NSMutableSet<NSString *> *gRYGMethodInFlight;
+static NSMutableDictionary<NSString *, NSMutableArray<RYGRuntimeMethodsCompletion> *> *gRYGMethodListeners;
 static atomic_uint_fast64_t gRYGIndexEpoch = 1;
+static atomic_uint_fast64_t gRYGSearchEpoch = 1;
 
-static NSString *RYGIndexCanonicalPath(NSString *path) {
-    if (!path.length) return @"";
-    NSString *standard = path.stringByStandardizingPath;
-    NSString *resolved = standard.stringByResolvingSymlinksInPath;
-    return resolved.length ? resolved.stringByStandardizingPath : standard;
+static NSString *RYGIndexKeyForPath(NSString *path) {
+    RYGLoadedImageRecord *record = [RYGLoadedImageCatalog recordForPath:path];
+    if (record.stableIdentifier.length) return record.stableIdentifier;
+    return path.length ? path.stringByStandardizingPath : @"";
 }
 
-static NSString *RYGIndexRuntimeNameForPath(NSString *path) {
-    NSString *wanted = RYGIndexCanonicalPath(path);
-    if (!wanted.length) return nil;
-    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
-        const char *raw = _dyld_get_image_name(index);
-        if (!raw) continue;
-        NSString *runtimeName = [NSString stringWithUTF8String:raw];
-        if ([RYGIndexCanonicalPath(runtimeName) isEqualToString:wanted]) return runtimeName;
-    }
-    return nil;
-}
-
-static const struct mach_header *RYGIndexHeaderForPath(NSString *path) {
-    NSString *wanted = RYGIndexCanonicalPath(path);
-    if (!wanted.length) return NULL;
-    for (uint32_t index = 0; index < _dyld_image_count(); index++) {
-        const char *raw = _dyld_get_image_name(index);
-        if (!raw) continue;
-        NSString *loaded = RYGIndexCanonicalPath([NSString stringWithUTF8String:raw]);
-        if ([loaded isEqualToString:wanted]) return _dyld_get_image_header(index);
-    }
-    return NULL;
+static NSString *RYGMethodCacheKey(NSString *imageKey, NSString *className) {
+    return [NSString stringWithFormat:@"%@|%@", imageKey ?: @"", className ?: @""];
 }
 
 static const char *RYGIndexSkipQualifiers(const char *type) {
@@ -133,224 +117,333 @@ static RYGRuntimeClassRow *RYGIndexClassRow(NSString *className,
 }
 
 static RYGRuntimeImageIndex *RYGIndexSnapshot(NSString *imagePath,
-                                               NSArray<RYGRuntimeClassRow *> *classRows,
-                                               NSDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *methodsByClass,
+                                               NSArray<RYGRuntimeClassRow *> *classes,
+                                               NSDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *methods,
                                                NSUInteger classesScanned,
                                                NSUInteger methodsScanned,
-                                               NSDate *started,
-                                               BOOL finalSnapshot) {
-    NSArray<RYGRuntimeClassRow *> *rows = classRows ?: @[];
-    if (finalSnapshot) {
-        rows = [rows filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(RYGRuntimeClassRow *row, NSDictionary *bindings) {
-            (void)bindings;
-            return row.instanceMethodCount || row.classMethodCount;
-        }]];
-    }
+                                               NSTimeInterval duration) {
     RYGRuntimeImageIndex *snapshot = [RYGRuntimeImageIndex new];
     snapshot.imagePath = imagePath ?: @"";
-    snapshot.classes = rows.copy;
-    snapshot.methodsByClass = methodsByClass.copy ?: @{};
+    snapshot.classes = classes.copy ?: @[];
+    snapshot.methodsByClass = methods.copy ?: @{};
     snapshot.classesScanned = classesScanned;
     snapshot.methodsScanned = methodsScanned;
-    snapshot.buildDuration = started ? -[started timeIntervalSinceNow] : 0;
+    snapshot.buildDuration = duration;
     return snapshot;
 }
 
-static void RYGIndexPublish(NSString *key,
-                            RYGRuntimeImageIndex *snapshot,
-                            uint64_t epoch,
-                            BOOL finalSnapshot) {
-    if (!key.length || !snapshot) return;
-    dispatch_async(RYGIndexStateQueue(), ^{
-        if (atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed) != epoch) return;
-        if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
-        if (!gRYGCompleted) gRYGCompleted = [NSMutableSet set];
-        gRYGIndexes[key] = snapshot;
-        NSArray *listeners = [gRYGListeners[key] copy] ?: @[];
-        if (finalSnapshot) {
-            [gRYGInFlight removeObject:key];
-            [gRYGCompleted addObject:key];
-            [gRYGListeners removeObjectForKey:key];
-        }
-        if (!listeners.count) return;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            for (RYGRuntimeIndexCompletion completion in listeners) {
-                if (completion) completion(snapshot);
-            }
-        });
-    });
+static NSArray<NSString *> *RYGIndexQueryGroups(NSString *query) {
+    NSMutableArray<NSString *> *groups = [NSMutableArray array];
+    for (NSString *piece in [query.lowercaseString componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+        if (piece.length) [groups addObject:piece];
+    }
+    return groups.copy;
 }
 
-static void RYGBuildIndexIncrementally(NSString *requested, NSString *key, uint64_t epoch) {
-    @autoreleasepool {
-        NSDate *started = NSDate.date;
-        NSString *canonical = RYGIndexCanonicalPath(requested);
-        const struct mach_header *target = RYGIndexHeaderForPath(canonical);
-        if (!target) {
-            RYGIndexPublish(key, RYGIndexSnapshot(canonical, @[], @{}, 0, 0, started, YES), epoch, YES);
-            return;
-        }
-
-        NSString *runtimeName = RYGIndexRuntimeNameForPath(canonical) ?: requested;
-        unsigned int imageClassCount = 0;
-        const char **imageClassNames = objc_copyClassNamesForImage(runtimeName.fileSystemRepresentation, &imageClassCount);
-        if (!imageClassNames || imageClassCount == 0 || imageClassCount > 500000) {
-            if (imageClassNames) free(imageClassNames);
-            RYGIndexPublish(key, RYGIndexSnapshot(canonical, @[], @{}, 0, 0, started, YES), epoch, YES);
-            return;
-        }
-
-        NSMutableArray<NSString *> *names = [NSMutableArray arrayWithCapacity:imageClassCount];
-        for (unsigned int index = 0; index < imageClassCount; index++) {
-            const char *raw = imageClassNames[index];
-            if (!raw || !*raw) continue;
-            NSString *name = [NSString stringWithUTF8String:raw];
-            if (name.length) [names addObject:name];
-        }
-        free(imageClassNames);
-        [names sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-
-        NSMutableArray<RYGRuntimeClassRow *> *classRows = [NSMutableArray arrayWithCapacity:names.count];
-        for (NSString *name in names) [classRows addObject:RYGIndexClassRow(name, canonical, 0, 0)];
-        NSMutableDictionary<NSString *, NSArray<RYGRuntimeBoolMethod *> *> *methodsByClass = [NSMutableDictionary dictionary];
-
-        // Second paint: the class list is usable before any class_copyMethodList
-        // or dladdr pass. Method eligibility fills progressively afterwards.
-        RYGIndexPublish(key, RYGIndexSnapshot(canonical, classRows, methodsByClass, 0, 0, started, NO), epoch, NO);
-
-        NSUInteger methodsScanned = 0;
-        NSUInteger classesScanned = 0;
-        const NSUInteger publishBatch = 256;
-
-        for (NSUInteger classIndex = 0; classIndex < names.count; classIndex++) {
-            if (atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed) != epoch) return;
-            @autoreleasepool {
-                NSString *className = names[classIndex];
-                Class cls = objc_lookUpClass(className.UTF8String);
-                if (!cls) {
-                    classesScanned++;
-                    continue;
-                }
-
-                NSMutableArray<RYGRuntimeBoolMethod *> *rows = nil;
-                NSUInteger instanceCount = 0;
-                NSUInteger classCount = 0;
-                for (NSUInteger pass = 0; pass < 2; pass++) {
-                    BOOL classMethod = pass == 1;
-                    Class owner = classMethod ? object_getClass(cls) : cls;
-                    unsigned int methodCount = 0;
-                    Method *methods = owner ? class_copyMethodList(owner, &methodCount) : NULL;
-                    methodsScanned += methodCount;
-                    for (unsigned int methodIndex = 0; methods && methodIndex < methodCount; methodIndex++) {
-                        Method method = methods[methodIndex];
-                        if (!RYGIndexBoolReturn(method) || !RYGIndexIMPBelongsToHeader(method, target)) continue;
-                        RYGRuntimeBoolMethod *methodRow = RYGIndexMethodRow(cls, method, classMethod, canonical);
-                        if (!methodRow) continue;
-                        if (!rows) rows = [NSMutableArray array];
-                        [rows addObject:methodRow];
-                        if (classMethod) classCount++; else instanceCount++;
-                    }
-                    if (methods) free(methods);
-                }
-
-                if (rows.count) {
-                    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
-                        if (left.classMethod != right.classMethod) return left.classMethod ? NSOrderedDescending : NSOrderedAscending;
-                        return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
-                    }];
-                    methodsByClass[className] = rows.copy;
-                }
-                classRows[classIndex] = RYGIndexClassRow(className, canonical, instanceCount, classCount);
-                classesScanned++;
-            }
-
-            if ((classesScanned % publishBatch) == 0) {
-                RYGIndexPublish(key,
-                                RYGIndexSnapshot(canonical, classRows, methodsByClass, classesScanned, methodsScanned, started, NO),
-                                epoch,
-                                NO);
+static BOOL RYGIndexTextMatchesGroups(NSString *text, NSArray<NSString *> *groups) {
+    if (!groups.count) return YES;
+    NSString *lower = text.lowercaseString ?: @"";
+    NSString *compact = [[lower componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
+    for (NSString *group in groups) {
+        BOOL matched = NO;
+        for (NSString *alternative in [group componentsSeparatedByString:@"|"]) {
+            if (!alternative.length) continue;
+            NSString *compactAlt = [[alternative componentsSeparatedByCharactersInSet:NSCharacterSet.alphanumericCharacterSet.invertedSet] componentsJoinedByString:@""];
+            if ([lower rangeOfString:alternative].location != NSNotFound ||
+                (compactAlt.length && [compact rangeOfString:compactAlt].location != NSNotFound)) {
+                matched = YES;
+                break;
             }
         }
-
-        RYGIndexPublish(key,
-                        RYGIndexSnapshot(canonical, classRows, methodsByClass, classesScanned, methodsScanned, started, YES),
-                        epoch,
-                        YES);
+        if (!matched) return NO;
     }
+    return YES;
+}
+
+static NSArray<RYGRuntimeBoolMethod *> *RYGScanMethodsForClass(NSString *className,
+                                                                RYGLoadedImageRecord *record,
+                                                                NSUInteger *scannedOut) {
+    if (!className.length || !record.header) return @[];
+    Class cls = objc_lookUpClass(className.UTF8String);
+    if (!cls) return @[];
+
+    NSMutableArray<RYGRuntimeBoolMethod *> *rows = [NSMutableArray array];
+    NSUInteger scanned = 0;
+    for (NSUInteger pass = 0; pass < 2; pass++) {
+        BOOL classMethod = pass == 1;
+        Class owner = classMethod ? object_getClass(cls) : cls;
+        unsigned int count = 0;
+        Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+        scanned += count;
+        for (unsigned int index = 0; methods && index < count; index++) {
+            Method method = methods[index];
+            if (!RYGIndexBoolReturn(method)) continue;
+            if (RYGIndexArgumentKind(method) < RYGRuntimeArgumentNone) continue;
+            SEL selector = method_getName(method);
+            NSString *name = selector ? NSStringFromSelector(selector) : @"";
+            if ([RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:name]) continue;
+            if (!RYGIndexIMPBelongsToHeader(method, record.header)) continue;
+            RYGRuntimeBoolMethod *row = RYGIndexMethodRow(cls, method, classMethod, record.path);
+            if (row) [rows addObject:row];
+        }
+        if (methods) free(methods);
+    }
+    [rows sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
+        if (left.classMethod != right.classMethod) return left.classMethod ? NSOrderedDescending : NSOrderedAscending;
+        return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
+    }];
+    if (scannedOut) *scannedOut = scanned;
+    return rows.copy;
 }
 
 @implementation RYGRuntimeIndex
 
 + (void)requestIndexForImagePath:(NSString *)imagePath completion:(RYGRuntimeIndexCompletion)completion {
-    NSString *requested = [imagePath copy] ?: @"";
-    NSString *key = RYGIndexCanonicalPath(requested);
+    NSString *path = [imagePath copy] ?: @"";
+    NSString *key = RYGIndexKeyForPath(path);
     if (!key.length) {
-        RYGRuntimeImageIndex *empty = [RYGRuntimeImageIndex new];
-        empty.imagePath = @"";
-        empty.classes = @[];
-        empty.methodsByClass = @{};
+        RYGRuntimeImageIndex *empty = RYGIndexSnapshot(@"", @[], @{}, 0, 0, 0);
         dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(empty); });
         return;
     }
 
     uint64_t epoch = atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed);
     dispatch_async(RYGIndexStateQueue(), ^{
-        if (atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed) != epoch) return;
         if (!gRYGIndexes) gRYGIndexes = [NSMutableDictionary dictionary];
-        if (!gRYGListeners) gRYGListeners = [NSMutableDictionary dictionary];
-        if (!gRYGInFlight) gRYGInFlight = [NSMutableSet set];
-        if (!gRYGCompleted) gRYGCompleted = [NSMutableSet set];
+        if (!gRYGIndexListeners) gRYGIndexListeners = [NSMutableDictionary dictionary];
+        if (!gRYGIndexInFlight) gRYGIndexInFlight = [NSMutableSet set];
+        if (!gRYGIndexComplete) gRYGIndexComplete = [NSMutableSet set];
 
         RYGRuntimeImageIndex *cached = gRYGIndexes[key];
-        if ([gRYGCompleted containsObject:key]) {
-            RYGRuntimeImageIndex *finalSnapshot = cached ?: RYGIndexSnapshot(key, @[], @{}, 0, 0, nil, YES);
-            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(finalSnapshot); });
-            return;
-        }
+        if (cached && completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(cached); });
+        if ([gRYGIndexComplete containsObject:key]) return;
 
         if (completion) {
-            NSMutableArray *listeners = gRYGListeners[key];
-            if (!listeners) {
-                listeners = [NSMutableArray array];
-                gRYGListeners[key] = listeners;
-            }
+            NSMutableArray *listeners = gRYGIndexListeners[key];
+            if (!listeners) { listeners = [NSMutableArray array]; gRYGIndexListeners[key] = listeners; }
             [listeners addObject:[completion copy]];
         }
+        if ([gRYGIndexInFlight containsObject:key]) return;
+        [gRYGIndexInFlight addObject:key];
 
-        if (cached && completion) {
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(cached); });
-        } else if (completion) {
-            // First paint is deliberately empty and immediate. This guarantees
-            // navigation never waits on Objective-C metadata traversal.
-            RYGRuntimeImageIndex *bootstrap = RYGIndexSnapshot(key, @[], @{}, 0, 0, nil, NO);
+        if (!cached) {
+            RYGRuntimeImageIndex *bootstrap = RYGIndexSnapshot(path, @[], @{}, 0, 0, 0);
             gRYGIndexes[key] = bootstrap;
-            dispatch_async(dispatch_get_main_queue(), ^{ completion(bootstrap); });
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(bootstrap); });
         }
 
-        if ([gRYGInFlight containsObject:key]) return;
-        [gRYGInFlight addObject:key];
         dispatch_async(RYGIndexWorkerQueue(), ^{
-            RYGBuildIndexIncrementally(requested, key, epoch);
+            @autoreleasepool {
+                NSDate *started = NSDate.date;
+                RYGLoadedImageRecord *record = [RYGLoadedImageCatalog recordForPath:path];
+                NSMutableArray<RYGRuntimeClassRow *> *rows = [NSMutableArray array];
+                if (record) {
+                    unsigned int count = 0;
+                    const char **names = objc_copyClassNamesForImage(record.path.fileSystemRepresentation, &count);
+                    if (names && count < 500000) {
+                        NSMutableArray<NSString *> *classNames = [NSMutableArray arrayWithCapacity:count];
+                        for (unsigned int index = 0; index < count; index++) {
+                            const char *raw = names[index];
+                            if (!raw || !*raw) continue;
+                            NSString *name = [NSString stringWithUTF8String:raw];
+                            if (name.length) [classNames addObject:name];
+                        }
+                        [classNames sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+                        for (NSString *name in classNames) [rows addObject:RYGIndexClassRow(name, record.path, 0, 0)];
+                    }
+                    if (names) free(names);
+                }
+                RYGRuntimeImageIndex *snapshot = RYGIndexSnapshot(record.path ?: path,
+                                                                  rows,
+                                                                  @{},
+                                                                  rows.count,
+                                                                  0,
+                                                                  -started.timeIntervalSinceNow);
+                dispatch_async(RYGIndexStateQueue(), ^{
+                    if (atomic_load_explicit(&gRYGIndexEpoch, memory_order_relaxed) != epoch) return;
+                    gRYGIndexes[key] = snapshot;
+                    [gRYGIndexInFlight removeObject:key];
+                    [gRYGIndexComplete addObject:key];
+                    NSArray *listeners = [gRYGIndexListeners[key] copy] ?: @[];
+                    [gRYGIndexListeners removeObjectForKey:key];
+                    dispatch_async(dispatch_get_main_queue(), ^{ for (RYGRuntimeIndexCompletion block in listeners) if (block) block(snapshot); });
+                });
+            }
         });
     });
 }
 
++ (void)requestMethodsForClassName:(NSString *)className
+                         imagePath:(NSString *)imagePath
+                        completion:(RYGRuntimeMethodsCompletion)completion {
+    NSString *path = [imagePath copy] ?: @"";
+    NSString *imageKey = RYGIndexKeyForPath(path);
+    NSString *cacheKey = RYGMethodCacheKey(imageKey, className);
+    if (!imageKey.length || !className.length) {
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(@[]); });
+        return;
+    }
+
+    dispatch_async(RYGIndexStateQueue(), ^{
+        if (!gRYGMethodCache) gRYGMethodCache = [NSMutableDictionary dictionary];
+        if (!gRYGMethodInFlight) gRYGMethodInFlight = [NSMutableSet set];
+        if (!gRYGMethodListeners) gRYGMethodListeners = [NSMutableDictionary dictionary];
+        NSArray *cached = gRYGMethodCache[cacheKey];
+        if (cached) {
+            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(cached); });
+            return;
+        }
+        if (completion) {
+            NSMutableArray *listeners = gRYGMethodListeners[cacheKey];
+            if (!listeners) { listeners = [NSMutableArray array]; gRYGMethodListeners[cacheKey] = listeners; }
+            [listeners addObject:[completion copy]];
+        }
+        if ([gRYGMethodInFlight containsObject:cacheKey]) return;
+        [gRYGMethodInFlight addObject:cacheKey];
+
+        dispatch_async(RYGIndexWorkerQueue(), ^{
+            @autoreleasepool {
+                RYGLoadedImageRecord *record = [RYGLoadedImageCatalog recordForPath:path];
+                NSUInteger scanned = 0;
+                NSArray *methods = record ? RYGScanMethodsForClass(className, record, &scanned) : @[];
+                dispatch_async(RYGIndexStateQueue(), ^{
+                    if (!gRYGMethodCache) gRYGMethodCache = [NSMutableDictionary dictionary];
+                    gRYGMethodCache[cacheKey] = methods;
+                    [gRYGMethodInFlight removeObject:cacheKey];
+                    NSArray *listeners = [gRYGMethodListeners[cacheKey] copy] ?: @[];
+                    [gRYGMethodListeners removeObjectForKey:cacheKey];
+
+                    RYGRuntimeImageIndex *current = gRYGIndexes[imageKey];
+                    if (current) {
+                        NSMutableDictionary *byClass = [current.methodsByClass mutableCopy] ?: [NSMutableDictionary dictionary];
+                        byClass[className] = methods;
+                        NSMutableArray *classes = [current.classes mutableCopy] ?: [NSMutableArray array];
+                        NSUInteger instanceCount = 0, classCount = 0;
+                        for (RYGRuntimeBoolMethod *row in methods) {
+                            if (row.classMethod) classCount++; else instanceCount++;
+                        }
+                        for (NSUInteger index = 0; index < classes.count; index++) {
+                            RYGRuntimeClassRow *row = classes[index];
+                            if ([row.className isEqualToString:className]) {
+                                classes[index] = RYGIndexClassRow(className, current.imagePath, instanceCount, classCount);
+                                break;
+                            }
+                        }
+                        gRYGIndexes[imageKey] = RYGIndexSnapshot(current.imagePath, classes, byClass,
+                                                                 current.classesScanned,
+                                                                 current.methodsScanned + scanned,
+                                                                 current.buildDuration);
+                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{ for (RYGRuntimeMethodsCompletion block in listeners) if (block) block(methods); });
+                });
+            }
+        });
+    });
+}
+
++ (void)requestSearchForImagePath:(NSString *)imagePath
+                            query:(NSString *)query
+                       completion:(RYGRuntimeSearchCompletion)completion {
+    NSString *path = [imagePath copy] ?: @"";
+    NSArray<NSString *> *groups = RYGIndexQueryGroups(query ?: @"");
+    uint64_t searchEpoch = atomic_fetch_add_explicit(&gRYGSearchEpoch, 1, memory_order_relaxed) + 1;
+    if (!path.length || !groups.count) {
+        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(@[], 0, 0, YES); });
+        return;
+    }
+
+    dispatch_async(RYGIndexWorkerQueue(), ^{
+        @autoreleasepool {
+            RYGLoadedImageRecord *record = [RYGLoadedImageCatalog recordForPath:path];
+            if (!record) {
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(@[], 0, 0, YES); });
+                return;
+            }
+            unsigned int classCount = 0;
+            const char **names = objc_copyClassNamesForImage(record.path.fileSystemRepresentation, &classCount);
+            if (!names || classCount >= 500000) {
+                if (names) free(names);
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(@[], 0, 0, YES); });
+                return;
+            }
+
+            NSMutableArray<RYGRuntimeBoolMethod *> *matches = [NSMutableArray array];
+            NSUInteger classesScanned = 0, methodsScanned = 0;
+            const NSUInteger publishEvery = 96;
+            for (unsigned int classIndex = 0; classIndex < classCount; classIndex++) {
+                if (atomic_load_explicit(&gRYGSearchEpoch, memory_order_relaxed) != searchEpoch) break;
+                @autoreleasepool {
+                    const char *raw = names[classIndex];
+                    if (!raw || !*raw) { classesScanned++; continue; }
+                    Class cls = objc_lookUpClass(raw);
+                    if (!cls) { classesScanned++; continue; }
+                    for (NSUInteger pass = 0; pass < 2; pass++) {
+                        BOOL classMethod = pass == 1;
+                        Class owner = classMethod ? object_getClass(cls) : cls;
+                        unsigned int count = 0;
+                        Method *methods = owner ? class_copyMethodList(owner, &count) : NULL;
+                        methodsScanned += count;
+                        for (unsigned int methodIndex = 0; methods && methodIndex < count; methodIndex++) {
+                            Method method = methods[methodIndex];
+                            if (!RYGIndexBoolReturn(method) || RYGIndexArgumentKind(method) < RYGRuntimeArgumentNone) continue;
+                            SEL selector = method_getName(method);
+                            NSString *selectorName = selector ? NSStringFromSelector(selector) : @"";
+                            if ([RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:selectorName]) continue;
+                            NSString *className = [NSString stringWithUTF8String:raw] ?: @"";
+                            NSString *haystack = [NSString stringWithFormat:@"%@ %@", className, selectorName];
+                            if (!RYGIndexTextMatchesGroups(haystack, groups)) continue;
+                            if (!RYGIndexIMPBelongsToHeader(method, record.header)) continue;
+                            RYGRuntimeBoolMethod *row = RYGIndexMethodRow(cls, method, classMethod, record.path);
+                            if (row) [matches addObject:row];
+                        }
+                        if (methods) free(methods);
+                    }
+                    classesScanned++;
+                }
+                if ((classesScanned % publishEvery) == 0 && completion) {
+                    NSArray *snapshot = matches.copy;
+                    NSUInteger c = classesScanned, m = methodsScanned;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (atomic_load_explicit(&gRYGSearchEpoch, memory_order_relaxed) == searchEpoch) completion(snapshot, c, m, NO);
+                    });
+                }
+            }
+            free(names);
+            if (atomic_load_explicit(&gRYGSearchEpoch, memory_order_relaxed) != searchEpoch) return;
+            [matches sortUsingComparator:^NSComparisonResult(RYGRuntimeBoolMethod *left, RYGRuntimeBoolMethod *right) {
+                NSComparisonResult byClass = [left.className localizedCaseInsensitiveCompare:right.className];
+                if (byClass != NSOrderedSame) return byClass;
+                if (left.classMethod != right.classMethod) return left.classMethod ? NSOrderedDescending : NSOrderedAscending;
+                return [left.selectorName localizedCaseInsensitiveCompare:right.selectorName];
+            }];
+            NSArray *finalMatches = matches.copy;
+            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(finalMatches, classesScanned, methodsScanned, YES); });
+        }
+    });
+}
+
++ (void)cancelActiveSearch {
+    atomic_fetch_add_explicit(&gRYGSearchEpoch, 1, memory_order_relaxed);
+}
+
 + (RYGRuntimeImageIndex *)cachedIndexForImagePath:(NSString *)imagePath {
     __block RYGRuntimeImageIndex *index = nil;
-    NSString *key = RYGIndexCanonicalPath(imagePath);
-    dispatch_sync(RYGIndexStateQueue(), ^{
-        index = gRYGIndexes[key];
-    });
+    NSString *key = RYGIndexKeyForPath(imagePath);
+    dispatch_sync(RYGIndexStateQueue(), ^{ index = gRYGIndexes[key]; });
     return index;
 }
 
 + (void)invalidate {
     atomic_fetch_add_explicit(&gRYGIndexEpoch, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&gRYGSearchEpoch, 1, memory_order_relaxed);
     dispatch_async(RYGIndexStateQueue(), ^{
         [gRYGIndexes removeAllObjects];
-        [gRYGListeners removeAllObjects];
-        [gRYGInFlight removeAllObjects];
-        [gRYGCompleted removeAllObjects];
+        [gRYGIndexListeners removeAllObjects];
+        [gRYGIndexInFlight removeAllObjects];
+        [gRYGIndexComplete removeAllObjects];
+        [gRYGMethodCache removeAllObjects];
+        [gRYGMethodInFlight removeAllObjects];
+        [gRYGMethodListeners removeAllObjects];
     });
 }
 
