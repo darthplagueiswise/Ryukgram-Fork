@@ -60,45 +60,44 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
         fail(f"separate sideload helper returned: {legacy_module.relative_to(ROOT)}")
 
 # Runtime Browser: discovery is on-demand; persistence has one bounded owner.
+# Persisted exact hooks may act during startup, so their invocation path must be
+# atomic-only rather than deferred until after the gate was already evaluated.
 manager_h = read("src/Debug/RYGRuntimeHookManager.h")
 manager = read("src/Debug/RYGRuntimeHookManager.m")
 bulk = read("src/Debug/RYGRuntimeBulkSessionOwner.m")
 browser = read("src/Debug/RYGFastRuntimeBrowserViewController.m")
 engine = read("src/Debug/RYGRuntimeBrowserEngine.m")
-launch_gate = read("src/Debug/RYGRuntimeRestoreLaunchGate.m")
 require(manager_h, ("RYGRuntimeHookManager", "setSessionOverride"), "runtime hook manager header")
 require(manager, (
     "ryg_runtime_bool_hook_specs_v7",
+    "ryg_runtime_legacy_bulk_cleanup_v8",
     "kRYGRuntimePersistentSpecLimit = 128",
     "kRYGRuntimeCPersistentSpecLimit = 8",
+    "RYGRuntimeHotState",
+    "forcedSet",
+    "forcedValue",
+    "nativeValue",
+    "RYGHookHotResult",
+    "atomic_exchange_explicit",
     "gRYGRuntimePending",
     "gRYGCPending",
     "RYGHookDirectMethod",
     "RYGHookInstallExact",
     "RYGHasPendingRestore",
     "setSessionOverride",
+    "RYGPurgeUntouchedLegacyBulkIfNeeded",
     "constructor(205)",
+    "No second timer replay here",
     "_dyld_register_func_for_add_image",
 ), "runtime hook manager")
 if "objc_getClassList" in manager or "objc_copyClassNamesForImage" in manager:
     fail("runtime persistence owner must replay exact identities, never discover classes")
 if "gRYGRuntimePending.allObjects" not in manager:
     fail("runtime replay must iterate unresolved identities only")
-require(launch_gate, (
-    "constructor(101)",
-    "UIApplicationDidBecomeActiveNotification",
-    "gRYGRuntimeLaunchGateDeferred",
-    "gRYGRuntimeLaunchGateRunning",
-    "QOS_CLASS_UTILITY",
-    "method_exchangeImplementations",
-    "reinstallPersistedOverrides",
-), "generic runtime launch gate")
-if "UIApplicationDidBecomeActiveNotification" not in launch_gate:
-    fail("generic runtime replay must be gated until the app becomes active")
-manager_priority = re.search(r"constructor\((\d+)\).*?RYGRuntimeHookManagerBootstrap", manager, re.S)
-gate_priority = re.search(r"constructor\((\d+)\).*?RYGInstallRuntimeRestoreLaunchGate", launch_gate, re.S)
-if not manager_priority or not gate_priority or int(gate_priority.group(1)) >= int(manager_priority.group(1)):
-    fail("generic runtime launch gate must install before the runtime manager constructor")
+if "RYGHookOverride(strongRecord" in manager or "RYGHookRememberNative(strongRecord" in manager:
+    fail("persisted runtime trampoline reintroduced dictionary/lock lookup per invocation")
+if "RYGRuntimeRestoreLaunchGate" in manager or (ROOT / "src/Debug/RYGRuntimeRestoreLaunchGate.m").exists():
+    fail("generic persisted hooks must preserve startup semantics; post-active launch gate returned")
 require(bulk, ("setSessionOverride", "session only", "revealAllVisibilityRows"), "bulk visibility")
 if "setOverride:desired" in bulk:
     fail("Reveal All must not persist a bulk generic hook set")
@@ -242,4 +241,4 @@ if logos and logos.is_file():
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
-print("source validation OK: SDK 26.5, post-active generic replay, lock-free MobileConfig getter path, legacy getter stacking blocked, bounded unresolved replay, session-only bulk reveal, on-demand browser, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, atomic startup-safe runtime hooks, one-time legacy bulk cleanup, lock-free MobileConfig getters, legacy getter stacking blocked, unresolved-only replay, session-only bulk reveal, on-demand browser, integrated sideload compatibility")
