@@ -65,6 +65,7 @@ manager = read("src/Debug/RYGRuntimeHookManager.m")
 bulk = read("src/Debug/RYGRuntimeBulkSessionOwner.m")
 browser = read("src/Debug/RYGFastRuntimeBrowserViewController.m")
 engine = read("src/Debug/RYGRuntimeBrowserEngine.m")
+launch_gate = read("src/Debug/RYGRuntimeRestoreLaunchGate.m")
 require(manager_h, ("RYGRuntimeHookManager", "setSessionOverride"), "runtime hook manager header")
 require(manager, (
     "ryg_runtime_bool_hook_specs_v7",
@@ -76,12 +77,28 @@ require(manager, (
     "RYGHookInstallExact",
     "RYGHasPendingRestore",
     "setSessionOverride",
+    "constructor(205)",
     "_dyld_register_func_for_add_image",
 ), "runtime hook manager")
 if "objc_getClassList" in manager or "objc_copyClassNamesForImage" in manager:
     fail("runtime persistence owner must replay exact identities, never discover classes")
 if "gRYGRuntimePending.allObjects" not in manager:
     fail("runtime replay must iterate unresolved identities only")
+require(launch_gate, (
+    "constructor(101)",
+    "UIApplicationDidBecomeActiveNotification",
+    "gRYGRuntimeLaunchGateDeferred",
+    "gRYGRuntimeLaunchGateRunning",
+    "QOS_CLASS_UTILITY",
+    "method_exchangeImplementations",
+    "reinstallPersistedOverrides",
+), "generic runtime launch gate")
+if "UIApplicationDidBecomeActiveNotification" not in launch_gate:
+    fail("generic runtime replay must be gated until the app becomes active")
+manager_priority = re.search(r"constructor\((\d+)\).*?RYGRuntimeHookManagerBootstrap", manager, re.S)
+gate_priority = re.search(r"constructor\((\d+)\).*?RYGInstallRuntimeRestoreLaunchGate", launch_gate, re.S)
+if not manager_priority or not gate_priority or int(gate_priority.group(1)) >= int(manager_priority.group(1)):
+    fail("generic runtime launch gate must install before the runtime manager constructor")
 require(bulk, ("setSessionOverride", "session only", "revealAllVisibilityRows"), "bulk visibility")
 if "setOverride:desired" in bulk:
     fail("Reveal All must not persist a bulk generic hook set")
@@ -122,7 +139,7 @@ for forbidden in (" prepare]", "reloadFromRuntime", "reapplyOverridesToNativeTab
     if forbidden in activation.group("body"):
         fail(f"Developer startup restore must not enumerate/reapply MobileConfig: {forbidden}")
 
-# MobileConfig: the app-launch getter path must be RAM-only.
+# MobileConfig: the app-launch getter path must be lock-free and allocation-free.
 mc_header = read("src/Features/ExpFlags/RYGMobileConfig.h")
 for type_name, discriminator in (("RYGMCTypeBool",1),("RYGMCTypeInt",2),("RYGMCTypeString",3),("RYGMCTypeDouble",4)):
     if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
@@ -131,20 +148,41 @@ mc = read("src/Features/ExpFlags/RYGMobileConfig.xm")
 require(mc, ("_ZN12mobileconfig17typeFromParameterEy", "_ZN12mobileconfig23kMobileConfigParamsListE", "setOverrideForParam:andValue:", "removeOverrideForParam:"), "MobileConfig")
 mc_owner = read("src/Features/ExpFlags/RYGMobileConfigHookOwner.m")
 require(mc_owner, (
-    "RYGMCLoadDiskSnapshot",
-    "gRYGMCCachedOverrides",
+    "RYG_MC_HOT_CAPACITY",
+    "gRYGMCHotSlots",
+    "RYGMCHotFindSlot",
+    "RYGMCHotLoadDiskSnapshotOnce",
     "RYGMCOwnedOverride",
+    "atomic_load_explicit",
     "RYGMCIMPBelongsToRyukGram",
-    "Capture the native upstream as early as possible",
+    "gRYGMCHooksInstalled",
+    "Capture native IMPs before the legacy Logos constructor",
 ), "MobileConfig hot-path owner")
 match = re.search(r"static id RYGMCOwnedOverride\([^)]*\)\s*\{(?P<body>.*?)\n\}", mc_owner, re.S)
 if not match:
     fail("could not inspect MobileConfig hot getter lookup")
-for forbidden in ("RYGMobileConfig.shared", "class_getInstanceVariable", "dictionaryWithContentsOfFile", "backtrace", "reapplyOverridesToNativeTable"):
+for forbidden in (
+    "NSNumber", "NSDictionary", "NSMutableDictionary", "os_unfair_lock",
+    "RYGMobileConfig.shared", "class_getInstanceVariable", "dictionaryWithContentsOfFile",
+    "NSUserDefaults", "backtrace", "dladdr", "reapplyOverridesToNativeTable",
+):
     if forbidden in match.group("body"):
         fail(f"MobileConfig getter hot path performs expensive work: {forbidden}")
 if "reapplyOverridesToNativeTable" in mc_owner:
     fail("MobileConfig hook-install owner must not reapply the full native override table")
+
+# The old Logos MobileConfig getter owner remains source-compatible only; it may
+# not stack on top of the RAM owner during the constructor window.
+mc_legacy_gate = read("src/Features/ExpFlags/RYGMobileConfigLegacyHookGate.m")
+require(mc_legacy_gate, (
+    "constructor(90)",
+    "ryg_metaconfig_enabled",
+    "method_exchangeImplementations",
+    "UIApplicationDidFinishLaunchingNotification",
+    "RYGMCLegacyGateRemove",
+), "legacy MobileConfig hook gate")
+if "setBool:" in mc_legacy_gate or "setObject:" in mc_legacy_gate:
+    fail("legacy MobileConfig gate must never mutate the user's saved preference")
 mc_backtrace = read("src/Features/ExpFlags/RYGMobileConfigBacktraceGuard.m")
 require(mc_backtrace, ("rebind_symbols_image", '.name = \"backtrace\"', "RYGMobileConfigBacktraceDisabled", "constructor(100)"), "MobileConfig callsite guard")
 
@@ -204,4 +242,4 @@ if logos and logos.is_file():
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
-print("source validation OK: SDK 26.5, RAM-only MobileConfig getter path, bounded unresolved runtime replay, session-only bulk reveal, on-demand browser, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, post-active generic replay, lock-free MobileConfig getter path, legacy getter stacking blocked, bounded unresolved replay, session-only bulk reveal, on-demand browser, integrated sideload compatibility")
