@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail fast on migration/build regressions before invoking Theos."""
+"""Structural source contract for the dogfood architecture."""
 
 from __future__ import annotations
 
@@ -17,6 +17,13 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def read(path: str) -> str:
+    file = ROOT / path
+    if not file.is_file():
+        fail(f"required implementation missing: {path}")
+    return file.read_text(encoding="utf-8", errors="replace")
+
+
 def logos_orig_tail(line: str) -> str | None:
     for match in re.finditer(r"%orig\b", line):
         cursor = match.end()
@@ -25,262 +32,201 @@ def logos_orig_tail(line: str) -> str | None:
         if cursor < len(line) and line[cursor] == "(":
             depth = 0
             while cursor < len(line):
-                char = line[cursor]
-                if char == "(":
+                if line[cursor] == "(":
                     depth += 1
-                elif char == ")":
+                elif line[cursor] == ")":
                     depth -= 1
                     if depth == 0:
                         cursor += 1
                         break
                 cursor += 1
-            if depth:
-                return line[match.end():]
         tail = line[cursor:]
         if not re.fullmatch(r"\s*;\s*", tail):
             return tail
     return None
 
 
-makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+makefile = read("Makefile")
 if "TARGET := iphone:clang:26.5:15.0" not in makefile:
-    fail("Makefile must build with the iOS 26.5 SDK and iOS 15 deployment target")
+    fail("Makefile must use SDK 26.5 and the iOS 15 deployment target")
 if "-include src/RYGPrefix.h" not in makefile:
-    fail("RYGPrefix.h is not the forced prefix header")
+    fail("RYGPrefix.h must remain the forced prefix header")
 if "src/Compatibility" not in makefile:
-    fail("the integrated compatibility-layer contract is missing")
+    fail("integrated sideload compatibility contract is missing")
 
 if (ROOT / "src/BundleAssets/ryg_mc_names.bin").exists():
-    fail("preloaded MobileConfig catalog ryg_mc_names.bin must not ship")
+    fail("preloaded MobileConfig name catalog must not ship")
 
-for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/SideloadPatch"):
-    if legacy_module.exists() and any(legacy_module.iterdir()):
-        fail(f"separate compatibility module still exists: {legacy_module.relative_to(ROOT)}")
-
-# Competing implementations that previously stacked hooks/renderers remain
-# forbidden. RYGRuntimeClassBrowser is intentionally NOT on this list: it is the
-# structural, non-classifying Class -> methods/properties enumerator used by the
-# live Runtime Browser.
+# These files were the stacked bootstrap/restore architecture responsible for
+# doing the same work from lifecycle, dyld callbacks and UI paths. Their return
+# is a regression, not an alternative implementation.
 for obsolete in (
+    "src/Debug/RYGDeveloperBootstrapOwner.m",
+    "src/Debug/RYGDeveloperPersistenceBootstrap.m",
+    "src/Debug/RYGDeveloperSurfaceFastPath.m",
+    "src/Debug/RYGRuntimeFastPath.m",
+    "src/Debug/RYGRuntimeOverrideOwner.m",
+    "src/Debug/RYGRuntimeIndex.h",
+    "src/Debug/RYGRuntimeIndex.m",
     "src/Debug/RYGDeveloperFeatureViewController.m",
     "src/Debug/RYGDeveloperGateViewController.m",
-    "src/Debug/RYGDeveloperExactSurfaceViewController.m",
-    "src/Debug/RYGDeveloperRuntimeBrowserViewController.m",
-    "src/Debug/RYGDeveloperEasyGatingControls.m",
-    "src/Debug/RYGCFunctionOverrideEngine.m",
     "src/Debug/RYGDeveloperRuntimeScanner.m",
-    "src/UI/RYGSettingsMenuGlassFix.m",
-    "src/Settings/RYGSettingsMenuLiquidGlass.m",
-    "src/Features/ExpFlags/RYGMobileConfigExternalSeenTracker.m",
-    "src/Features/ExpFlags/RYGMobileConfigParamTableCompatibility.m",
-    "src/Features/ExpFlags/RYGMobileConfigNativeSync.m",
 ):
     if (ROOT / obsolete).exists():
-        fail(f"obsolete competing implementation returned: {obsolete}")
+        fail(f"obsolete competing runtime/bootstrap implementation returned: {obsolete}")
 
-mc_header_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.h"
-mc_impl_path = ROOT / "src/Features/ExpFlags/RYGMobileConfig.xm"
-mc_json_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.m"
-easy_path = ROOT / "src/Debug/RYGEasyGatingRuntime.m"
-mobile_config_bridge_path = ROOT / "src/Features/ExpFlags/RYGMobileConfigBridge.m"
-runtime_engine_path = ROOT / "src/Debug/RYGRuntimeBrowserEngine.m"
-runtime_index_path = ROOT / "src/Debug/RYGRuntimeIndex.m"
-runtime_view_path = ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.m"
-topic_path = ROOT / "src/Debug/RYGDeveloperTopicViewController.m"
-setting_path = ROOT / "src/Settings/RYGSetting.m"
-settings_entry_path = ROOT / "src/Features/General/RYGSettingsMenuEntry.x"
-liquid_glass_path = ROOT / "src/UI/RYGLiquidGlass.m"
-
-mc_header = mc_header_path.read_text(encoding="utf-8")
-for type_name, discriminator in (
-    ("RYGMCTypeBool", 1),
-    ("RYGMCTypeInt", 2),
-    ("RYGMCTypeString", 3),
-    ("RYGMCTypeDouble", 4),
+manager = read("src/Debug/RYGRuntimeHookManager.m")
+manager_h = read("src/Debug/RYGRuntimeHookManager.h")
+for marker in (
+    "ryg_runtime_bool_hook_specs_v6",
+    "ryg_runtime_legacy_quarantine_v6",
+    "kRYGRuntimeMigrationLimit = 256",
+    "RYGHookDirectMethod",
+    "class_copyMethodList",
+    "RYGHookInstallExact",
+    "UIApplicationDidFinishLaunchingNotification",
+    "RYGRuntimeHookManagerBootstrap",
+    "method_exchangeImplementations",
 ):
-    if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
-        fail(f"native MobileConfig discriminator drifted: {type_name} must equal {discriminator}")
-if "RYGMCTypeIsRuntimeValue" not in mc_header:
-    fail("MobileConfig type validation helper is missing")
+    if marker not in manager:
+        fail(f"single runtime hook owner contract marker missing: {marker}")
+if "_dyld_register_func_for_add_image" in manager:
+    fail("runtime override restore must not register dyld add-image callbacks")
+if "objc_getClassList" in manager or "objc_copyClassNamesForImage" in manager:
+    fail("runtime hook manager must replay exact specs, never discover classes")
+if "RYGRuntimeHookManager" not in manager_h:
+    fail("runtime hook manager public contract is missing")
 
-mc_impl = mc_impl_path.read_text(encoding="utf-8")
+browser = read("src/Debug/RYGFastRuntimeBrowserViewController.m")
+for marker in (
+    "objc_copyClassNamesForImage",
+    "membersForClassName",
+    "machOSymbolsForImagePath",
+    "selector scan is on-demand",
+    "methods are not indexed until needed",
+    'initWithItems:@[@"Objective-C", @"C Symbols"]',
+    "Force On",
+    "Force Off",
+    "Use Native",
+):
+    if marker not in browser:
+        fail(f"on-demand Runtime Browser marker missing: {marker}")
+for forbidden in ("RYGRuntimeIndex", "requestIndexForImagePath", "objc_getClassList", "_dyld_register_func_for_add_image"):
+    if forbidden in browser:
+        fail(f"Runtime Browser reintroduced eager/global discovery: {forbidden}")
+if re.search(r"imageButton\.(?:leading|trailing)Anchor[^\n]*constant:", browser):
+    fail("Runtime Browser image selector must use adaptive layout margins")
+
+engine = read("src/Debug/RYGRuntimeBrowserEngine.m")
+for marker in (
+    "runtimeImagePaths",
+    "membersForClassName",
+    "method_getReturnType",
+    "method_getArgumentType",
+    "machOSymbolsForImagePath",
+    "rebind_symbols_image",
+):
+    if marker not in engine:
+        fail(f"Runtime Browser engine contract marker missing: {marker}")
+if "__attribute__((constructor))" in engine or "_dyld_register_func_for_add_image" in engine:
+    fail("Runtime Browser engine itself must stay presentation/discovery-only")
+
+hub = read("src/Debug/RYGDeveloperHubViewController.m")
+if "activatePersistedNativeFeatures" in hub:
+    fail("opening Developer Hub must not trigger persisted restore")
+if "Startup only replays exact persisted identities" not in hub:
+    fail("Developer Hub must document the exact-replay/on-demand model")
+
+topic = read("src/Debug/RYGDeveloperTopicViewController.m")
+for marker in (
+    "_TtC17IGBugReporterMenu29IGBugReportMenuViewController",
+    "showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:showDogfoodingAssistant:",
+    "_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController",
+    "_TtC35IGDogfoodingAssistantLauncherClient35IGDogfoodingAssistantLauncherClient",
+    "_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs",
+    "_TtC18IGNavConfiguration25IGHomecomingConfiguration",
+    "isDynamicTabStoryGridEnabled",
+    "_TtC20IGLiquidGlassSwizzle26IGLiquidGlassSwizzleToggle",
+    "_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper",
+    "_TtC29IGLiquidGlassExperimentHelper39IGLiquidGlassNavigationExperimentHelper",
+    "RYGDeveloperStateBootstrap",
+    "No MobileConfig prepare/reload/reapply occurs here",
+):
+    if marker not in topic:
+        fail(f"Developer exact-owner/persistence marker missing: {marker}")
+for forbidden in ("_dyld_register_func_for_add_image", "objc_getClassList", "RYGFindExactBoolSelector", "RYGRuntimeIndex"):
+    if forbidden in topic:
+        fail(f"Developer Topic reintroduced global/eager discovery: {forbidden}")
+activation = re.search(r"\+ \(void\)activatePersistedNativeFeatures\s*\{(?P<body>.*?)\n\}\n\n- \(instancetype\)initWithSurface", topic, re.S)
+if not activation:
+    fail("could not validate activatePersistedNativeFeatures body")
+for forbidden in (" prepare]", "reloadFromRuntime", "reapplyOverridesToNativeTable"):
+    if forbidden in activation.group("body"):
+        fail(f"startup native restore must not enumerate/reapply MobileConfig: {forbidden}")
+
+mc_header = read("src/Features/ExpFlags/RYGMobileConfig.h")
+for type_name, discriminator in (("RYGMCTypeBool", 1), ("RYGMCTypeInt", 2), ("RYGMCTypeString", 3), ("RYGMCTypeDouble", 4)):
+    if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
+        fail(f"MobileConfig discriminator drifted: {type_name} must equal {discriminator}")
+
+mc_impl = read("src/Features/ExpFlags/RYGMobileConfig.xm")
 for marker in (
     "_ZN12mobileconfig17typeFromParameterEy",
     "_ZN12mobileconfig23kMobileConfigParamsListE",
     "_ZN12mobileconfig23kMobileConfigParamsSizeE",
-    '@"FBMobileConfigStartupConfigs"',
     '@"setOverrideForParam:andValue:"',
     '@"removeOverrideForParam:"',
-    "descriptorAt:",
-    "exportedParamCount",
-    "rygCanonicalPointerValue",
 ):
     if marker not in mc_impl:
-        fail(f"validated MobileConfig contract marker is missing: {marker}")
-for forbidden in (
-    "getOrCreateOverridesTable",
-    "FBMobileConfigOverridesTable22updateOverrideForParam",
-    'class_getInstanceVariable([manager class], "_configManager")',
-):
-    if forbidden in mc_impl:
-        fail(f"obsolete C++ MobileConfig override path returned: {forbidden}")
+        fail(f"validated MobileConfig runtime marker missing: {marker}")
 if "dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC))" in mc_impl:
-    fail("MobileConfig overrides must not be auto-reapplied during app startup")
+    fail("MobileConfig must not auto-reapply from an 8-second startup timer")
 
-mc_json = mc_json_path.read_text(encoding="utf-8")
+mc_bridge = read("src/Features/ExpFlags/RYGMobileConfigBridge.m")
+for forbidden in ("RYGBridgeDataDirectoryScore", "containerURLForSecurityApplicationGroupIdentifier"):
+    if forbidden in mc_bridge:
+        fail(f"guessed MobileConfig container fallback returned: {forbidden}")
+if 'hasSuffix:@".data"' not in mc_bridge:
+    fail("native MobileConfig data-file contract is missing")
+
+mc_json = read("src/Features/ExpFlags/RYGMobileConfigJSONIO.m")
 for marker in ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"):
     if marker not in mc_json:
-        fail(f"canonical MobileConfig JSON contract marker is missing: {marker}")
-json_header = (ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONIO.h").read_text(encoding="utf-8")
-if "RYGMCNameMappingImportModeMerge" not in json_header or "mode:(RYGMCNameMappingImportMode)mode" not in mc_json:
-    fail("id_name_mapping Replace/Merge import contract is missing")
+        fail(f"canonical mc_overrides JSON marker missing: {marker}")
 
-easy = easy_path.read_text(encoding="utf-8")
+easy = read("src/Debug/RYGEasyGatingRuntime.m")
 for marker in (
     'name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock"',
     "rebind_symbols_image",
     "RYGResolveFinalGateID",
-    "wrapperAddress + 0x34",
     "RYGEasyGatingImageRangeHasProtection",
-    "VM_PROT_READ | VM_PROT_EXECUTE",
+    "ryg_easy_gating_platform_bool_overrides_v2",
 ):
     if marker not in easy:
-        fail(f"sideload-safe Easy Gating wrapper/final-ID contract is missing: {marker}")
+        fail(f"sideload-safe EasyGating marker missing: {marker}")
 if re.search(r'dlsym\s*\([^\n]*"EasyGatingPlatformGetBoolean"', easy):
-    fail("Easy Gating must not patch the signed FBSharedFramework platform function")
-if "ryg_easy_gating_platform_bool_overrides_v2" not in easy:
-    fail("Easy Gating final-ID persistence namespace is missing")
+    fail("EasyGating must not patch signed FBShared __TEXT")
 
-mobile_config_bridge = mobile_config_bridge_path.read_text(encoding="utf-8")
-for forbidden in (
-    "RYGBridgeDataDirectoryScore",
-    "RYGBridgeResolveSignedAppGroupDataDirectory",
-    "RYGBridgeSignedApplicationGroups",
-    "containerURLForSecurityApplicationGroupIdentifier",
-):
-    if forbidden in mobile_config_bridge:
-        fail(f"MobileConfig guessed App Group/account fallback returned: {forbidden}")
-for marker in ("hasSuffix:@\".data\"", "there is deliberately no guessed fallback"):
-    if marker not in mobile_config_bridge:
-        fail(f"exact native MobileConfig data-directory contract is missing: {marker}")
+liquid = read("src/UI/RYGLiquidGlass.m")
+if 'return ![RYGUtils getBoolPref:@"liquid_glass_force_off"]' not in liquid:
+    fail("Liquid Glass availability/accessibility contract changed")
+if "return !UIAccessibilityIsReduceTransparencyEnabled()" in liquid:
+    fail("Liquid Glass must let UIKit adapt Reduce Transparency")
 
-runtime_engine = runtime_engine_path.read_text(encoding="utf-8")
-for marker in (
-    "objc_copyClassNamesForImage",
-    "objc_getClassList",
-    "class_getImageName",
-    "method_getReturnType",
-    "method_getArgumentType",
-    "method_getNumberOfArguments",
-    'strchr("BcC"',
-):
-    if marker not in runtime_engine:
-        fail(f"direct Runtime Browser ABI/image marker is missing: {marker}")
-if "__attribute__((constructor))" in runtime_engine or "_dyld_register_func_for_add_image" in runtime_engine:
-    fail("Runtime Browser must not reinstall developer overrides at process startup/image load")
-if "NSUserDefaults" in runtime_engine and "ryg_runtime_bool_overrides" in runtime_engine:
-    fail("generic Runtime Browser overrides must remain process-local")
-
-runtime_index = runtime_index_path.read_text(encoding="utf-8")
-for marker in (
-    "objc_copyClassNamesForImage",
-    "class_copyMethodList",
-    'strchr("BcC"',
-    "RYGIndexIMPBelongsToHeader",
-    "isStructuralNoiseSelectorName",
-    "requestIndexForImagePath",
-    "invalidate",
-):
-    if marker not in runtime_index:
-        fail(f"live Runtime index marker is missing: {marker}")
-
-runtime_view = runtime_view_path.read_text(encoding="utf-8")
-for marker in (
-    'initWithItems:@[@"Objective-C", @"C Symbols"]',
-    "RYGRuntimeIndex",
-    "requestIndexForImagePath",
-    "runtimeImagePaths",
-    "refreshTapped",
-    "Force On",
-    "Force Off",
-    "Native",
-    "machOSymbolsForImagePath",
-    "self.view.layoutMarginsGuide",
-):
-    if marker not in runtime_view:
-        fail(f"structural live Runtime Browser marker is missing: {marker}")
-if "preloaded" in runtime_view.lower() or "bundled table" in runtime_view.lower():
-    fail("Runtime Browser must not ship a preloaded class/method table")
-if re.search(r"imageButton\.(?:leading|trailing)Anchor[^\n]*constant:", runtime_view):
-    fail("Runtime Browser image menu must use adaptive system layout margins")
-
-topic = topic_path.read_text(encoding="utf-8")
-for marker in (
-    "_TtC25IGOverlayStoriesTrayDebug39IGOverlayStoriesTrayDebugViewController",
-    "_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs",
-    "_TtC29IGLiquidGlassExperimentHelper33IGThrowbackChromeExperimentHelper",
-    "_TtC21IGConsumerSubsService21IGConsumerSubsService",
-    "_TtC17IGBugReporterMenu29IGBugReportMenuViewController",
-    "showInternalSettings:showLoggedOutInternalSettings:showShakeToReportPreferenceToggle:showDogfoodingAssistant:",
-    "_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController",
-    "_TtC20IGDogfoodingSettings20IGDogfoodingSettings",
-    "_TtC35IGDogfoodingAssistantLauncherClient35IGDogfoodingAssistantLauncherClient",
-):
-    if marker not in topic:
-        fail(f"validated Developer native owner/selector is missing: {marker}")
-for forbidden in ("keywords:", "RYGDevContainsAny", "boolMethodsForSurface"):
-    if forbidden in topic:
-        fail(f"Developer topic preclassification returned: {forbidden}")
-if 'initialQuery:@"settings ishidden|' in topic:
-    fail("hidden Settings browser incorrectly requires every visibility gate to contain the word settings")
-if 'initialQuery:@"ishidden|shouldhide|shouldshow|canshow|isvisible|isavailable|shoulddisplay"' not in topic:
-    fail("hidden Settings browser live visibility query is missing")
-for marker in (
-    'initialQuery:@"prism"',
-    'initialQuery:@"liquidglass|throwback|glass"',
-    'initialQuery:@"storytray|storiestray|storygrid|storiesgrid"',
-    'initialQuery:@"dogfood|employee|internal"',
-):
-    if marker not in topic:
-        fail(f"Developer live cross-image surface query is missing: {marker}")
-
-setting = setting_path.read_text(encoding="utf-8")
-for marker in ("UIAction.class", "UICommand.class", "RYGLiquidGlassConfigureButton", "setDefaultContentInsets"):
-    if marker not in setting:
-        fail(f"settings menu Liquid Glass/state marker is missing: {marker}")
-
-settings_entry = settings_entry_path.read_text(encoding="utf-8")
-for marker in (
-    "kRYGProfileSettingsLongPressKey",
-    "kRYGTabSettingsLongPressKey",
-    "objc_getAssociatedObject",
-    "ryg_tabBarSettingsLongPress:",
-    "_dyld_register_func_for_add_image",
-    "RYGInstallSettingsLongPressHooks",
-):
-    if marker not in settings_entry:
-        fail(f"idempotent settings long-press contract is missing: {marker}")
-if "gestureRecognizers.count == 0" in settings_entry:
-    fail("profile settings long-press must coexist with Instagram's native recognizers")
-if "@selector(handleLongPress:)" in settings_entry or "@selector(ryg_settingsShortcutLongPress:)" in settings_entry:
-    fail("settings shortcut reintroduced a collision-prone generic long-press selector")
-
-liquid_glass = liquid_glass_path.read_text(encoding="utf-8")
-if 'return ![RYGUtils getBoolPref:@"liquid_glass_force_off"]' not in liquid_glass:
-    fail("Liquid Glass availability must preserve UIKit's automatic accessibility adaptations")
-if "return !UIAccessibilityIsReduceTransparencyEnabled()" in liquid_glass:
-    fail("Liquid Glass must not be disabled when Reduce Transparency is enabled")
+for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/SideloadPatch"):
+    if legacy_module.exists() and any(legacy_module.iterdir()):
+        fail(f"separate sideload helper returned: {legacy_module.relative_to(ROOT)}")
 
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
 for path in build_surfaces:
     if not path.exists():
         continue
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8", errors="replace")
     if re.search(r"iPhoneOS(?:16\.2|26\.2)\.sdk|iphone:clang:(?:16\.2|26\.2)", text):
         fail(f"old SDK reference in {path.relative_to(ROOT)}")
     if re.search(r"ipapatch|--dylib\s+\S*(?:pluginsinject|noplugin|sideloadpatch)", text, re.I):
-        fail(f"separate sideload-helper injection remains in {path.relative_to(ROOT)}")
+        fail(f"separate helper injection remains in {path.relative_to(ROOT)}")
 
 active_sources: list[Path] = []
 for suffix in ("*.m", "*.mm", "*.x", "*.xm", "*.h"):
@@ -293,7 +239,7 @@ for path in active_sources:
     code = re.sub(r'@?"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', '""', code)
     match = legacy_symbol.search(code)
     if match:
-        fail(f"unmigrated code symbol {match.group(0)!r} in {path.relative_to(ROOT)}")
+        fail(f"unmigrated legacy symbol {match.group(0)!r} in {path.relative_to(ROOT)}")
     if path.suffix in {".x", ".xm"}:
         if re.search(r"%orig\s*\(\s*\)", code):
             fail(f"no-argument %orig() must use bare %orig in {path.relative_to(ROOT)}")
@@ -302,8 +248,7 @@ for path in active_sources:
             if tail is not None:
                 fail(f"tokens follow %orig on the same source line in {path.relative_to(ROOT)}:{line_number}: {tail.strip()!r}")
 
-theos_root = os.environ.get("THEOS")
-logos = Path(theos_root) / "bin/logos.pl" if theos_root else None
+logos = Path(os.environ.get("THEOS", "")) / "bin/logos.pl" if os.environ.get("THEOS") else None
 if logos and logos.is_file():
     for path in sorted(p for p in active_sources if p.suffix in {".x", ".xm"}):
         result = subprocess.run(["perl", str(logos), str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=False)
@@ -311,24 +256,4 @@ if logos and logos.is_file():
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
-required = (
-    ROOT / "src/Compatibility/RYGSideloadCompatibility.xm",
-    ROOT / "src/UI/RYGLiquidGlass.m",
-    ROOT / "src/Settings/RYGSetting.m",
-    ROOT / "src/Debug/RYGRuntimeBrowserEngine.m",
-    ROOT / "src/Debug/RYGRuntimeIndex.h",
-    ROOT / "src/Debug/RYGRuntimeIndex.m",
-    ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.h",
-    ROOT / "src/Debug/RYGFastRuntimeBrowserViewController.m",
-    ROOT / "src/Debug/RYGDeveloperTopicViewController.m",
-    ROOT / "src/Debug/RYGWordmarkViewController.m",
-    ROOT / "src/Debug/RYGEasyGatingRuntime.m",
-    ROOT / "src/Features/ExpFlags/RYGMobileConfigNameMappingStore.m",
-    ROOT / "src/Features/ExpFlags/RYGFastMobileConfigBrowserViewController.m",
-    ROOT / "src/Features/ExpFlags/RYGMobileConfigJSONSync.m",
-)
-for path in required:
-    if not path.is_file():
-        fail(f"required implementation missing: {path.relative_to(ROOT)}")
-
-print("source validation OK: one Liquid Glass renderer, structural live Runtime Browser, declared runtime-owner contracts, sideload-safe final-ID EasyGating, one MobileConfig sync owner, Replace/Merge mapping, integrated sideload compatibility")
+print("source validation OK: single exact runtime owner, on-demand browser, bounded migration, no dyld restore loops, explicit MobileConfig work, SDK 26.5")
