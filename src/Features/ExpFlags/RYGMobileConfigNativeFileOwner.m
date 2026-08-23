@@ -42,14 +42,16 @@ static BOOL RYGMCNativeFileWriteAndVerify(NSData *data, NSString *path) {
 static void RYGMCNativeFileRestore(uint64_t generation) {
     @autoreleasepool {
         if (atomic_load_explicit(&gRYGMCNativeFileGeneration, memory_order_acquire) != generation) return;
-        RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-        if (!mobileConfig.overrideCount) return;
 
+        // The durable canonical document is the source of truth across process
+        // launches. Do not require the in-memory override table to have already
+        // been reconstructed: on a cold launch it is intentionally still empty.
         NSData *canonical = [NSData dataWithContentsOfFile:RYGMCNativeFileCanonicalCachePath()
                                                    options:NSDataReadingMappedIfSafe
                                                      error:nil];
         if (!RYGMCNativeFileValidJSON(canonical)) return;
 
+        RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
         NSString *nativePath = [mobileConfig ryg_nativeOverridesJSONPath];
         if (!nativePath.length) return;
         if (!RYGMCNativeFileWriteAndVerify(canonical, nativePath)) return;
@@ -58,9 +60,18 @@ static void RYGMCNativeFileRestore(uint64_t generation) {
         NSString *mappingPath = [mobileConfig ryg_nativeNameMappingPath];
         if (mapping.length && mappingPath.length) (void)RYGMCNativeFileWriteAndVerify(mapping, mappingPath);
 
-        // Native StartupConfigs is only a mirror. Reapply it after the file has
-        // been restored, off the launch-critical constructor path.
-        [mobileConfig reapplyOverridesToNativeTable];
+        // If the process restarted, hydrate the runtime override table from the
+        // same canonical document before mirroring StartupConfigs. This runs on
+        // the utility queue after the app became active and never on cold-start.
+        if (!mobileConfig.overrideCount) {
+            NSUInteger applied = 0;
+            NSError *importError = nil;
+            (void)[mobileConfig ryg_importAndApplyOverridesData:canonical
+                                                   appliedCount:&applied
+                                                          error:&importError];
+        } else {
+            [mobileConfig reapplyOverridesToNativeTable];
+        }
     }
 }
 
