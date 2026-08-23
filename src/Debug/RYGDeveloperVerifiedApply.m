@@ -6,6 +6,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <string.h>
 
 static NSString *const kRYGVerifiedStoryTrayPref = @"ryg_dev_story_tray_override";
 static NSString *const kRYGVerifiedGlassSwizzlePref = @"ryg_dev_glass_swizzle_enabled";
@@ -60,8 +61,7 @@ static Method RYGVerifiedDirectMethod(Class owner, SEL selector) {
 static RYGRuntimeBoolMethod *RYGVerifiedStoryTrayGate(void) {
     NSString *className = @"_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs";
     NSString *selectorName = @"isTrayAttachedToHeaderEnabled:";
-    Class cls = objc_lookClass(className.UTF8String);
-    if (!cls) cls = objc_lookUpClass(className.UTF8String);
+    Class cls = objc_lookUpClass(className.UTF8String);
     Class owner = cls ? object_getClass(cls) : Nil;
     SEL selector = NSSelectorFromString(selectorName);
     Method method = RYGVerifiedDirectMethod(owner, selector);
@@ -115,8 +115,6 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
     NSNumber *current = [RYGRuntimeHookManager overrideForKey:gate.overrideKey];
     if (!current) current = [RYGRuntimeHookManager observedNativeValueForKey:gate.overrideKey];
     if (!current) {
-        // Arm observation first. The native debug presenter only needs the BOOL
-        // for its initial switch state; do not invent the gate's native value.
         (void)[RYGRuntimeHookManager observeMethod:gate];
         [RYGUtils showErrorHUDWithDescription:@"Story Tray native value has not been observed yet. Let Instagram evaluate the tray once, then reopen this menu."];
         return YES;
@@ -128,7 +126,6 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
     if (!method || method_getNumberOfArguments(method) != 5 || !RYGVerifiedMethodReturns(method, 'v') ||
         !RYGVerifiedObjectArgument(method, 2) || !RYGVerifiedBoolArgument(method, 3) || !RYGVerifiedObjectArgument(method, 4)) return NO;
 
-    __weak UIViewController *weakPresenter = presenter;
     void (^completion)(BOOL) = ^(BOOL enabled) {
         RYGRuntimeBoolMethod *resolved = RYGVerifiedStoryTrayGate();
         BOOL success = resolved && [RYGRuntimeHookManager setOverride:@(enabled) forMethod:resolved];
@@ -139,7 +136,6 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
         }
         [NSUserDefaults.standardUserDefaults setObject:@(enabled) forKey:kRYGVerifiedStoryTrayPref];
         [RYGUtils showToastForDuration:1.3 title:@"Story Tray override applied" subtitle:enabled ? @"Forced On" : @"Forced Off"];
-        (void)weakPresenter;
     };
     ((void (*)(id, SEL, id, BOOL, id))objc_msgSend)((id)cls, selector, presenter, current.boolValue, completion);
     return YES;
@@ -214,8 +210,8 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
 - (void)ryg_verified_switchChanged:(UISwitch *)toggle {
     CGPoint point = [toggle convertPoint:CGPointMake(CGRectGetMidX(toggle.bounds), CGRectGetMidY(toggle.bounds)) toView:self.tableView];
     NSIndexPath *indexPath = [self.tableView indexPathForRowAtPoint:point];
-    NSArray *rows = [self valueForKey:@"rows"];
-    NSDictionary *row = indexPath.row < (NSInteger)rows.count ? rows[(NSUInteger)indexPath.row] : nil;
+    NSArray *rows = [self valueForKey:@"rows"] ?: @[];
+    NSDictionary *row = (indexPath && indexPath.row < (NSInteger)rows.count) ? rows[(NSUInteger)indexPath.row] : nil;
     if (![[row objectForKey:@"kind"] isEqualToString:@"glass"]) {
         [self ryg_verified_switchChanged:toggle];
         return;
@@ -242,7 +238,7 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
     NSNumber *readback = nil;
     if (!RYGVerifiedSetHelper(className, selectorName, toggle.isOn, &readback)) {
         toggle.on = !toggle.isOn;
-        [RYGUtils showErrorHUDWithDescription:[NSString stringWithFormat:@"%@ singleton/setter ABI is not available in this loaded build.", className.lastPathComponent ?: @"Liquid Glass helper"]];
+        [RYGUtils showErrorHUDWithDescription:[NSString stringWithFormat:@"%@ singleton/setter ABI is not available in this loaded build.", className ?: @"Liquid Glass helper"]];
         return;
     }
     [NSUserDefaults.standardUserDefaults setBool:toggle.isOn forKey:preference];
@@ -264,7 +260,7 @@ static BOOL RYGVerifiedOpenStoryTrayDebug(UIViewController *presenter) {
 
 - (void)ryg_verified_tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     NSArray *rows = [self valueForKey:@"rows"] ?: @[];
-    NSDictionary *row = indexPath.row < (NSInteger)rows.count ? rows[(NSUInteger)indexPath.row] : nil;
+    NSDictionary *row = (indexPath && indexPath.row < (NSInteger)rows.count) ? rows[(NSUInteger)indexPath.row] : nil;
     if ([row[@"action"] isEqualToString:@"rygStoryTrayDebug"]) {
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
         if (!RYGVerifiedOpenStoryTrayDebug(self)) [RYGUtils showErrorHUDWithDescription:@"The native Story Tray debug presenter ABI is not available in this Instagram build."];
