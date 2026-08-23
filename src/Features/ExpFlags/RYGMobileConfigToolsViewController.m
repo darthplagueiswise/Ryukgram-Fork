@@ -106,7 +106,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeReplace;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge" style:UIAlertActionStyleDefault handler:^(__unused UIAction *action) {
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Merge" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeMerge;
         [weakSelf presentJSONPicker:RYGMCImportOperationNameMapping];
     }]];
