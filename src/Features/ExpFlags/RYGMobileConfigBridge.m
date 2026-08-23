@@ -4,10 +4,14 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#include <string.h>
 
 @interface RYGMobileConfig (RYGBridgePrivate)
 - (NSDictionary *)loadNameCatalog;
 @end
+
+static NSString *const kRYGBridgeVerifiedDataLeafKey = @"ryg_mc_verified_native_data_leaf_v1";
+static NSString *const kRYGBridgeInstagramGroupIdentifier = @"group.com.burbn.instagram";
 
 static BOOL RYGBridgeDirectoryExists(NSString *path) {
     if (!path.length) return NO;
@@ -30,28 +34,52 @@ static NSString *RYGBridgeDataLeafFromCandidate(NSString *candidate) {
     return [parent.lastPathComponent.lowercaseString hasSuffix:@".data"] ? parent.lastPathComponent : nil;
 }
 
+static NSString *RYGBridgeRememberResolvedDataDirectory(NSString *path) {
+    NSString *standard = RYGBridgeStandardPath(path);
+    NSString *leaf = RYGBridgeDataLeafFromCandidate(standard);
+    if (!standard.length || !leaf.length || ![standard.lastPathComponent isEqualToString:leaf]) return standard;
+    [NSUserDefaults.standardUserDefaults setObject:leaf forKey:kRYGBridgeVerifiedDataLeafKey];
+    return standard;
+}
+
+static NSString *RYGBridgePreviouslyVerifiedDataLeaf(void) {
+    id raw = [NSUserDefaults.standardUserDefaults objectForKey:kRYGBridgeVerifiedDataLeafKey];
+    if (![raw isKindOfClass:NSString.class]) return nil;
+    NSString *leaf = [(NSString *)raw lastPathComponent];
+    return [leaf.lowercaseString hasSuffix:@".data"] ? leaf : nil;
+}
+
 static NSDictionary<NSString *, NSURL *> *RYGBridgeGroupContainerURLs(void) {
+    NSMutableDictionary<NSString *, NSURL *> *clean = [NSMutableDictionary dictionary];
+
+    // Prefer the public current-process App Group API. It returns the real
+    // container root assigned by the current signature instead of requiring us
+    // to guess a UUID under /var/mobile/Containers/Shared/AppGroup.
+    NSURL *instagramGroup = [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:kRYGBridgeInstagramGroupIdentifier];
+    if (instagramGroup.path.length) clean[kRYGBridgeInstagramGroupIdentifier] = instagramGroup;
+
+    // LSBundleProxy is retained only as an enumeration fallback for builds whose
+    // entitlement uses another Instagram/Burbn group identifier.
     Class proxyClass = objc_lookUpClass("LSBundleProxy");
     SEL currentSelector = NSSelectorFromString(@"bundleProxyForCurrentProcess");
     Method currentMethod = proxyClass ? class_getClassMethod(proxyClass, currentSelector) : NULL;
-    if (!currentMethod || method_getNumberOfArguments(currentMethod) != 2) return @{};
+    if (!currentMethod || method_getNumberOfArguments(currentMethod) != 2) return clean.copy;
 
     char returnType[32] = {0};
     method_getReturnType(currentMethod, returnType, sizeof(returnType));
-    if (returnType[0] != '@') return @{};
+    if (returnType[0] != '@') return clean.copy;
     id proxy = ((id (*)(id, SEL))objc_msgSend)((id)proxyClass, currentSelector);
-    if (!proxy) return @{};
+    if (!proxy) return clean.copy;
 
     SEL groupsSelector = NSSelectorFromString(@"groupContainerURLs");
     Method groupsMethod = class_getInstanceMethod([proxy class], groupsSelector);
-    if (!groupsMethod || method_getNumberOfArguments(groupsMethod) != 2) return @{};
+    if (!groupsMethod || method_getNumberOfArguments(groupsMethod) != 2) return clean.copy;
     memset(returnType, 0, sizeof(returnType));
     method_getReturnType(groupsMethod, returnType, sizeof(returnType));
-    if (returnType[0] != '@') return @{};
+    if (returnType[0] != '@') return clean.copy;
 
     id raw = ((id (*)(id, SEL))objc_msgSend)(proxy, groupsSelector);
-    if (![raw isKindOfClass:NSDictionary.class]) return @{};
-    NSMutableDictionary<NSString *, NSURL *> *clean = [NSMutableDictionary dictionary];
+    if (![raw isKindOfClass:NSDictionary.class]) return clean.copy;
     [(NSDictionary *)raw enumerateKeysAndObjectsUsingBlock:^(id key, id value, BOOL *stop) {
         (void)stop;
         if (![key isKindOfClass:NSString.class] || ![value isKindOfClass:NSURL.class]) return;
@@ -68,7 +96,7 @@ static NSArray<NSURL *> *RYGBridgeUniqueGroupRoots(NSDictionary<NSString *, NSUR
 }
 
 static NSURL *RYGBridgePreferredWritableGroupRoot(NSDictionary<NSString *, NSURL *> *groups) {
-    NSURL *exact = groups[@"group.com.burbn.instagram"];
+    NSURL *exact = groups[kRYGBridgeInstagramGroupIdentifier];
     if (exact.path.length) return exact;
 
     NSMutableOrderedSet<NSURL *> *instagramRoots = [NSMutableOrderedSet orderedSet];
@@ -142,31 +170,36 @@ static NSString *RYGBridgeResolveDataDirectoryFromCandidate(NSString *candidate)
     NSDictionary<NSString *, NSURL *> *groups = RYGBridgeGroupContainerURLs();
     NSArray<NSURL *> *groupRoots = RYGBridgeUniqueGroupRoots(groups);
 
+    // Once the native manager has positively identified <user>.data, preserve
+    // that exact leaf across launches. App Group UUIDs can change after signing;
+    // the account leaf is stable and is never synthesized by RyukGram.
+    if (!leaf.length) leaf = RYGBridgePreviouslyVerifiedDataLeaf();
+
     // A native candidate is accepted immediately only when it already points at
     // an existing .data directory inside an actually entitled App Group. This
     // prevents the app-sandbox/Documents path from winning over the shared
     // MobileConfig store after sideload re-signing.
     if (standardCandidate.length && [standardCandidate.lastPathComponent.lowercaseString hasSuffix:@".data"] &&
         RYGBridgeDirectoryExists(standardCandidate) && RYGBridgePathIsInsideGroupRoots(standardCandidate, groupRoots)) {
-        return standardCandidate;
+        return RYGBridgeRememberResolvedDataDirectory(standardCandidate);
     }
 
     NSArray<NSString *> *existing = RYGBridgeExistingDataDirectories(groupRoots);
     if (leaf.length) {
         NSMutableArray<NSString *> *sameLeaf = [NSMutableArray array];
         for (NSString *directory in existing) if ([directory.lastPathComponent isEqualToString:leaf]) [sameLeaf addObject:directory];
-        if (sameLeaf.count == 1) return sameLeaf.firstObject;
+        if (sameLeaf.count == 1) return RYGBridgeRememberResolvedDataDirectory(sameLeaf.firstObject);
         NSString *mappingMatch = RYGBridgeUniqueMappingMatch(sameLeaf);
-        if (mappingMatch.length) return mappingMatch;
+        if (mappingMatch.length) return RYGBridgeRememberResolvedDataDirectory(mappingMatch);
     }
 
-    if (existing.count == 1) return existing.firstObject;
+    if (existing.count == 1) return RYGBridgeRememberResolvedDataDirectory(existing.firstObject);
     NSString *mappingMatch = RYGBridgeUniqueMappingMatch(existing);
-    if (mappingMatch.length) return mappingMatch;
+    if (mappingMatch.length) return RYGBridgeRememberResolvedDataDirectory(mappingMatch);
 
-    // Creating a missing directory is allowed only when the native manager gave
-    // the exact <user>.data leaf and there is exactly one unambiguous entitled
-    // Instagram App Group root. The account/user id is never synthesized.
+    // A missing directory may be recreated only with an exact leaf that came
+    // from the native manager on this or a previous verified launch and one
+    // unambiguous entitled Instagram App Group root.
     NSURL *writableRoot = leaf.length ? RYGBridgePreferredWritableGroupRoot(groups) : nil;
     if (writableRoot.path.length) {
         NSString *mobileConfigRoot = RYGBridgeMobileConfigRootsForGroupURL(writableRoot).firstObject;
@@ -179,7 +212,9 @@ static NSString *RYGBridgeResolveDataDirectoryFromCandidate(NSString *candidate)
             if ([NSFileManager.defaultManager createDirectoryAtPath:target
                                         withIntermediateDirectories:YES
                                                          attributes:nil
-                                                              error:&error]) return RYGBridgeStandardPath(target);
+                                                              error:&error]) {
+                return RYGBridgeRememberResolvedDataDirectory(target);
+            }
         }
     }
 
@@ -188,7 +223,9 @@ static NSString *RYGBridgeResolveDataDirectoryFromCandidate(NSString *candidate)
     // there is deliberately no guessed account fallback.
     if (!groupRoots.count && standardCandidate.length &&
         [standardCandidate.lastPathComponent.lowercaseString hasSuffix:@".data"] &&
-        RYGBridgeDirectoryExists(standardCandidate)) return standardCandidate;
+        RYGBridgeDirectoryExists(standardCandidate)) {
+        return RYGBridgeRememberResolvedDataDirectory(standardCandidate);
+    }
     return nil;
 }
 
@@ -209,8 +246,8 @@ static void RYGBridgeMirrorMappingCache(NSString *dataDirectory) {
 - (NSString *)ryg_bridgeNativeDataDirectory {
     // After exchange this invokes JSONIO's manager-backed resolver first. If the
     // manager is not captured yet, resolve from the process' real entitled group
-    // container(s) and the existing native Documents/mobileconfig/<user>.data
-    // directory instead of silently falling back to Application Support.
+    // container(s) and the existing or previously verified
+    // Documents/mobileconfig/<user>.data directory.
     NSString *candidate = [self ryg_bridgeNativeDataDirectory];
     NSString *resolved = RYGBridgeResolveDataDirectoryFromCandidate(candidate);
     if (resolved.length) RYGBridgeMirrorMappingCache(resolved);
