@@ -91,3 +91,5 @@ Makefile.sim
 
 mc_dump/
 ryukgram-mc-report.txt
+
+# CI-only marker for verified-leaf MobileConfig validation.
