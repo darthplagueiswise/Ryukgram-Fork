@@ -1,7 +1,7 @@
 #import "RYGDeveloperFeatureCatalogViewController.h"
 #import "RYGDeveloperFeatureCatalog.h"
-#import "RYGRuntimeBrowserEngine.h"
-#import "RYGRuntimeLiveObserver.h"
+#import "RYGDeveloperHookRegistry.h"
+#import "RYGRuntimeBrowserEngine.h" // model types only; no Runtime Browser hook state
 #import "../UI/RYGLiquidGlass.h"
 #import "../UI/RYGPopupChrome.h"
 
@@ -16,8 +16,8 @@
 - (instancetype)init { if ((self=[super initWithStyle:UITableViewStyleInsetGrouped])) _surfaceValue=-1; return self; }
 - (instancetype)initWithSurface:(RYGDeveloperRuntimeSurface)surface { if ((self=[super initWithStyle:UITableViewStyleInsetGrouped])) _surfaceValue=surface; return self; }
 
-static NSString *RYGCatalogTitle(RYGDeveloperRuntimeSurface s) {
-    switch (s) {
+static NSString *RYGCatalogTitle(RYGDeveloperRuntimeSurface surface) {
+    switch (surface) {
         case RYGDeveloperRuntimeSurfacePrism: return @"Prism / IGDS / BSLDS";
         case RYGDeveloperRuntimeSurfaceLiquidGlass: return @"Liquid Glass / Throwback";
         case RYGDeveloperRuntimeSurfaceStories: return @"Story Tray / Story Grid";
@@ -41,6 +41,7 @@ static NSString *RYGCatalogTitle(RYGDeveloperRuntimeSurface s) {
     RYGLiquidGlassApplyToViewController(self);
 
     [[RYGDeveloperFeatureCatalog sharedCatalog] startIfNeeded];
+    [[RYGDeveloperHookRegistry sharedRegistry] startIfNeeded];
     if (self.surfaceValue >= 0) {
         UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
         search.searchResultsUpdater = self;
@@ -85,58 +86,79 @@ static NSString *RYGCatalogTitle(RYGDeveloperRuntimeSurface s) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     (void)tableView; (void)section;
-    if (self.surfaceValue < 0) return @"Known owners are prewarmed only after Developer opens. A scoped class walk runs on a utility queue only when a domain is opened; Runtime Browser is not required.";
+    if (self.surfaceValue < 0) return @"Known owners prewarm only after Developer opens. A scoped app-image class walk runs on a private queue only when a domain is opened; Runtime Browser is not required.";
     BOOL busy = [[RYGDeveloperFeatureCatalog sharedCatalog] isRefreshingSurface:(RYGDeveloperRuntimeSurface)self.surfaceValue];
-    return busy ? @"Refreshing loaded classes in background…" : @"Only BOOL-compatible direct methods with validated Objective-C encodings are shown. Structural NSObject/runtime methods are filtered.";
+    return busy ? @"Refreshing loaded app classes in background…" : @"Only BOOL-compatible direct methods with live Objective-C encodings are shown. Overrides are persisted against LC_UUID + class + +/-selector + encoding.";
+}
+
+- (void)showHookError:(NSError *)error {
+    if (!error) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Override unavailable" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (UIButton *)buttonForMethod:(RYGRuntimeBoolMethod *)method {
-    NSNumber *forced = method.overrideValue;
-    NSNumber *native = method.liveValue;
-    NSString *title = forced ? (forced.boolValue ? @"Forced On" : @"Forced Off") : (native ? (native.boolValue ? @"Native On" : @"Native Off") : @"Native");
+    RYGDeveloperHookRegistry *registry = RYGDeveloperHookRegistry.sharedRegistry;
+    NSNumber *forced = [registry overrideValueForMethod:method];
+    NSString *title = forced ? (forced.boolValue ? @"Forced On" : @"Forced Off") : @"Native";
     __weak typeof(self) weakSelf = self;
-    UIAction *observe = [UIAction actionWithTitle:@"Observe native" image:nil identifier:nil handler:^(__unused UIAction *action) {
-        RYGRuntimeBeginLiveObservation(@[method]);
+
+    UIAction *useNative = [UIAction actionWithTitle:@"Use Native" image:nil identifier:nil handler:^(__unused UIAction *action) {
+        NSError *error = nil;
+        if (![registry setOverrideValue:nil forMethod:method error:&error]) [weakSelf showHookError:error];
         [weakSelf.tableView reloadData];
     }];
-    UIAction *useNative = [UIAction actionWithTitle:@"Use Native" image:nil identifier:nil handler:^(__unused UIAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:nil forMethod:method]; [weakSelf.tableView reloadData];
-    }];
     UIAction *forceOn = [UIAction actionWithTitle:@"Force On" image:nil identifier:nil handler:^(__unused UIAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@YES forMethod:method]; [weakSelf.tableView reloadData];
+        NSError *error = nil;
+        if (![registry setOverrideValue:@YES forMethod:method error:&error]) [weakSelf showHookError:error];
+        [weakSelf.tableView reloadData];
     }];
     UIAction *forceOff = [UIAction actionWithTitle:@"Force Off" image:nil identifier:nil handler:^(__unused UIAction *action) {
-        [RYGRuntimeBrowserEngine setOverride:@NO forMethod:method]; [weakSelf.tableView reloadData];
+        NSError *error = nil;
+        if (![registry setOverrideValue:@NO forMethod:method error:&error]) [weakSelf showHookError:error];
+        [weakSelf.tableView reloadData];
     }];
     useNative.state = forced ? UIMenuElementStateOff : UIMenuElementStateOn;
     forceOn.state = forced && forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
     forceOff.state = forced && !forced.boolValue ? UIMenuElementStateOn : UIMenuElementStateOff;
+
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    button.menu = [UIMenu menuWithTitle:method.selectorName ?: @"BOOL" image:nil identifier:nil options:0 children:@[observe,[UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[useNative,forceOn,forceOff]]]];
+    UIMenu *output = [UIMenu menuWithTitle:@"Output" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:@[useNative, forceOn, forceOff]];
+    button.menu = [UIMenu menuWithTitle:method.selectorName ?: @"BOOL" image:nil identifier:nil options:0 children:@[output]];
     button.showsMenuAsPrimaryAction = YES;
     RYGLiquidGlassConfigureButton(button, NO);
     UIButtonConfiguration *configuration = button.configuration;
-    if (configuration) { configuration.title = title; configuration.baseForegroundColor = UIColor.labelColor; button.configuration = configuration; }
-    else [button setTitle:title forState:UIControlStateNormal];
+    if (configuration) {
+        configuration.title = title;
+        configuration.baseForegroundColor = UIColor.labelColor;
+        button.configuration = configuration;
+    } else {
+        [button setTitle:title forState:UIControlStateNormal];
+    }
     return button;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"RYGDevCatalog"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"RYGDevCatalog"];
-    cell.accessoryView = nil; cell.accessoryType = UITableViewCellAccessoryNone; cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+
     if (self.surfaceValue < 0) {
         RYGDeveloperRuntimeSurface surface = (RYGDeveloperRuntimeSurface)indexPath.row;
         cell.textLabel.text = RYGCatalogTitle(surface);
-        cell.detailTextLabel.text = @"Runtime-populated Developer catalogue";
+        cell.detailTextLabel.text = @"Live Developer catalogue";
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
         return cell;
     }
+
     RYGRuntimeBoolMethod *method = self.visibleMethods[(NSUInteger)indexPath.row];
     cell.textLabel.text = method.selectorName;
     cell.textLabel.numberOfLines = 2;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@%@", method.className, method.classMethod ? @"+" : @"-", method.typeEncoding ?: @""];
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %@ · %@", method.className, method.classMethod ? @"class" : @"instance", method.typeEncoding ?: @""];
     cell.detailTextLabel.numberOfLines = 3;
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.accessoryView = [self buttonForMethod:method];
