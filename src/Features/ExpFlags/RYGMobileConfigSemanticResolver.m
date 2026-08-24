@@ -9,7 +9,7 @@
 // valid semantic identity, but the exact 64-bit paramSpecifier cannot yet be
 // produced. This adapter retries the native descriptor/model resolution at the
 // moment the user applies a value. It never waits for a getter observation and
-// never fabricates 0x40/0x80 mirror PIDs.
+// never fabricates mirrored unit PIDs.
 
 @interface RYGMobileConfig (RYGSemanticResolverPrivate)
 - (BOOL)ryg_semantic_setOverride:(id)value for:(RYGMCParam *)param;
