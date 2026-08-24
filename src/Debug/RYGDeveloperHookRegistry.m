@@ -52,7 +52,8 @@ static NSString *RYGUUIDStringForImagePath(NSString *path) {
         if (![candidate isEqualToString:target]) continue;
         const struct mach_header *header = _dyld_get_image_header(i);
         if (!header) return nil;
-        const uint8_t *cursor = (const uint8_t *)header + (header->magic == MH_MAGIC_64 || header->magic == MH_CIGAM_64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header));
+        const uint8_t *cursor = (const uint8_t *)header +
+            (header->magic == MH_MAGIC_64 || header->magic == MH_CIGAM_64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header));
         for (uint32_t commandIndex = 0; commandIndex < header->ncmds; commandIndex++) {
             const struct load_command *command = (const struct load_command *)cursor;
             if (command->cmd == LC_UUID && command->cmdsize >= sizeof(struct uuid_command)) {
@@ -69,13 +70,28 @@ static NSString *RYGUUIDStringForImagePath(NSString *path) {
     return nil;
 }
 
+static Method RYGDirectMethod(Class owner, SEL selector) {
+    if (!owner || !selector) return NULL;
+    unsigned int count = 0;
+    Method *methods = class_copyMethodList(owner, &count);
+    Method found = NULL;
+    for (unsigned int index = 0; methods && index < count; index++) {
+        if (method_getName(methods[index]) == selector) {
+            found = methods[index];
+            break;
+        }
+    }
+    if (methods) free(methods);
+    return found;
+}
+
 static Method RYGLiveMethod(RYGRuntimeBoolMethod *method, Class *ownerOut) {
     if (!method.className.length || !method.selectorName.length) return NULL;
     Class cls = objc_lookUpClass(method.className.UTF8String);
     if (!cls) return NULL;
     Class owner = method.classMethod ? object_getClass(cls) : cls;
     SEL selector = NSSelectorFromString(method.selectorName);
-    Method live = owner && selector ? class_getInstanceMethod(owner, selector) : NULL;
+    Method live = RYGDirectMethod(owner, selector);
     if (ownerOut) *ownerOut = owner;
     return live;
 }
@@ -89,7 +105,42 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
     const char *encoding = method_getTypeEncoding(live);
     NSString *liveEncoding = encoding ? [NSString stringWithUTF8String:encoding] : @"";
     if (!uuid.length || !liveEncoding.length) return nil;
-    return [NSString stringWithFormat:@"%@|%@|%c|%@|%@", uuid, method.className, method.classMethod ? '+' : '-', method.selectorName, liveEncoding];
+    return [NSString stringWithFormat:@"%@|%@|%c|%@|%@", uuid, method.className,
+            method.classMethod ? '+' : '-', method.selectorName, liveEncoding];
+}
+
+static RYGRuntimeBoolMethod *RYGMethodForPersistedIdentity(NSString *identity) {
+    NSArray<NSString *> *parts = [identity componentsSeparatedByString:@"|"];
+    if (parts.count != 5) return nil;
+    NSString *uuid = parts[0], *className = parts[1], *kind = parts[2], *selectorName = parts[3], *encoding = parts[4];
+    if (!uuid.length || !className.length || !selectorName.length || !encoding.length) return nil;
+    BOOL classMethod = [kind isEqualToString:@"+"];
+    if (!classMethod && ![kind isEqualToString:@"-"]) return nil;
+
+    Class cls = objc_lookUpClass(className.UTF8String);
+    if (!cls) return nil;
+    const char *rawImage = class_getImageName(cls);
+    NSString *imagePath = rawImage ? [NSString stringWithUTF8String:rawImage] : nil;
+    if (!imagePath.length || ![[RYGUUIDStringForImagePath(imagePath) uppercaseString] isEqualToString:uuid.uppercaseString]) return nil;
+
+    Class owner = classMethod ? object_getClass(cls) : cls;
+    Method live = RYGDirectMethod(owner, NSSelectorFromString(selectorName));
+    if (!live) return nil;
+    const char *rawEncoding = method_getTypeEncoding(live);
+    NSString *liveEncoding = rawEncoding ? [NSString stringWithUTF8String:rawEncoding] : @"";
+    if (![liveEncoding isEqualToString:encoding]) return nil;
+
+    RYGRuntimeArgumentKind argumentKind = (RYGRuntimeArgumentKind)-1;
+    if (!RYGMethodShape(live, &argumentKind)) return nil;
+
+    RYGRuntimeBoolMethod *method = [RYGRuntimeBoolMethod new];
+    method.className = className;
+    method.selectorName = selectorName;
+    method.classMethod = classMethod;
+    method.argumentKind = argumentKind;
+    method.typeEncoding = liveEncoding;
+    method.imagePath = imagePath;
+    return method;
 }
 
 @interface RYGDeveloperHookRecord : NSObject
@@ -125,24 +176,35 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
     return self;
 }
 
+- (NSDictionary<NSString *, NSNumber *> *)snapshotOverrides {
+    @synchronized (self) { return [self.overrides copy]; }
+}
+
 - (void)startIfNeeded {
     @synchronized (self) {
         if (self.started) return;
         self.started = YES;
     }
+    __weak typeof(self) weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        __weak typeof(self) weakSelf = self;
-        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidFinishLaunchingNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(__unused NSNotification *note) {
             [weakSelf restorePersistedOverridesForLoadedImages];
         }];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(__unused NSNotification *note) {
+            [weakSelf restorePersistedOverridesForLoadedImages];
+        }];
+    });
+    if ([self snapshotOverrides].count) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(650 * NSEC_PER_MSEC)), self.queue, ^{
             [weakSelf restorePersistedOverridesForLoadedImages];
         });
-    });
-}
-
-- (NSDictionary *)snapshotOverrides {
-    @synchronized (self) { return [self.overrides copy]; }
+    }
 }
 
 - (void)persistOverrides {
@@ -154,14 +216,17 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
     Method live = RYGLiveMethod(method, NULL);
     NSString *identity = live ? RYGIdentityForMethod(method, live) : nil;
     if (!identity.length) return nil;
-    @synchronized (self) { return self.overrides[identity]; }
+    NSNumber *forced = nil;
+    @synchronized (self) { forced = self.overrides[identity]; }
+    if (forced) (void)[self installShimForMethod:method error:nil];
+    return forced;
 }
 
 - (BOOL)installShimForMethod:(RYGRuntimeBoolMethod *)method error:(NSError **)error {
     Class owner = Nil;
     Method live = RYGLiveMethod(method, &owner);
     if (!live || !owner) {
-        if (error) *error = [NSError errorWithDomain:RYGDeveloperHookErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey:@"Class or selector is not currently loaded."}];
+        if (error) *error = [NSError errorWithDomain:RYGDeveloperHookErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey:@"Class or direct selector is not currently loaded."}];
         return NO;
     }
     RYGRuntimeArgumentKind kind = (RYGRuntimeArgumentKind)-1;
@@ -187,6 +252,7 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
     }
 
     IMP nativeIMP = method_getImplementation(live);
+    SEL selector = method_getName(live);
     __weak typeof(self) weakSelf = self;
     IMP shim = NULL;
     if (kind == RYGRuntimeArgumentNone) {
@@ -194,7 +260,7 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
             NSNumber *forced = nil;
             @synchronized (weakSelf) { forced = weakSelf.overrides[identity]; }
             if (forced) return forced.boolValue;
-            return ((BOOL (*)(id, SEL))nativeIMP)(receiver, method_getName(live));
+            return ((BOOL (*)(id, SEL))nativeIMP)(receiver, selector);
         };
         shim = imp_implementationWithBlock(block);
     } else if (kind == RYGRuntimeArgumentObject) {
@@ -202,7 +268,7 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
             NSNumber *forced = nil;
             @synchronized (weakSelf) { forced = weakSelf.overrides[identity]; }
             if (forced) return forced.boolValue;
-            return ((BOOL (*)(id, SEL, id))nativeIMP)(receiver, method_getName(live), argument);
+            return ((BOOL (*)(id, SEL, id))nativeIMP)(receiver, selector, argument);
         };
         shim = imp_implementationWithBlock(block);
     } else if (kind == RYGRuntimeArgumentInteger) {
@@ -210,7 +276,7 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
             NSNumber *forced = nil;
             @synchronized (weakSelf) { forced = weakSelf.overrides[identity]; }
             if (forced) return forced.boolValue;
-            return ((BOOL (*)(id, SEL, long long))nativeIMP)(receiver, method_getName(live), argument);
+            return ((BOOL (*)(id, SEL, long long))nativeIMP)(receiver, selector, argument);
         };
         shim = imp_implementationWithBlock(block);
     }
@@ -226,6 +292,7 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
 }
 
 - (BOOL)setOverrideValue:(NSNumber *)value forMethod:(RYGRuntimeBoolMethod *)method error:(NSError **)error {
+    [self startIfNeeded];
     if (![self installShimForMethod:method error:error]) return NO;
     Method live = RYGLiveMethod(method, NULL);
     NSString *identity = live ? RYGIdentityForMethod(method, live) : nil;
@@ -239,10 +306,23 @@ static NSString *RYGIdentityForMethod(RYGRuntimeBoolMethod *method, Method live)
 }
 
 - (void)restorePersistedOverridesForLoadedImages {
-    // Exact identities are restored lazily when their Developer surface is
-    // catalogued. We deliberately avoid an objc_getClassList walk here.
-    // The retained override dictionary is therefore effectively a quarantine
-    // until the live method is rediscovered with the same LC_UUID/encoding.
+    NSDictionary<NSString *, NSNumber *> *snapshot = [self snapshotOverrides];
+    if (!snapshot.count) return;
+    dispatch_async(self.queue, ^{
+        @autoreleasepool {
+            for (NSString *identity in snapshot) {
+                RYGRuntimeBoolMethod *method = RYGMethodForPersistedIdentity(identity);
+                if (!method) continue; // exact UUID/class/selector/encoding is not loaded yet
+                (void)[self installShimForMethod:method error:nil];
+            }
+        }
+    });
 }
 
 @end
+
+__attribute__((constructor(226))) static void RYGDeveloperHookRegistryBootstrap(void) {
+    // Intentionally cheap: loads only the persisted identity dictionary and
+    // notification observers. No class/image/method enumeration occurs here.
+    [[RYGDeveloperHookRegistry sharedRegistry] startIfNeeded];
+}
