@@ -26,71 +26,89 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     [self rebuildSections];
 }
 
-- (void)viewDidAppear:(BOOL)animated {
-    [super viewDidAppear:animated];
-    (void)[RYGMobileConfig.shared ryg_syncPersistedJSONToNativeDataDirectory];
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self rebuildSections];
+}
+
+- (BOOL)requireNativeTargetForOperation:(NSString *)operation {
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+    NSString *path = [mobileConfig ryg_nativeOverridesJSONPath];
+    if (path.length) return YES;
+    [RYGUtils showErrorHUDWithDescription:[NSString stringWithFormat:@"%@ requires Instagram's active MobileConfig session. getOverridesTablePath has not resolved the current Documents/mobileconfig/<user>.data target yet; no App Group path was guessed.", operation ?: @"This operation"]];
+    return NO;
 }
 
 - (BOOL)syncNativeOrShowError:(NSString *)operation {
+    if (![self requireNativeTargetForOperation:operation]) return NO;
     RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
-    BOOL success = [mobileConfig ryg_syncPersistedJSONToNativeDataDirectory];
     NSString *path = [mobileConfig ryg_nativeOverridesJSONPath];
-    if (success && path.length) return YES;
-
-    NSString *message = path.length
-        ? [NSString stringWithFormat:@"%@ failed to round-trip %@", operation ?: @"MobileConfig sync", path]
-        : [NSString stringWithFormat:@"%@ could not resolve one unambiguous App Group Documents/mobileconfig/<user>.data directory. No fake path was written.", operation ?: @"MobileConfig sync"];
-    [RYGUtils showErrorHUDWithDescription:message];
+    if ([mobileConfig ryg_syncPersistedJSONToNativeDataDirectory]) return YES;
+    [RYGUtils showErrorHUDWithDescription:[NSString stringWithFormat:@"%@ failed to atomically write and verify %@.", operation ?: @"MobileConfig sync", path ?: @"mc_overrides.json"]];
     return NO;
 }
 
 - (void)rebuildSections {
     __weak typeof(self) weakSelf = self;
+    RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+    NSString *nativePath = [mobileConfig ryg_nativeOverridesJSONPath];
+    NSString *mappingPath = [mobileConfig ryg_nativeNameMappingPath];
+
+    RYGSetting *status = [RYGSetting staticCellWithTitle:@"Active MobileConfig target"
+                                                subtitle:nativePath.length ? nativePath : @"Waiting for active getOverridesTablePath"
+                                                    icon:[RYGSymbol symbolWithName:@"document"]];
+    RYGSetting *mappingStatus = [RYGSetting staticCellWithTitle:@"Name catalogue"
+                                                       subtitle:mappingPath.length ? mappingPath : @"Imported mapping remains cached until the active .data target is available"
+                                                           icon:[RYGSymbol symbolWithName:@"list"]];
+    RYGSetting *overrideStatus = [RYGSetting staticCellWithTitle:@"Selected overrides"
+                                                        subtitle:[NSString stringWithFormat:@"%lu", (unsigned long)mobileConfig.overrideCount]
+                                                            icon:[RYGSymbol symbolWithName:@"sliders"]];
 
     RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"Browser"
-                                                     subtitle:@""
+                                                     subtitle:@"Native descriptor table + imported id_name_mapping names"
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
                                                viewController:[RYGFastMobileConfigBrowserViewController new]];
 
     RYGSetting *importNames = [RYGSetting buttonCellWithTitle:@"Import id_name_mapping.json"
-                                                     subtitle:@""
+                                                     subtitle:@"Replace or merge; active App Group copy becomes authoritative"
                                                          icon:[RYGSymbol symbolWithName:@"download"]
                                                        action:^{ [weakSelf chooseNameImportMode]; }];
     RYGSetting *exportNames = [RYGSetting buttonCellWithTitle:@"Export id_name_mapping.json"
-                                                     subtitle:@""
+                                                     subtitle:@"Export current catalogue without mutating native state"
                                                          icon:[RYGSymbol symbolWithName:@"share"]
                                                        action:^{ [weakSelf exportNameMapping]; }];
 
     RYGSetting *importOverrides = [RYGSetting buttonCellWithTitle:@"Import mc_overrides.json"
-                                                         subtitle:@""
+                                                         subtitle:@"Parse canonical config/parameter semantics and apply exact active-unit PIDs"
                                                              icon:[RYGSymbol symbolWithName:@"download"]
                                                            action:^{ [weakSelf presentJSONPicker:RYGMCImportOperationOverrides]; }];
     RYGSetting *exportOverrides = [RYGSetting buttonCellWithTitle:@"Export mc_overrides.json"
-                                                         subtitle:@""
+                                                         subtitle:@"Export current override document without rewriting the App Group"
                                                              icon:[RYGSymbol symbolWithName:@"share"]
                                                            action:^{ [weakSelf exportOverrides]; }];
     RYGSetting *applyOverrides = [RYGSetting buttonCellWithTitle:@"Apply active overrides"
-                                                        subtitle:@"Write + verify native App Group mc_overrides.json"
+                                                        subtitle:@"Write StartupConfigs + atomically verify native mc_overrides.json"
                                                             icon:[RYGSymbol symbolWithName:@"arrow.clockwise"]
                                                           action:^{
-        RYGMobileConfig *mobileConfig = RYGMobileConfig.shared;
+        if (![weakSelf requireNativeTargetForOperation:@"Apply active overrides"]) return;
         [mobileConfig reapplyOverridesToNativeTable];
         if (![weakSelf syncNativeOrShowError:@"Apply active overrides"]) return;
         NSString *path = [mobileConfig ryg_nativeOverridesJSONPath];
         [RYGUtils showToastForDuration:1.5 title:@"Overrides applied + verified" subtitle:path.lastPathComponent ?: @"mc_overrides.json"];
+        [weakSelf rebuildSections];
     }];
     RYGSetting *clearOverrides = [RYGSetting buttonCellWithTitle:@"Clear overrides"
-                                                        subtitle:@""
+                                                        subtitle:@"Remove selected values from native table and document"
                                                             icon:[RYGSymbol symbolWithName:@"trash"]
                                                           action:^{ [weakSelf confirmClearOverrides]; }];
     clearOverrides.titleColor = UIColor.systemRedColor;
 
-    NSString *nativePath = [RYGMobileConfig.shared ryg_nativeOverridesJSONPath];
     NSString *footer = nativePath.length
-        ? [NSString stringWithFormat:@"Native target: %@", nativePath]
-        : @"Native target unresolved. RyukGram writes only after a real entitled App Group / existing <user>.data directory is resolved.";
+        ? [NSString stringWithFormat:@"Native authority: %@\nNo App Group UUID or account leaf is synthesized by RyukGram.", nativePath]
+        : @"Native target unresolved. The browser can still display imported names, but native writes remain disabled until Instagram exposes its active session path.";
 
     [self applySettingSections:@[
+        [RYGSettingsViewController sectionWithHeader:@"Status" footer:nil rows:@[status, mappingStatus, overrideStatus]],
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[browser]],
         [RYGSettingsViewController sectionWithHeader:@"Names" footer:nil rows:@[importNames, exportNames]],
         [RYGSettingsViewController sectionWithHeader:@"Overrides" footer:footer rows:@[importOverrides, exportOverrides, applyOverrides, clearOverrides]],
@@ -98,9 +116,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 }
 
 - (void)chooseNameImportMode {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Import id_name_mapping.json"
-                                                                    message:nil
-                                                             preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Import id_name_mapping.json" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
     [sheet addAction:[UIAlertAction actionWithTitle:@"Replace" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
         weakSelf.pendingNameMappingMode = RYGMCNameMappingImportModeReplace;
@@ -120,8 +136,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 - (void)presentJSONPicker:(RYGMCImportOperation)operation {
     self.pendingImportOperation = operation;
-    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
@@ -155,7 +170,8 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Mapping import failed"];
             return;
         }
-        if (![self syncNativeOrShowError:@"Mapping import"]) return;
+        [mobileConfig reloadFromRuntime];
+        if ([self requireNativeTargetForOperation:@"Mapping import"] && ![self syncNativeOrShowError:@"Mapping import"]) return;
         NSUInteger configs = 0, params = 0;
         for (RYGMCConfig *config in mobileConfig.allConfigs) {
             if (config.name.length) configs++;
@@ -169,6 +185,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
     }
 
     if (operation == RYGMCImportOperationOverrides) {
+        if (![self requireNativeTargetForOperation:@"Override import"]) return;
         NSUInteger applied = 0;
         if (![mobileConfig ryg_importAndApplyOverridesData:data appliedCount:&applied error:&error]) {
             [RYGUtils showErrorHUDWithDescription:error.localizedDescription ?: @"Override import failed"];
@@ -197,7 +214,6 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 }
 
 - (void)exportNameMapping {
-    if (![self syncNativeOrShowError:@"Export mapping"]) return;
     NSError *error = nil;
     NSData *data = [RYGMobileConfig.shared ryg_exportNameMappingData:&error];
     if (!data.length) {
@@ -208,7 +224,6 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 }
 
 - (void)exportOverrides {
-    if (![self syncNativeOrShowError:@"Export overrides"]) return;
     NSError *error = nil;
     NSData *data = [RYGMobileConfig.shared ryg_exportOverridesData:&error];
     if (!data.length) {
@@ -219,10 +234,11 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 }
 
 - (void)confirmClearOverrides {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear overrides?" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear overrides?" message:@"This removes the selected native MobileConfig overrides for the active account." preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
     [alert addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+        if (![weakSelf requireNativeTargetForOperation:@"Clear overrides"]) return;
         [RYGMobileConfig.shared resetAllOverrides];
         if (![weakSelf syncNativeOrShowError:@"Clear overrides"]) return;
         [weakSelf rebuildSections];
