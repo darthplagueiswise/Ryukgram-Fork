@@ -1,21 +1,23 @@
 #import "RYGMobileConfig.h"
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <os/lock.h>
+#import <mach-o/dyld.h>
 
 // Native MobileConfig path authority.
 //
-// Binary evidence from FBSharedFramework(20260821-132949):
+// Binary evidence from FBSharedFramework(20260823-232938):
+//   -FBMobileConfigContextManager getBool:              B24@0:8{mc_bool_param_t=Q}16
+//   -FBMobileConfigContextManager getOverridesTablePath @16@0:8
 //   -IGMobileConfigContextManager getBool:              B24@0:8{mc_bool_param_t=Q}16
 //   -IGMobileConfigContextManager getOverridesTablePath @16@0:8
-// There is no class/singleton method on the manager metaclass.  Therefore the
-// only safe authority is a real manager instance observed from a native getter.
 //
-// CRITICAL: observing that instance must never perform path lookup, filesystem
-// work or preference I/O.  The first getBool: wrapper only retains `self`,
-// restores the previous IMP, and immediately forwards.  getOverridesTablePath
-// is invoked later, only when import/export asks for ryg_nativeDataDirectory.
+// The active manager instance is authoritative. Capturing it must stay out of
+// the expensive path: the one-shot getter wrapper only retains `self`, restores
+// the previous IMP, and forwards. Filesystem/path work happens only when the
+// MobileConfig import/export UI asks for ryg_nativeDataDirectory.
 
 static os_unfair_lock gRYGMCNativeAuthorityLock = OS_UNFAIR_LOCK_INIT;
 static id gRYGMCObservedManager;
@@ -36,9 +38,6 @@ static BOOL RYGMCCaptureMethodLooksCompatible(Method method) {
     const char *returnType = RYGMCUnqualifiedType(ret);
     if (!returnType || !strchr("BcC", *returnType)) return NO;
 
-    // The native parameter is a one-word mc_bool_param_t wrapper.  Objective-C
-    // encodes it as a struct containing Q in the current FBShared build; older
-    // builds may expose the underlying Q/q directly.  Both are one x-register.
     char arg[96] = {0};
     method_getArgumentType(method, 2, arg, sizeof(arg));
     const char *argumentType = RYGMCUnqualifiedType(arg);
@@ -51,7 +50,8 @@ static BOOL RYGMCCapturePathMethodLooksCompatible(Method method) {
     if (!method || method_getNumberOfArguments(method) != 2) return NO;
     char ret[32] = {0};
     method_getReturnType(method, ret, sizeof(ret));
-    return *RYGMCUnqualifiedType(ret) == '@';
+    const char *type = RYGMCUnqualifiedType(ret);
+    return type && *type == '@';
 }
 
 static void RYGMCRetainObservedManager(id manager) {
@@ -78,21 +78,17 @@ static void RYGMCUninstallCapture(Class cls, SEL selector, IMP wrapper, IMP upst
 
 static BOOL RYGMCCaptureFBGetBool(id self, SEL cmd, unsigned long long pid) {
     // Hot-path guarantee: no getOverridesTablePath, filesystem, defaults,
-    // dictionary, runtime scan or dispatch here.
+    // dictionary, scan or dispatch here.
     RYGMCRetainObservedManager(self);
-    Class cls = [self class];
     IMP upstream = gRYGMCCaptureFBUpstream;
-    RYGMCUninstallCapture(cls, cmd, (IMP)RYGMCCaptureFBGetBool, upstream, &gRYGMCCaptureFBInstalled);
+    RYGMCUninstallCapture([self class], cmd, (IMP)RYGMCCaptureFBGetBool, upstream, &gRYGMCCaptureFBInstalled);
     return upstream ? ((BOOL (*)(id, SEL, unsigned long long))upstream)(self, cmd, pid) : NO;
 }
 
 static BOOL RYGMCCaptureIGGetBool(id self, SEL cmd, unsigned long long pid) {
-    // Hot-path guarantee: no getOverridesTablePath, filesystem, defaults,
-    // dictionary, runtime scan or dispatch here.
     RYGMCRetainObservedManager(self);
-    Class cls = [self class];
     IMP upstream = gRYGMCCaptureIGUpstream;
-    RYGMCUninstallCapture(cls, cmd, (IMP)RYGMCCaptureIGGetBool, upstream, &gRYGMCCaptureIGInstalled);
+    RYGMCUninstallCapture([self class], cmd, (IMP)RYGMCCaptureIGGetBool, upstream, &gRYGMCCaptureIGInstalled);
     return upstream ? ((BOOL (*)(id, SEL, unsigned long long))upstream)(self, cmd, pid) : NO;
 }
 
@@ -100,7 +96,7 @@ static void RYGMCTryInstallCaptureForClass(const char *className,
                                             IMP wrapper,
                                             IMP *upstream,
                                             BOOL *installedFlag) {
-    if (!className || !wrapper || !upstream || !installedFlag || *installedFlag || RYGMCCurrentObservedManager()) return;
+    if (!className || !wrapper || !upstream || !installedFlag || RYGMCCurrentObservedManager()) return;
     Class cls = objc_lookUpClass(className);
     if (!cls) return;
 
@@ -110,7 +106,15 @@ static void RYGMCTryInstallCaptureForClass(const char *className,
     if (!RYGMCCaptureMethodLooksCompatible(getterMethod) || !RYGMCCapturePathMethodLooksCompatible(pathMethod)) return;
 
     IMP current = method_getImplementation(getterMethod);
-    if (!current || current == wrapper) return;
+    if (!current) return;
+    if (current == wrapper) {
+        *installedFlag = YES;
+        return;
+    }
+
+    // Another owner may legitimately reassert this hot getter after us. Until a
+    // real manager has been observed, always wrap the CURRENT implementation so
+    // the next native call captures self and restores exactly that upstream.
     *upstream = current;
     (void)method_setImplementation(getterMethod, wrapper);
     *installedFlag = method_getImplementation(getterMethod) == wrapper;
@@ -126,6 +130,13 @@ static void RYGMCTryInstallOneShotManagerCapture(void) {
                                    (IMP)RYGMCCaptureIGGetBool,
                                    &gRYGMCCaptureIGUpstream,
                                    &gRYGMCCaptureIGInstalled);
+}
+
+static void RYGMCNativeAuthorityImageDidLoad(const struct mach_header *header, intptr_t slide) {
+    (void)header; (void)slide;
+    if (RYGMCCurrentObservedManager()) return;
+    // O(1) late-load retry only. No path lookup or filesystem access here.
+    RYGMCTryInstallOneShotManagerCapture();
 }
 
 static NSString *RYGMCNativeDataDirectoryFromValue(id value) {
@@ -160,8 +171,6 @@ static NSString *RYGMCDataDirectoryFromObservedManager(void) {
     Method method = class_getInstanceMethod([manager class], selector);
     if (!RYGMCCapturePathMethodLooksCompatible(method)) return nil;
 
-    // This is deliberately outside every MobileConfig getter.  Import/export is
-    // the caller that pays for native path resolution and filesystem validation.
     id value = ((id (*)(id, SEL))objc_msgSend)(manager, selector);
     return RYGMCValidatedNativeDirectory(RYGMCNativeDataDirectoryFromValue(value), YES);
 }
@@ -174,17 +183,16 @@ static NSString *RYGMCDataDirectoryFromObservedManager(void) {
 @implementation RYGMobileConfig (RYGNativeAuthority)
 
 - (NSString *)ryg_authorityNativeDataDirectory {
-    // First choice: the exact active manager observed from a native getter.
+    // Native manager wins. It already knows the account-specific <user>.data;
+    // never reject that result because more than one application-group exists.
     NSString *native = RYGMCDataDirectoryFromObservedManager();
     if (native.length) return native;
 
-    // A context class may have loaded after tweak construction.  Arm the
-    // one-shot observer for the next real getter, but never wait/spin here.
     RYGMCTryInstallOneShotManagerCapture();
 
-    // After method exchange this invokes the previous resolver chain.  Accept a
-    // concrete .data result directly; do not impose another App-Group ambiguity
-    // heuristic on a path that is already manager-backed.
+    // Preserve older resolver only as a fallback for a concrete existing .data
+    // path. The UI must never describe "one unambiguous App Group" as a native
+    // MobileConfig requirement.
     NSString *previous = [self ryg_authorityNativeDataDirectory];
     return RYGMCValidatedNativeDirectory(previous, previous.length > 0);
 }
@@ -200,10 +208,17 @@ static void RYGMCInstallNativeAuthority(void) {
 }
 
 __attribute__((constructor(120))) static void RYGMobileConfigCaptureManagerBootstrap(void) {
-    // This performs only class/method lookup + one IMP replacement.  The first
-    // getter stores `self` and immediately restores the previous IMP.  No I/O.
     RYGMCTryInstallOneShotManagerCapture();
-    dispatch_async(dispatch_get_main_queue(), ^{ RYGMCTryInstallOneShotManagerCapture(); });
+    if (!RYGMCCurrentObservedManager()) _dyld_register_func_for_add_image(RYGMCNativeAuthorityImageDidLoad);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        RYGMCTryInstallOneShotManagerCapture();
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(__unused NSNotification *note) {
+            if (!RYGMCCurrentObservedManager()) RYGMCTryInstallOneShotManagerCapture();
+        }];
+    });
 }
 
 __attribute__((constructor(65470))) static void RYGMobileConfigInstallNativeAuthority(void) {
