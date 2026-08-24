@@ -2,7 +2,9 @@ name: Build RyukGram dogfood · SDK 26.5
 
 on:
   push:
-    branches: [dogfood]
+    branches:
+      - dogfood
+      - dogfood-developer-catalog-fastpath-20260824
   pull_request:
     branches: [dogfood]
   workflow_dispatch:
@@ -21,7 +23,7 @@ jobs:
       THEOS: ${{ github.workspace }}/theos
 
     steps:
-      - name: Checkout dogfood source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           path: main
@@ -121,10 +123,10 @@ jobs:
             ${{ runner.temp }}/ryg-rootful-build.log
           if-no-files-found: ignore
 
-      - name: Upload dogfood packages
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: RyukGram_dogfood_${{ env.VERSION }}_${{ github.run_number }}
+          name: RyukGram_${{ env.VERSION }}_${{ github.run_number }}
           path: |
             main/packages/RyukGram_*_rootless.deb
             main/packages/RyukGram_*_rootful.deb

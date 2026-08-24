@@ -38,7 +38,8 @@ def logos_orig_tail(line: str) -> str | None:
         if cursor < len(line) and line[cursor] == "(":
             depth = 0
             while cursor < len(line):
-                if line[cursor] == "(": depth += 1
+                if line[cursor] == "(":
+                    depth += 1
                 elif line[cursor] == ")":
                     depth -= 1
                     if depth == 0:
@@ -59,10 +60,12 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
     if legacy_module.exists() and any(legacy_module.iterdir()):
         fail(f"separate sideload helper returned: {legacy_module.relative_to(ROOT)}")
 
-# Developer catalogue: zero scan at startup, independent hook owner and scoped
-# discovery only after the Developer UI is opened.
-dev_catalog = read("src/Debug/RYGDeveloperFeatureCatalog.m")
+# Developer catalogue: the dyld callback may only invalidate generations. No
+# process/image/class walk is allowed during cold start. Known owners prewarm
+# only after the Developer hub is explicitly opened; broad discovery is scoped
+# to the selected domain and image list.
 dev_catalog_h = read("src/Debug/RYGDeveloperFeatureCatalog.h")
+dev_catalog = read("src/Debug/RYGDeveloperFeatureCatalog.m")
 dev_registry = read("src/Debug/RYGDeveloperHookRegistry.m")
 dev_hub = read("src/Debug/RYGDeveloperHubViewController.m")
 require(dev_catalog_h, ("prewarmKnownOwners", "discoverAdditionalClasses"), "Developer catalogue header")
@@ -81,18 +84,32 @@ for forbidden in ("objc_getClassList", "objc_copyClassNamesForImage", "class_cop
         fail(f"Developer catalogue cold-start bootstrap performs discovery: {forbidden}")
 if "objc_getClassList" in dev_catalog:
     fail("Developer catalogue must use image-scoped class enumeration, not process-global objc_getClassList")
+
 require(dev_registry, (
     "LC_UUID",
     "method_getTypeEncoding",
+    "RYGDirectMethod",
+    "RYGMethodForPersistedIdentity",
     "imp_implementationWithBlock",
+    "restorePersistedOverridesForLoadedImages",
     "ryg_developer_bool_overrides_v2",
 ), "Developer hook registry")
 if "RYGRuntimeBrowserEngine setOverride" in dev_registry:
     fail("Developer hook registry must be independent from Runtime Browser override state")
-require(dev_hub, ("prewarmKnownOwners", "Aura / IGPlus", "Runtime Browser · Live"), "Developer hub")
+if "objc_getClassList" in dev_registry or "objc_copyClassNamesForImage" in dev_registry:
+    fail("Developer persisted replay must resolve only exact persisted identities")
+for obsolete in ("src/Debug/RYGDeveloperSetterOwner.m", "src/Debug/RYGDeveloperVerifiedApply.m"):
+    if (ROOT / obsolete).exists():
+        fail(f"competing Developer hook owner returned: {obsolete}")
+require(dev_hub, (
+    "prewarmKnownOwners",
+    "Aura / IGPlus",
+    "Runtime Browser · ObjC",
+    "Runtime Browser · C Functions",
+), "Developer hub")
 
-# Runtime Browser remains on-demand and may not perform process-global startup
-# discovery. Persistent identities are replayed by the dedicated hook manager.
+# Objective-C Runtime Browser remains on-demand. Persistent identity replay lives
+# in the hook manager; discovery UI must never become a launch dependency.
 manager_h = read("src/Debug/RYGRuntimeHookManager.h")
 manager = read("src/Debug/RYGRuntimeHookManager.m")
 browser = read("src/Debug/RYGFastRuntimeBrowserViewController.m")
@@ -101,14 +118,33 @@ require(manager_h, ("RYGRuntimeHookManager", "setSessionOverride"), "runtime hoo
 require(manager, ("RYGRuntimeHotState", "forcedSet", "forcedValue", "nativeValue", "RYGHookDirectMethod", "RYGHookInstallExact"), "runtime hook manager")
 if "objc_getClassList" in manager or "objc_copyClassNamesForImage" in manager:
     fail("runtime persistence owner must replay exact identities, never discover classes")
-require(browser, ("objc_copyClassNamesForImage", "membersForClassName", "Force On", "Force Off", "Use Native", "machOSymbolsForImagePath"), "Runtime Browser")
+require(browser, ("objc_copyClassNamesForImage", "membersForClassName", "Force On", "Force Off", "Use Native"), "Runtime Browser")
 if "objc_getClassList" in browser or "_dyld_register_func_for_add_image" in browser:
     fail("Runtime Browser UI reintroduced process-global/startup discovery")
 if "__attribute__((constructor))" in engine or "_dyld_register_func_for_add_image" in engine:
     fail("Runtime Browser engine must remain discovery/presentation-only")
 
-# MobileConfig core keeps the binary descriptor parser, while semantic authority
-# comes from the active session. No guessed App Group UUID and no mirrored unit.
+# C Functions: only imported symbols in the selected image are candidates.
+# Force 0/1 is allowed only when every resolved direct BL call site consumes
+# w0/x0 as a predicate; unproven symbols remain inspect-only.
+c_resolver = read("src/Debug/RYGCFunctionResolver.m")
+c_ui = read("src/Debug/RYGCFunctionsViewController.m")
+require(c_resolver, (
+    "S_SYMBOL_STUBS",
+    "LC_UUID",
+    "directCallSiteCount",
+    "predicateHookable",
+    "RYGCCallConsumesPredicate",
+    "rebind_symbols_image",
+    "Inspect only",
+), "C Function resolver")
+require(c_ui, ("C Functions", "Force On", "Force Off", "ABI-verified predicate hooks"), "C Function UI")
+if "MSHookFunction" in c_resolver:
+    fail("C Function browser must not inline-patch signed __TEXT")
+
+# MobileConfig semantic authority comes from the active session. No App Group
+# UUID, user id, unit mirror or getter observation may be used as the semantic
+# prerequisite for a configId:paramId imported from id_name_mapping.json.
 mc_header = read("src/Features/ExpFlags/RYGMobileConfig.h")
 for type_name, discriminator in (("RYGMCTypeBool",1),("RYGMCTypeInt",2),("RYGMCTypeString",3),("RYGMCTypeDouble",4)):
     if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
@@ -136,6 +172,19 @@ if "getBool:" in mc_authority:
 if (ROOT / "src/Features/ExpFlags/RYGMobileConfigUnitCompat.m").exists():
     fail("synthetic MobileConfig unit mirror owner returned")
 
+mc_semantic = read("src/Features/ExpFlags/RYGMobileConfigSemanticResolver.m")
+require(mc_semantic, (
+    "configNumber",
+    "paramIndex",
+    "reloadFromRuntime",
+    "setOverride:for:",
+    "clearOverrideFor:",
+    "canonical mc_overrides.json",
+), "MobileConfig semantic resolver")
+for forbidden in ("gRealPid", "gCallSites", "callSiteFor:", "getBool:", "0x40", "0x80"):
+    if forbidden in mc_semantic:
+        fail(f"MobileConfig semantic resolver depends on observation/mirrored PID state: {forbidden}")
+
 mc_owner = read("src/Features/ExpFlags/RYGMobileConfigHookOwner.m")
 require(mc_owner, (
     "RYG_MC_HOT_CAPACITY",
@@ -155,7 +204,7 @@ for forbidden in ("NSDictionary", "NSMutableDictionary", "os_unfair_lock", "RYGM
 mc_json = read("src/Features/ExpFlags/RYGMobileConfigJSONIO.m")
 require(mc_json, ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"), "canonical MobileConfig JSON")
 
-# EasyGating stays sideload-safe: import rebinding only, no signed __TEXT patch.
+# EasyGating remains import-rebinding only: no signed __TEXT inline patch.
 easy = read("src/Debug/RYGEasyGatingRuntime.m")
 require(easy, ('name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock"', "rebind_symbols_image", "RYGResolveFinalGateID", "RYGEasyGatingImageRangeHasProtection", "ryg_easy_gating_platform_bool_overrides_v2"), "EasyGating")
 if re.search(r'dlsym\s*\([^\n]*"EasyGatingPlatformGetBoolean"', easy):
@@ -167,11 +216,12 @@ if 'return ![RYGUtils getBoolPref:@"liquid_glass_force_off"]' not in liquid:
 if "return !UIAccessibilityIsReduceTransparencyEnabled()" in liquid:
     fail("Liquid Glass must let UIKit adapt Reduce Transparency")
 
-# Build surfaces may not drift back to older SDKs or helper dylibs.
+# Build surfaces may not drift back to older SDKs or separate helper injection.
 build_surfaces = [ROOT / "Makefile", ROOT / "build.sh", ROOT / "build-fast.sh"]
 build_surfaces.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
 for path in build_surfaces:
-    if not path.exists(): continue
+    if not path.exists():
+        continue
     text = path.read_text(encoding="utf-8", errors="replace")
     if re.search(r"iPhoneOS(?:16\.2|26\.2)\.sdk|iphone:clang:(?:16\.2|26\.2)", text):
         fail(f"old SDK reference in {path.relative_to(ROOT)}")
@@ -188,12 +238,15 @@ for path in active_sources:
     code = re.sub(r"/\*.*?\*/|//[^\n]*", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
     code = re.sub(r'@?"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', '""', code)
     bad = legacy_symbol.search(code)
-    if bad: fail(f"unmigrated legacy symbol {bad.group(0)!r} in {path.relative_to(ROOT)}")
+    if bad:
+        fail(f"unmigrated legacy symbol {bad.group(0)!r} in {path.relative_to(ROOT)}")
     if path.suffix in {".x", ".xm"}:
-        if re.search(r"%orig\s*\(\s*\)", code): fail(f"no-argument %orig() in {path.relative_to(ROOT)}")
+        if re.search(r"%orig\s*\(\s*\)", code):
+            fail(f"no-argument %orig() in {path.relative_to(ROOT)}")
         for line_number, line in enumerate(code.splitlines(), 1):
             tail = logos_orig_tail(line)
-            if tail is not None: fail(f"tokens follow %orig in {path.relative_to(ROOT)}:{line_number}: {tail.strip()!r}")
+            if tail is not None:
+                fail(f"tokens follow %orig in {path.relative_to(ROOT)}:{line_number}: {tail.strip()!r}")
 
 logos = Path(os.environ.get("THEOS", "")) / "bin/logos.pl" if os.environ.get("THEOS") else None
 if logos and logos.is_file():
@@ -203,4 +256,4 @@ if logos and logos.is_file():
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
-print("source validation OK: SDK 26.5, lazy Developer catalogue, independent typed Developer hooks, active-session MobileConfig authority, lock-free getter owner, on-demand Runtime Browser, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, lazy Developer catalogue, single typed Developer owner, semantic MobileConfig apply without observation dependency, ABI-gated C imports, on-demand Runtime Browser, integrated sideload compatibility")
