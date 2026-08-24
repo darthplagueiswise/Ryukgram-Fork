@@ -10,27 +10,27 @@ FOUNDATION_EXPORT NSString *const RYGDeveloperFeatureCatalogSurfaceUserInfoKey;
 
 /// Lightweight Developer-only feature catalogue.
 ///
-/// It is intentionally independent from the Runtime Browser UI. Starting the
-/// catalogue does not enumerate the Objective-C runtime: it only installs a
-/// cheap dyld generation marker. Known owner classes are prewarmed on a utility
-/// queue and the global class walk is deferred until a Developer domain is
-/// explicitly opened.
+/// The catalogue is independent from Runtime Browser UI/state.  Starting it is
+/// effectively free: only a dyld image-generation marker is registered.  Known
+/// owners are prewarmed after Developer is opened; a loaded-class walk is only
+/// allowed for the single domain the user explicitly opens.
 @interface RYGDeveloperFeatureCatalog : NSObject
 
 + (instancetype)sharedCatalog;
 
-/// Idempotent. Safe to call when Developer is first opened. No class walk is
-/// performed synchronously from this method.
+/// Idempotent; does not enumerate Objective-C classes or methods.
 - (void)startIfNeeded;
+
+/// Called when the Developer root is visible. Resolves only the tiny per-domain
+/// known-owner lists on the private queue; never performs objc_getClassList.
+- (void)prewarmKnownOwners;
 
 /// Immutable in-memory snapshot. Never performs discovery synchronously.
 - (NSArray<RYGRuntimeBoolMethod *> *)snapshotForSurface:(RYGDeveloperRuntimeSurface)surface;
 
-/// Refreshes on the private utility queue. When discoverAdditionalClasses is
-/// NO, only a very small set of known owners is checked with objc_lookUpClass.
-/// When YES, a scoped loaded-class walk is allowed for this one Developer
-/// domain so new owner classes can be discovered without opening Runtime
-/// Browser.
+/// Refreshes on the private queue. When discoverAdditionalClasses is NO, only
+/// known owners are checked with objc_lookUpClass. When YES, a scoped walk over
+/// already-loaded app classes is allowed for this one domain.
 - (void)requestRefreshForSurface:(RYGDeveloperRuntimeSurface)surface
         discoverAdditionalClasses:(BOOL)discoverAdditionalClasses;
 
