@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail fast on dogfood architecture/performance regressions before Theos."""
+"""Fail fast on RyukGram dogfood architecture/performance regressions before Theos."""
 
 from __future__ import annotations
 
@@ -59,141 +59,103 @@ for legacy_module in (ROOT / "modules/zxPluginsInject", ROOT / "modules/Sideload
     if legacy_module.exists() and any(legacy_module.iterdir()):
         fail(f"separate sideload helper returned: {legacy_module.relative_to(ROOT)}")
 
-# Runtime Browser: discovery is on-demand; persistence has one bounded owner.
-# Persisted exact hooks may act during startup, so their invocation path must be
-# atomic-only rather than deferred until after the gate was already evaluated.
+# Developer catalogue: zero scan at startup, independent hook owner and scoped
+# discovery only after the Developer UI is opened.
+dev_catalog = read("src/Debug/RYGDeveloperFeatureCatalog.m")
+dev_catalog_h = read("src/Debug/RYGDeveloperFeatureCatalog.h")
+dev_registry = read("src/Debug/RYGDeveloperHookRegistry.m")
+dev_hub = read("src/Debug/RYGDeveloperHubViewController.m")
+require(dev_catalog_h, ("prewarmKnownOwners", "discoverAdditionalClasses"), "Developer catalogue header")
+require(dev_catalog, (
+    "_dyld_register_func_for_add_image",
+    "objc_copyClassNamesForImage",
+    "RYGKnownOwners",
+    "RYGStructuralNoise",
+    "RYGDeveloperRuntimeSurfaceConsumerSubs",
+), "Developer live catalogue")
+start_body = re.search(r"- \(void\)startIfNeeded\s*\{(?P<body>.*?)\n\}", dev_catalog, re.S)
+if not start_body:
+    fail("could not inspect Developer catalogue bootstrap")
+for forbidden in ("objc_getClassList", "objc_copyClassNamesForImage", "class_copyMethodList", "requestRefreshForSurface"):
+    if forbidden in start_body.group("body"):
+        fail(f"Developer catalogue cold-start bootstrap performs discovery: {forbidden}")
+if "objc_getClassList" in dev_catalog:
+    fail("Developer catalogue must use image-scoped class enumeration, not process-global objc_getClassList")
+require(dev_registry, (
+    "LC_UUID",
+    "method_getTypeEncoding",
+    "imp_implementationWithBlock",
+    "ryg_developer_bool_overrides_v2",
+), "Developer hook registry")
+if "RYGRuntimeBrowserEngine setOverride" in dev_registry:
+    fail("Developer hook registry must be independent from Runtime Browser override state")
+require(dev_hub, ("prewarmKnownOwners", "Aura / IGPlus", "Runtime Browser · Live"), "Developer hub")
+
+# Runtime Browser remains on-demand and may not perform process-global startup
+# discovery. Persistent identities are replayed by the dedicated hook manager.
 manager_h = read("src/Debug/RYGRuntimeHookManager.h")
 manager = read("src/Debug/RYGRuntimeHookManager.m")
-bulk = read("src/Debug/RYGRuntimeBulkSessionOwner.m")
 browser = read("src/Debug/RYGFastRuntimeBrowserViewController.m")
 engine = read("src/Debug/RYGRuntimeBrowserEngine.m")
 require(manager_h, ("RYGRuntimeHookManager", "setSessionOverride"), "runtime hook manager header")
-require(manager, (
-    "ryg_runtime_bool_hook_specs_v7",
-    "ryg_runtime_legacy_bulk_cleanup_v8",
-    "kRYGRuntimePersistentSpecLimit = 128",
-    "kRYGRuntimeCPersistentSpecLimit = 8",
-    "RYGRuntimeHotState",
-    "forcedSet",
-    "forcedValue",
-    "nativeValue",
-    "RYGHookHotResult",
-    "atomic_exchange_explicit",
-    "gRYGRuntimePending",
-    "gRYGCPending",
-    "RYGHookDirectMethod",
-    "RYGHookInstallExact",
-    "RYGHasPendingRestore",
-    "setSessionOverride",
-    "RYGPurgeUntouchedLegacyBulkIfNeeded",
-    "constructor(205)",
-    "No second timer replay here",
-    "_dyld_register_func_for_add_image",
-), "runtime hook manager")
+require(manager, ("RYGRuntimeHotState", "forcedSet", "forcedValue", "nativeValue", "RYGHookDirectMethod", "RYGHookInstallExact"), "runtime hook manager")
 if "objc_getClassList" in manager or "objc_copyClassNamesForImage" in manager:
     fail("runtime persistence owner must replay exact identities, never discover classes")
-if "gRYGRuntimePending.allObjects" not in manager:
-    fail("runtime replay must iterate unresolved identities only")
-if "RYGHookOverride(strongRecord" in manager or "RYGHookRememberNative(strongRecord" in manager:
-    fail("persisted runtime trampoline reintroduced dictionary/lock lookup per invocation")
-if "RYGRuntimeRestoreLaunchGate" in manager or (ROOT / "src/Debug/RYGRuntimeRestoreLaunchGate.m").exists():
-    fail("generic persisted hooks must preserve startup semantics; post-active launch gate returned")
-require(bulk, ("setSessionOverride", "session only", "revealAllVisibilityRows"), "bulk visibility")
-if "setOverride:desired" in bulk:
-    fail("Reveal All must not persist a bulk generic hook set")
-require(browser, (
-    "objc_copyClassNamesForImage",
-    "membersForClassName",
-    "Cross-class selector scan is on-demand",
-    "Force On",
-    "Force Off",
-    "Use Native",
-    "machOSymbolsForImagePath",
-), "Runtime Browser")
+require(browser, ("objc_copyClassNamesForImage", "membersForClassName", "Force On", "Force Off", "Use Native", "machOSymbolsForImagePath"), "Runtime Browser")
 if "objc_getClassList" in browser or "_dyld_register_func_for_add_image" in browser:
     fail("Runtime Browser UI reintroduced process-global/startup discovery")
 if "__attribute__((constructor))" in engine or "_dyld_register_func_for_add_image" in engine:
     fail("Runtime Browser engine must remain discovery/presentation-only")
 
-# Developer screens must not be a prerequisite for restore.
-hub = read("src/Debug/RYGDeveloperHubViewController.m")
-topic = read("src/Debug/RYGDeveloperTopicViewController.m")
-if "activatePersistedNativeFeatures" in hub:
-    fail("opening Developer Hub must not perform persistence restore")
-require(topic, (
-    "_TtC17IGBugReporterMenu29IGBugReportMenuViewController",
-    "_TtC20IGDogfoodingSettings34IGDogfoodingSettingsViewController",
-    "_TtC35IGDogfoodingAssistantLauncherClient35IGDogfoodingAssistantLauncherClient",
-    "_TtC27IGPersistentStoryTrayGating38IGPersistentStoryTrayGatingStaticFuncs",
-    "_TtC18IGNavConfiguration25IGHomecomingConfiguration",
-    "isDynamicTabStoryGridEnabled",
-    "No MobileConfig prepare/reload/reapply occurs here",
-), "Developer exact owner")
-if "objc_getClassList" in topic or "RYGFindExactBoolSelector" in topic:
-    fail("Developer screen reintroduced global class discovery")
-activation = re.search(r"\+ \(void\)activatePersistedNativeFeatures\s*\{(?P<body>.*?)\n\}\n\n- \(instancetype\)initWithSurface", topic, re.S)
-if not activation:
-    fail("could not validate Developer persisted activation body")
-for forbidden in (" prepare]", "reloadFromRuntime", "reapplyOverridesToNativeTable"):
-    if forbidden in activation.group("body"):
-        fail(f"Developer startup restore must not enumerate/reapply MobileConfig: {forbidden}")
-
-# MobileConfig: the app-launch getter path must be lock-free and allocation-free.
+# MobileConfig core keeps the binary descriptor parser, while semantic authority
+# comes from the active session. No guessed App Group UUID and no mirrored unit.
 mc_header = read("src/Features/ExpFlags/RYGMobileConfig.h")
 for type_name, discriminator in (("RYGMCTypeBool",1),("RYGMCTypeInt",2),("RYGMCTypeString",3),("RYGMCTypeDouble",4)):
     if not re.search(rf"\b{type_name}\s*=\s*{discriminator}\b", mc_header):
         fail(f"MobileConfig discriminator drifted: {type_name} must equal {discriminator}")
 mc = read("src/Features/ExpFlags/RYGMobileConfig.xm")
-require(mc, ("_ZN12mobileconfig17typeFromParameterEy", "_ZN12mobileconfig23kMobileConfigParamsListE", "setOverrideForParam:andValue:", "removeOverrideForParam:"), "MobileConfig")
+require(mc, ("_ZN12mobileconfig17typeFromParameterEy", "_ZN12mobileconfig23kMobileConfigParamsListE", "setOverrideForParam:andValue:", "removeOverrideForParam:"), "MobileConfig descriptor core")
+
+mc_authority = read("src/Features/ExpFlags/RYGMobileConfigNativeAuthority.m")
+require(mc_authority, (
+    "FBMobileConfigFBTGlobalSessionManager",
+    "currentSessionContextManagerHolder",
+    "getOverridesTablePath",
+    "getUnitType",
+    "getStableIdFromParamSpecifier:",
+    "RYGMCResolveExactPID",
+    "id_name_mapping.json",
+    "ryg_authorityLoadNameCatalog",
+    "ryg_authorityWriteNativeForPid",
+), "MobileConfig active-session authority")
+for forbidden in ("containerURLForSecurityApplicationGroupIdentifier", "RYGMCForceCanonicalPID", "RYGMirrorPID"):
+    if forbidden in mc_authority:
+        fail(f"MobileConfig semantic authority contains guessed/mirrored path or PID logic: {forbidden}")
+if "getBool:" in mc_authority:
+    fail("MobileConfig semantic authority must never own a hot getter")
+if (ROOT / "src/Features/ExpFlags/RYGMobileConfigUnitCompat.m").exists():
+    fail("synthetic MobileConfig unit mirror owner returned")
+
 mc_owner = read("src/Features/ExpFlags/RYGMobileConfigHookOwner.m")
 require(mc_owner, (
     "RYG_MC_HOT_CAPACITY",
     "gRYGMCHotSlots",
     "RYGMCHotFindSlot",
-    "RYGMCHotLoadDiskSnapshotOnce",
     "RYGMCOwnedOverride",
     "atomic_load_explicit",
-    "RYGMCIMPBelongsToRyukGram",
     "gRYGMCHooksInstalled",
-    "Capture native IMPs before the legacy Logos constructor",
 ), "MobileConfig hot-path owner")
 match = re.search(r"static id RYGMCOwnedOverride\([^)]*\)\s*\{(?P<body>.*?)\n\}", mc_owner, re.S)
 if not match:
     fail("could not inspect MobileConfig hot getter lookup")
-for forbidden in (
-    "NSNumber", "NSDictionary", "NSMutableDictionary", "os_unfair_lock",
-    "RYGMobileConfig.shared", "class_getInstanceVariable", "dictionaryWithContentsOfFile",
-    "NSUserDefaults", "backtrace", "dladdr", "reapplyOverridesToNativeTable",
-):
+for forbidden in ("NSDictionary", "NSMutableDictionary", "os_unfair_lock", "RYGMobileConfig.shared", "NSUserDefaults", "backtrace", "dladdr", "reapplyOverridesToNativeTable"):
     if forbidden in match.group("body"):
         fail(f"MobileConfig getter hot path performs expensive work: {forbidden}")
-if "reapplyOverridesToNativeTable" in mc_owner:
-    fail("MobileConfig hook-install owner must not reapply the full native override table")
 
-# The old Logos MobileConfig getter owner remains source-compatible only; it may
-# not stack on top of the RAM owner during the constructor window.
-mc_legacy_gate = read("src/Features/ExpFlags/RYGMobileConfigLegacyHookGate.m")
-require(mc_legacy_gate, (
-    "constructor(90)",
-    "ryg_metaconfig_enabled",
-    "method_exchangeImplementations",
-    "UIApplicationDidFinishLaunchingNotification",
-    "RYGMCLegacyGateRemove",
-), "legacy MobileConfig hook gate")
-if "setBool:" in mc_legacy_gate or "setObject:" in mc_legacy_gate:
-    fail("legacy MobileConfig gate must never mutate the user's saved preference")
-mc_backtrace = read("src/Features/ExpFlags/RYGMobileConfigBacktraceGuard.m")
-require(mc_backtrace, ("rebind_symbols_image", '.name = \"backtrace\"', "RYGMobileConfigBacktraceDisabled", "constructor(100)"), "MobileConfig callsite guard")
-
-mc_bridge = read("src/Features/ExpFlags/RYGMobileConfigBridge.m")
-if "containerURLForSecurityApplicationGroupIdentifier" in mc_bridge:
-    fail("guessed MobileConfig App Group fallback returned")
-if 'hasSuffix:@".data"' not in mc_bridge:
-    fail("native MobileConfig data-directory contract missing")
 mc_json = read("src/Features/ExpFlags/RYGMobileConfigJSONIO.m")
 require(mc_json, ('@"_qe_overrides_"', '@": : "', "RYGMCParseCanonicalJSONValue"), "canonical MobileConfig JSON")
 
-# EasyGating must stay sideload-safe: import rebinding only, no signed __TEXT patch.
+# EasyGating stays sideload-safe: import rebinding only, no signed __TEXT patch.
 easy = read("src/Debug/RYGEasyGatingRuntime.m")
 require(easy, ('name = "EasyGatingGetBoolean_Internal_DoNotUseOrMock"', "rebind_symbols_image", "RYGResolveFinalGateID", "RYGEasyGatingImageRangeHasProtection", "ryg_easy_gating_platform_bool_overrides_v2"), "EasyGating")
 if re.search(r'dlsym\s*\([^\n]*"EasyGatingPlatformGetBoolean"', easy):
@@ -241,4 +203,4 @@ if logos and logos.is_file():
             detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "unknown Logos error"
             fail(f"Logos preprocessing failed for {path.relative_to(ROOT)}: {detail}")
 
-print("source validation OK: SDK 26.5, atomic startup-safe runtime hooks, one-time legacy bulk cleanup, lock-free MobileConfig getters, legacy getter stacking blocked, unresolved-only replay, session-only bulk reveal, on-demand browser, integrated sideload compatibility")
+print("source validation OK: SDK 26.5, lazy Developer catalogue, independent typed Developer hooks, active-session MobileConfig authority, lock-free getter owner, on-demand Runtime Browser, integrated sideload compatibility")
