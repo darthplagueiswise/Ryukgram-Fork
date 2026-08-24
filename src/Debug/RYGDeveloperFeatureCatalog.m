@@ -60,6 +60,14 @@ static NSArray *SelectorTokens(RYGDeveloperRuntimeSurface s) {
     return @[];
 }
 static BOOL HasToken(NSString *v, NSArray *tokens) { NSString *l=v.lowercaseString?:@""; for (NSString *t in tokens) if ([l containsString:t]) return YES; return NO; }
+static BOOL Noise(NSString *s) {
+    if (!s.length || [RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:s]) return YES;
+    NSString *l=s.lowercaseString;
+    static NSArray *fragments; static dispatch_once_t once;
+    dispatch_once(&once,^{ fragments=@[@"canrespond",@"respondstoselector",@"isequal",@"iskindofclass",@"ismemberofclass",@"conformstoprotocol",@"methodforselector",@"debugdescription",@"description",@"retaincount",@"copywithzone",@"mutablecopywithzone",@"canperformaction"];} );
+    for (NSString *f in fragments) if ([l containsString:f]) return YES;
+    return NO;
+}
 static BOOL AppClass(Class c) {
     const char *raw=c?class_getImageName(c):NULL; if (!raw) return NO;
     NSString *p=[[NSString stringWithUTF8String:raw] stringByStandardizingPath]; NSString *b=NSBundle.mainBundle.bundlePath.stringByStandardizingPath;
@@ -69,7 +77,7 @@ static void ScanClass(Class c, RYGDeveloperRuntimeSurface s, NSMutableDictionary
     if (!AppClass(c)) return; NSString *cn=NSStringFromClass(c)?:@""; BOOL classHit=HasToken(cn,ClassTokens(s));
     for (NSUInteger pass=0;pass<2;pass++) { Class owner=pass?object_getClass(c):c; unsigned int n=0; Method *ms=owner?class_copyMethodList(owner,&n):NULL;
         for (unsigned int i=0;ms&&i<n;i++) { RYGRuntimeArgumentKind k=ArgKind(ms[i]); if (k<0) continue; NSString *sn=NSStringFromSelector(method_getName(ms[i]))?:@"";
-            if ([RYGRuntimeBrowserEngine isStructuralNoiseSelectorName:sn]) continue; if (!HasToken(sn,SelectorTokens(s)) && !(classHit && HasToken(sn,@[@"enabled",@"available",@"visible",@"hidden",@"show",@"internal",@"debug",@"experiment"]))) continue;
+            if (Noise(sn)) continue; if (!HasToken(sn,SelectorTokens(s)) && !(classHit && HasToken(sn,@[@"enabled",@"available",@"visible",@"hidden",@"show",@"internal",@"debug",@"experiment"]))) continue;
             RYGRuntimeBoolMethod *r=[RYGRuntimeBoolMethod new]; r.className=cn; r.selectorName=sn; r.classMethod=pass!=0; r.argumentKind=k; const char *te=method_getTypeEncoding(ms[i]); r.typeEncoding=te?[NSString stringWithUTF8String:te]:@""; const char *im=class_getImageName(c); r.imagePath=im?[NSString stringWithUTF8String:im]:@"";
             out[[NSString stringWithFormat:@"%@|%@|%c|%@|%@",r.imagePath,r.className,r.classMethod?'+':'-',r.selectorName,r.typeEncoding]]=r;
         } if (ms) free(ms);
