@@ -161,10 +161,10 @@ static BOOL RYGMCOwnerInstallOne(Class cls, NSString *selectorName, IMP replacem
     return method_getImplementation(method) == replacement;
 }
 
-static BOOL RYGMCOwnerBool(id self, SEL cmd, uint64_t pid) { id value = RYGMCOwnedOverride(pid); return value ? value.boolValue : (gRYGMCUpBool ? ((BOOL (*)(id,SEL,uint64_t))gRYGMCUpBool)(self,cmd,pid) : NO); }
-static BOOL RYGMCOwnerBoolDef(id self, SEL cmd, uint64_t pid, BOOL def) { id value = RYGMCOwnedOverride(pid); return value ? value.boolValue : (gRYGMCUpBoolDef ? ((BOOL (*)(id,SEL,uint64_t,BOOL))gRYGMCUpBoolDef)(self,cmd,pid,def) : def); }
-static BOOL RYGMCOwnerBoolOpts(id self, SEL cmd, uint64_t pid, id opts) { id value = RYGMCOwnedOverride(pid); return value ? value.boolValue : (gRYGMCUpBoolOpts ? ((BOOL (*)(id,SEL,uint64_t,id))gRYGMCUpBoolOpts)(self,cmd,pid,opts) : NO); }
-static BOOL RYGMCOwnerBoolOptsDef(id self, SEL cmd, uint64_t pid, id opts, BOOL def) { id value = RYGMCOwnedOverride(pid); return value ? value.boolValue : (gRYGMCUpBoolOptsDef ? ((BOOL (*)(id,SEL,uint64_t,id,BOOL))gRYGMCUpBoolOptsDef)(self,cmd,pid,opts,def) : def); }
+static BOOL RYGMCOwnerBool(id self, SEL cmd, uint64_t pid) { id value = RYGMCOwnedOverride(pid); return value ? [value boolValue] : (gRYGMCUpBool ? ((BOOL (*)(id,SEL,uint64_t))gRYGMCUpBool)(self,cmd,pid) : NO); }
+static BOOL RYGMCOwnerBoolDef(id self, SEL cmd, uint64_t pid, BOOL def) { id value = RYGMCOwnedOverride(pid); return value ? [value boolValue] : (gRYGMCUpBoolDef ? ((BOOL (*)(id,SEL,uint64_t,BOOL))gRYGMCUpBoolDef)(self,cmd,pid,def) : def); }
+static BOOL RYGMCOwnerBoolOpts(id self, SEL cmd, uint64_t pid, id opts) { id value = RYGMCOwnedOverride(pid); return value ? [value boolValue] : (gRYGMCUpBoolOpts ? ((BOOL (*)(id,SEL,uint64_t,id))gRYGMCUpBoolOpts)(self,cmd,pid,opts) : NO); }
+static BOOL RYGMCOwnerBoolOptsDef(id self, SEL cmd, uint64_t pid, id opts, BOOL def) { id value = RYGMCOwnedOverride(pid); return value ? [value boolValue] : (gRYGMCUpBoolOptsDef ? ((BOOL (*)(id,SEL,uint64_t,id,BOOL))gRYGMCUpBoolOptsDef)(self,cmd,pid,opts,def) : def); }
 static long long RYGMCOwnerInt(id self, SEL cmd, uint64_t pid) { id value = RYGMCOwnedOverride(pid); return value ? [value longLongValue] : (gRYGMCUpInt ? ((long long (*)(id,SEL,uint64_t))gRYGMCUpInt)(self,cmd,pid) : 0); }
 static long long RYGMCOwnerIntDef(id self, SEL cmd, uint64_t pid, long long def) { id value = RYGMCOwnedOverride(pid); return value ? [value longLongValue] : (gRYGMCUpIntDef ? ((long long (*)(id,SEL,uint64_t,long long))gRYGMCUpIntDef)(self,cmd,pid,def) : def); }
 static long long RYGMCOwnerIntOpts(id self, SEL cmd, uint64_t pid, id opts) { id value = RYGMCOwnedOverride(pid); return value ? [value longLongValue] : (gRYGMCUpIntOpts ? ((long long (*)(id,SEL,uint64_t,id))gRYGMCUpIntOpts)(self,cmd,pid,opts) : 0); }
