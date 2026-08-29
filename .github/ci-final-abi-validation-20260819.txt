@@ -1,0 +1,1 @@
+Final CI validation marker for the current dogfood HEAD after LIEF/Capstone validation of Easy Gating and MobileConfig ABIs.
