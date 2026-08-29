@@ -1,0 +1,1 @@
+Validation-only marker for current dogfood rebuild after nullable settings contract correction.
