@@ -2,8 +2,10 @@
 #import "../Utils.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <math.h>
 
 static const void *kRYGGlassButtonConfiguredKey = &kRYGGlassButtonConfiguredKey;
+static const void *kRYGGlassButtonDeferredFitKey = &kRYGGlassButtonDeferredFitKey;
 
 static NSString *RYGDefiningImagePath(void) {
     static NSString *path;
@@ -97,6 +99,27 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
     view.backgroundColor = tintColor ?: UIColor.clearColor;
 }
 
+static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
+    if (!menu) return;
+
+    // UIMenu's default large layout is deliberately a full-width action list.
+    // That looks wasteful for the tweak's one/two-item selectors. Automatic is
+    // the public UIKit policy that lets the presentation choose the compact
+    // layout appropriate to the actual children instead of us baking a width.
+    if (@available(iOS 16.0, *)) {
+        menu.preferredElementSize = UIMenuElementSizeAutomatic;
+    }
+
+    // Apply the same policy to nested selection groups (for example Output ->
+    // Native/On/Off) so opening a submenu cannot re-introduce a fixed large
+    // surface after the root menu was made adaptive.
+    for (UIMenuElement *element in menu.children) {
+        if ([element isKindOfClass:UIMenu.class]) {
+            RYGPrepareAdaptiveMenu((UIMenu *)element);
+        }
+    }
+}
+
 static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
                                                               BOOL prominent) API_AVAILABLE(ios(26.0)) {
     UIButtonConfiguration *old = button.configuration;
@@ -129,12 +152,33 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
     return glass;
 }
 
-void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
+static void RYGFitFrameManagedMenuButton(UIButton *button) {
+    if (!button) return;
+    [button invalidateIntrinsicContentSize];
+    [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    // UITableViewCell.accessoryView is frame-managed, while stack/constraint
+    // based controls are not. Only own the former's frame. Re-measuring here
+    // after the final configuration/title fixes the clipped pills in late
+    // table reloads without fighting Auto Layout elsewhere in the tweak.
+    if (!button.translatesAutoresizingMaskIntoConstraints) return;
+    [button sizeToFit];
+    CGSize intrinsic = button.intrinsicContentSize;
+    CGRect frame = button.frame;
+    if (intrinsic.width > 0.0 && isfinite(intrinsic.width)) frame.size.width = ceil(intrinsic.width);
+    if (intrinsic.height > 0.0 && isfinite(intrinsic.height)) frame.size.height = ceil(intrinsic.height);
+    button.frame = frame;
+}
+
+static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
     if (!button) return;
     if (@available(iOS 26.0, *)) {
         if (!RYGLiquidGlassIsAvailable()) return;
 
         BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
+        if (menuSource && button.menu) RYGPrepareAdaptiveMenu(button.menu);
+
         NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
         NSString *stateKey = [NSString stringWithFormat:@"%d:%d:%@", prominent, menuSource, title];
         NSString *configured = objc_getAssociatedObject(button, kRYGGlassButtonConfiguredKey);
@@ -148,16 +192,39 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
                                      OBJC_ASSOCIATION_COPY_NONATOMIC);
         }
 
-        if (menuSource) {
-            [button invalidateIntrinsicContentSize];
-            [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-            [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-            // UITableViewCell.accessoryView is frame-based. The old code sized
-            // the plain button first and changed it to a Glass configuration
-            // later, so the pill drew outside the stale accessory frame and on
-            // top of the title/subtitle. Only frame-managed controls are sized
-            // here; Auto Layout-owned buttons keep their constraints untouched.
-            if (button.translatesAutoresizingMaskIntoConstraints) [button sizeToFit];
+        if (menuSource) RYGFitFrameManagedMenuButton(button);
+    }
+}
+
+void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
+    if (!button) return;
+    RYGSynchronizeGlassButton(button, prominent);
+
+    if (@available(iOS 26.0, *)) {
+        if (!RYGLiquidGlassIsAvailable()) return;
+        BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
+        if (!menuSource || !button.translatesAutoresizingMaskIntoConstraints) return;
+
+        // A number of menu builders intentionally call the common styler and
+        // then mutate UIButtonConfiguration.title. The old implementation
+        // measured the accessory before that mutation, leaving the cell with a
+        // stale narrow frame. A single end-of-runloop reconciliation observes
+        // the caller's final title/menu and fixes every such source globally.
+        if (![objc_getAssociatedObject(button, kRYGGlassButtonDeferredFitKey) boolValue]) {
+            objc_setAssociatedObject(button,
+                                     kRYGGlassButtonDeferredFitKey,
+                                     @YES,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            __weak UIButton *weakButton = button;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIButton *strongButton = weakButton;
+                if (!strongButton) return;
+                objc_setAssociatedObject(strongButton,
+                                         kRYGGlassButtonDeferredFitKey,
+                                         nil,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                RYGSynchronizeGlassButton(strongButton, prominent);
+            });
         }
     }
 }
