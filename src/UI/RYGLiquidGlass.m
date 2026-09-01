@@ -173,59 +173,59 @@ static void RYGFitFrameManagedMenuButton(UIButton *button) {
 
 static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
     if (!button) return;
+
+    BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
+    if (menuSource && button.menu) RYGPrepareAdaptiveMenu(button.menu);
+
+    // Menu geometry is independent from the current material. Keep source
+    // controls correctly measured on older systems and when Glass is disabled.
     if (@available(iOS 26.0, *)) {
-        if (!RYGLiquidGlassIsAvailable()) return;
-
-        BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-        if (menuSource && button.menu) RYGPrepareAdaptiveMenu(button.menu);
-
-        NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
-        NSString *stateKey = [NSString stringWithFormat:@"%d:%d:%@", prominent, menuSource, title];
-        NSString *configured = objc_getAssociatedObject(button, kRYGGlassButtonConfiguredKey);
-        if (![configured isEqualToString:stateKey]) {
-            button.backgroundColor = UIColor.clearColor;
-            if (menuSource) button.tintColor = UIColor.labelColor;
-            button.configuration = RYGGlassConfigurationForButton(button, prominent);
-            objc_setAssociatedObject(button,
-                                     kRYGGlassButtonConfiguredKey,
-                                     stateKey,
-                                     OBJC_ASSOCIATION_COPY_NONATOMIC);
+        if (RYGLiquidGlassIsAvailable()) {
+            NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
+            NSString *stateKey = [NSString stringWithFormat:@"%d:%d:%@", prominent, menuSource, title];
+            NSString *configured = objc_getAssociatedObject(button, kRYGGlassButtonConfiguredKey);
+            if (![configured isEqualToString:stateKey]) {
+                button.backgroundColor = UIColor.clearColor;
+                if (menuSource) button.tintColor = UIColor.labelColor;
+                button.configuration = RYGGlassConfigurationForButton(button, prominent);
+                objc_setAssociatedObject(button,
+                                         kRYGGlassButtonConfiguredKey,
+                                         stateKey,
+                                         OBJC_ASSOCIATION_COPY_NONATOMIC);
+            }
         }
-
-        if (menuSource) RYGFitFrameManagedMenuButton(button);
     }
+
+    if (menuSource) RYGFitFrameManagedMenuButton(button);
 }
 
 void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
     if (!button) return;
     RYGSynchronizeGlassButton(button, prominent);
 
-    if (@available(iOS 26.0, *)) {
-        if (!RYGLiquidGlassIsAvailable()) return;
-        BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-        if (!menuSource || !button.translatesAutoresizingMaskIntoConstraints) return;
+    BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
+    if (!menuSource || !button.translatesAutoresizingMaskIntoConstraints) return;
 
-        // A number of menu builders intentionally call the common styler and
-        // then mutate UIButtonConfiguration.title. The old implementation
-        // measured the accessory before that mutation, leaving the cell with a
-        // stale narrow frame. A single end-of-runloop reconciliation observes
-        // the caller's final title/menu and fixes every such source globally.
-        if (![objc_getAssociatedObject(button, kRYGGlassButtonDeferredFitKey) boolValue]) {
-            objc_setAssociatedObject(button,
+    // A number of menu builders intentionally call the common styler and then
+    // mutate UIButtonConfiguration.title. The old implementation measured the
+    // accessory before that mutation, leaving the cell with a stale narrow
+    // frame. A single end-of-runloop reconciliation observes the caller's final
+    // title/menu and fixes every such source globally, with or without Glass.
+    if (![objc_getAssociatedObject(button, kRYGGlassButtonDeferredFitKey) boolValue]) {
+        objc_setAssociatedObject(button,
+                                 kRYGGlassButtonDeferredFitKey,
+                                 @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        __weak UIButton *weakButton = button;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIButton *strongButton = weakButton;
+            if (!strongButton) return;
+            objc_setAssociatedObject(strongButton,
                                      kRYGGlassButtonDeferredFitKey,
-                                     @YES,
+                                     nil,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            __weak UIButton *weakButton = button;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UIButton *strongButton = weakButton;
-                if (!strongButton) return;
-                objc_setAssociatedObject(strongButton,
-                                         kRYGGlassButtonDeferredFitKey,
-                                         nil,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                RYGSynchronizeGlassButton(strongButton, prominent);
-            });
-        }
+            RYGSynchronizeGlassButton(strongButton, prominent);
+        });
     }
 }
 
