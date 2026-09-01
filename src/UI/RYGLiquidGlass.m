@@ -54,11 +54,6 @@ BOOL RYGIsOwnedViewController(UIViewController *controller) {
 
 BOOL RYGLiquidGlassIsAvailable(void) {
     if (@available(iOS 26.0, *)) {
-        // UIGlassEffect owns its accessibility adaptations. iOS makes the
-        // material frostier for Reduce Transparency, raises contrast when
-        // requested, and reduces its motion automatically. Replacing it with
-        // a plain view here removed the closed-menu/title material precisely
-        // for users who need the stronger legibility treatment.
         return ![RYGUtils getBoolPref:@"liquid_glass_force_off"];
     }
     return NO;
@@ -102,17 +97,10 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
 static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
     if (!menu) return;
 
-    // UIMenu's default large layout is deliberately a full-width action list.
-    // That looks wasteful for the tweak's one/two-item selectors. Automatic is
-    // the public UIKit policy that lets the presentation choose the compact
-    // layout appropriate to the actual children instead of us baking a width.
-    if (@available(iOS 16.0, *)) {
+    if (@available(iOS 17.0, *)) {
         menu.preferredElementSize = UIMenuElementSizeAutomatic;
     }
 
-    // Apply the same policy to nested selection groups (for example Output ->
-    // Native/On/Off) so opening a submenu cannot re-introduce a fixed large
-    // surface after the root menu was made adaptive.
     for (UIMenuElement *element in menu.children) {
         if ([element isKindOfClass:UIMenu.class]) {
             RYGPrepareAdaptiveMenu((UIMenu *)element);
@@ -140,13 +128,8 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
     if (menuSource) {
-        // UIKit owns the closed -> expanded Liquid Glass menu morph. Keep its
-        // default source metrics; never carry a hand-authored inset into the
-        // expanded menu geometry.
         [glass setDefaultContentInsets];
     } else if (old) {
-        // Preserve author-owned metrics only for ordinary action buttons.
-        // Menu source controls always use UIKit's intrinsic Glass geometry.
         glass.contentInsets = old.contentInsets;
     }
     return glass;
@@ -158,10 +141,6 @@ static void RYGFitFrameManagedMenuButton(UIButton *button) {
     [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
-    // UITableViewCell.accessoryView is frame-managed, while stack/constraint
-    // based controls are not. Only own the former's frame. Re-measuring here
-    // after the final configuration/title fixes the clipped pills in late
-    // table reloads without fighting Auto Layout elsewhere in the tweak.
     if (!button.translatesAutoresizingMaskIntoConstraints) return;
     [button sizeToFit];
     CGSize intrinsic = button.intrinsicContentSize;
@@ -177,8 +156,6 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     if (menuSource && button.menu) RYGPrepareAdaptiveMenu(button.menu);
 
-    // Menu geometry is independent from the current material. Keep source
-    // controls correctly measured on older systems and when Glass is disabled.
     if (@available(iOS 26.0, *)) {
         if (RYGLiquidGlassIsAvailable()) {
             NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
@@ -206,11 +183,6 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     if (!menuSource || !button.translatesAutoresizingMaskIntoConstraints) return;
 
-    // A number of menu builders intentionally call the common styler and then
-    // mutate UIButtonConfiguration.title. The old implementation measured the
-    // accessory before that mutation, leaving the cell with a stale narrow
-    // frame. A single end-of-runloop reconciliation observes the caller's final
-    // title/menu and fixes every such source globally, with or without Glass.
     if (![objc_getAssociatedObject(button, kRYGGlassButtonDeferredFitKey) boolValue]) {
         objc_setAssociatedObject(button,
                                  kRYGGlassButtonDeferredFitKey,
@@ -249,9 +221,6 @@ UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
         configuration.attributedTitle = attributed;
         configuration.baseForegroundColor = UIColor.labelColor;
         configuration.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
-        // The navigation title is itself a standard Glass control. Let UIKit
-        // choose its intrinsic capsule metrics so Dynamic Type and iOS 26's
-        // navigation transitions do not inherit fixed tweak-side margins.
         [configuration setDefaultContentInsets];
         pill.configuration = configuration;
     } else {
