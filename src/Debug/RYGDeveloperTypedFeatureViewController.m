@@ -81,7 +81,8 @@ static NSString *RYGTypedValueString(id value) {
 
 - (instancetype)initWithTitle:(NSString *)title query:(NSString *)query {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
-        _domainTitle = [title copy].length ? [title copy] : @"Feature Flags";
+        NSString *copiedTitle = [title copy];
+        _domainTitle = copiedTitle.length ? copiedTitle : @"Feature Flags";
         _domainQuery = [query copy] ?: @"";
         _allRows = @[];
         _visibleRows = @[];
