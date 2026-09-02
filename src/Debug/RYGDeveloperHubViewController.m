@@ -2,7 +2,7 @@
 #import "RYGDeveloperTopicViewController.h"
 #import "RYGDeveloperTypedFeatureViewController.h"
 #import "RYGWordmarkViewController.h"
-#import "RYGFastRuntimeBrowserViewController.h"
+#import "RYGPortedRuntimeBrowserViewController.h"
 #import "RYGEasyGatingViewController.h"
 #import "RYGMetaLocalExperimentBrowser.h"
 #import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
@@ -14,8 +14,6 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    // No broad Objective-C feature catalogue is prewarmed here. Feature domains
-    // resolve only Instagram's typed MobileConfig/runtime table when opened.
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
@@ -83,17 +81,18 @@
                                                    subtitle:@"Native list + FDID generator + current Odin family device ID"
                                                        icon:[RYGSymbol symbolWithName:@"insights"]
                                                      action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Typed"
-                                                     subtitle:@"Raw images → classes → typed getters; separate from feature-domain menus"
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · WAT Port"
+                                                     subtitle:@"dogfood2 model · image → flat typed getters · live receiver · persist/retry/apply"
                                                          icon:[RYGSymbol symbolWithName:@"search"]
-                                               viewController:[RYGFastRuntimeBrowserViewController new]];
+                                               viewController:[RYGPortedRuntimeBrowserViewController new]];
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, wordmarkFlags, easyGating, mobileConfig]],
         [RYGSettingsViewController sectionWithHeader:@"Feature domains"
                                                footer:@"Feature menus resolve typed MobileConfig/runtime parameters only. Raw class/selector exploration is isolated in Runtime Browser. Native Bug Report and Dogfooding flows still use Instagram's real sessions, providers and uploader."
                                                  rows:@[prism, stories, glass, maps, subscriptions, internalOnly, bugReport, settingsRows, dogfood]],
-        [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
+        [RYGSettingsViewController sectionWithHeader:nil footer:@"Runtime Browser is the WATweaks dogfood2 interaction model adapted to Instagram: flat typed getters, direct BOOL switches, typed scalar/Foundation editors, persist-first hooks and pending retry."
+                                                 rows:@[metaLocal, runtime]],
     ]];
 }
 
