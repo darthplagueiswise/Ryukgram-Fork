@@ -16,7 +16,7 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 
 @implementation RYGMobileConfigToolsViewController
 
-- (instancetype)init { return [super initWithTitle:@"ABProps Runtime"]; }
+- (instancetype)init { return [super initWithTitle:@"MobileConfig Runtime"]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -31,8 +31,8 @@ typedef NS_ENUM(NSInteger, RYGMCImportOperation) {
 - (void)rebuildSections {
     __weak typeof(self) weakSelf = self;
 
-    RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"ABProps / MobileConfig Runtime Browser"
-                                                     subtitle:@"35k+ typed parameters from Instagram's live exported table"
+    RYGSetting *browser = [RYGSetting navigationCellWithTitle:@"MobileConfig Runtime Browser"
+                                                     subtitle:@"Typed parameters from Instagram's live exported table"
                                                          icon:[RYGSymbol symbolWithName:@"sliders"]
                                                viewController:[RYGFastMobileConfigBrowserViewController new]];
 
