@@ -1,7 +1,43 @@
-name: Build and Release RyukGram Vanilla
+name: Release RyukGram
 
 on:
     workflow_dispatch:
+        inputs:
+            include_rootless:
+                description: "Attach rootless .deb"
+                default: true
+                required: false
+                type: boolean
+            include_rootful:
+                description: "Attach rootful .deb"
+                default: true
+                required: false
+                type: boolean
+            include_trollfools:
+                description: "Attach TrollFools zip"
+                default: false
+                required: false
+                type: boolean
+            include_dylib:
+                description: "Attach standalone RyukGram.dylib"
+                default: false
+                required: false
+                type: boolean
+            include_zxinject:
+                description: "Attach standalone zxPluginsInject.dylib (needed by buildapp-from-release: sideload)"
+                default: true
+                required: false
+                type: boolean
+            include_noplugins_patch:
+                description: "Attach standalone NoPluginsPatch.dylib (needed by buildapp-from-release: no-plugins)"
+                default: true
+                required: false
+                type: boolean
+            draft:
+                description: "Create as draft (don't publish)"
+                default: true
+                required: false
+                type: boolean
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,25 +51,32 @@ jobs:
             contents: write
 
         steps:
+            - name: Validate selection
+              run: |
+                if [ "${{ inputs.include_rootless }}" != "true" ] && \
+                   [ "${{ inputs.include_rootful }}" != "true" ] && \
+                   [ "${{ inputs.include_trollfools }}" != "true" ] && \
+                   [ "${{ inputs.include_dylib }}" != "true" ] && \
+                   [ "${{ inputs.include_zxinject }}" != "true" ] && \
+                   [ "${{ inputs.include_noplugins_patch }}" != "true" ]; then
+                  echo "::error::Select at least one asset to attach."
+                  exit 1
+                fi
+
             - name: Checkout
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
                 submodules: recursive
                 fetch-depth: 0
 
-            - name: Clean Homebrew runner taps
-              run: |
-                brew untap aws/tap || true
-                brew untap azure/bicep || true
-
             - name: Install Dependencies
-              run: brew install ldid dpkg make gh
+              run: brew install ldid dpkg make
 
             - name: Set PATH
               run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
 
             - name: Setup Theos
-              uses: actions/checkout@v6
+              uses: actions/checkout@v4
               with:
                 repository: theos/theos
                 ref: master
@@ -42,112 +85,150 @@ jobs:
 
             - name: SDK Caching
               id: SDK
-              uses: actions/cache@v5
+              uses: actions/cache@v4
               env:
-                cache-name: iPhoneOS26.2.sdk
+                cache-name: iPhoneOS26.5.sdk
               with:
                 path: ${{ github.workspace }}/theos/sdks/
-                key: ${{ runner.os }}-${{ env.cache-name }}
-                restore-keys: |
-                  ${{ runner.os }}-${{ env.cache-name }}
+                key: ${{ env.cache-name }}
+                restore-keys: ${{ env.cache-name }}
 
             - name: Download iOS SDK
               if: steps.SDK.outputs.cache-hit != 'true'
               run: |
                 git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/xybp888/iOS-SDKs/
                 cd iOS-SDKs
-                git sparse-checkout set --no-cone iPhoneOS26.2.sdk
+                git sparse-checkout set --no-cone iPhoneOS26.5.sdk
                 git checkout
                 mv *.sdk $THEOS/sdks
               env:
                 THEOS: ${{ github.workspace }}/theos
 
-            - name: Set vanilla package version
+            - name: Get Version
               id: version
               run: |
-                RAW_VERSION=$(awk '/Version:/ {print $2}' control)
-                BASE_VERSION=$(printf '%s\n' "$RAW_VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-                BRANCH_NAME="${GITHUB_REF_NAME//\//-}"
-                RUN_NUMBER="${GITHUB_RUN_NUMBER}"
-                BUILD_VERSION="${BASE_VERSION}.${RUN_NUMBER}"
-                BUILD_LABEL="${BRANCH_NAME}_${BUILD_VERSION}"
-                PACKAGE_NAME="RyukGram_${BRANCH_NAME}_${BUILD_VERSION}.deb"
-                sed -i '' "s/^Version:.*/Version: ${BUILD_VERSION}/" control
-                echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
-                echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
-                echo "BRANCH_NAME=${BRANCH_NAME}" >> "$GITHUB_ENV"
-                echo "RUN_NUMBER=${RUN_NUMBER}" >> "$GITHUB_ENV"
-                echo "BUILD_LABEL=${BUILD_LABEL}" >> "$GITHUB_ENV"
-                echo "PACKAGE_NAME=${PACKAGE_NAME}" >> "$GITHUB_ENV"
-                echo "base_version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
-                echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
-                echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
-                echo "run_number=${RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-                echo "build_label=${BUILD_LABEL}" >> "$GITHUB_OUTPUT"
-                echo "package_name=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
-                echo "Using package version ${BUILD_VERSION} (${BUILD_LABEL})"
-                grep '^Version:' control
+                VERSION=$(awk '/Version:/ {print $2}' control)
+                IG_VER=$(head -1 IG_VERSION 2>/dev/null | tr -d ' \t\r\n')
+                [ -n "$IG_VER" ] || IG_VER=unknown
+                echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+                echo "IG_VER=${IG_VER}" >> "$GITHUB_ENV"
+                echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
             - name: Setup FFmpegKit
               run: ./scripts/setup-ffmpegkit.sh
 
-            - name: Build package
+            - name: Build rootless deb
+              if: ${{ inputs.include_rootless }}
               run: |
                 export THEOS="${{ github.workspace }}/theos"
                 ./build.sh rootless
+                ls -la packages
+
+            - name: Build rootful deb
+              if: ${{ inputs.include_rootful }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh rootful
+                ls -la packages
+
+            - name: Build TrollFools zip
+              if: ${{ inputs.include_trollfools }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh trollfools
+                ls -la packages
+
+            - name: Build standalone RyukGram.dylib
+              if: ${{ inputs.include_dylib }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh dylib
                 cd packages
-                DEB="$(ls -t *.deb | head -n1)"
-                [ -n "$DEB" ] && mv "$DEB" "$PACKAGE_NAME"
+                mv RyukGram.dylib "RyukGram_v${VERSION}.dylib"
                 ls -la
 
-            - name: Upload artifact
-              uses: actions/upload-artifact@v6
-              with:
-                name: RyukGram_${{ steps.version.outputs.branch_name }}_v${{ steps.version.outputs.build_version }}
-                path: packages/${{ steps.version.outputs.package_name }}
-                if-no-files-found: error
-
-            - name: Check if release
-              id: check_release
+            - name: Build standalone zxPluginsInject.dylib
+              if: ${{ inputs.include_zxinject }}
               run: |
-                COMMIT_MSG=$(git log -1 --pretty=%B)
-                if [[ "$COMMIT_MSG" == *"[release]"* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-                  echo "should_release=true" >> "$GITHUB_OUTPUT"
-                else
-                  echo "should_release=false" >> "$GITHUB_OUTPUT"
-                fi
+                export THEOS="${{ github.workspace }}/theos"
+                make -C modules/zxPluginsInject FINALPACKAGE=1
+                cp modules/zxPluginsInject/.theos/obj/zxPluginsInject.dylib "packages/zxPluginsInject_v${VERSION}.dylib"
+                install_name_tool -id "@rpath/zxPluginsInject.dylib" "packages/zxPluginsInject_v${VERSION}.dylib" || true
+                ls -la packages
+
+            - name: Build standalone NoPluginsPatch.dylib
+              if: ${{ inputs.include_noplugins_patch }}
+              run: |
+                export THEOS="${{ github.workspace }}/theos"
+                ./build.sh sideloadpatch
+                cp packages/NoPluginsPatch.dylib "packages/NoPluginsPatch_v${VERSION}.dylib"
+                ls -la packages
 
             - name: Generate release notes
-              if: steps.check_release.outputs.should_release == 'true'
+              id: notes
               run: |
-                PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${BUILD_VERSION}$" | head -n1 || true)
+                [ -f NOTES.md ] || { echo "::error::NOTES.md not found in repo."; exit 1; }
+
+                SUBJECT=$(grep -m1 '\[release\]' NOTES.md | sed 's/^.*\[release\][[:space:]]*//' | xargs || true)
+                TITLE="${SUBJECT:-RyukGram v${VERSION}}"
+                echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+                sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d' NOTES.md > /tmp/body.md
+
+                PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${VERSION}$" | head -n1 || true)
                 {
                   echo "## Changelog"
                   echo ""
-                  git log -1 --pretty=%B | tail -n +2 | sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d'
+                  cat /tmp/body.md
                   echo ""
                   echo "## Downloads"
                   echo ""
                   echo "| File | Description |"
                   echo "|------|-------------|"
-                  echo "| \`${PACKAGE_NAME}\` | ${BRANCH_NAME} .deb package. |"
+                  if [ "${{ inputs.include_rootless }}" = "true" ]; then
+                    echo "| \`RyukGram_${VERSION}_IG${IG_VER}_rootless.deb\` | Rootless .deb. |"
+                  fi
+                  if [ "${{ inputs.include_rootful }}" = "true" ]; then
+                    echo "| \`RyukGram_${VERSION}_IG${IG_VER}_rootful.deb\` | Rootful .deb. |"
+                  fi
+                  if [ "${{ inputs.include_trollfools }}" = "true" ]; then
+                    echo "| \`RyukGram_trollfools_${VERSION}_IG${IG_VER}.zip\` | TrollFools injection bundle (dylib + resources + frameworks). |"
+                  fi
+                  if [ "${{ inputs.include_dylib }}" = "true" ]; then
+                    echo "| \`RyukGram_v${VERSION}.dylib\` | Standalone tweak dylib. |"
+                  fi
+                  if [ "${{ inputs.include_zxinject }}" = "true" ]; then
+                    echo "| \`zxPluginsInject_v${VERSION}.dylib\` | Sideload plugin-injection helper dylib. |"
+                  fi
+                  if [ "${{ inputs.include_noplugins_patch }}" = "true" ]; then
+                    echo "| \`NoPluginsPatch_v${VERSION}.dylib\` | No-plugins sideload compat patch (keychain / app groups / CloudKit). |"
+                  fi
                   echo ""
                   if [ -n "$PREV_TAG" ]; then
-                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${BUILD_VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${BUILD_VERSION})"
+                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
                   else
-                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/${BRANCH_NAME})**"
+                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/main)**"
                   fi
                 } > /tmp/release_notes.md
 
             - name: Create Release
-              if: steps.check_release.outputs.should_release == 'true'
               run: |
-                SUBJECT=$(git log -1 --pretty=%s | sed 's/\[release\]//g' | xargs)
-                TITLE="${SUBJECT:-RyukGram ${BRANCH_NAME} v${BUILD_VERSION}}"
-                gh release create "v${BUILD_VERSION}" \
+                FILES=()
+                [ "${{ inputs.include_rootless }}" = "true" ] && FILES+=("packages/RyukGram_${VERSION}_IG${IG_VER}_rootless.deb")
+                [ "${{ inputs.include_rootful }}" = "true" ] && FILES+=("packages/RyukGram_${VERSION}_IG${IG_VER}_rootful.deb")
+                [ "${{ inputs.include_trollfools }}" = "true" ] && FILES+=("packages/RyukGram_trollfools_${VERSION}_IG${IG_VER}.zip")
+                [ "${{ inputs.include_dylib }}" = "true" ] && FILES+=("packages/RyukGram_v${VERSION}.dylib")
+                [ "${{ inputs.include_zxinject }}" = "true" ] && FILES+=("packages/zxPluginsInject_v${VERSION}.dylib")
+                [ "${{ inputs.include_noplugins_patch }}" = "true" ] && FILES+=("packages/NoPluginsPatch_v${VERSION}.dylib")
+
+                DRAFT_FLAG=""
+                [ "${{ inputs.draft }}" = "true" ] && DRAFT_FLAG="--draft"
+
+                gh release create "v${VERSION}" \
                   --repo "${{ github.repository }}" \
-                  --title "$TITLE" \
+                  --title "${{ steps.notes.outputs.title }}" \
                   --notes-file /tmp/release_notes.md \
-                  "packages/${PACKAGE_NAME}"
+                  $DRAFT_FLAG \
+                  "${FILES[@]}"
               env:
                 GH_TOKEN: ${{ github.token }}
