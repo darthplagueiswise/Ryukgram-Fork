@@ -4,8 +4,8 @@
 #import <objc/message.h>
 
 // Extract the real URL from l.instagram.com redirects and strip tracking params
-static NSURL *sciCleanBrowserURL(NSURL *url) {
-    if (![SCIUtils getBoolPref:@"strip_browser_tracking"]) return url;
+static NSURL *rygCleanBrowserURL(NSURL *url) {
+    if (![RYGUtils getBoolPref:@"strip_browser_tracking"]) return url;
     if (!url) return url;
 
     NSString *urlStr = url.absoluteString;
@@ -22,22 +22,7 @@ static NSURL *sciCleanBrowserURL(NSURL *url) {
         }
     }
 
-    // Strip common tracking params from the destination URL
-    NSURLComponents *comps = [NSURLComponents componentsWithString:urlStr];
-    if (comps.queryItems.count) {
-        NSSet *trackingParams = [NSSet setWithArray:@[
-            @"utm_source", @"utm_medium", @"utm_campaign", @"utm_content",
-            @"utm_term", @"utm_id", @"fbclid", @"igshid", @"igsh",
-            @"ig_rid", @"campaign_id", @"ad_id", @"aem"
-        ]];
-        NSMutableArray *clean = [NSMutableArray array];
-        for (NSURLQueryItem *q in comps.queryItems) {
-            if (![trackingParams containsObject:q.name]) [clean addObject:q];
-        }
-        comps.queryItems = clean.count ? clean : nil;
-    }
-
-    NSURL *result = comps.URL;
+    NSURL *result = [NSURL URLWithString:[RYGUtils stripTrackingParams:urlStr]];
     return result ?: url;
 }
 
@@ -48,16 +33,16 @@ static NSURL *sciCleanBrowserURL(NSURL *url) {
     NSURLRequest *req = urlIvar ? object_getIvar(session, urlIvar) : nil;
     NSURL *url = req.URL;
 
-    if (url && [SCIUtils getBoolPref:@"open_links_external"]) {
-        NSURL *cleaned = sciCleanBrowserURL(url);
+    if (url && [RYGUtils getBoolPref:@"open_links_external"]) {
+        NSURL *cleaned = rygCleanBrowserURL(url);
         [[UIApplication sharedApplication] openURL:cleaned options:@{} completionHandler:nil];
         [(UIViewController *)self dismissViewControllerAnimated:NO completion:nil];
         return;
     }
 
     // For in-app browser: replace the URL request with the cleaned version
-    if (url && [SCIUtils getBoolPref:@"strip_browser_tracking"]) {
-        NSURL *cleaned = sciCleanBrowserURL(url);
+    if (url && [RYGUtils getBoolPref:@"strip_browser_tracking"]) {
+        NSURL *cleaned = rygCleanBrowserURL(url);
         if (![cleaned isEqual:url]) {
             NSURLRequest *cleanReq = [NSURLRequest requestWithURL:cleaned];
             object_setIvar(session, urlIvar, cleanReq);

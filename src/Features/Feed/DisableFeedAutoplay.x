@@ -1,32 +1,49 @@
 #import "../../Utils.h"
-#import <objc/runtime.h>
-#import <substrate.h>
+#import <objc/message.h>
 
-// IGFeedPlayback.IGFeedPlaybackStrategy gained new init parameters in IG 423+.
-// Both the 2-arg and 3-arg variants are hooked to force shouldDisableAutoplay=YES.
-// Hooked via MSHookMessageEx in %ctor since the class has a Swift-mangled name.
+%group RYGDisableFeedAutoplay
 
-static id (*orig_initStrategy2)(id, SEL, BOOL, BOOL);
-static id new_initStrategy2(id self, SEL _cmd, BOOL shouldDisable, BOOL shouldClearStale) {
-    if ([SCIUtils getBoolPref:@"disable_feed_autoplay"]) shouldDisable = YES;
-    return orig_initStrategy2(self, _cmd, shouldDisable, shouldClearStale);
+%hook _TtC14IGFeedPlayback22IGFeedPlaybackStrategy
+
+- (id)initWithShouldDisableAutoplay:(BOOL)disable shouldClearStaleReservation:(BOOL)clear {
+	return %orig(YES, clear);
 }
 
-static id (*orig_initStrategy3)(id, SEL, BOOL, BOOL, BOOL);
-static id new_initStrategy3(id self, SEL _cmd, BOOL shouldDisable, BOOL shouldClearStale, BOOL bypassForVoiceover) {
-    if ([SCIUtils getBoolPref:@"disable_feed_autoplay"]) shouldDisable = YES;
-    return orig_initStrategy3(self, _cmd, shouldDisable, shouldClearStale, bypassForVoiceover);
+- (id)initWithShouldDisableAutoplay:(BOOL)disable shouldClearStaleReservation:(BOOL)clear shouldBypassDisabledAutoplayForVoiceover:(BOOL)bypassVO {
+	return %orig(YES, clear, bypassVO);
 }
+
+- (id)initWithShouldDisableAutoplay:(BOOL)disable shouldClearStaleReservation:(BOOL)clear shouldBypassDisabledAutoplayForVoiceover:(BOOL)bypassVO shouldOverrideDefaultThresholds:(BOOL)override launcherSet:(id)launcherSet {
+	return %orig(YES, clear, bypassVO, override, launcherSet);
+}
+
+%end
+
+%hook _TtC21IGModernFeedVideoCell21IGModernFeedVideoCell
+
+- (void)videoPlayerOverlayControllerDidSingleTap:(id)overlay gestureRecognizer:(id)gr {
+	%orig;
+
+	SEL respondsSel = @selector(respondsToSelector:);
+	SEL carouselSel = @selector(isTouchFromCarousel);
+	SEL retrySel = @selector(retryStartPlayback);
+
+	BOOL hasCarousel = ((BOOL (*)(id, SEL, SEL))objc_msgSend)(self, respondsSel, carouselSel);
+	if (!hasCarousel) return;
+
+	BOOL isCarousel = ((BOOL (*)(id, SEL))objc_msgSend)(self, carouselSel);
+	if (!isCarousel) return;
+
+	BOOL hasRetry = ((BOOL (*)(id, SEL, SEL))objc_msgSend)(self, respondsSel, retrySel);
+	if (hasRetry)
+		((void (*)(id, SEL))objc_msgSend)(self, retrySel);
+}
+
+%end
+
+%end
 
 %ctor {
-    Class cls = objc_getClass("IGFeedPlayback.IGFeedPlaybackStrategy");
-    if (!cls) return;
-
-    SEL sel2 = @selector(initWithShouldDisableAutoplay:shouldClearStaleReservation:);
-    if ([cls instancesRespondToSelector:sel2])
-        MSHookMessageEx(cls, sel2, (IMP)new_initStrategy2, (IMP *)&orig_initStrategy2);
-
-    SEL sel3 = @selector(initWithShouldDisableAutoplay:shouldClearStaleReservation:shouldBypassDisabledAutoplayForVoiceover:);
-    if ([cls instancesRespondToSelector:sel3])
-        MSHookMessageEx(cls, sel3, (IMP)new_initStrategy3, (IMP *)&orig_initStrategy3);
+	if ([RYGUtils getBoolPref:@"disable_feed_autoplay"])
+		%init(RYGDisableFeedAutoplay);
 }

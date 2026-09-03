@@ -2,19 +2,15 @@
 
 %hook IGPendingRequestView
 - (void)_onApproveButtonTapped {
-    if ([SCIUtils getBoolPref:@"follow_request_confirm"]) {
-        NSLog(@"[SCInsta] Confirm follow request triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
+    if ([RYGUtils getBoolPref:@"follow_request_confirm"]) {
+        [RYGUtils showConfirmation:^(void) { %orig; } title:RYGLocalized(@"Confirm follow requests")];
     } else {
         return %orig;
     }
 }
 - (void)_onIgnoreButtonTapped {
-    if ([SCIUtils getBoolPref:@"follow_request_confirm"]) {
-        NSLog(@"[SCInsta] Confirm follow request triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
+    if ([RYGUtils getBoolPref:@"follow_request_confirm"]) {
+        [RYGUtils showConfirmation:^(void) { %orig; } title:RYGLocalized(@"Confirm follow requests")];
     } else {
         return %orig;
     }

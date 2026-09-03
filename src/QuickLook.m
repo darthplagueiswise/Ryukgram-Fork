@@ -1,29 +1,23 @@
 #import "QuickLook.h"
 
-@implementation QuickLookDelegate
+@implementation RYGQuickLookDelegate
 
 - (instancetype)initWithPreviewItemURLs:(NSArray<NSURL *> *)urls {
-    self = [super init];
-    if (self) {
+    if ((self = [super init])) {
         _previewItemURLs = [urls copy];
     }
     return self;
 }
 
-/* * QLPreviewControllerDataSource Protocol * */
+#pragma mark - QLPreviewControllerDataSource
 
 - (NSInteger)numberOfPreviewItemsInPreviewController:(QLPreviewController *)controller {
-    return self.previewItemURLs.count;
+    return (NSInteger)self.previewItemURLs.count;
 }
 
 - (id<QLPreviewItem>)previewController:(QLPreviewController *)controller previewItemAtIndex:(NSInteger)index {
-    return self.previewItemURLs[index];
+    if (index < 0 || index >= (NSInteger)self.previewItemURLs.count) return nil;
+    return self.previewItemURLs[(NSUInteger)index];
 }
-
-/* QLPreviewControllerDelegate Protocol */
-
-// - (void)previewControllerWillDismiss:(QLPreviewController *)controller {}
-
-// - (void)previewControllerDidDismiss:(QLPreviewController *)controller {}
 
 @end

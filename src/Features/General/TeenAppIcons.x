@@ -5,34 +5,23 @@
 
 - (void)didMoveToSuperview {
     %orig;
-
     [self addLongPressGestureRecognizer];
 }
 
 %new - (void)addLongPressGestureRecognizer {
-    BOOL hasLongPress = [self.gestureRecognizers filteredArrayUsingPredicate:
-        [NSPredicate predicateWithBlock:^BOOL(NSObject *item, NSDictionary *_) {
-            return [item isKindOfClass:[UILongPressGestureRecognizer class]];
-        }]
-    ].count > 0;
-
-    if (!hasLongPress) {
-        NSLog(@"[SCInsta] Adding teen app icons long press gesture recognizer");
-
-        UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
-        [self addGestureRecognizer:longPress];
+    for (UIGestureRecognizer *g in self.gestureRecognizers) {
+        if ([g isKindOfClass:UILongPressGestureRecognizer.class]) return;
     }
+    UILongPressGestureRecognizer *gr = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleLongPress:)];
+    [self addGestureRecognizer:gr];
 }
+
 %new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
     if (sender.state != UIGestureRecognizerStateBegan) return;
-
-    if ([SCIUtils getBoolPref:@"teen_app_icons"]) {
-        IGHomeFeedHeaderViewController *homeFeedHeaderVC = [SCIUtils nearestViewControllerForView:self];
-
-        if (homeFeedHeaderVC != nil) {
-            [homeFeedHeaderVC headerDidLongPressLogo:nil];
-        }
-    }
+    if (![RYGUtils getBoolPref:@"teen_app_icons"]) return;
+    IGHomeFeedHeaderViewController *header = [RYGUtils nearestViewControllerForView:self];
+    [header headerDidLongPressLogo:nil];
 }
 
 %end

@@ -1,13 +1,23 @@
 #import "../../Utils.h"
+#import <substrate.h>
+#import <objc/runtime.h>
 
-%hook IGSundialViewerNavigationBarOld
-- (void)didMoveToWindow {
-    %orig;
+// IG 443 dropped IGSundialViewerNavigationBarOld.
+static void (*orig_navBarDidMoveToWindow)(id, SEL);
 
-    if ([SCIUtils getBoolPref:@"hide_reels_header"]) {
-        NSLog(@"[SCInsta] Hiding reels header");
-
-        [self removeFromSuperview];
-    }
+static void ryg_navBarDidMoveToWindow(id self, SEL _cmd) {
+    orig_navBarDidMoveToWindow(self, _cmd);
+    RYGProbeOnce(@"reelsheader.didmovetowindow", @"%@", NSStringFromClass(object_getClass(self)));
+    if ([RYGUtils getBoolPref:@"hide_reels_header"]) [(UIView *)self removeFromSuperview];
 }
-%end
+
+%ctor {
+    Class cls = NSClassFromString(@"_TtC33IGSundialViewerNavigationBarSwift28IGSundialViewerNavigationBar")
+             ?: NSClassFromString(@"IGSundialViewerNavigationBarSwift.IGSundialViewerNavigationBar")
+             ?: NSClassFromString(@"IGSundialViewerNavigationBar")
+             ?: NSClassFromString(@"IGSundialViewerNavigationBarOld");
+    RYGProbeClass(@"reelsheader.class", @"IGSundialViewerNavigationBar");
+    if (!cls) return;
+    MSHookMessageEx(cls, @selector(didMoveToWindow),
+                    (IMP)ryg_navBarDidMoveToWindow, (IMP *)&orig_navBarDidMoveToWindow);
+}

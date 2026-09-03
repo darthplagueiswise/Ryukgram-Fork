@@ -5,7 +5,7 @@
 - (void)didMoveToSuperview {
     %orig;
 
-    if ([SCIUtils getBoolPref:@"enable_hidden_texteffectsstyles"]) {
+    if ([RYGUtils getBoolPref:@"enable_hidden_texteffectsstyles"]) {
     
         // Clear previous option values
         [self.animationTypes removeAllObjects];
@@ -26,7 +26,7 @@
 
         // Refresh option picker
         if ([self respondsToSelector:@selector(reloadData)]) {
-            NSLog(@"[SCInsta] Enable all text effects: Reloading data...");
+            NSLog(@"[RyukGram] Enable all text effects: Reloading data...");
             [self reloadData];
         }
 

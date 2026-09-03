@@ -1,26 +1,21 @@
 #import "Manager.h"
-#import "../ActionButton/SCIMediaActions.h"
+#import "../RYGFileNaming.h"
 
-@implementation SCIDownloadManager
+@implementation RYGDownloadManager
 
-- (instancetype)initWithDelegate:(id<SCIDownloadDelegateProtocol>)downloadDelegate {
-    self = [super init];
-    
-    if (self) {
-        self.delegate = downloadDelegate;
+- (instancetype)initWithDelegate:(id<RYGDownloadDelegateProtocol>)delegate {
+    if ((self = [super init])) {
+        _delegate = delegate;
     }
-
     return self;
 }
 
 - (void)downloadFileWithURL:(NSURL *)url fileExtension:(NSString *)fileExtension {
-    // Properties
-    self.session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration] delegate:self delegateQueue:nil];
+    self.session = [NSURLSession sessionWithConfiguration:NSURLSessionConfiguration.defaultSessionConfiguration
+                                                delegate:self
+                                           delegateQueue:nil];
     self.task = [self.session downloadTaskWithURL:url];
-    
-    // Default to jpg if no other reasonable length extension is provided
-    self.fileExtension = [fileExtension length] >= 3 ? fileExtension : @"jpg";
-
+    self.fileExtension = fileExtension.length >= 3 ? fileExtension : @"jpg";
     [self.task resume];
     [self.delegate downloadDidStart];
 }
@@ -30,45 +25,40 @@
     [self.delegate downloadDidCancel];
 }
 
-// URLSession methods
 - (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didWriteData:(int64_t)bytesWritten totalBytesWritten:(int64_t)totalBytesWritten totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite {
-    float progress = (float)totalBytesWritten / (float)totalBytesExpectedToWrite;
-
-    [self.delegate downloadDidProgress:progress];
+    if (totalBytesExpectedToWrite <= 0) return;
+    float p = (float)totalBytesWritten / (float)totalBytesExpectedToWrite;
+    if ([self.delegate respondsToSelector:@selector(downloadDidProgress:received:total:)])
+        [self.delegate downloadDidProgress:p received:totalBytesWritten total:totalBytesExpectedToWrite];
+    else
+        [self.delegate downloadDidProgress:p];
 }
 
-- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didFinishDownloadingToURL:(NSURL *)location {    
-    // Move downloaded file to cache directory
-    NSURL *finalLocation = [self moveFileToCacheDir:location];
-
-    [self.delegate downloadDidFinishWithFileURL:finalLocation];
+- (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask didFinishDownloadingToURL:(NSURL *)location {
+    [self.delegate downloadDidFinishWithFileURL:[self moveFileToCacheDir:location]];
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if (error) NSLog(@"[SCInsta] Download error: %@", error);
+    if (error) NSLog(@"[RyukGram] Download error: %@", error);
     [self.delegate downloadDidFinishWithError:error];
 }
 
-// Rename downloaded file & move from documents dir -> cache dir
 - (NSURL *)moveFileToCacheDir:(NSURL *)oldPath {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *cacheDir = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *stem = [self.delegate respondsToSelector:@selector(rygFilenameStem)]
+        ? [self.delegate rygFilenameStem]
+        : [RYGFileName stemForMetadata:nil];
+    NSString *ext = self.fileExtension.length ? self.fileExtension : @"bin";
 
-    NSString *cacheDirectoryPath = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *stem = [SCIMediaActions currentFilenameStem] ?: NSUUID.UUID.UUIDString;
-    NSURL *newPath = [[NSURL fileURLWithPath:cacheDirectoryPath] URLByAppendingPathComponent:[NSString stringWithFormat:@"%@.%@", stem, self.fileExtension]];
-    
-    NSLog(@"[SCInsta] Download Handler: Moving file from: %@ to: %@", oldPath.absoluteString, newPath.absoluteString);
+    NSString *name = [RYGFileName uniqueName:[stem stringByAppendingPathExtension:ext] inDirectory:cacheDir];
+    NSURL *dst = [[NSURL fileURLWithPath:cacheDir] URLByAppendingPathComponent:name];
 
-    // Move file to cache directory
-    NSError *fileMoveError;
-    [fileManager moveItemAtURL:oldPath toURL:newPath error:&fileMoveError];
-
-    if (fileMoveError) {
-        NSLog(@"[SCInsta] Download Handler: Error while moving file: %@", oldPath.absoluteString);
-        NSLog(@"[SCInsta] Download Handler: %@", fileMoveError);
+    NSError *moveError = nil;
+    if (![fm moveItemAtURL:oldPath toURL:dst error:&moveError]) {
+        NSLog(@"[RyukGram] move %@ -> %@ failed: %@", oldPath.absoluteString, dst.absoluteString, moveError);
     }
-
-    return newPath;
+    return dst;
 }
 
 @end

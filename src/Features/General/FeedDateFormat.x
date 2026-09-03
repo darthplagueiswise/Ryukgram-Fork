@@ -1,115 +1,138 @@
-// Date format hooks — replace IG's relative timestamps with a custom format.
-// Each NSDate formatter selector is independently toggleable via prefs
-// (date_fmt_<name>) so users can apply the format surface-by-surface.
+// Replaces IG's own timestamps with the user's date format.
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
-#import "SCIDateFormatEntries.h"
+#import "RYGDateFormatEntries.h"
+#import "RYGDateFormatRender.h"
 #import <substrate.h>
 
-static NSDictionary *sciDateFormats(BOOL sec) {
-    return sec ? @{
-        @"short":        @"MMM d",
-        @"medium":       @"MMM d, yyyy",
-        @"full":         @"MMM d, yyyy 'at' h:mm:ss a",
-        @"time_12":      @"MMM d 'at' h:mm:ss a",
-        @"time_24":      @"MMM d 'at' HH:mm:ss",
-        @"dd_mmm":       @"dd-MMM-yyyy 'at' h:mm:ss a",
-        @"day_slash":    @"dd/MM/yyyy h:mm:ss a",
-        @"month_slash":  @"MM/dd/yyyy h:mm:ss a",
-        @"euro":         @"dd.MM.yyyy HH:mm:ss",
-        @"iso":          @"yyyy-MM-dd",
-        @"iso_time":     @"yyyy-MM-dd HH:mm:ss",
-    } : @{
-        @"short":        @"MMM d",
-        @"medium":       @"MMM d, yyyy",
-        @"full":         @"MMM d, yyyy 'at' h:mm a",
-        @"time_12":      @"MMM d 'at' h:mm a",
-        @"time_24":      @"MMM d 'at' HH:mm",
-        @"dd_mmm":       @"dd-MMM-yyyy 'at' h:mm a",
-        @"day_slash":    @"dd/MM/yyyy h:mm a",
-        @"month_slash":  @"MM/dd/yyyy h:mm a",
-        @"euro":         @"dd.MM.yyyy HH:mm",
-        @"iso":          @"yyyy-MM-dd",
-        @"iso_time":     @"yyyy-MM-dd HH:mm",
-    };
-}
+#define rygFormatDate RYGGeneralDateString
 
-static NSString *sciFormat(NSDate *date) {
-    NSString *fmt = [SCIUtils getStringPref:@"feed_date_format"];
-    if (!fmt.length || [fmt isEqualToString:@"default"]) return nil;
-    BOOL sec = [[NSUserDefaults standardUserDefaults] boolForKey:@"feed_date_show_seconds"];
-    NSString *pattern = sciDateFormats(sec)[fmt];
-    if (!pattern) return nil;
-    static NSDateFormatter *df = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ df = [NSDateFormatter new]; });
-    df.dateFormat = pattern;
-    return [df stringFromDate:date];
-}
+#define RYG_HOOK0(NAME, SEL_, LABEL, PREF) \
+	static NSString *(*orig_##NAME)(NSDate *, SEL); \
+	static NSString *hook_##NAME(NSDate *self, SEL _cmd) { \
+		if ([RYGUtils getBoolPref:@PREF]) { \
+			NSString *r = rygFormatDate(self); \
+			if (r.length) return r; \
+		} \
+		return orig_##NAME(self, _cmd); \
+	}
 
-// Per-arity hook generators. When the entry's pref is on, return the custom
-// format; otherwise forward to orig with the original arguments.
+#define RYG_HOOK1(NAME, SEL_, LABEL, PREF) \
+	static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger); \
+	static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1) { \
+		if ([RYGUtils getBoolPref:@PREF]) { \
+			NSString *r = rygFormatDate(self); \
+			if (r.length) return r; \
+		} \
+		return orig_##NAME(self, _cmd, a1); \
+	}
 
-#define SCI_HOOK0(NAME, SEL_, LABEL, PREF) \
-    static NSString *(*orig_##NAME)(NSDate *, SEL); \
-    static NSString *hook_##NAME(NSDate *self, SEL _cmd) { \
-        if ([SCIUtils getBoolPref:@PREF]) { \
-            NSString *r = sciFormat(self); \
-            if (r) return r; \
-        } \
-        return orig_##NAME(self, _cmd); \
-    }
+#define RYG_HOOK2(NAME, SEL_, LABEL, PREF) \
+	static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger); \
+	static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2) { \
+		if ([RYGUtils getBoolPref:@PREF]) { \
+			NSString *r = rygFormatDate(self); \
+			if (r.length) return r; \
+		} \
+		return orig_##NAME(self, _cmd, a1, a2); \
+	}
 
-#define SCI_HOOK1(NAME, SEL_, LABEL, PREF) \
-    static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger); \
-    static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1) { \
-        if ([SCIUtils getBoolPref:@PREF]) { \
-            NSString *r = sciFormat(self); \
-            if (r) return r; \
-        } \
-        return orig_##NAME(self, _cmd, a1); \
-    }
+#define RYG_HOOK3(NAME, SEL_, LABEL, PREF) \
+	static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger, NSInteger); \
+	static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2, NSInteger a3) { \
+		if ([RYGUtils getBoolPref:@PREF]) { \
+			NSString *r = rygFormatDate(self); \
+			if (r.length) return r; \
+		} \
+		return orig_##NAME(self, _cmd, a1, a2, a3); \
+	}
 
-#define SCI_HOOK2(NAME, SEL_, LABEL, PREF) \
-    static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger); \
-    static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2) { \
-        if ([SCIUtils getBoolPref:@PREF]) { \
-            NSString *r = sciFormat(self); \
-            if (r) return r; \
-        } \
-        return orig_##NAME(self, _cmd, a1, a2); \
-    }
+#define RYG_HOOK4(NAME, SEL_, LABEL, PREF) \
+	static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger, NSInteger, NSInteger); \
+	static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2, NSInteger a3, NSInteger a4) { \
+		if ([RYGUtils getBoolPref:@PREF]) { \
+			NSString *r = rygFormatDate(self); \
+			if (r.length) return r; \
+		} \
+		return orig_##NAME(self, _cmd, a1, a2, a3, a4); \
+	}
 
-#define SCI_HOOK3(NAME, SEL_, LABEL, PREF) \
-    static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger, NSInteger); \
-    static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2, NSInteger a3) { \
-        if ([SCIUtils getBoolPref:@PREF]) { \
-            NSString *r = sciFormat(self); \
-            if (r) return r; \
-        } \
-        return orig_##NAME(self, _cmd, a1, a2, a3); \
-    }
+#define RYG_EMIT_HOOK(NAME, SEL_, LABEL, ARITY, PREF) RYG_HOOK##ARITY(NAME, SEL_, LABEL, PREF)
+RYG_DATE_FORMAT_ENTRIES(RYG_EMIT_HOOK)
 
-#define SCI_HOOK4(NAME, SEL_, LABEL, PREF) \
-    static NSString *(*orig_##NAME)(NSDate *, SEL, NSInteger, NSInteger, NSInteger, NSInteger); \
-    static NSString *hook_##NAME(NSDate *self, SEL _cmd, NSInteger a1, NSInteger a2, NSInteger a3, NSInteger a4) { \
-        if ([SCIUtils getBoolPref:@PREF]) { \
-            NSString *r = sciFormat(self); \
-            if (r) return r; \
-        } \
-        return orig_##NAME(self, _cmd, a1, a2, a3, a4); \
-    }
-
-#define SCI_EMIT_HOOK(NAME, SEL_, LABEL, ARITY, PREF) SCI_HOOK##ARITY(NAME, SEL_, LABEL, PREF)
-SCI_DATE_FORMAT_ENTRIES(SCI_EMIT_HOOK)
-
-#define SCI_INSTALL_HOOK(NAME, SEL_, LABEL, ARITY, PREF) do { \
-    SEL s = sel_registerName(SEL_); \
-    if ([[NSDate class] instancesRespondToSelector:s]) \
-        MSHookMessageEx([NSDate class], s, (IMP)hook_##NAME, (IMP *)&orig_##NAME); \
+#define RYG_INSTALL_HOOK(NAME, SEL_, LABEL, ARITY, PREF) do { \
+	SEL s = sel_registerName(SEL_); \
+	if ([[NSDate class] instancesRespondToSelector:s]) { \
+		MSHookMessageEx([NSDate class], s, (IMP)hook_##NAME, (IMP *)&orig_##NAME); \
+	} \
 } while (0);
 
+// Active-thread inbox rows ship an empty timestampText, so fill it from the message date.
+static NSDictionary *rygInboxTSAttrs = nil;
+
+%hook IGDirectInboxThreadCellViewModel
+
+- (NSAttributedString *)timestampText {
+	NSAttributedString *orig = %orig;
+	if (![RYGUtils getBoolPref:@"date_fmt_dms"]) return orig;
+
+	if (orig.length > 0) {
+		rygInboxTSAttrs = [orig attributesAtIndex:0 effectiveRange:NULL];
+		return orig;
+	}
+
+	NSDate *date = nil;
+	@try { date = [(id)self valueForKey:@"mostRecentMessageActivityDate"]; } @catch (__unused NSException *e) {}
+	if (![date isKindOfClass:[NSDate class]]) return orig;
+
+	NSString *formatted = rygFormatDate(date);
+	if (!formatted.length) return orig;
+
+	NSDictionary *attrs = rygInboxTSAttrs ?: @{ NSForegroundColorAttributeName: [UIColor secondaryLabelColor],
+	                                            NSFontAttributeName: [UIFont systemFontOfSize:13.0] };
+	return [[NSAttributedString alloc] initWithString:[@"· " stringByAppendingString:formatted] attributes:attrs];
+}
+
+%end
+
+// One story header variant formats through these class methods instead of the NSDate ones.
+static NSString *(*orig_storyTimeText)(Class, SEL, NSDate *, long long);
+static NSString *hook_storyTimeText(Class self, SEL _cmd, NSDate *date, long long fmt) {
+	RYGProbeOnce(@"datefmt.story.sundial", @"storyItemHeaderTimeText:dateFormat:");
+	if ([RYGUtils getBoolPref:@"date_fmt_notes_comments_stories"] && [date isKindOfClass:[NSDate class]]) {
+		NSString *r = rygFormatDate(date);
+		if (r.length) return r;
+	}
+	return orig_storyTimeText(self, _cmd, date, fmt);
+}
+
+static NSString *(*orig_storyTimeTextExp)(Class, SEL, NSDate *, long long, NSDate *);
+static NSString *hook_storyTimeTextExp(Class self, SEL _cmd, NSDate *date, long long fmt, NSDate *exp) {
+	RYGProbeOnce(@"datefmt.story.sundial_exp", @"storyItemHeaderTimeTextWithExpiration:dateFormat:expiringAtDate:");
+	if ([RYGUtils getBoolPref:@"date_fmt_notes_comments_stories"] && [date isKindOfClass:[NSDate class]]) {
+		NSString *r = rygFormatDate(date);
+		if (r.length) return r;
+	}
+	return orig_storyTimeTextExp(self, _cmd, date, fmt, exp);
+}
+
+static void rygInstallStoryHeaderHooks(void) {
+	Class cls = NSClassFromString(@"_TtC33IGStoryFullscreenHeaderViewModels37IGStoryItemHeaderAccessibilityHelpers")
+	            ?: NSClassFromString(@"IGStoryItemHeaderAccessibilityHelpers");
+	if (!cls) return;
+	Class meta = object_getClass(cls);
+
+	SEL s1 = @selector(storyItemHeaderTimeText:dateFormat:);
+	if ([cls respondsToSelector:s1])
+		MSHookMessageEx(meta, s1, (IMP)hook_storyTimeText, (IMP *)&orig_storyTimeText);
+
+	SEL s2 = @selector(storyItemHeaderTimeTextWithExpiration:dateFormat:expiringAtDate:);
+	if ([cls respondsToSelector:s2])
+		MSHookMessageEx(meta, s2, (IMP)hook_storyTimeTextExp, (IMP *)&orig_storyTimeTextExp);
+}
+
 %ctor {
-    SCI_DATE_FORMAT_ENTRIES(SCI_INSTALL_HOOK)
+	RYG_DATE_FORMAT_ENTRIES(RYG_INSTALL_HOOK)
+	rygInstallStoryHeaderHooks();
 }

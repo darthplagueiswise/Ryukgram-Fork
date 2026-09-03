@@ -3,7 +3,7 @@
 
 (function () {
     if (window.top !== window.self) return;
-    if (sessionStorage.getItem("__sciOpenedApp")) return;
+    if (sessionStorage.getItem("__rygOpenedApp")) return;
 
     function urlFromLocation() {
         const path = window.location.pathname.split("/").filter(Boolean);
@@ -33,7 +33,7 @@
     function openInApp() {
         const target = urlFromLocation();
         if (!target) return;
-        sessionStorage.setItem("__sciOpenedApp", "1");
+        sessionStorage.setItem("__rygOpenedApp", "1");
         window.location.href = target;
     }
 

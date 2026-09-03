@@ -2,28 +2,30 @@
 
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import "../Feed/GridFeed/RYGGridFeedInfo.h"
+#import "../Feed/GridFeed/RYGHomeGridController.h"
 #import <objc/runtime.h>
 #import <substrate.h>
 
-static BOOL sciDisableBgRefresh(void) {
-    return [SCIUtils getBoolPref:@"disable_bg_refresh"];
+static BOOL rygDisableBgRefresh(void) {
+    return [RYGUtils getBoolPref:@"disable_bg_refresh"];
 }
 
-static BOOL sciDisableHomeRefresh(void) {
-    return [SCIUtils getBoolPref:@"disable_home_refresh"];
+static BOOL rygDisableHomeRefresh(void) {
+    return [RYGUtils getBoolPref:@"disable_home_refresh"];
 }
 
-static BOOL sciDisableHomeScroll(void) {
-    return [SCIUtils getBoolPref:@"disable_home_scroll"];
+static BOOL rygDisableHomeScroll(void) {
+    return [RYGUtils getBoolPref:@"disable_home_scroll"];
 }
 
-static BOOL sciDisableReelsRefresh(void) {
-    return [SCIUtils getBoolPref:@"disable_reels_tab_refresh"];
+static BOOL rygDisableReelsRefresh(void) {
+    return [RYGUtils getBoolPref:@"disable_reels_tab_refresh"];
 }
 
 // Returns 999999s when disabled (effectively never), -1 to keep IG's value.
-static double sciOverrideInterval(void) {
-    if (sciDisableBgRefresh()) return 999999;
+static double rygOverrideInterval(void) {
+    if (rygDisableBgRefresh()) return 999999;
     return -1;
 }
 
@@ -33,25 +35,25 @@ static double sciOverrideInterval(void) {
 
 static double (*orig_wsRefresh)(id, SEL, id, id);
 static double new_wsRefresh(id self, SEL _cmd, id ls, id store) {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : orig_wsRefresh(self, _cmd, ls, store);
 }
 
 static double (*orig_wsBgRefresh)(id, SEL, id, id);
 static double new_wsBgRefresh(id self, SEL _cmd, id ls, id store) {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : orig_wsBgRefresh(self, _cmd, ls, store);
 }
 
 static double (*orig_peakWsRefresh)(id, SEL, double, id, id);
 static double new_peakWsRefresh(id self, SEL _cmd, double iv, id ls, id store) {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : orig_peakWsRefresh(self, _cmd, iv, ls, store);
 }
 
 static double (*orig_peakWsBgRefresh)(id, SEL, id, id);
 static double new_peakWsBgRefresh(id self, SEL _cmd, id ls, id store) {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : orig_peakWsBgRefresh(self, _cmd, ls, store);
 }
 
@@ -107,8 +109,8 @@ supplementalFeedHoistedMediaID:(id)a22
              isInFollowingTab:(BOOL)a24
 useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 
-    double override = sciOverrideInterval();
-    if (sciDisableBgRefresh()) disable = YES;
+    double override = rygOverrideInterval();
+    if (rygDisableBgRefresh()) disable = YES;
     if (override > 0) { a18 = override; a19 = override; a20 = override; a21 = override; }
 
     return %orig(a1, a2, a3, a4, a5, a6, disable, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25);
@@ -116,19 +118,19 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 
 // Getter overrides for instances created before the class hooks landed.
 - (double)minWarmStartFetchInterval {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : %orig;
 }
 - (double)peakMinWarmStartFetchInterval {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : %orig;
 }
 - (double)minimumWarmStartBackgroundedInterval {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : %orig;
 }
 - (double)peakMinimumWarmStartBackgroundedInterval {
-    double o = sciOverrideInterval();
+    double o = rygOverrideInterval();
     return o > 0 ? o : %orig;
 }
 
@@ -139,7 +141,8 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 %hook IGMainFeedViewController
 
 - (void)hotStartRefresh {
-    if (sciDisableBgRefresh()) return;
+    RYGProbeOnce(@"hook.bgrefresh.mainfeed", @"IGMainFeedViewController fired");
+    if (rygDisableBgRefresh()) return;
     %orig;
 }
 
@@ -150,10 +153,11 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 %hook IGTabBarController
 
 - (void)_timelineButtonPressed {
-    BOOL noRefresh = sciDisableHomeRefresh();
-    BOOL noScroll = sciDisableHomeScroll();
+    BOOL noRefresh = rygDisableHomeRefresh();
+    BOOL noScroll = rygDisableHomeScroll();
+    BOOL gridActive = [RYGGridFeedInfo active];
 
-    if (!noRefresh && !noScroll) { %orig; return; }
+    if (!noRefresh && !noScroll && !gridActive) { %orig; return; }
 
     UIViewController *selected = nil;
     if ([self respondsToSelector:@selector(selectedViewController)])
@@ -167,6 +171,13 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
     }
 
     if (!onFeedTab) { %orig; return; }
+
+    // Grid owns the feed: IG's %orig would scroll its hidden collection, so scroll ours.
+    if (gridActive) {
+        if (noScroll) return;
+        if ([RYGHomeGridController handleHomeButtonTap]) return;
+        %orig; return;
+    }
     if (noScroll) return;
 
     // noRefresh only — scroll to top without refreshing.
@@ -189,7 +200,7 @@ useShimmerLoadingWhenNoStoriesTray:(BOOL)a25 {
 // MARK: - Reels tab refresh
 
 - (void)_discoverVideoButtonPressed {
-    if (!sciDisableReelsRefresh()) { %orig; return; }
+    if (!rygDisableReelsRefresh()) { %orig; return; }
 
     UIViewController *selected = nil;
     if ([self respondsToSelector:@selector(selectedViewController)])

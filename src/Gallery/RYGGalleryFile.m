@@ -1,0 +1,733 @@
+#import "RYGGalleryFile.h"
+#import "RYGGalleryPaths.h"
+#import "RYGGalleryCoreDataStack.h"
+#import "RYGAssetUtils.h"
+#import "../RYGFileNaming.h"
+#import <AVFoundation/AVFoundation.h>
+#import <ImageIO/ImageIO.h>
+
+NSNotificationName const RYGGalleryFileDidRemoveNotification = @"RYGGalleryFileDidRemoveNotification";
+
+static CGFloat const kThumbnailSize = 300.0;
+
+static NSCache<NSString *, UIImage *> *RYGGalleryThumbnailCache(void) {
+	static NSCache<NSString *, UIImage *> *cache;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		cache = [[NSCache alloc] init];
+		cache.countLimit = 200;
+	});
+	return cache;
+}
+
+static dispatch_queue_t RYGGalleryThumbnailStateQueue(void) {
+	static dispatch_queue_t queue;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		queue = dispatch_queue_create("com.ryuk.ryukgram.gallery.thumbnail-state", DISPATCH_QUEUE_SERIAL);
+	});
+	return queue;
+}
+
+static NSMutableDictionary<NSString *, NSMutableArray<void(^)(BOOL success)> *> *RYGGalleryThumbnailCompletions(void) {
+	static NSMutableDictionary<NSString *, NSMutableArray<void(^)(BOOL success)> *> *completions;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		completions = [NSMutableDictionary dictionary];
+	});
+	return completions;
+}
+
+@implementation RYGGalleryFile
+
+@dynamic identifier;
+@dynamic relativePath;
+@dynamic mediaType;
+@dynamic source;
+@dynamic dateAdded;
+@dynamic fileSize;
+@dynamic isFavorite;
+@dynamic folderPath;
+@dynamic customName;
+@dynamic sourceUsername;
+@dynamic sourceUserPK;
+@dynamic sourceProfileURLString;
+@dynamic sourceMediaPK;
+@dynamic sourceMediaCode;
+@dynamic sourceMediaURLString;
+@dynamic pixelWidth;
+@dynamic pixelHeight;
+@dynamic durationSeconds;
+
+#pragma mark - Save to Gallery
+
++ (RYGGalleryFile *)saveFileToGallery:(NSURL *)fileURL
+						   source:(RYGGallerySource)source
+						mediaType:(RYGGalleryMediaType)mediaType
+							error:(NSError **)error {
+	return [self saveFileToGallery:fileURL source:source mediaType:mediaType folderPath:nil metadata:nil error:error];
+}
+
++ (RYGGalleryFile *)saveFileToGallery:(NSURL *)fileURL
+						   source:(RYGGallerySource)source
+						mediaType:(RYGGalleryMediaType)mediaType
+					   folderPath:(NSString *)folderPath
+							error:(NSError **)error {
+	return [self saveFileToGallery:fileURL source:source mediaType:mediaType folderPath:folderPath metadata:nil error:error];
+}
+
++ (void)applyMetadata:(nullable RYGGallerySaveMetadata *)metadata toFile:(RYGGalleryFile *)file fallbackSource:(RYGGallerySource)fallbackSource {
+	if (metadata) {
+		file.source = metadata.source;
+		file.sourceUsername = metadata.sourceUsername.length ? metadata.sourceUsername : nil;
+		file.sourceUserPK = metadata.sourceUserPK.length ? metadata.sourceUserPK : nil;
+		file.sourceProfileURLString = metadata.sourceProfileURLString.length ? metadata.sourceProfileURLString : nil;
+		file.sourceMediaPK = metadata.sourceMediaPK.length ? metadata.sourceMediaPK : nil;
+		file.sourceMediaCode = metadata.sourceMediaCode.length ? metadata.sourceMediaCode : nil;
+		file.sourceMediaURLString = metadata.sourceMediaURLString.length ? metadata.sourceMediaURLString : nil;
+		file.pixelWidth = metadata.pixelWidth;
+		file.pixelHeight = metadata.pixelHeight;
+		file.durationSeconds = metadata.durationSeconds;
+	} else {
+		file.source = fallbackSource;
+		file.sourceUsername = nil;
+		file.sourceUserPK = nil;
+		file.sourceProfileURLString = nil;
+		file.sourceMediaPK = nil;
+		file.sourceMediaCode = nil;
+		file.sourceMediaURLString = nil;
+		file.pixelWidth = 0;
+		file.pixelHeight = 0;
+		file.durationSeconds = 0;
+	}
+}
+
++ (void)probeMediaAtPath:(NSString *)path mediaType:(RYGGalleryMediaType)mediaType file:(RYGGalleryFile *)file {
+	if (mediaType == RYGGalleryMediaTypeAudio) {
+		AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:path] options:nil];
+		CMTime dur = asset.duration;
+		if (file.durationSeconds <= 0.05 && CMTIME_IS_NUMERIC(dur)) {
+			double sec = CMTimeGetSeconds(dur);
+			if (sec > 0.05 && !isnan(sec)) {
+				file.durationSeconds = sec;
+			}
+		}
+		return;
+	}
+	if (mediaType == RYGGalleryMediaTypeGIF || mediaType == RYGGalleryMediaTypeImage) {
+		CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], NULL);
+		if (!src) {
+			return;
+		}
+		CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(src, 0, NULL);
+		CFRelease(src);
+		if (!props) {
+			return;
+		}
+		NSNumber *w = CFDictionaryGetValue(props, kCGImagePropertyPixelWidth);
+		NSNumber *h = CFDictionaryGetValue(props, kCGImagePropertyPixelHeight);
+		if (file.pixelWidth <= 0 && [w respondsToSelector:@selector(intValue)]) {
+			file.pixelWidth = (int32_t)w.intValue;
+		}
+		if (file.pixelHeight <= 0 && [h respondsToSelector:@selector(intValue)]) {
+			file.pixelHeight = (int32_t)h.intValue;
+		}
+		CFRelease(props);
+		return;
+	}
+
+	NSURL *url = [NSURL fileURLWithPath:path];
+	AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:nil];
+	CMTime dur = asset.duration;
+	if (file.durationSeconds <= 0.05 && CMTIME_IS_NUMERIC(dur)) {
+		double sec = CMTimeGetSeconds(dur);
+		if (sec > 0.05 && !isnan(sec)) {
+			file.durationSeconds = sec;
+		}
+	}
+	NSArray<AVAssetTrack *> *tracks = [asset tracksWithMediaType:AVMediaTypeVideo];
+	if (tracks.count == 0) {
+		return;
+	}
+	AVAssetTrack *track = tracks.firstObject;
+	CGSize natural = track.naturalSize;
+	CGAffineTransform tx = track.preferredTransform;
+	CGSize rendered = CGSizeApplyAffineTransform(natural, tx);
+	int32_t w = (int32_t)lround(fabs(rendered.width));
+	int32_t h = (int32_t)lround(fabs(rendered.height));
+	if (file.pixelWidth <= 0) {
+		file.pixelWidth = w;
+	}
+	if (file.pixelHeight <= 0) {
+		file.pixelHeight = h;
+	}
+}
+
++ (RYGGalleryFile *)saveFileToGallery:(NSURL *)fileURL
+						   source:(RYGGallerySource)source
+						mediaType:(RYGGalleryMediaType)mediaType
+					   folderPath:(NSString *)folderPath
+						 metadata:(RYGGallerySaveMetadata *)metadata
+							error:(NSError **)error {
+	NSFileManager *fm = [NSFileManager defaultManager];
+
+	if (![fm fileExistsAtPath:fileURL.path]) {
+		if (error) {
+			*error = [NSError errorWithDomain:@"RYGGallery" code:1
+									 userInfo:@{NSLocalizedDescriptionKey: @"Source file does not exist"}];
+		}
+		return nil;
+	}
+
+    [[RYGGalleryCoreDataStack shared] ensureLegacyMigrationSilently];
+    NSManagedObjectContext *ctx = [RYGGalleryCoreDataStack shared].viewContext;
+    __block RYGGalleryFile *result = nil;
+    __block NSError *outError = nil;
+    void (^body)(void) = ^{
+        // 60s dedup window — bulk paths flip skipDedup since carousel children share the parent PK.
+        if (metadata.sourceMediaPK.length > 0 && !metadata.skipDedup) {
+            NSFetchRequest *dedupRequest = [[NSFetchRequest alloc] initWithEntityName:@"RYGGalleryFile"];
+            NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-60.0];
+            dedupRequest.predicate = [NSPredicate predicateWithFormat:@"sourceMediaPK == %@ AND dateAdded >= %@",
+                                       metadata.sourceMediaPK, cutoff];
+            dedupRequest.fetchLimit = 1;
+            NSArray *recent = [ctx executeFetchRequest:dedupRequest error:nil];
+            if (recent.count > 0) {
+                NSLog(@"[RyukGram][Gallery] Skipped duplicate save for media PK %@", metadata.sourceMediaPK);
+                result = recent.firstObject;
+                return;
+            }
+        }
+
+        NSString *mediaDir = [RYGGalleryPaths galleryMediaDirectory];
+        NSString *fileName = [RYGFileName uniqueName:[RYGFileName nameForURL:fileURL mediaType:mediaType metadata:metadata]
+                                         inDirectory:mediaDir];
+        NSString *destPath = [mediaDir stringByAppendingPathComponent:fileName];
+
+        NSError *copyError;
+        if (![fm copyItemAtPath:fileURL.path toPath:destPath error:&copyError]) {
+            NSLog(@"[RyukGram Gallery] Failed to copy file: %@", copyError);
+            outError = copyError;
+            return;
+        }
+
+        NSDictionary *attrs = [fm attributesOfItemAtPath:destPath error:nil];
+        int64_t size = [attrs[NSFileSize] longLongValue];
+
+        RYGGalleryFile *file = [NSEntityDescription insertNewObjectForEntityForName:@"RYGGalleryFile"
+                                                           inManagedObjectContext:ctx];
+        file.identifier = [NSUUID UUID].UUIDString;
+        file.relativePath = fileName;
+        file.mediaType = mediaType;
+        file.dateAdded = [NSDate date];
+        file.fileSize = size;
+        file.isFavorite = NO;
+        file.folderPath = folderPath;
+
+        [self applyMetadata:metadata toFile:file fallbackSource:source];
+        [self probeMediaAtPath:destPath mediaType:mediaType file:file];
+
+        NSError *saveError;
+        if (![ctx save:&saveError]) {
+            NSLog(@"[RyukGram Gallery] Failed to save entity: %@", saveError);
+            [fm removeItemAtPath:destPath error:nil];
+            outError = saveError;
+            return;
+        }
+
+        result = file;
+    };
+    [ctx performBlockAndWait:body];
+
+    if (result && !outError) [self generateThumbnailForFile:result completion:nil];
+    if (error && outError) *error = outError;
+    return result;
+}
+
++ (RYGGalleryFile *)referenceFileAtPath:(NSString *)absolutePath
+								 source:(RYGGallerySource)source
+							  mediaType:(RYGGalleryMediaType)mediaType
+							   metadata:(RYGGallerySaveMetadata *)metadata
+								  error:(NSError **)error {
+	NSFileManager *fm = [NSFileManager defaultManager];
+	if (![absolutePath hasPrefix:@"/"] || ![fm fileExistsAtPath:absolutePath]) {
+		if (error) *error = [NSError errorWithDomain:@"RYGGallery" code:1 userInfo:@{NSLocalizedDescriptionKey: @"File does not exist"}];
+		return nil;
+	}
+	[[RYGGalleryCoreDataStack shared] ensureLegacyMigrationSilently];
+	NSManagedObjectContext *ctx = [RYGGalleryCoreDataStack shared].viewContext;
+	__block RYGGalleryFile *result = nil;
+	[ctx performBlockAndWait:^{
+		// Dedup by media PK so re-syncing the same recording doesn't add duplicates.
+		if (metadata.sourceMediaPK.length) {
+			NSFetchRequest *req = [[NSFetchRequest alloc] initWithEntityName:@"RYGGalleryFile"];
+			req.predicate = [NSPredicate predicateWithFormat:@"sourceMediaPK == %@ AND source == %d", metadata.sourceMediaPK, (int)source];
+			req.fetchLimit = 1;
+			RYGGalleryFile *existing = [ctx executeFetchRequest:req error:nil].firstObject;
+			if (existing) { result = existing; return; }
+		}
+		int64_t size = [[fm attributesOfItemAtPath:absolutePath error:nil][NSFileSize] longLongValue];
+		RYGGalleryFile *file = [NSEntityDescription insertNewObjectForEntityForName:@"RYGGalleryFile" inManagedObjectContext:ctx];
+		file.identifier = [NSUUID UUID].UUIDString;
+		file.relativePath = absolutePath;   // absolute → filePath returns it directly, no copy
+		file.mediaType = mediaType;
+		file.dateAdded = [NSDate date];
+		file.fileSize = size;
+		file.isFavorite = NO;
+		[self applyMetadata:metadata toFile:file fallbackSource:source];
+		[self probeMediaAtPath:absolutePath mediaType:mediaType file:file];
+		NSError *saveError;
+		if ([ctx save:&saveError]) result = file;
+	}];
+	if (result) [self generateThumbnailForFile:result completion:nil];
+	return result;
+}
+
+#pragma mark - Remove
+
++ (NSArray<RYGGalleryFile *> *)fetchFilesWithIdentifiers:(NSArray<NSString *> *)identifiers context:(NSManagedObjectContext *)ctx {
+	if (!identifiers.count) return @[];
+	NSFetchRequest *req = [[NSFetchRequest alloc] initWithEntityName:@"RYGGalleryFile"];
+	req.predicate = [NSPredicate predicateWithFormat:@"identifier IN %@", identifiers];
+	return [ctx executeFetchRequest:req error:nil] ?: @[];
+}
+
++ (NSArray<NSString *> *)existingIdentifiersFrom:(NSArray<NSString *> *)identifiers {
+	if (!identifiers.count) return @[];
+	NSManagedObjectContext *ctx = [RYGGalleryCoreDataStack shared].viewContext;
+	NSMutableArray<NSString *> *alive = [NSMutableArray array];
+	[ctx performBlockAndWait:^{
+		for (RYGGalleryFile *f in [self fetchFilesWithIdentifiers:identifiers context:ctx])
+			if ([f fileExists]) [alive addObject:f.identifier];
+	}];
+	return alive;
+}
+
++ (NSUInteger)removeFilesWithIdentifiers:(NSArray<NSString *> *)identifiers {
+	if (!identifiers.count) return 0;
+	NSManagedObjectContext *ctx = [RYGGalleryCoreDataStack shared].viewContext;
+	__block NSUInteger removed = 0;
+	[ctx performBlockAndWait:^{
+		for (RYGGalleryFile *f in [self fetchFilesWithIdentifiers:identifiers context:ctx])
+			if ([f removeWithError:nil]) removed++;
+	}];
+	return removed;
+}
+
+- (BOOL)removeWithError:(NSError **)error {
+	NSFileManager *fm = [NSFileManager defaultManager];
+
+	// Snapshot before delete so observers (e.g. call-recordings) can cascade.
+	NSDictionary *info = @{ @"source": @(self.source),
+							@"sourceMediaPK": self.sourceMediaPK ?: @"",
+							@"sourceMediaCode": self.sourceMediaCode ?: @"" };
+
+	NSString *mediaPath = [self filePath];
+	if ([fm fileExistsAtPath:mediaPath]) {
+		[fm removeItemAtPath:mediaPath error:nil];
+	}
+
+	NSString *thumbPath = [self thumbnailPath];
+	if ([fm fileExistsAtPath:thumbPath]) {
+		[fm removeItemAtPath:thumbPath error:nil];
+	}
+
+	NSManagedObjectContext *ctx = self.managedObjectContext;
+	[ctx deleteObject:self];
+
+	NSError *saveError;
+	if (![ctx save:&saveError]) {
+		NSLog(@"[RyukGram Gallery] Failed to delete entity: %@", saveError);
+		if (error) *error = saveError;
+		return NO;
+	}
+
+	[NSNotificationCenter.defaultCenter postNotificationName:RYGGalleryFileDidRemoveNotification object:nil userInfo:info];
+	return YES;
+}
+
+#pragma mark - Paths
+
+- (NSString *)filePath {
+	// A referenced file (e.g. a shared call recording) stores an absolute path.
+	if ([self.relativePath hasPrefix:@"/"]) return self.relativePath;
+	return [[RYGGalleryPaths galleryMediaDirectory] stringByAppendingPathComponent:self.relativePath];
+}
+
+- (NSURL *)fileURL {
+	return [NSURL fileURLWithPath:[self filePath]];
+}
+
+- (BOOL)fileExists {
+	return [[NSFileManager defaultManager] fileExistsAtPath:[self filePath]];
+}
+
+- (NSString *)thumbnailPath {
+	return [[RYGGalleryPaths galleryThumbnailsDirectory]
+			stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.jpg", self.identifier]];
+}
+
+- (BOOL)thumbnailExists {
+	return [[NSFileManager defaultManager] fileExistsAtPath:[self thumbnailPath]];
+}
+
+#pragma mark - Display helpers
+
+- (NSString *)displayName {
+	if (self.customName.length > 0) return self.customName;
+
+	NSString *rel = (self.relativePath ?: @"").lastPathComponent;
+	// Older gallery files carry an "<epochMs>_" prefix.
+	NSRange sep = [rel rangeOfString:@"_"];
+	if (sep.location != NSNotFound && sep.location >= 10) {
+		NSString *head = [rel substringToIndex:sep.location];
+		BOOL allDigits = [head rangeOfCharacterFromSet:[NSCharacterSet.decimalDigitCharacterSet invertedSet]].location == NSNotFound;
+		if (allDigits && sep.location + 1 < rel.length) return [rel substringFromIndex:sep.location + 1];
+	}
+	return rel;
+}
+
+- (NSString *)exportFilename {
+	NSString *name = self.displayName;
+	NSString *fileExt = self.fileURL.pathExtension;
+	if (fileExt.length && !name.pathExtension.length) return [name stringByAppendingPathExtension:fileExt];
+	return name;
+}
+
+- (NSString *)sourceLabel {
+	return [RYGGalleryFile labelForSource:(RYGGallerySource)self.source];
+}
+
+- (NSString *)shortSourceLabel {
+	return [RYGGalleryFile shortLabelForSource:(RYGGallerySource)self.source];
+}
+
+- (NSString *)listPrimaryTitle {
+	if (self.sourceUsername.length) {
+		return self.sourceUsername;
+	}
+	return [self displayName];
+}
+
+- (NSString *)listFormattedDuration {
+	if (self.durationSeconds <= 0.05) {
+		return @"";
+	}
+	NSInteger total = (NSInteger)llround(self.durationSeconds);
+	NSInteger m = total / 60;
+	NSInteger s = total % 60;
+	return [NSString stringWithFormat:@"%ld:%02ld", (long)m, (long)s];
+}
+
+- (NSString *)listBitrateString {
+	if (self.mediaType != RYGGalleryMediaTypeVideo && self.mediaType != RYGGalleryMediaTypeAudio) {
+		return @"";
+	}
+	if (self.durationSeconds < 0.5 || self.fileSize <= 0) {
+		return @"";
+	}
+	double bps = (double)self.fileSize * 8.0 / self.durationSeconds;
+	if (self.mediaType == RYGGalleryMediaTypeAudio) {
+		double kbps = bps / 1e3;
+		if (kbps < 1.0) return @"";
+		return [NSString stringWithFormat:RYGLocalized(@"%.0f kbps"), kbps];
+	}
+	double mbps = bps / 1e6;
+	if (mbps < 0.01) return @"";
+	return [NSString stringWithFormat:RYGLocalized(@"%.1f Mbps"), mbps];
+}
+
+- (NSString *)listTechnicalLine {
+	NSMutableArray<NSString *> *parts = [NSMutableArray array];
+	BOOL hasDuration = (self.mediaType == RYGGalleryMediaTypeVideo || self.mediaType == RYGGalleryMediaTypeAudio);
+	BOOL hasResolution = (self.mediaType != RYGGalleryMediaTypeAudio);
+	if (hasDuration) {
+		NSString *d = [self listFormattedDuration];
+		if (d.length) {
+			[parts addObject:d];
+		}
+	}
+	NSString *sz = [NSByteCountFormatter stringFromByteCount:self.fileSize
+													countStyle:NSByteCountFormatterCountStyleFile];
+	if (sz.length) {
+		[parts addObject:sz];
+	}
+	if (hasResolution && self.pixelWidth > 0 && self.pixelHeight > 0) {
+		[parts addObject:[NSString stringWithFormat:@"%dx%d", self.pixelWidth, self.pixelHeight]];
+	}
+	if (hasDuration) {
+		NSString *br = [self listBitrateString];
+		if (br.length) {
+			[parts addObject:br];
+		}
+	}
+	return [parts componentsJoinedByString:@" · "];
+}
+
+- (NSString *)listDownloadDateString {
+	static NSDateFormatter *fmt;
+	static dispatch_once_t onceToken;
+	dispatch_once(&onceToken, ^{
+		fmt = [[NSDateFormatter alloc] init];
+		fmt.dateFormat = @"MMM d 'at' h:mm a";
+	});
+	return self.dateAdded ? [fmt stringFromDate:self.dateAdded] : @"";
+}
+
+- (NSURL *)preferredProfileURL {
+	if (self.sourceProfileURLString.length > 0) {
+		NSURL *url = [NSURL URLWithString:self.sourceProfileURLString];
+		if (url) return url;
+	}
+	if (self.sourceUsername.length > 0) {
+		NSString *encodedUsername = [self.sourceUsername stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+		if (encodedUsername.length > 0) {
+			NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"instagram://user?username=%@", encodedUsername]];
+			if (url) return url;
+		}
+	}
+	return nil;
+}
+
+- (NSURL *)preferredOriginalMediaURL {
+	if (self.sourceMediaURLString.length > 0) {
+		NSURL *url = [NSURL URLWithString:self.sourceMediaURLString];
+		NSString *scheme = url.scheme.lowercaseString ?: @"";
+		if (url && ([scheme isEqualToString:@"http"] ||
+					[scheme isEqualToString:@"https"] ||
+					[scheme isEqualToString:@"instagram"])) {
+			return url;
+		}
+	}
+	if (self.sourceMediaCode.length > 0) {
+		NSString *pathComponent = (self.source == RYGGallerySourceReels) ? @"reel" : @"p";
+		return [NSURL URLWithString:[NSString stringWithFormat:@"https://www.instagram.com/%@/%@/", pathComponent, self.sourceMediaCode]];
+	}
+	if (self.sourceMediaPK.length > 0) {
+		NSString *encodedPK = [self.sourceMediaPK stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+		if (encodedPK.length > 0) {
+			return [NSURL URLWithString:[NSString stringWithFormat:@"instagram://media?id=%@", encodedPK]];
+		}
+	}
+	return nil;
+}
+
+- (BOOL)hasOpenableProfile {
+	return [self preferredProfileURL] != nil;
+}
+
+- (BOOL)hasOpenableOriginalMedia {
+	return [self preferredOriginalMediaURL] != nil;
+}
+
++ (NSString *)labelForSource:(RYGGallerySource)source {
+	switch (source) {
+		case RYGGallerySourceFeed:	  return RYGLocalized(@"Feed");
+		case RYGGallerySourceStories:   return RYGLocalized(@"Stories");
+		case RYGGallerySourceReels:	 return RYGLocalized(@"Reels");
+		case RYGGallerySourceProfile:   return RYGLocalized(@"Profile");
+		case RYGGallerySourceDMs:	   return RYGLocalized(@"DMs");
+		case RYGGallerySourceThumbnail: return RYGLocalized(@"Thumb");
+		case RYGGallerySourceNotes:	 return RYGLocalized(@"Notes");
+		case RYGGallerySourceComments:  return RYGLocalized(@"Comments");
+		case RYGGallerySourceInstants:  return RYGLocalized(@"Instants");
+		case RYGGallerySourceCalls:	 return RYGLocalized(@"Calls");
+		case RYGGallerySourceImported:  return RYGLocalized(@"Imported");
+		case RYGGallerySourceOther:
+		default:					  return RYGLocalized(@"Other");
+	}
+}
+
++ (NSString *)shortLabelForSource:(RYGGallerySource)source {
+	switch (source) {
+		case RYGGallerySourceFeed:	  return RYGLocalized(@"Feed");
+		case RYGGallerySourceStories:   return RYGLocalized(@"Story");
+		case RYGGallerySourceReels:	 return RYGLocalized(@"Reel");
+		case RYGGallerySourceProfile:   return RYGLocalized(@"Profile");
+		case RYGGallerySourceDMs:	   return RYGLocalized(@"DMs");
+		case RYGGallerySourceThumbnail: return RYGLocalized(@"Thumb");
+		case RYGGallerySourceNotes:	 return RYGLocalized(@"Notes");
+		case RYGGallerySourceComments:  return RYGLocalized(@"Comment");
+		case RYGGallerySourceInstants:  return RYGLocalized(@"Instant");
+		case RYGGallerySourceCalls:	 return RYGLocalized(@"Call");
+		case RYGGallerySourceImported:  return RYGLocalized(@"Imported");
+		case RYGGallerySourceOther:
+		default:					  return RYGLocalized(@"Other");
+	}
+}
+
++ (NSString *)symbolNameForSource:(RYGGallerySource)source {
+	switch (source) {
+		case RYGGallerySourceFeed:	return @"feed";
+		case RYGGallerySourceStories: return @"story";
+		case RYGGallerySourceReels:   return @"reels";
+		case RYGGallerySourceProfile: return @"profile";
+		case RYGGallerySourceDMs:	 return @"messages";
+		case RYGGallerySourceThumbnail: return @"photo_gallery";
+		case RYGGallerySourceNotes:   return @"notes";
+		case RYGGallerySourceComments: return @"comments";
+		case RYGGallerySourceInstants: return @"instants";
+		case RYGGallerySourceCalls:   return @"call";
+		case RYGGallerySourceImported: return @"download";
+		case RYGGallerySourceOther:
+		default:					return @"media";
+	}
+}
+
+#pragma mark - Thumbnails
+
++ (void)generateThumbnailForFile:(RYGGalleryFile *)file completion:(void(^)(BOOL success))completion {
+	NSString *filePath = [file filePath];
+	NSString *thumbPath = [file thumbnailPath];
+	int16_t mediaType = file.mediaType;
+	NSCache<NSString *, UIImage *> *cache = RYGGalleryThumbnailCache();
+
+	UIImage *cachedThumb = [cache objectForKey:thumbPath];
+	if (cachedThumb || [file thumbnailExists]) {
+		if (!cachedThumb) {
+			cachedThumb = [UIImage imageWithContentsOfFile:thumbPath];
+			if (cachedThumb) {
+				[cache setObject:cachedThumb forKey:thumbPath];
+			}
+		}
+		if (completion) {
+			dispatch_async(dispatch_get_main_queue(), ^{
+				completion(cachedThumb != nil);
+			});
+		}
+		return;
+	}
+
+	__block BOOL shouldGenerate = NO;
+	dispatch_sync(RYGGalleryThumbnailStateQueue(), ^{
+		NSMutableDictionary<NSString *, NSMutableArray<void(^)(BOOL success)> *> *pending = RYGGalleryThumbnailCompletions();
+		NSMutableArray<void(^)(BOOL success)> *callbacks = pending[thumbPath];
+		if (callbacks) {
+			if (completion) {
+				[callbacks addObject:[completion copy]];
+			}
+			return;
+		}
+
+		shouldGenerate = YES;
+		callbacks = [NSMutableArray array];
+		if (completion) {
+			[callbacks addObject:[completion copy]];
+		}
+		pending[thumbPath] = callbacks;
+	});
+
+	if (!shouldGenerate) {
+		return;
+	}
+
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+		UIImage *thumb = nil;
+
+		if (mediaType == RYGGalleryMediaTypeImage || mediaType == RYGGalleryMediaTypeGIF) {
+			UIImage *full = nil;
+			if (mediaType == RYGGalleryMediaTypeGIF) {
+				CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)[NSURL fileURLWithPath:filePath], NULL);
+				if (src) {
+					CGImageRef cg = CGImageSourceCreateImageAtIndex(src, 0, NULL);
+					if (cg) {
+						full = [UIImage imageWithCGImage:cg];
+						CGImageRelease(cg);
+					}
+					CFRelease(src);
+				}
+			}
+			if (!full) full = [UIImage imageWithContentsOfFile:filePath];
+			if (full) {
+				thumb = [self resizeImage:full toSize:CGSizeMake(kThumbnailSize, kThumbnailSize)];
+			}
+		} else if (mediaType == RYGGalleryMediaTypeVideo) {
+			NSURL *videoURL = [NSURL fileURLWithPath:filePath];
+			AVAsset *asset = [AVAsset assetWithURL:videoURL];
+			AVAssetImageGenerator *gen = [[AVAssetImageGenerator alloc] initWithAsset:asset];
+			gen.appliesPreferredTrackTransform = YES;
+			gen.maximumSize = CGSizeMake(kThumbnailSize, kThumbnailSize);
+
+			NSError *err;
+			CGImageRef cgImage = [gen copyCGImageAtTime:CMTimeMake(1, 2) actualTime:NULL error:&err];
+			if (cgImage) {
+				thumb = [UIImage imageWithCGImage:cgImage];
+				CGImageRelease(cgImage);
+			}
+		} else if (mediaType == RYGGalleryMediaTypeAudio) {
+			thumb = [self renderAudioThumbnail];
+		}
+
+		if (thumb) {
+			NSData *jpegData = UIImageJPEGRepresentation(thumb, 0.8);
+			[jpegData writeToFile:thumbPath atomically:YES];
+			[cache setObject:thumb forKey:thumbPath];
+		}
+
+		__block NSArray<void(^)(BOOL success)> *callbacks = nil;
+		dispatch_sync(RYGGalleryThumbnailStateQueue(), ^{
+			callbacks = [[RYGGalleryThumbnailCompletions()[thumbPath] copy] ?: @[] copy];
+			[RYGGalleryThumbnailCompletions() removeObjectForKey:thumbPath];
+		});
+
+		if (callbacks.count == 0) {
+			return;
+		}
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			BOOL success = (thumb != nil);
+			for (void (^callback)(BOOL success) in callbacks) {
+				callback(success);
+			}
+		});
+	});
+}
+
++ (UIImage *)loadThumbnailForFile:(RYGGalleryFile *)file {
+	NSString *thumbPath = [file thumbnailPath];
+	UIImage *cached = [RYGGalleryThumbnailCache() objectForKey:thumbPath];
+	if (cached) {
+		return cached;
+	}
+	if ([file thumbnailExists]) {
+		UIImage *image = [UIImage imageWithContentsOfFile:thumbPath];
+		if (image) {
+			[RYGGalleryThumbnailCache() setObject:image forKey:thumbPath];
+		}
+		return image;
+	}
+	return nil;
+}
+
++ (UIImage *)renderAudioThumbnail {
+	CGSize size = CGSizeMake(kThumbnailSize, kThumbnailSize);
+	UIGraphicsBeginImageContextWithOptions(size, YES, 1.0);
+	CGContextRef ctx = UIGraphicsGetCurrentContext();
+	UIColor *bg = [UIColor colorWithRed:0.13 green:0.10 blue:0.20 alpha:1.0];
+	CGContextSetFillColorWithColor(ctx, bg.CGColor);
+	CGContextFillRect(ctx, CGRectMake(0, 0, size.width, size.height));
+	UIImage *glyph = [RYGAssetUtils instagramIconNamed:@"audio" pointSize:120.0];
+	if (glyph) {
+		glyph = [glyph imageWithTintColor:[UIColor whiteColor] renderingMode:UIImageRenderingModeAlwaysOriginal];
+		CGSize gs = glyph.size;
+		CGRect rect = CGRectMake((size.width - gs.width) / 2.0, (size.height - gs.height) / 2.0, gs.width, gs.height);
+		[glyph drawInRect:rect];
+	}
+	UIImage *result = UIGraphicsGetImageFromCurrentImageContext();
+	UIGraphicsEndImageContext();
+	return result;
+}
+
++ (UIImage *)resizeImage:(UIImage *)image toSize:(CGSize)targetSize {
+	CGFloat scale = MIN(targetSize.width / image.size.width, targetSize.height / image.size.height);
+	CGSize newSize = CGSizeMake(image.size.width * scale, image.size.height * scale);
+
+	UIGraphicsBeginImageContextWithOptions(newSize, NO, 1.0);
+	[image drawInRect:CGRectMake(0, 0, newSize.width, newSize.height)];
+	UIImage *resized = UIGraphicsGetImageFromCurrentImageContext();
+	UIGraphicsEndImageContext();
+
+	return resized;
+}
+
+@end

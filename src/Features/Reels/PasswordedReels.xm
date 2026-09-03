@@ -1,5 +1,6 @@
 #import "../../InstagramHeaders.h"
 #import "../../Utils.h"
+#import "../../RYGChrome.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -7,9 +8,9 @@
 // The password is stored in the _asnwer ivar (IG typo). We read it at runtime,
 // then provide buttons to auto-fill + submit or reveal + copy the password.
 
-#define SCI_PW_BTN_TAG 1342
+#define RYG_PW_BTN_TAG 1342
 
-static NSString * _Nullable sciGetPassword(id overlayView) {
+static NSString * _Nullable rygGetPassword(id overlayView) {
     Class cls = [overlayView class];
     while (cls && cls != [UIView class]) {
         unsigned int count = 0;
@@ -55,7 +56,7 @@ static NSString * _Nullable sciGetPassword(id overlayView) {
     return nil;
 }
 
-static UITextField * _Nullable sciFindTextField(UIView *root) {
+static UITextField * _Nullable rygFindTextField(UIView *root) {
     NSMutableArray *stack = [NSMutableArray arrayWithObject:root];
     while (stack.count > 0) {
         UIView *v = stack.lastObject;
@@ -66,7 +67,7 @@ static UITextField * _Nullable sciFindTextField(UIView *root) {
     return nil;
 }
 
-static UIView * _Nullable sciFindSubmitButton(UIView *root) {
+static UIView * _Nullable rygFindSubmitButton(UIView *root) {
     NSMutableArray *stack = [NSMutableArray arrayWithObject:root];
     while (stack.count > 0) {
         UIView *v = stack.lastObject;
@@ -82,39 +83,33 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
 - (void)didMoveToSuperview {
     %orig;
     if (!self.superview) return;
-    if (![SCIUtils getBoolPref:@"unlock_password_reels"]) return;
-    [self sciAddButtons];
+    if (![RYGUtils getBoolPref:@"unlock_password_reels"]) return;
+    [self rygAddButtons];
 }
 
 - (void)layoutSubviews {
     %orig;
-    if (![SCIUtils getBoolPref:@"unlock_password_reels"]) return;
-    [self sciAddButtons];
+    if (![RYGUtils getBoolPref:@"unlock_password_reels"]) return;
+    [self rygAddButtons];
 }
 
-%new - (void)sciAddButtons {
-    if ([self viewWithTag:SCI_PW_BTN_TAG]) return;
+%new - (void)rygAddButtons {
+    if ([self viewWithTag:RYG_PW_BTN_TAG]) return;
 
-    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightBold];
-
-    UIButton *unlockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    unlockBtn.tag = SCI_PW_BTN_TAG;
-    [unlockBtn setImage:[UIImage systemImageNamed:@"lock.open.fill" withConfiguration:config] forState:UIControlStateNormal];
-    unlockBtn.tintColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
-    unlockBtn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5];
-    unlockBtn.layer.cornerRadius = 20;
+    RYGChromeButton *unlockBtn = [[RYGChromeButton alloc] initWithSymbol:@"lock.open.fill" pointSize:18.0 diameter:40.0];
+    unlockBtn.tag = RYG_PW_BTN_TAG;
+    unlockBtn.iconTint = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
+    unlockBtn.bubbleColor = [UIColor colorWithWhite:0.0 alpha:0.5];
     unlockBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [unlockBtn addTarget:self action:@selector(sciUnlockTapped) forControlEvents:UIControlEventTouchUpInside];
+    [unlockBtn addTarget:self action:@selector(rygUnlockTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:unlockBtn];
 
-    UIButton *eyeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-    eyeBtn.tag = SCI_PW_BTN_TAG + 1;
-    [eyeBtn setImage:[UIImage systemImageNamed:@"eye.fill" withConfiguration:config] forState:UIControlStateNormal];
-    eyeBtn.tintColor = [UIColor whiteColor];
-    eyeBtn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5];
-    eyeBtn.layer.cornerRadius = 20;
+    RYGChromeButton *eyeBtn = [[RYGChromeButton alloc] initWithSymbol:@"eye.fill" pointSize:18.0 diameter:40.0];
+    eyeBtn.tag = RYG_PW_BTN_TAG + 1;
+    eyeBtn.iconTint = [UIColor whiteColor];
+    eyeBtn.bubbleColor = [UIColor colorWithWhite:0.0 alpha:0.5];
     eyeBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [eyeBtn addTarget:self action:@selector(sciShowPasswordTapped) forControlEvents:UIControlEventTouchUpInside];
+    [eyeBtn addTarget:self action:@selector(rygShowPasswordTapped) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:eyeBtn];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -130,19 +125,19 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
     ]];
 }
 
-%new - (void)sciUnlockTapped {
+%new - (void)rygUnlockTapped {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
 
-    NSString *password = sciGetPassword(self);
+    NSString *password = rygGetPassword(self);
     if (!password) {
-        [SCIUtils showErrorHUDWithDescription:SCILocalized(@"No password found")];
+        [RYGUtils showErrorHUDWithDescription:RYGLocalized(@"No password found")];
         return;
     }
 
-    UITextField *textField = sciFindTextField(self);
+    UITextField *textField = rygFindTextField(self);
     if (!textField) {
-        [SCIUtils showErrorHUDWithDescription:SCILocalized(@"No text field found")];
+        [RYGUtils showErrorHUDWithDescription:RYGLocalized(@"No text field found")];
         return;
     }
 
@@ -158,7 +153,7 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
     }
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIView *submitBtn = sciFindSubmitButton(self);
+        UIView *submitBtn = rygFindSubmitButton(self);
         if (submitBtn && [submitBtn isKindOfClass:[UIControl class]]) {
             [(UIControl *)submitBtn setHidden:NO];
             [(UIControl *)submitBtn sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -166,24 +161,20 @@ static UIView * _Nullable sciFindSubmitButton(UIView *root) {
     });
 }
 
-%new - (void)sciShowPasswordTapped {
+%new - (void)rygShowPasswordTapped {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
     [haptic impactOccurred];
 
-    NSString *password = sciGetPassword(self);
+    NSString *password = rygGetPassword(self);
     if (!password) {
-        [SCIUtils showErrorHUDWithDescription:SCILocalized(@"No password found")];
+        [RYGUtils showErrorHUDWithDescription:RYGLocalized(@"No password found")];
         return;
     }
 
     [[UIPasteboard generalPasteboard] setString:password];
-
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SCILocalized(@"Password")
-                                                                  message:password
-                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:SCILocalized(@"Copied!") style:UIAlertActionStyleCancel handler:nil]];
-    UIViewController *topVC = topMostController();
-    if (topVC) [topVC presentViewController:alert animated:YES completion:nil];
+    RYGNotifySuccess(RYG_NOTIF_COPY_PASSWORD,
+                     [NSString stringWithFormat:RYGLocalized(@"Copied %@"), password],
+                     nil);
 }
 
 %end

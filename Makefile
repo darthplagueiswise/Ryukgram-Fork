@@ -1,12 +1,11 @@
-TARGET := iphone:clang:26.5:15.0
+TARGET := iphone:clang:26.5:16.0
 INSTALL_TARGET_PROCESSES = Instagram
-ARCHS = arm64
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
+$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
 
 # The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
 # longer baked in here — it ships as a standalone NoPluginsPatch.dylib
@@ -24,7 +23,7 @@ RYG_FILELOG ?= 0
 # Build RYG_PROBE=1 to audit hook coverage on the next IG bump.
 RYG_PROBE ?= 0
 
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DRYG_FILELOG=$(RYG_FILELOG) -DRYG_PROBE=$(RYG_PROBE)
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DRYG_FILELOG=$(RYG_FILELOG) -DRYG_PROBE=$(RYG_PROBE) -include src/RYGPrefix.h
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression -lsqlite3
 
@@ -64,3 +63,5 @@ endif
 # 	$(MAKE) -C modules/flexing clean
 
 # endif
+ARCHS = arm64
+THEOS_PACKAGE_SCHEME = rootless

@@ -1,0 +1,53 @@
+// Shared list UI for exclude / locked / hidden chat lists. Configure with
+// RYGIDListConfig; the VC owns search, sort, edit, add, swipe, and menus.
+
+#import <UIKit/UIKit.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface RYGIDListConfig : NSObject
+
+@property (nonatomic, copy)   NSString *title;
+@property (nonatomic, copy)   NSString *searchPlaceholder;
+@property (nonatomic, copy)   NSString *addAlertTitle;
+@property (nonatomic, copy)   NSString *addAlertMessage;
+@property (nonatomic, copy)   NSString *addAlertPlaceholder;
+@property (nonatomic, copy)   NSArray<NSString *> *sortTitles;       // nil = no sort button
+@property (nonatomic)         BOOL allowsEdit;
+@property (nonatomic)         BOOL allowsAdd;
+
+@property (nonatomic, copy)   NSArray<id> * _Nonnull(^itemsProvider)(void);
+@property (nonatomic, copy)   NSString * _Nonnull(^titleProvider)(id item);
+@property (nonatomic, copy, nullable) NSString * _Nullable(^subtitleProvider)(id item);
+@property (nonatomic, copy, nullable) UIImage  * _Nullable(^iconProvider)(id item);
+@property (nonatomic, copy)   BOOL(^matchesQuery)(id item, NSString *query);
+@property (nonatomic, copy, nullable) NSArray * _Nonnull(^sortedItems)(NSArray *items, NSInteger mode);
+@property (nonatomic, copy, nullable) void(^onTapItem)(id item, UIViewController *vc);
+@property (nonatomic, copy)   void(^onRemoveItem)(id item);
+@property (nonatomic, copy, nullable) void(^onAddRequest)(NSString *query, UIViewController *vc, void(^reload)(void));
+// When set, "+" opens the rich user picker (recent DMs + live search) and hands
+// back a resolved { pk, username, fullName, profilePicURL }. Takes precedence over onAddRequest.
+@property (nonatomic, copy, nullable) void(^onAddResolvedUser)(NSDictionary *user, void(^reload)(void));
+// Opt an onAddRequest list into the same picker: the picked username (or raw ID) is
+// fed to onAddRequest as its text, so all existing resolution/confirm logic is reused.
+@property (nonatomic) BOOL useUserPickerForAdd;
+// Label for the picker's raw-numeric row (e.g. "Add by thread ID"). nil = user ID.
+@property (nonatomic, copy, nullable) NSString *addIDLabel;
+@property (nonatomic, copy, nullable) UIMenu * _Nullable(^contextMenuForItem)(id item, void(^reload)(void));
+@property (nonatomic, copy, nullable) NSArray<UIContextualAction *> * _Nonnull(^leadingSwipeActionsForItem)(id item, void(^reload)(void));
+@property (nonatomic, copy, nullable) NSArray<UIBarButtonItem *> * _Nonnull(^extraBatchActions)(NSArray *selectedItems, void(^reload)(void), void(^exitEdit)(void));
+
+// Optional pill below the search bar. Return nil/empty to hide it; tapping fires onStatusTap.
+@property (nonatomic, copy, nullable) NSString * _Nullable(^statusProvider)(void);
+@property (nonatomic, copy, nullable) void(^onStatusTap)(void);
+
+@end
+
+
+@interface RYGIDListViewController : UIViewController
+@property (nonatomic, strong, readonly) RYGIDListConfig *config;
+- (instancetype)initWithConfig:(RYGIDListConfig *)config;
+- (void)reload;
+@end
+
+NS_ASSUME_NONNULL_END

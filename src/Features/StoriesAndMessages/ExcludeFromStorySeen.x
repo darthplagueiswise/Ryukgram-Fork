@@ -1,259 +1,309 @@
-// Per-user story seen-receipt exclusions. Excluded users' stories behave
-// normally (your view appears in their viewer list). Provides owner detection
-// helpers, 3-dot menu injection, and overlay refresh utilities.
+// Per-user story seen-receipt exclusions.
+// Excluded users' stories behave normally.
+// Provides owner detection helpers, 3-dot menu injection, and overlay refresh utilities.
 
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
 #import "StoryHelpers.h"
-#import "SCIExcludedStoryUsers.h"
+#import "RYGExcludedStoryUsers.h"
+#import "StoryMenuItems.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
-#import <substrate.h>
 
-NSDictionary *sciOwnerInfoFromObject(id obj);
+NSDictionary *rygOwnerInfoFromObject(id obj);
 
 // ============ Active story VC tracking ============
 
-__weak UIViewController *sciActiveStoryViewerVC = nil;
+__weak UIViewController *rygActiveStoryViewerVC = nil;
+
+static id rygSafeCall0(id obj, SEL sel) {
+	if (!obj || !sel || ![obj respondsToSelector:sel]) return nil;
+
+	@try {
+		return ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+	} @catch (__unused id e) {
+		return nil;
+	}
+}
+
+static NSString *rygString(id value) {
+	if ([value isKindOfClass:NSString.class]) return [(NSString *)value length] ? value : nil;
+	if ([value isKindOfClass:NSNumber.class]) return [(NSNumber *)value stringValue];
+	return nil;
+}
 
 %hook IGStoryViewerViewController
+
 - (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    sciActiveStoryViewerVC = self;
+	%orig;
+	rygActiveStoryViewerVC = self;
 }
+
 - (void)viewWillDisappear:(BOOL)animated {
-    if (sciActiveStoryViewerVC == (UIViewController *)self) sciActiveStoryViewerVC = nil;
-    %orig;
+	if (rygActiveStoryViewerVC == (UIViewController *)self) {
+		rygActiveStoryViewerVC = nil;
+	}
+
+	%orig;
 }
+
 %end
 
 // ============ Owner extraction ============
 
-NSDictionary *sciOwnerInfoFromObject(id obj) {
-    if (!obj) return nil;
-    @try {
-        id pk = nil, un = nil, fn = nil;
-        if ([obj respondsToSelector:@selector(pk)])
-            pk = ((id(*)(id, SEL))objc_msgSend)(obj, @selector(pk));
-        if ([obj respondsToSelector:@selector(username)])
-            un = ((id(*)(id, SEL))objc_msgSend)(obj, @selector(username));
-        if ([obj respondsToSelector:@selector(fullName)])
-            fn = ((id(*)(id, SEL))objc_msgSend)(obj, @selector(fullName));
-        if (pk && un) {
-            return @{ @"pk": [NSString stringWithFormat:@"%@", pk],
-                      @"username": [NSString stringWithFormat:@"%@", un],
-                      @"fullName": fn ? [NSString stringWithFormat:@"%@", fn] : @"" };
-        }
-        NSArray *nestedKeys = @[@"user", @"owner", @"author", @"reelUser", @"reelOwner"];
-        for (NSString *k in nestedKeys) {
-            @try {
-                id sub = [obj valueForKey:k];
-                if (sub && sub != obj) {
-                    NSDictionary *d = sciOwnerInfoFromObject(sub);
-                    if (d) return d;
-                }
-            } @catch (__unused id e) {}
-        }
-    } @catch (__unused id e) {}
-    return nil;
+NSDictionary *rygOwnerInfoFromObject(id obj) {
+	if (!obj) return nil;
+
+	@try {
+		id pk = rygSafeCall0(obj, @selector(pk));
+		id username = rygSafeCall0(obj, @selector(username));
+		id fullName = rygSafeCall0(obj, @selector(fullName));
+
+		if (!pk) pk = [RYGUtils fieldCacheValue:obj forKey:@"pk"] ?: [RYGUtils fieldCacheValue:obj forKey:@"strong_id__"] ?: [RYGUtils pkFromIGUser:obj];
+		if (!username) username = [RYGUtils fieldCacheValue:obj forKey:@"username"];
+		if (!fullName) fullName = [RYGUtils fieldCacheValue:obj forKey:@"full_name"];
+
+		NSString *pkStr = rygString(pk);
+		NSString *unStr = rygString(username);
+		NSString *fnStr = rygString(fullName) ?: @"";
+
+		if (pkStr.length && unStr.length) {
+			return @{
+				@"pk": pkStr,
+				@"username": unStr,
+				@"fullName": fnStr
+			};
+		}
+
+		for (NSString *key in @[@"user", @"owner", @"author", @"reelUser", @"reelOwner"]) {
+			id sub = nil;
+
+			@try {
+				sub = [obj valueForKey:key];
+			} @catch (__unused id e) {}
+
+			if (sub && sub != obj) {
+				NSDictionary *info = rygOwnerInfoFromObject(sub);
+				if (info) return info;
+			}
+		}
+	} @catch (__unused id e) {}
+
+	return nil;
 }
 
-NSDictionary *sciOwnerInfoForStoryVC(UIViewController *vc) {
-    if (!vc) return nil;
-    @try {
-        id vm = ((id(*)(id, SEL))objc_msgSend)(vc, @selector(currentViewModel));
-        if (!vm) return nil;
-        id owner = nil;
-        @try { owner = [vm valueForKey:@"owner"]; } @catch (__unused id e) {}
-        if (!owner) return nil;
-        return sciOwnerInfoFromObject(owner);
-    } @catch (__unused id e) { return nil; }
+static NSDictionary *rygOwnerInfoFromStoryItem(id item) {
+	if (!item) return nil;
+
+	NSDictionary *info = rygOwnerInfoFromObject(item);
+	if (info) return info;
+
+	id user = [RYGUtils fieldCacheValue:item forKey:@"user"] ?: rygSafeCall0(item, @selector(user));
+	info = rygOwnerInfoFromObject(user);
+	if (info) return info;
+
+	id owner = [RYGUtils fieldCacheValue:item forKey:@"owner"] ?: rygSafeCall0(item, @selector(owner));
+	return rygOwnerInfoFromObject(owner);
 }
 
-NSDictionary *sciCurrentStoryOwnerInfo(void) {
-    return sciOwnerInfoForStoryVC(sciActiveStoryViewerVC);
+NSDictionary *rygOwnerInfoForStoryVC(UIViewController *vc) {
+	if (!vc) return nil;
+
+	@try {
+		id item = rygSafeCall0(vc, @selector(currentStoryItem));
+		NSDictionary *info = rygOwnerInfoFromStoryItem(item);
+		if (info) return info;
+
+		id section = rygSafeCall0(vc, @selector(currentlyDisplayedSectionController));
+		item = rygSafeCall0(section, @selector(currentStoryItem));
+		info = rygOwnerInfoFromStoryItem(item);
+		if (info) return info;
+
+		id vm = rygSafeCall0(vc, @selector(currentViewModel));
+		info = rygOwnerInfoFromObject(rygSafeCall0(vm, @selector(owner)));
+		if (info) return info;
+
+		id owner = nil;
+
+		@try {
+			owner = [vm valueForKey:@"owner"];
+		} @catch (__unused id e) {}
+
+		return rygOwnerInfoFromObject(owner);
+	} @catch (__unused id e) {
+		return nil;
+	}
 }
 
-// Find the section controller for a specific cell via ivar scan.
-static id sciFindSectionControllerForCell(UICollectionViewCell *cell) {
-    Class sectionClass = NSClassFromString(@"IGStoryFullscreenSectionController");
-    if (!sectionClass || !cell) return nil;
-    unsigned int cCount = 0;
-    Ivar *cIvars = class_copyIvarList([cell class], &cCount);
-    for (unsigned int i = 0; i < cCount; i++) {
-        const char *type = ivar_getTypeEncoding(cIvars[i]);
-        if (!type || type[0] != '@') continue;
-        id val = object_getIvar(cell, cIvars[i]);
-        if (!val) continue;
-        if ([val isKindOfClass:sectionClass]) { free(cIvars); return val; }
-        unsigned int vCount = 0;
-        Ivar *vIvars = class_copyIvarList([val class], &vCount);
-        for (unsigned int j = 0; j < vCount; j++) {
-            const char *type2 = ivar_getTypeEncoding(vIvars[j]);
-            if (!type2 || type2[0] != '@') continue;
-            id val2 = object_getIvar(val, vIvars[j]);
-            if (val2 && [val2 isKindOfClass:sectionClass]) { free(vIvars); free(cIvars); return val2; }
-        }
-        if (vIvars) free(vIvars);
-    }
-    if (cIvars) free(cIvars);
-    return nil;
+NSDictionary *rygCurrentStoryOwnerInfo(void) {
+	return rygOwnerInfoForStoryVC(rygActiveStoryViewerVC);
 }
 
-static NSDictionary *sciOwnerInfoFromSectionController(id sc) {
-    if (!sc) return nil;
-    NSArray *tryKeys = @[@"viewModel", @"item", @"model", @"object"];
-    for (NSString *k in tryKeys) {
-        @try {
-            id obj = [sc valueForKey:k];
-            if (obj) {
-                NSDictionary *info = sciOwnerInfoFromObject(obj);
-                if (info) return info;
-            }
-        } @catch (__unused id e) {}
-    }
-    return sciOwnerInfoFromObject(sc);
+static id rygStoryItemFromContextProvider(id provider) {
+	id ctx = rygSafeCall0(provider, @selector(currentStoryItemContext));
+	if (!ctx) ctx = rygSafeCall0(provider, @selector(_currentStoryItemContext));
+
+	id item = rygSafeCall0(ctx, @selector(storyItem));
+	return item ?: ctx;
 }
 
-// Per-cell owner lookup: walks from the overlay to its IGStoryFullscreenCell,
-// finds the cell's section controller, and reads the owner. Gives the correct
-// owner even when multiple cells are alive (pre-loaded adjacent reels).
-NSDictionary *sciOwnerInfoForView(UIView *view) {
-    if (!view) return nil;
-    Class cellClass = NSClassFromString(@"IGStoryFullscreenCell");
-    UIView *cur = view;
-    UICollectionViewCell *cell = nil;
-    while (cur) {
-        if (cellClass && [cur isKindOfClass:cellClass]) { cell = (UICollectionViewCell *)cur; break; }
-        cur = cur.superview;
-    }
-    if (cell) {
-        id sc = sciFindSectionControllerForCell(cell);
-        NSDictionary *info = sciOwnerInfoFromSectionController(sc);
-        if (info) return info;
-    }
-    // Fallback: VC's currentViewModel
-    UIViewController *vc = sciFindVC(view, @"IGStoryViewerViewController");
-    return sciOwnerInfoForStoryVC(vc);
+// Per-view owner lookup: use the overlay/cell's currentStoryItemContext first.
+// This avoids the old expensive section-controller ivar scan.
+NSDictionary *rygOwnerInfoForView(UIView *view) {
+	if (!view) return nil;
+
+	NSDictionary *info = rygOwnerInfoFromStoryItem(rygStoryItemFromContextProvider(view));
+	if (info) return info;
+
+	Class cellClass = NSClassFromString(@"IGStoryFullscreenCell");
+	UIView *cur = view;
+
+	while (cur) {
+		if (cellClass && [cur isKindOfClass:cellClass]) {
+			info = rygOwnerInfoFromStoryItem(rygStoryItemFromContextProvider(cur));
+			if (info) return info;
+			break;
+		}
+
+		cur = cur.superview;
+	}
+
+	UIViewController *vc = rygFindVC(view, @"IGStoryViewerViewController");
+	return rygOwnerInfoForStoryVC(vc ?: rygActiveStoryViewerVC);
 }
 
-BOOL sciIsCurrentStoryOwnerExcluded(void) {
-    NSDictionary *info = sciCurrentStoryOwnerInfo();
-    // Unknown owner: block_selected → don't block; block_all → block.
-    if (!info) return [SCIExcludedStoryUsers isBlockSelectedMode];
-    return [SCIExcludedStoryUsers isUserPKExcluded:info[@"pk"]];
+BOOL rygIsCurrentStoryOwnerExcluded(void) {
+	NSDictionary *info = rygCurrentStoryOwnerInfo();
+
+	// Unknown owner: block_selected → don't block; block_all → block.
+	if (!info) return [RYGExcludedStoryUsers isBlockSelectedMode];
+
+	return [RYGExcludedStoryUsers isUserPKExcluded:info[@"pk"]];
 }
 
-BOOL sciIsObjectStoryOwnerExcluded(id obj) {
-    NSDictionary *info = sciOwnerInfoFromObject(obj);
-    if (!info) return [SCIExcludedStoryUsers isBlockSelectedMode];
-    return [SCIExcludedStoryUsers isUserPKExcluded:info[@"pk"]];
+BOOL rygIsObjectStoryOwnerExcluded(id obj) {
+	NSDictionary *info = rygOwnerInfoFromObject(obj);
+
+	if (!info) return [RYGExcludedStoryUsers isBlockSelectedMode];
+
+	return [RYGExcludedStoryUsers isUserPKExcluded:info[@"pk"]];
 }
 
 // ============ Overlay utilities ============
 
-void sciTriggerStoryMarkSeen(UIViewController *storyVC) {
-    if (!storyVC) return;
-    Class overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayView");
-    if (!overlayCls) overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayMetalLayerView");
-    if (!overlayCls) return;
-    SEL markSel = @selector(sciStoryMarkSeenTapped:);
-    NSMutableArray *stack = [NSMutableArray arrayWithObject:storyVC.view];
-    while (stack.count) {
-        UIView *v = stack.lastObject; [stack removeLastObject];
-        if ([v isKindOfClass:overlayCls] && [v respondsToSelector:markSel]) {
-            ((void(*)(id, SEL, id))objc_msgSend)(v, markSel, nil);
-            return;
-        }
-        for (UIView *sub in v.subviews) [stack addObject:sub];
-    }
+static Class rygOverlayClass(void) {
+	Class cls = NSClassFromString(@"IGStoryFullscreenOverlayView");
+	return cls ?: NSClassFromString(@"IGStoryFullscreenOverlayMetalLayerView");
 }
 
-void sciRefreshAllVisibleOverlays(UIViewController *storyVC) {
-    if (!storyVC) return;
-    Class overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayView");
-    if (!overlayCls) overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayMetalLayerView");
-    if (!overlayCls) return;
-    SEL refreshSel = @selector(sciRefreshSeenButton);
-    SEL audioSel = @selector(sciRefreshAudioButton);
-    NSMutableArray *stack = [NSMutableArray arrayWithObject:storyVC.view];
-    while (stack.count) {
-        UIView *v = stack.lastObject; [stack removeLastObject];
-        if ([v isKindOfClass:overlayCls]) {
-            if ([v respondsToSelector:refreshSel])
-                ((void(*)(id, SEL))objc_msgSend)(v, refreshSel);
-            if ([v respondsToSelector:audioSel])
-                ((void(*)(id, SEL))objc_msgSend)(v, audioSel);
-        }
-        for (UIView *sub in v.subviews) [stack addObject:sub];
-    }
+void rygTriggerStoryMarkSeen(UIViewController *storyVC) {
+	if (!storyVC) return;
+
+	Class cls = rygOverlayClass();
+	if (!cls) return;
+
+	SEL markSel = @selector(rygStoryMarkSeenTapped:);
+	NSMutableArray *stack = [NSMutableArray arrayWithObject:storyVC.view];
+
+	while (stack.count) {
+		UIView *view = stack.lastObject;
+		[stack removeLastObject];
+
+		if ([view isKindOfClass:cls] && [view respondsToSelector:markSel]) {
+			((void (*)(id, SEL, id))objc_msgSend)(view, markSel, nil);
+			return;
+		}
+
+		[stack addObjectsFromArray:view.subviews];
+	}
 }
 
-// ============ 3-dot menu injection ============
-// Hooks into the existing IGDSMenu hook in Tweak.x via sciMaybeAppendStoryExcludeMenuItem.
-// Always present regardless of master toggle (fallback when eye affordance is hidden).
+void rygRefreshAllVisibleOverlays(UIViewController *storyVC) {
+	if (!storyVC) return;
 
-NSArray *sciMaybeAppendStoryExcludeMenuItem(NSArray *items) {
-    if (!sciActiveStoryViewerVC) return items;
-    BOOL looksLikeStoryHeader = NO;
-    for (id it in items) {
-        @try {
-            id title = [it valueForKey:@"title"];
-            NSString *t = [NSString stringWithFormat:@"%@", title ?: @""];
-            if ([t isEqualToString:@"Report"] || [t isEqualToString:@"Mute"] ||
-                [t isEqualToString:@"Unfollow"] || [t isEqualToString:@"Follow"] ||
-                [t isEqualToString:@"Hide"]) {
-                looksLikeStoryHeader = YES; break;
-            }
-        } @catch (__unused id e) {}
-    }
-    if (!looksLikeStoryHeader) return items;
+	Class cls = rygOverlayClass();
+	if (!cls) return;
 
-    NSDictionary *ownerInfo = sciCurrentStoryOwnerInfo();
-    if (!ownerInfo) return items;
+	SEL updateSel = @selector(rygUpdateStoryOverlayButtons);
+	SEL seenSel = @selector(rygRefreshSeenButton);
+	SEL audioSel = @selector(rygRefreshAudioButton);
 
-    NSString *pk = ownerInfo[@"pk"];
-    NSString *username = ownerInfo[@"username"] ?: @"";
-    NSString *fullName = ownerInfo[@"fullName"] ?: @"";
-    // Bypass master toggle so the 3-dot fallback always shows
-    BOOL inList = [SCIExcludedStoryUsers isInList:pk];
-    BOOL blockSelected = [SCIExcludedStoryUsers isBlockSelectedMode];
+	NSMutableArray *stack = [NSMutableArray arrayWithObject:storyVC.view];
 
-    Class menuItemCls = NSClassFromString(@"IGDSMenuItem");
-    if (!menuItemCls) return items;
+	while (stack.count) {
+		UIView *view = stack.lastObject;
+		[stack removeLastObject];
 
-    NSString *addLabel = blockSelected ? SCILocalized(@"Add to block list") : SCILocalized(@"Exclude story seen");
-    NSString *removeLabel = blockSelected ? SCILocalized(@"Remove from block list") : SCILocalized(@"Un-exclude story seen");
-    NSString *title = inList ? removeLabel : addLabel;
+		if ([view isKindOfClass:cls]) {
+			if ([view respondsToSelector:updateSel]) {
+				((void (*)(id, SEL))objc_msgSend)(view, updateSel);
+			} else {
+				if ([view respondsToSelector:seenSel]) {
+					((void (*)(id, SEL))objc_msgSend)(view, seenSel);
+				}
 
-    __weak UIViewController *weakVC = sciActiveStoryViewerVC;
-    void (^handler)(void) = ^{
-        if (inList) {
-            [SCIExcludedStoryUsers removePK:pk];
-            [SCIUtils showToastForDuration:2.0 title:blockSelected ? SCILocalized(@"Unblocked") : SCILocalized(@"Un-excluded")];
-            // Removing in block_selected = normal behavior → mark seen
-            if (blockSelected) sciTriggerStoryMarkSeen(weakVC);
-        } else {
-            [SCIExcludedStoryUsers addOrUpdateEntry:@{
-                @"pk": pk, @"username": username, @"fullName": fullName
-            }];
-            [SCIUtils showToastForDuration:2.0 title:blockSelected ? SCILocalized(@"Blocked") : SCILocalized(@"Excluded")];
-            // Adding in block_all = normal behavior → mark seen
-            if (!blockSelected) sciTriggerStoryMarkSeen(weakVC);
-        }
-        sciRefreshAllVisibleOverlays(weakVC);
-    };
+				if ([view respondsToSelector:audioSel]) {
+					((void (*)(id, SEL))objc_msgSend)(view, audioSel);
+				}
+			}
+		}
 
-    id newItem = nil;
-    @try {
-        SEL initSel = @selector(initWithTitle:image:handler:);
-        typedef id (*Init)(id, SEL, id, id, id);
-        newItem = ((Init)objc_msgSend)([menuItemCls alloc], initSel, title, nil, handler);
-    } @catch (__unused id e) { newItem = nil; }
+		[stack addObjectsFromArray:view.subviews];
+	}
+}
 
-    if (!newItem) return items;
+// ============ story-menu entry ============
 
-    NSMutableArray *newItems = [items mutableCopy] ?: [NSMutableArray array];
-    [newItems addObject:newItem];
-    return [newItems copy];
+RYGStoryMenuEntry *rygStoryExcludeMenuEntry(void) {
+	if (!rygActiveStoryViewerVC) return nil;
+
+	NSDictionary *ownerInfo = rygCurrentStoryOwnerInfo();
+	if (!ownerInfo) return nil;
+
+	NSString *pk = ownerInfo[@"pk"];
+	NSString *username = ownerInfo[@"username"] ?: @"";
+	NSString *fullName = ownerInfo[@"fullName"] ?: @"";
+	if (!pk.length) return nil;
+
+	BOOL inList = [RYGExcludedStoryUsers isInList:pk];
+	BOOL blockSelected = [RYGExcludedStoryUsers isBlockSelectedMode];
+
+	NSString *addLabel = blockSelected ? RYGLocalized(@"Add to block list") : RYGLocalized(@"Exclude story seen");
+	NSString *removeLabel = blockSelected ? RYGLocalized(@"Remove from block list") : RYGLocalized(@"Un-exclude story seen");
+	NSString *title = inList ? removeLabel : addLabel;
+	NSString *symbol = inList ? @"eye" : @"eye.slash";
+
+	__weak UIViewController *weakVC = rygActiveStoryViewerVC;
+
+	void (^handler)(void) = ^{
+		UIViewController *vc = weakVC;
+
+		if (inList) {
+			[RYGExcludedStoryUsers removePK:pk];
+
+			RYGNotifySuccess(blockSelected ? RYG_NOTIF_BLOCK_TOGGLE : RYG_NOTIF_EXCLUDE_STORY,
+							 blockSelected ? RYGLocalized(@"Unblocked") : RYGLocalized(@"Un-excluded"),
+							 nil);
+
+			// Removing in block_selected = normal behavior → mark seen.
+			if (blockSelected) rygTriggerStoryMarkSeen(vc);
+		} else {
+			[RYGExcludedStoryUsers addOrUpdateEntry:@{
+				@"pk": pk,
+				@"username": username,
+				@"fullName": fullName
+			}];
+
+			RYGNotifySuccess(blockSelected ? RYG_NOTIF_BLOCK_TOGGLE : RYG_NOTIF_EXCLUDE_STORY,
+							 blockSelected ? RYGLocalized(@"Blocked") : RYGLocalized(@"Excluded"),
+							 nil);
+
+			// Adding in block_all = normal behavior → mark seen.
+			if (!blockSelected) rygTriggerStoryMarkSeen(vc);
+		}
+
+		rygRefreshAllVisibleOverlays(vc);
+	};
+
+	return [RYGStoryMenuEntry entryWithTitle:title symbol:symbol handler:handler];
 }

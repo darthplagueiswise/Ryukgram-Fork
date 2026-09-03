@@ -2,942 +2,592 @@
 #import "InstagramHeaders.h"
 #import "Tweak.h"
 #import "Utils.h"
-#import "Features/General/SCICacheManager.h"
-#import "Features/General/SCIChangelog.h"
+#import "RYGDefaults.h"
+#import "Features/General/RYGCacheManager.h"
+#import "Features/General/RYGChangelog.h"
+#import "RYGTempFiles.h"
+#import "RYGAccountRegistry.h"
+#import "RYGFileLog.h"
+#import "Lock/RYGLockManager.h"
+#import "Lock/RYGLockGroups.h"
+#import "Features/HiddenChats/RYGHiddenChats.h"
+#import "Features/DeletedMessages/RYGDeletedMessagesCapture.h"
+#import "Features/DeletedMessages/RYGNSEImport.h"
+#import "Features/DeletedMessages/RYGNSEConfig.h"
+#import "Features/FollowRequests/RYGFollowRequestTracker.h"
+#import "Features/General/RYGMessagesOnlySchedule.h"
+#import "Settings/RYGDonatePrompt.h"
 #include "../modules/fishhook/fishhook.h"
 
-///////////////////////////////////////////////////////////
+#define RYG_PREF(key) [RYGUtils getBoolPref:key]
+#define RYG_SCREENSHOT_BLOCKED RYG_PREF(@"remove_screenshot_alert")
+#define VOID_HANDLESCREENSHOT(orig) do { if (!RYG_SCREENSHOT_BLOCKED) { orig; } } while (0)
+#define NONVOID_HANDLESCREENSHOT(orig) do { if (RYG_SCREENSHOT_BLOCKED) return nil; return orig; } while (0)
 
-// Screenshot handlers
-
-#define VOID_HANDLESCREENSHOT(orig) [SCIUtils getBoolPref:@"remove_screenshot_alert"] ? nil : orig;
-#define NONVOID_HANDLESCREENSHOT(orig) return VOID_HANDLESCREENSHOT(orig)
-
-///////////////////////////////////////////////////////////
-
-// * Tweak version *
-NSString *SCIVersionString = @"v1.2.2";
-
-// Variables that work across features
+NSString *RYGVersionString = @"v1.3.4";
 BOOL dmVisualMsgsViewedButtonEnabled = false;
 
-// Tweak first-time setup
+static BOOL sLGButtons = NO;
+static BOOL sLGSurfaces = NO;
+static BOOL sLGForceOff = NO;
+static BOOL sLGProgressiveBlur = NO;
+
+static BOOL rygFlexEnabled(void) {return RYG_PREF(@"flex_app_launch") || RYG_PREF(@"flex_app_start") || RYG_PREF(@"flex_instagram");}
+
+static BOOL rygShouldHideMetaAIRecipient(id obj) {
+	return RYG_PREF(@"hide_meta_ai") && ([[obj recipient] threadName] && [[[obj recipient] threadName] isEqualToString:@"Meta AI"]);
+}
+
+static BOOL rygStringEquals(NSString *a, NSString *b) {
+	return a && [a isEqualToString:b];
+}
+
+static NSString *rygSafeValue(id obj, NSString *key) {
+	@try { return [obj valueForKey:key]; } @catch (__unused id e) { return nil; }
+}
+
+
+
+// MARK: - App lifecycle
+
+%group RYGAppLifecycleGroup
+
+static BOOL sDidShowSettings;
+
 %hook IGInstagramAppDelegate
 - (_Bool)application:(UIApplication *)application willFinishLaunchingWithOptions:(id)arg2 {
-    // Default SCInsta config
-    NSDictionary *sciDefaults = @{
-        @"hide_ads": @(YES),
-        @"copy_description": @(YES),
-        @"profile_copy_button": @(YES),
-        @"detailed_color_picker": @(YES),
-        @"remove_screenshot_alert": @(YES),
-        @"voice_call_confirm": @(NO),
-        @"video_call_confirm": @(NO),
-        @"keep_deleted_message": @(NO),
-        @"hide_suggested_stories": @(NO),
-        @"profile_analyzer_accumulate": @(NO),
-        @"story_tray_actions": @(NO),
-        @"zoom_profile_photo": @(NO),
-        @"follow_indicator": @(NO),
-        @"profile_note_copy": @(NO),
-        @"disable_disappearing_mode_swipe": @(NO),
-        @"hide_voice_call_button": @(NO),
-        @"hide_video_call_button": @(NO),
-        @"fake_location_enabled": @(NO),
-        @"show_fake_location_map_button": @(NO),
-        @"fake_location_lat": @(48.8584),
-        @"fake_location_lon": @(2.2945),
-        @"fake_location_name": @"Eiffel Tower",
-        @"fake_location_presets": @[],
-        @"messages_only": @(NO),
-        @"messages_only_hide_tabbar": @(NO),
-        @"fake_follower_count": @(NO),
-        @"fake_following_count": @(NO),
-        @"fake_post_count": @(NO),
-        @"fake_verified": @(NO),
-        @"launch_tab": @"default",
-        @"save_profile": @(YES),
-        // Per-context action buttons (new in 1.1.6)
-        @"feed_media_zoom": @(NO),
-        @"disable_bg_refresh": @(NO),
-        @"disable_home_refresh": @(NO),
-        @"disable_home_scroll": @(NO),
-        @"disable_reels_tab_refresh": @(NO),
-        @"dm_full_last_active": @(NO),
-        @"send_file": @(NO),
-        @"note_actions": @(NO),
-        @"note_copy_on_hold": @(NO),
-        @"feed_date_format": @"default",
-        // Per-surface date format toggles (see SCIDateFormatEntries.h)
-        @"date_fmt_mixed": @(YES),
-        @"date_fmt_notes_comments_stories": @(NO),
-        @"date_fmt_dms": @(NO),
-        @"feed_action_button": @(YES),
-        @"feed_action_default": @"menu",
-        @"reels_action_button": @(YES),
-        @"reels_action_default": @"menu",
-        @"stories_action_button": @(YES),
-        @"stories_action_default": @"menu",
-        @"dm_visual_action_button": @(YES),
-        @"dm_visual_action_default": @"menu",
-        @"dm_visual_seen_button": @(YES),
-        @"dm_visual_audio_toggle": @(NO),
-        // Legacy long-press gesture (off by default — kept for users who prefer it)
-        @"dw_legacy_gesture": @(NO),
-        @"dw_confirm": @(NO),
-        @"enhance_download_quality": @(YES),
-        @"default_video_quality": @"always_ask",
-        @"default_photo_quality": @"high",
-        @"ffmpeg_encoding_speed": @"ultrafast",
-        @"unfollow_confirm": @(NO),
-        @"dw_save_action": @"share",
-        @"dw_finger_count": @(3),
-        @"dw_finger_duration": @(0.5),
-        @"reels_tap_control": @"default",
-        @"reels_photo_tap_mute": @(NO),
-        @"nav_icon_ordering": @"default",
-        @"swipe_nav_tabs": @"default",
-        @"enable_notes_customization": @(YES),
-        @"custom_note_themes": @(YES),
-        @"disable_auto_unmuting_reels": @(NO),
-        @"auto_scroll_reels_mode": @"off",
-        @"sci_exp_flags_enabled": @(NO),
-        @"settings_shortcut": @(YES),
-        @"doom_scrolling_reel_count": @(1),
-        @"keep_seen_visual_local": @(NO),
-        @"send_audio_as_file": @(YES),
-        @"download_audio_message": @(NO),
-        @"save_to_ryukgram_album": @(NO),
-        @"unlock_password_reels": @(YES),
-        @"seen_mode": @"button",
-        @"seen_auto_on_interact": @(NO),
-        @"seen_auto_on_typing": @(NO),
-        @"seen_on_story_like": @(NO),
-        @"seen_on_story_reply": @(NO),
-        @"advance_on_story_reply": @(NO),
-        @"advance_on_mark_seen": @(NO),
-        @"advance_on_story_like": @(NO),
-        @"indicate_unsent_messages": @(NO),
-        @"unsent_message_toast": @(NO),
-        @"warn_refresh_clears_preserved": @(NO),
-        @"enable_chat_exclusions": @(YES),
-        @"chat_blocking_mode": @"block_all",
-        @"exclusions_default_keep_deleted": @(NO),
-        @"chat_quick_list_button": @(YES),
-        @"enable_story_user_exclusions": @(YES),
-        @"story_blocking_mode": @"block_all",
-        @"story_excluded_show_unexclude_eye": @(YES),
-        @"story_seen_mode": @"button",
-        @"story_audio_toggle": @(NO),
-        @"view_story_mentions": @(YES),
-        @"settings_pause_playback": @(YES),
-        @"embed_links": @(NO),
-        @"embed_link_domain": @"kkinstagram.com",
-        @"strip_tracking_params": @(NO),
-        @"download_highlight_cover": @(YES),
-        @"open_links_external": @(NO),
-        @"strip_browser_tracking": @(NO),
-        @"hide_feed_repost": @(NO),
-        @"copy_comment": @(YES),
-        @"download_gif_comment": @(YES),
-        @"cache_auto_clear_mode": @"off",
-        @"cache_auto_check_size": @(YES),
-        @"sci_changelog_force_show": @(NO),
-        @"live_anonymous_view": @(NO),
-        @"live_hide_comments": @(NO),
-        @"hide_ui_on_capture": @(NO),
-        @"paste_link_from_search": @(NO),
-        @"sci_language": @"system"
-    };
-    [[NSUserDefaults standardUserDefaults] registerDefaults:sciDefaults];
-    [SCIUtils setSciRegisteredDefaults:sciDefaults];
-    
-    // Override instagram defaults
-    if ([SCIUtils getBoolPref:@"liquid_glass_buttons"]) {
-        [[NSUserDefaults standardUserDefaults] setValue:@(YES) forKey:@"instagram.override.project.lucent.navigation"];
-    }
-    else {
-        [[NSUserDefaults standardUserDefaults] setValue:@(NO) forKey:@"instagram.override.project.lucent.navigation"];
-    }
-
-    return %orig;
+	[[NSUserDefaults standardUserDefaults] setValue:@(sLGButtons) forKey:@"instagram.override.project.lucent.navigation"];
+	return %orig;
 }
 - (_Bool)application:(UIApplication *)application didFinishLaunchingWithOptions:(id)arg2 {
-    %orig;
-
-    // Open settings for first-time users
-    double openDelay = [SCIUtils getBoolPref:@"tweak_settings_app_launch"] ? 0.0 : 5.0;
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(openDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (
-            ![[[NSUserDefaults standardUserDefaults] objectForKey:@"SCInstaFirstRun"] isEqualToString:SCIVersionString]
-            || [SCIUtils getBoolPref:@"tweak_settings_app_launch"]
-        ) {
-            NSLog(@"[SCInsta] First run — showing settings modal");
-            [SCIUtils showSettingsVC:[self window]];
-        }
-    });
-
-    if ([SCIUtils getBoolPref:@"flex_app_launch"]) {
-        [[objc_getClass("FLEXManager") sharedManager] showExplorer];
-    }
-
-    return true;
+	BOOL result = %orig;
+	[RYGTempFiles sweepLeftovers];
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ RYGFileLogExportToDocuments(); });
+	rygDMUpdateKeepAlive();
+	[[RYGFollowRequestTracker shared] refreshFromPrefs];
+	if ([RYGUtils getBoolPref:@"messages_only_schedule_enabled"])
+		[[RYGMessagesOnlySchedule shared] start];
+	[RYGCacheManager runAutoClearIfDue];
+	[RYGDonatePrompt noteAppLaunch];
+	[RYGNSEConfig startObserving];
+	[RYGNSEImport promoteDeleted];
+	[RYGNSEImport runCleanup];
+	return result;
 }
-
 - (void)applicationDidBecomeActive:(id)arg1 {
-    %orig;
-
-    if ([SCIUtils getBoolPref:@"flex_app_start"]) {
-        [[objc_getClass("FLEXManager") sharedManager] showExplorer];
-    }
-
+	%orig;
+	[RYGCacheManager recoverInterruptedAutoClear];
+	[RYGNSEImport promoteDeleted];
+	if ([[RYGUtils getStringPref:@"nse_cleanup_mode"] isEqualToString:@"on_open"]) [RYGNSEImport cleanStagingCache];
+	else [RYGNSEImport runCleanup];
 }
-
 - (void)applicationDidEnterBackground:(id)arg1 {
-    %orig;
-    // Cache housekeeping while backgrounded — never competes with IG's foreground I/O.
-    [SCICacheManager runAutoClearIfDue];
+	%orig;
+	[RYGCacheManager runAutoClearIfDue];
+	[[RYGLockManager shared] applyBackgroundInvalidation];
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ RYGFileLogExportToDocuments(); });
 }
+
 %end
 
-// Tab bar only exists in the logged-in state — fire the changelog popup here
-// rather than at app launch (which runs pre-login).
 %hook IGTabBarController
 - (void)viewDidAppear:(BOOL)animated {
-    %orig;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        [SCIChangelog presentIfNewFromWindow:self.view.window];
-    });
+	%orig;
+
+	[RYGAccountRegistry noteCurrentAccount];
+
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{[RYGChangelog presentIfNewFromWindow:self.view.window];});
+
+	if (sDidShowSettings) return;
+
+	id lastRun = [[NSUserDefaults standardUserDefaults] objectForKey:@"RyukGramFirstRun"];
+	BOOL firstRun = ![lastRun isKindOfClass:NSString.class] || ![(NSString *)lastRun isEqualToString:RYGVersionString];
+	if (!firstRun && !RYG_PREF(@"tweak_settings_app_launch")) return;
+
+	sDidShowSettings = YES;
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		if (!topMostController().presentedViewController) {
+			[RYGUtils showSettingsVC:self.view.window];
+		}
+	});
 }
+
 %end
+
+%end
+
+// MARK: - FLEX
+
+%group RYGFlexGroup
+
+%hook IGRootViewController
+- (void)viewDidLoad {
+	%orig;
+	static BOOL didAddActiveObserver = NO;
+	if (!didAddActiveObserver && RYG_PREF(@"flex_app_start")) {
+		didAddActiveObserver = YES;
+		[[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification *note) {
+			if (RYG_PREF(@"flex_app_start")) {
+				[[objc_getClass("FLEXManager") sharedManager] showExplorer];
+			}
+		}];
+	}
+	if (RYG_PREF(@"flex_instagram")) {
+		UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
+		longPress.minimumPressDuration = 1.0;
+		longPress.numberOfTouchesRequired = 5;
+		[self.view addGestureRecognizer:longPress];
+	}
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+	%orig;
+
+	static BOOL didShowFlexOnLaunch = NO;
+
+	if (!didShowFlexOnLaunch && RYG_PREF(@"flex_app_launch")) {
+		didShowFlexOnLaunch = YES;
+
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[[objc_getClass("FLEXManager") sharedManager] showExplorer];
+		});
+	}
+}
+
+%new
+- (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
+	if (sender.state == UIGestureRecognizerStateBegan && RYG_PREF(@"flex_instagram")) {
+		[[objc_getClass("FLEXManager") sharedManager] showExplorer];
+	}
+}
+
+%end
+
+%end
+
+// MARK: - Liquid glass
+
+%group RYGLiquidGlassGroup
 
 %hook IGDSLauncherConfig
-- (_Bool)isLiquidGlassInAppNotificationEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
-- (_Bool)isLiquidGlassContextMenuEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
-- (_Bool)isLiquidGlassToastEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
-- (_Bool)isLiquidGlassToastPeekEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
-- (_Bool)isLiquidGlassAlertDialogEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
-- (_Bool)isLiquidGlassIconBarButtonEnabled {
-    return [SCIUtils liquidGlassEnabledBool:%orig];
-}
+- (_Bool)isLiquidGlassInAppNotificationEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassToastEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassToastPeekEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassIconBarButtonEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassNavigationContentStylePinningEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassEaseInOutBlurEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
+- (_Bool)isLiquidGlassCGContextBlurEnabled {return sLGForceOff ? NO : (sLGButtons ? YES : %orig);}
 %end
 
+%end
 
-// Disable sending modded insta bug reports
+// MARK: - Progressive blur (iOS 26+ scroll-edge effect)
+
+%group RYGProgressiveBlurGroup
+%hook UIScrollEdgeEffect
++ (void)hide {}
+- (BOOL)ig_isHidden {return NO;}
+- (void)ig_setIsHidden:(BOOL)hidden {%orig(NO);}
+%end
+%end
+
+// MARK: - Debug / bug report blocking
+
+%group RYGDebugBlockGroup
 %hook IGWindow
-- (void)showDebugMenu {
-    return;
-}
+- (void)showDebugMenu {}
 %end
 
 %hook IGBugReportUploader
-- (id)initWithNetworker:(id)arg1
-         pandoGraphQLService:(id)arg2
-             analyticsLogger:(id)arg3
-                userDefaults:(id)arg4
-         launcherSetProvider:(id)arg5
-shouldPersistLastBugReportId:(id)arg6
-{
-    return nil;
-}
+- (id)initWithNetworker:(id)arg1 pandoGraphQLService:(id)arg2 analyticsLogger:(id)arg3 userDefaults:(id)arg4 launcherSetProvider:(id)arg5 shouldPersistLastBugReportId:(id)arg6 {return nil;}
+%end
 %end
 
-// Disable anti-screenshot feature on visual messages
+// MARK: - Screenshot blocking
+
+%group RYGScreenshotBlockGroup
 %hook IGStoryViewerContainerView
-- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 { VOID_HANDLESCREENSHOT(%orig); }
+- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
-
-// Disable screenshot logging/detection
 %hook IGDirectVisualMessageViewerSession
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 { NONVOID_HANDLESCREENSHOT(%orig); }
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {NONVOID_HANDLESCREENSHOT(%orig);}
 %end
-
 %hook IGDirectVisualMessageReplayService
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 { NONVOID_HANDLESCREENSHOT(%orig); }
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {NONVOID_HANDLESCREENSHOT(%orig);}
 %end
-
 %hook IGDirectVisualMessageReportService
-- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 { NONVOID_HANDLESCREENSHOT(%orig); }
+- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {RYGProbeOnce(@"hook.ssblock.vmreport", @"IGDirectVisualMessageReportService fired (legacy)");NONVOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGDirectVisualMessageScreenshotSafetyLogger
 - (id)initWithUserSession:(id)arg1 entryPoint:(NSInteger)arg2 {
-    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) {
-        NSLog(@"[SCInsta] Disable visual message screenshot safety logger");
-        return nil;
-    }
-
-    return %orig;
+	RYGProbeOnce(@"hook.ssblock.safetylogger", @"IGDirectVisualMessageScreenshotSafetyLogger fired (current)");
+	if (!RYG_SCREENSHOT_BLOCKED) return %orig;
+	return nil;
 }
+
 %end
 
 %hook IGScreenshotObserver
-- (id)initForController:(id)arg1 { NONVOID_HANDLESCREENSHOT(%orig); }
+- (id)initForController:(id)arg1 {RYGProbeOnce(@"hook.ssblock.observer", @"IGScreenshotObserver fired (current)");NONVOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGScreenshotObserverDelegate
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {RYGProbeOnce(@"hook.ssblock.observerdelegate", @"IGScreenshotObserverDelegate fired (legacy)");VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGDirectMediaViewerViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGStoryViewerViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGSundialFeedViewController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
 
 %hook IGDirectVisualMessageViewerController
-- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }
-- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }
-
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
 %end
 
-/////////////////////////////////////////////////////////////////////////////
+%hook _TtC27IGDirectMediaViewerKitSwift33IGDirectMediaViewerViewController
+- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {VOID_HANDLESCREENSHOT(%orig);}
+- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {VOID_HANDLESCREENSHOT(%orig);}
+%end
+%end
 
-// Hide items
+// MARK: - Hide / filter UI items
 
-// Direct suggested chats (in search bar)
+%group RYGHideItemsGroup
+
 %hook IGDirectInboxSearchListAdapterDataSource
+
 - (id)objectsForListAdapter:(id)arg1 {
-    NSArray *originalObjs = %orig();
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
+	NSArray *items = %orig();
+	BOOL hideMeta = RYG_PREF(@"hide_meta_ai");
+	BOOL hideChats = RYG_PREF(@"no_suggested_chats");
 
-    for (id obj in originalObjs) {
-        BOOL shouldHide = NO;
+	if (!hideMeta && !hideChats) return items;
 
-        // Section header 
-        if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) {
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
 
-            // Broadcast channels
-            if ([[obj valueForKey:@"uniqueIdentifier"] isEqualToString:@"channels"]) {
-                if ([SCIUtils getBoolPref:@"no_suggested_chats"]) {
-                    NSLog(@"[SCInsta] Hiding suggested chats (header)");
+	for (id obj in items) {
+		BOOL hide = NO;
 
-                    shouldHide = YES;
-                }
-            }
+		if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) {
+			NSString *uid = rygSafeValue(obj, @"uniqueIdentifier");
+			NSString *title = rygSafeValue(obj, @"labelTitle");
+			hide = (hideChats && rygStringEquals(uid, @"channels")) || (hideMeta && (rygStringEquals(title, @"Ask Meta AI") || rygStringEquals(title, @"AI")));
+		} else if ([obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsPillsSectionViewModel)] || [obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsSuggestedPromptViewModel)] || [obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsSuggestedPromptLoggingViewModel)]) {
+			hide = hideMeta;
+		} else if ([obj isKindOfClass:%c(IGDirectRecipientCellViewModel)]) {
+			hide = (hideChats && [[obj recipient] isBroadcastChannel]) || (hideMeta && (([obj sectionType] == 20) || ([obj sectionType] == 18) || rygStringEquals([[obj recipient] threadName], @"Meta AI")));
+		}
 
-            // Ask Meta AI
-            else if ([[obj valueForKey:@"labelTitle"] isEqualToString:@"Ask Meta AI"]) {
-                if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                    NSLog(@"[SCInsta] Hiding meta ai suggested chats (header)");
+		if (!hide) [out addObject:obj];
+	}
 
-                    shouldHide = YES;
-                }
-            }
-
-            // AI
-            else if ([[obj valueForKey:@"labelTitle"] isEqualToString:@"AI"]) {
-                if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                    NSLog(@"[SCInsta] Hiding ai suggested chats (header)");
-
-                    shouldHide = YES;
-                }
-            }
-            
-        }
-
-        // AI agents section
-        else if (
-            [obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsPillsSectionViewModel)]
-         || [obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsSuggestedPromptViewModel)]
-         || [obj isKindOfClass:%c(IGDirectInboxSearchAIAgentsSuggestedPromptLoggingViewModel)]
-        ) {
-
-            if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                NSLog(@"[SCInsta] Hiding suggested chats (ai agents)");
-
-                shouldHide = YES;
-            }
-
-        }
-
-        // Recipients list
-        else if ([obj isKindOfClass:%c(IGDirectRecipientCellViewModel)]) {
-
-            // Broadcast channels
-            if ([[obj recipient] isBroadcastChannel]) {
-                if ([SCIUtils getBoolPref:@"no_suggested_chats"]) {
-                    NSLog(@"[SCInsta] Hiding suggested chats (broadcast channels recipient)");
-
-                    shouldHide = YES;
-                }
-            }
-            
-            // Meta AI (special section types)
-            else if (([obj sectionType] == 20) || [obj sectionType] == 18) {
-                if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                    NSLog(@"[SCInsta] Hiding meta ai suggested chats (meta ai recipient)");
-
-                    shouldHide = YES;
-                }
-            }
-
-            // Meta AI (catch-all)
-            else if ([[[obj recipient] threadName] isEqualToString:@"Meta AI"]) {
-                if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                    NSLog(@"[SCInsta] Hiding meta ai suggested chats (meta ai recipient)");
-
-                    shouldHide = YES;
-                }
-            }
-        }
-
-        // Populate new objs array
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-
-    }
-
-    return [filteredObjs copy];
+	return out.copy;
 }
+
 %end
 
-// Direct suggested chats (thread creation view)
 %hook IGDirectThreadCreationViewController
+
 - (id)objectsForListAdapter:(id)arg1 {
-    NSArray *originalObjs = %orig();
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
+	NSArray *items = %orig();
+	BOOL hideMeta = RYG_PREF(@"hide_meta_ai"), hideUsers = RYG_PREF(@"no_suggested_users");
+	if (!hideMeta && !hideUsers) return items;
 
-    for (id obj in originalObjs) {
-        BOOL shouldHide = NO;
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
+	for (id obj in items) {
+		BOOL hide = NO;
 
-        // Meta AI suggested user in direct new message view
-        if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-            
-            if ([obj isKindOfClass:%c(IGDirectCreateChatCellViewModel)]) {
+		if (hideMeta && [obj isKindOfClass:%c(IGDirectCreateChatCellViewModel)]) {hide = rygStringEquals(rygSafeValue(obj, @"title"), @"AI chats");
+		} else if (hideMeta && [obj isKindOfClass:%c(IGDirectRecipientCellViewModel)]) {hide = rygStringEquals([[obj recipient] threadName], @"Meta AI");
+		} else if (hideUsers && [obj isKindOfClass:%c(IGContactInvitesSearchUpsellViewModel)]) {hide = YES;}
 
-                // "AI Chats"
-                if ([[obj valueForKey:@"title"] isEqualToString:@"AI chats"]) {
-                    NSLog(@"[SCInsta] Hiding meta ai: direct thread creation ai chats section");
+		if (!hide) [out addObject:obj];
+	}
 
-                    shouldHide = YES;
-                }
+	return out.copy;
+}
 
-            }
+%end
 
-            else if ([obj isKindOfClass:%c(IGDirectRecipientCellViewModel)]) {
+%hook _TtC34IGDirectInboxListAdapterDataSource34IGDirectInboxListAdapterDataSource
 
-                // Meta AI suggested user
-                if ([[[obj recipient] threadName] isEqualToString:@"Meta AI"]) {
-                    NSLog(@"[SCInsta] Hiding meta ai: direct thread creation ai suggestion");
+- (id)objectsForListAdapter:(id)arg1 {
+	NSArray *items = %orig();
+	BOOL hideUsers = RYG_PREF(@"no_suggested_users"), hideNotes = RYG_PREF(@"hide_notes_tray");
+	BOOL hideLockedChats = RYG_PREF(@"lock_chats_hide_from_inbox")
+		&& [[RYGLockManager shared] isGroupLocked:RYGLockGroupChats];
+	NSArray<NSString *> *lockedIDs = hideLockedChats ? [[RYGLockManager shared] lockedChatIDs] : nil;
+	NSArray<NSString *> *hiddenIDs = [RYGHiddenChats allThreadIDs];
+	BOOL hasHiddenChats = hiddenIDs.count > 0 && ![RYGHiddenChats revealed];
 
-                    shouldHide = YES;
-                }
+	if (!hideUsers && !hideNotes && !hideLockedChats && !hasHiddenChats) return items;
 
-            }
-            
-        }
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
+	for (id obj in items) {
+		BOOL hide = NO;
 
-        // Invite friends to insta contacts upsell
-        if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-            if ([obj isKindOfClass:%c(IGContactInvitesSearchUpsellViewModel)]) {
-                NSLog(@"[SCInsta] Hiding suggested users: invite contacts upsell");
+		if ([obj isKindOfClass:%c(IGDirectInboxHeaderCellViewModel)]) {
+			NSString *title = [obj title];
+			hide = hideUsers && (rygStringEquals(title, @"Suggestions") || [title hasPrefix:@"Accounts to"]);
+		} else if ([obj isKindOfClass:%c(IGDirectInboxSuggestedThreadCellViewModel)]) {hide = hideUsers;
+		} else if ([obj isKindOfClass:%c(IGDiscoverPeopleItemConfiguration)] || [obj isKindOfClass:%c(IGDiscoverPeopleConnectionItemConfiguration)]) {hide = hideUsers;
+		} else if ([obj isKindOfClass:NSClassFromString(@"_TtC28IGDirectNotesViewModelsSwift29IGDirectNotesTrayRowViewModel")]) {hide = hideNotes;
+		} else if ([obj isKindOfClass:%c(IGDirectInboxThreadCellViewModel)]) {
+			NSString *tid = rygSafeValue(obj, @"threadId");
+			if (tid.length) {
+				if (hasHiddenChats && [hiddenIDs containsObject:tid]) hide = YES;
+				else if (hideLockedChats && [lockedIDs containsObject:tid]) hide = YES;
+			}
+		}
 
-                shouldHide = YES;
-            }
-        }
+		if (!hide) [out addObject:obj];
+	}
 
-        // Populate new objs array
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-    }
-
-    return [filteredObjs copy];
+	return out.copy;
 }
 %end
 
-// Direct suggested chats (inbox view)
-%hook IGDirectInboxListAdapterDataSource
-- (id)objectsForListAdapter:(id)arg1 {
-    NSArray *originalObjs = %orig();
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
-
-    for (id obj in originalObjs) {
-        BOOL shouldHide = NO;
-
-        // Section header
-        if ([obj isKindOfClass:%c(IGDirectInboxHeaderCellViewModel)]) {
-            
-            // "Suggestions" header
-            if ([[obj title] isEqualToString:@"Suggestions"]) {
-                if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-                    NSLog(@"[SCInsta] Hiding suggested chats (header: messages tab)");
-
-                    shouldHide = YES;
-                }
-            }
-
-            // "Accounts to follow/message" header
-            else if ([[obj title] hasPrefix:@"Accounts to"]) {
-                if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-                    NSLog(@"[SCInsta] Hiding suggested users: (header: inbox view)");
-
-                    shouldHide = YES;
-                }
-            }
-
-        }
-
-        // Suggested recipients
-        else if ([obj isKindOfClass:%c(IGDirectInboxSuggestedThreadCellViewModel)]) {
-            if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-                NSLog(@"[SCInsta] Hiding suggested chats (recipients: channels tab)");
-
-                shouldHide = YES;
-            }
-        }
-
-        // "Accounts to follow" recipients
-        else if ([obj isKindOfClass:%c(IGDiscoverPeopleItemConfiguration)] || [obj isKindOfClass:%c(IGDiscoverPeopleConnectionItemConfiguration)]) {
-            if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-                NSLog(@"[SCInsta] Hiding suggested chats: (recipients: inbox view)");
-
-                shouldHide = YES;
-            }
-        }
-
-        // Hide notes tray
-        else if ([obj isKindOfClass:%c(IGDirectNotesTrayRowViewModel)]) {
-            if ([SCIUtils getBoolPref:@"hide_notes_tray"]) {
-                NSLog(@"[SCInsta] Hiding notes tray");
-
-                shouldHide = YES;
-            }
-        }
-
-        // Populate new objs array
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-
-    }
-
-    return [filteredObjs copy];
-}
-%end
-
-// Explore page results
 %hook IGSearchListKitDataSource
 - (id)objectsForListAdapter:(id)arg1 {
-    NSArray *originalObjs = %orig();
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
+	NSArray *items = %orig();
+	BOOL hideMeta = RYG_PREF(@"hide_meta_ai");
+	BOOL hideUsers = RYG_PREF(@"no_suggested_users");
 
-    for (id obj in originalObjs) {
-        BOOL shouldHide = NO;
+	if (!hideMeta && !hideUsers) return items;
 
-        // Meta AI
-        if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
 
-            // Section header 
-            if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) {
+	for (id obj in items) {
+		BOOL hide = NO;
 
-                // "Ask Meta AI" search results header
-                if ([[obj valueForKey:@"labelTitle"] isEqualToString:@"Ask Meta AI"]) {
-                    shouldHide = YES;
-                }
+		if (hideMeta) {
+			if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) hide = rygStringEquals(rygSafeValue(obj, @"labelTitle"), @"Ask Meta AI");
+			else if ([obj isKindOfClass:%c(IGSearchNullStateUpsellViewModel)] || [obj isKindOfClass:%c(IGSearchResultNestedGroupViewModel)]) hide = YES;
+			else if ([obj isKindOfClass:(NSClassFromString(@"_TtC18IGSearchViewModels23IGSearchResultViewModel") ?: NSClassFromString(@"IGSearchResultViewModel"))]) hide = ([obj itemType] == 6) || rygStringEquals([[obj title] string], @"meta.ai");
+		}
 
-            }
+		if (!hide && hideUsers) {
+			if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) hide = rygStringEquals(rygSafeValue(obj, @"labelTitle"), @"Suggested for you");
+			else if ([obj isKindOfClass:%c(IGDiscoverPeopleItemConfiguration)]) hide = YES;
+			else if ([obj isKindOfClass:%c(IGSeeAllItemConfiguration)] && ((IGSeeAllItemConfiguration *)obj).destination == 4) hide = YES;
+		}
 
-            // Empty search bar upsell view
-            else if ([obj isKindOfClass:%c(IGSearchNullStateUpsellViewModel)]) {
-                shouldHide = YES;
-            }
+		if (!hide) [out addObject:obj];
+	}
 
-            // Meta AI search suggestions
-            else if ([obj isKindOfClass:%c(IGSearchResultNestedGroupViewModel)]) {
-                shouldHide = YES;
-            }
-
-            // Meta AI suggested search results
-            else if ([obj isKindOfClass:%c(IGSearchResultViewModel)]) {
-
-                // itemType 6 is meta ai suggestions
-                if ([obj itemType] == 6) {
-                    if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                        shouldHide = YES;
-                    }
-                    
-                }
-
-                // Meta AI user account in search results
-                else if ([[[obj title] string] isEqualToString:@"meta.ai"]) {
-                    if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                        shouldHide = YES;
-                    }
-                }
-
-            }
-            
-        }
-
-        // No suggested users
-        if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-
-            // Section header 
-            if ([obj isKindOfClass:%c(IGLabelItemViewModel)]) {
-
-                // "Suggested for you" search results header
-                if ([[obj valueForKey:@"labelTitle"] isEqualToString:@"Suggested for you"]) {
-                    shouldHide = YES;
-                }
-
-            }
-
-            // Instagram users
-            else if ([obj isKindOfClass:%c(IGDiscoverPeopleItemConfiguration)]) {
-                shouldHide = YES;
-            }
-
-            // See all suggested users
-            else if ([obj isKindOfClass:%c(IGSeeAllItemConfiguration)] && ((IGSeeAllItemConfiguration *)obj).destination == 4) {
-                shouldHide = YES;
-            }
-
-        }
-
-        // Populate new objs array
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-
-    }
-
-    return [filteredObjs copy];
+	return out.copy;
 }
+
 %end
 
-// Story tray
-%hook IGMainStoryTrayDataSource
-- (id)allItemsForTrayUsingCachedValue:(BOOL)cached {
-    NSArray *originalObjs = %orig(cached);
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
-
-    for (IGStoryTrayViewModel *obj in originalObjs) {
-        BOOL shouldHide = NO;
-
-        if ([SCIUtils getBoolPref:@"no_suggested_users"]) {
-            if ([obj isKindOfClass:%c(IGStoryTrayViewModel)]) {
-                NSNumber *type = [((IGStoryTrayViewModel *)obj) valueForKey:@"type"];
-                
-                // 8/9 looks to be the types for recommended stories
-                if ([type isEqual:@(8)] || [type isEqual:@(9)]) {
-                    NSLog(@"[SCInsta] Hiding suggested users: story tray");
-
-                    shouldHide = YES;
-
-                }
-            }
-        }
-
-        if ([SCIUtils getBoolPref:@"hide_ads"]) {
-            // "New!" account id is 3538572169
-            if ([obj isKindOfClass:%c(IGStoryTrayViewModel)] && (obj.isUnseenNux == YES || [obj.pk isEqualToString:@"3538572169"])) {
-                NSLog(@"[SCInsta] Removing ads: story tray");
-
-                shouldHide = YES;
-            }
-        }
-
-        // Populate new objs array
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-    }
-
-    return [filteredObjs copy];
-}
-%end
-
-// Story tray expanded footer (Suggested accounts to follow)
-%hook IGStoryTraySectionController
-- (void)storyTrayControllerShowSUPOGEducationBump {
-    if ([SCIUtils getBoolPref:@"no_suggested_users"]) return;
-
-    return %orig();
-}
-%end
-
-// Modern IGDS app menus
 %hook IGDSMenu
-- (id)initWithMenuItems:(NSArray<IGDSMenuItem *> *)originalObjs edr:(BOOL)edr headerLabelText:(id)headerLabelText {
-    NSMutableArray *filteredObjs = [NSMutableArray arrayWithCapacity:[originalObjs count]];
 
-    for (id obj in originalObjs) {
-        BOOL shouldHide = NO;
+- (id)initWithMenuItems:(NSArray<IGDSMenuItem *> *)items edr:(BOOL)edr headerLabelText:(id)headerLabelText {
+	BOOL hideMeta = RYG_PREF(@"hide_meta_ai");
+	NSMutableArray *out = [NSMutableArray arrayWithCapacity:items.count];
 
-        NSString *itemTitle = nil;
-        @try { itemTitle = [obj valueForKey:@"title"]; } @catch (__unused id e) {}
+	for (id obj in items) {
+		NSString *title = rygSafeValue(obj, @"title");
+		BOOL hide = hideMeta && (rygStringEquals(title, @"AI images") || rygStringEquals(title, @"Meta AI"));
 
-        // Meta AI
-        if ([itemTitle isEqualToString:@"AI images"] || [itemTitle isEqualToString:@"Meta AI"]) {
-            if ([SCIUtils getBoolPref:@"hide_meta_ai"]) {
-                shouldHide = YES;
-            }
-        }
+		if (!hide) [out addObject:obj];
+	}
 
-        if (!shouldHide) {
-            [filteredObjs addObject:obj];
-        }
-    }
+	extern NSArray *rygAppendStoryEntriesToIGDSMenu(NSArray *);
+	NSArray *finalItems = rygAppendStoryEntriesToIGDSMenu(out.copy);
 
-    extern NSArray *sciMaybeAppendStoryExcludeMenuItem(NSArray *);
-    extern NSArray *sciMaybeAppendStoryAudioMenuItem(NSArray *);
-    extern NSArray *sciMaybeAppendStoryMentionsMenuItem(NSArray *);
-    NSArray *finalObjs = sciMaybeAppendStoryExcludeMenuItem([filteredObjs copy]);
-    finalObjs = sciMaybeAppendStoryAudioMenuItem(finalObjs);
-    finalObjs = sciMaybeAppendStoryMentionsMenuItem(finalObjs);
-    return %orig(finalObjs, edr, headerLabelText);
+	return %orig(finalItems, edr, headerLabelText);
 }
+
 %end
 
-/////////////////////////////////////////////////////////////////////////////
+%end
 
-// Confirm buttons
+// MARK: - Confirm / button behavior
+
+%group RYGConfirmActionsGroup
 
 %hook IGFeedItemUFICell
-- (void)UFIButtonBarDidTapOnLike:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm"]) {
-        NSLog(@"[SCInsta] Confirm post like triggered");
 
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    }
-    else {
-        return %orig;
-    }  
+- (void)UFIButtonBarDidTapOnLike:(id)arg1 {
+	if (!RYG_PREF(@"like_confirm")) return %orig;
+	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm like: Posts")];
 }
 
 - (void)UFIButtonBarDidTapOnRepost:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"repost_confirm"]) {
-        NSLog(@"[SCInsta] Confirm repost triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    }
-    else {
-        return %orig;
-    }
+	if (!RYG_PREF(@"repost_confirm")) return %orig;
+	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm repost")];
 }
 
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"repost_confirm"]) {
-        NSLog(@"[SCInsta] Confirm repost triggered (long press ignored)");
-    }
-    else {
-        return %orig;
-    }
+	if (!RYG_PREF(@"repost_confirm")) return %orig;
 }
+
 - (void)UFIButtonBarDidLongPressOnRepost:(id)arg1 withGestureRecognizer:(id)arg2 {
-    if ([SCIUtils getBoolPref:@"repost_confirm"]) {
-        NSLog(@"[SCInsta] Confirm repost triggered (long press ignored)");
-    }
-    else {
-        return %orig;
-    }
+	if (!RYG_PREF(@"repost_confirm")) return %orig;
 }
+
 %end
 
-// Hide repost button in feed (requires restart)
 %hook IGUFIInteractionCountsView
 - (void)updateUFIWithButtonsConfig:(id)config interactionCountProvider:(id)provider {
-    %orig;
-    if (![SCIUtils getBoolPref:@"hide_feed_repost"]) return;
-    Ivar rv = class_getInstanceVariable(object_getClass(self), "_repostView");
-    if (rv) [object_getIvar((id)self, rv) setHidden:YES];
-    Ivar uv = class_getInstanceVariable(object_getClass(self), "_undoRepostButton");
-    if (uv) [object_getIvar((id)self, uv) setHidden:YES];
+	%orig;
+	if (!RYG_PREF(@"hide_feed_repost")) return;
+	Ivar rv = class_getInstanceVariable(object_getClass(self), "_repostView");
+	Ivar uv = class_getInstanceVariable(object_getClass(self), "_undoRepostButton");
+	if (rv) [object_getIvar((id)self, rv) setHidden:YES];
+	if (uv) [object_getIvar((id)self, uv) setHidden:YES];
 }
 %end
 
-
-%hook IGSundialViewerVerticalUFI
-- (void)_didTapLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        NSLog(@"[SCInsta] Confirm reels like triggered");
-
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    }
-    else {
-        return %orig;
-    }
+%hook _TtC26IGSundialViewerVerticalUFI26IGSundialViewerVerticalUFI
+- (void)didLongPressLikeButton:(id)arg1 {
+	if (!RYG_PREF(@"like_confirm_reels")) return %orig;
+}
+- (void)didTapRepostButton {
+	if (RYG_PREF(@"hide_reels_repost")) return;
+	if (!RYG_PREF(@"repost_confirm")) return %orig;
+	[RYGUtils showConfirmation:^{ %orig; } title:RYGLocalized(@"Confirm repost")];
 }
 
-- (void)_didLongPressLikeButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"like_confirm_reels"]) {
-        NSLog(@"[SCInsta] Confirm repost triggered (long press ignored)");
-    }
-    else {
-        return %orig;
-    }
-}
-
-- (void)_didTapRepostButton {
-    if ([SCIUtils getBoolPref:@"hide_reels_repost"]) return;
-    if ([SCIUtils getBoolPref:@"repost_confirm"]) {
-        [SCIUtils showConfirmation:^(void) { %orig; }];
-    }
-    else {
-        %orig;
-    }
-}
-
-- (void)_didLongPressRepostButton:(id)arg1 {
-    if ([SCIUtils getBoolPref:@"hide_reels_repost"]) return;
-    if ([SCIUtils getBoolPref:@"repost_confirm"]) return;
-    %orig;
+- (void)didLongPressRepostButton:(id)arg1 {
+	if (RYG_PREF(@"hide_reels_repost") || RYG_PREF(@"repost_confirm")) return;
+	%orig;
 }
 %end
 
-// Hide repost button at the view model level so IG's layout handles the gap
 %hook IGSundialViewerUFIViewModel
 - (BOOL)shouldShowRepostButton {
-    if ([SCIUtils getBoolPref:@"hide_reels_repost"]) return NO;
-    return %orig;
+	return RYG_PREF(@"hide_reels_repost") ? NO : %orig;
 }
 %end
-
-/////////////////////////////////////////////////////////////////////////////
-
-// FLEX explorer gesture handler
-%hook IGRootViewController
-- (void)viewDidLoad {
-    %orig;
-    
-    // Recognize 5-finger long press
-    UILongPressGestureRecognizer *longPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
-    longPress.minimumPressDuration = 1;
-    longPress.numberOfTouchesRequired = 5;
-    [self.view addGestureRecognizer:longPress];
-}
-%new - (void)handleLongPress:(UILongPressGestureRecognizer *)sender {
-    if (sender.state != UIGestureRecognizerStateBegan) return;
-
-    if ([SCIUtils getBoolPref:@"flex_instagram"]) {
-        [[objc_getClass("FLEXManager") sharedManager] showExplorer];
-    }
-}
 %end
 
-// Disable safe mode (defaults reset upon subsequent crashes)
+// MARK: - Safe mode
+
+%group RYGSafeModeGroup
+
 %hook IGSafeModeChecker
+
 - (id)initWithInstacrashCounterProvider:(void *)provider crashThreshold:(unsigned long long)threshold {
-    if ([SCIUtils getBoolPref:@"disable_safe_mode"]) return nil;
-
-    return %orig(provider, threshold);
+	return RYG_PREF(@"disable_safe_mode") ? nil : %orig(provider, threshold);
 }
+
 - (unsigned long long)crashCount {
-    if ([SCIUtils getBoolPref:@"disable_safe_mode"]) {
-        return 0;
-    }
-
-    return %orig;
+	return RYG_PREF(@"disable_safe_mode") ? 0 : %orig;
 }
+
 %end
 
-// liquid glass Swift class hooks
+%end
+
+// MARK: - Liquid glass runtime hooks
+
 static BOOL (*orig_swizzleToggle_isEnabled)(id, SEL) = NULL;
-static BOOL new_swizzleToggle_isEnabled(id self, SEL _cmd) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_buttons"]) return YES;
-    return orig_swizzleToggle_isEnabled(self, _cmd);
-}
-
 static BOOL (*orig_expHelper_isEnabled)(id, SEL) = NULL;
-static BOOL new_expHelper_isEnabled(id self, SEL _cmd) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_buttons"]) return YES;
-    return orig_expHelper_isEnabled(self, _cmd);
-}
-
 static BOOL (*orig_expHelper_isHomeFeed)(id, SEL) = NULL;
-static BOOL new_expHelper_isHomeFeed(id self, SEL _cmd) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_buttons"]) return YES;
-    return orig_expHelper_isHomeFeed(self, _cmd);
-}
 
-// Liquid glass tab bar — C function hooks via fishhook
-// Credits: @euoradan (Radan) for discovering these flags
+static BOOL new_swizzleToggle_isEnabled(id self, SEL _cmd) {return !sLGForceOff;}
+static BOOL new_expHelper_isEnabled(id self, SEL _cmd) {return !sLGForceOff;}
+static BOOL new_expHelper_isHomeFeed(id self, SEL _cmd) {return !sLGForceOff;}
+
 static BOOL (*orig_IGFloatingTabBarEnabled)(void) = NULL;
 static BOOL (*orig_IGTabBarDynamicSizingEnabled)(void) = NULL;
 static BOOL (*orig_IGTabBarEnhancedDynamicSizingEnabled)(void) = NULL;
 static BOOL (*orig_IGTabBarHomecomingWithFloatingTabEnabled)(void) = NULL;
-static BOOL (*orig_IGTabBarViewPointFixEnabled)(void) = NULL;
 static NSInteger (*orig_IGTabBarStyleForLauncherSet)(NSInteger) = NULL;
 
-static BOOL hook_IGFloatingTabBarEnabled(void) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return YES;
-    return orig_IGFloatingTabBarEnabled ? orig_IGFloatingTabBarEnabled() : NO;
-}
-static BOOL hook_IGTabBarDynamicSizingEnabled(void) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return YES;
-    return orig_IGTabBarDynamicSizingEnabled ? orig_IGTabBarDynamicSizingEnabled() : NO;
-}
-static BOOL hook_IGTabBarEnhancedDynamicSizingEnabled(void) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return YES;
-    return orig_IGTabBarEnhancedDynamicSizingEnabled ? orig_IGTabBarEnhancedDynamicSizingEnabled() : NO;
-}
-static BOOL hook_IGTabBarHomecomingWithFloatingTabEnabled(void) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return YES;
-    return orig_IGTabBarHomecomingWithFloatingTabEnabled ? orig_IGTabBarHomecomingWithFloatingTabEnabled() : NO;
-}
-static BOOL hook_IGTabBarViewPointFixEnabled(void) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return YES;
-    return orig_IGTabBarViewPointFixEnabled ? orig_IGTabBarViewPointFixEnabled() : NO;
-}
+#define RYG_BOOL_FISHHOOK(name) static BOOL hook_##name(void) {return !sLGForceOff;}
+
+RYG_BOOL_FISHHOOK(IGFloatingTabBarEnabled)
+RYG_BOOL_FISHHOOK(IGTabBarDynamicSizingEnabled)
+RYG_BOOL_FISHHOOK(IGTabBarEnhancedDynamicSizingEnabled)
+RYG_BOOL_FISHHOOK(IGTabBarHomecomingWithFloatingTabEnabled)
+
+// style 0 = classic tab bar, 1 = floating/liquid glass
 static NSInteger hook_IGTabBarStyleForLauncherSet(NSInteger set) {
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) return 1;
-    return orig_IGTabBarStyleForLauncherSet ? orig_IGTabBarStyleForLauncherSet(set) : set;
+	return sLGForceOff ? 0 : 1;
+}
+
+static void rygInstallLiquidGlassHooks(void) {
+	if (sLGButtons || sLGForceOff) {
+		Class swizzleToggle = objc_getClass("IGLiquidGlassSwizzle.IGLiquidGlassSwizzleToggle");
+
+		if (swizzleToggle) {
+			MSHookMessageEx(swizzleToggle, @selector(isEnabled), (IMP)new_swizzleToggle_isEnabled, (IMP *)&orig_swizzleToggle_isEnabled);
+		}
+
+		Class expHelper = objc_getClass("IGLiquidGlassExperimentHelper.IGLiquidGlassNavigationExperimentHelper");
+
+		if (expHelper) {
+			MSHookMessageEx(expHelper, @selector(isEnabled), (IMP)new_expHelper_isEnabled, (IMP *)&orig_expHelper_isEnabled);
+			MSHookMessageEx(expHelper, @selector(isHomeFeedHeaderEnabled), (IMP)new_expHelper_isHomeFeed, (IMP *)&orig_expHelper_isHomeFeed);
+		}
+	}
+
+	if (sLGSurfaces || sLGForceOff) {
+		rebind_symbols((struct rebinding[]){
+			{"IGFloatingTabBarEnabled", (void *)hook_IGFloatingTabBarEnabled, (void **)&orig_IGFloatingTabBarEnabled},
+			{"IGTabBarDynamicSizingEnabled", (void *)hook_IGTabBarDynamicSizingEnabled, (void **)&orig_IGTabBarDynamicSizingEnabled},
+			{"IGTabBarEnhancedDynamicSizingEnabled", (void *)hook_IGTabBarEnhancedDynamicSizingEnabled, (void **)&orig_IGTabBarEnhancedDynamicSizingEnabled},
+			{"IGTabBarHomecomingWithFloatingTabEnabled", (void *)hook_IGTabBarHomecomingWithFloatingTabEnabled, (void **)&orig_IGTabBarHomecomingWithFloatingTabEnabled},
+			{"IGTabBarStyleForLauncherSet", (void *)hook_IGTabBarStyleForLauncherSet, (void **)&orig_IGTabBarStyleForLauncherSet},
+		}, 5);
+	}
 }
 
 %ctor {
-    // ObjC hooks for liquid glass buttons
-    Class swizzleToggle = objc_getClass("IGLiquidGlassSwizzle.IGLiquidGlassSwizzleToggle");
-    if (swizzleToggle) {
-        MSHookMessageEx(swizzleToggle, @selector(isEnabled),
-                        (IMP)new_swizzleToggle_isEnabled, (IMP *)&orig_swizzleToggle_isEnabled);
-    }
+	RYGMigrateLegacyDefaults();
+	RYGMigrateActivityModes();
+	RYGRegisterDefaultsOnce();
+	RYGDropMistypedStoredDefaults();
 
-    Class expHelper = objc_getClass("IGLiquidGlassExperimentHelper.IGLiquidGlassNavigationExperimentHelper");
-    if (expHelper) {
-        MSHookMessageEx(expHelper, @selector(isEnabled),
-                        (IMP)new_expHelper_isEnabled, (IMP *)&orig_expHelper_isEnabled);
-        MSHookMessageEx(expHelper, @selector(isHomeFeedHeaderEnabled),
-                        (IMP)new_expHelper_isHomeFeed, (IMP *)&orig_expHelper_isHomeFeed);
-    }
+	sLGForceOff = RYG_PREF(@"liquid_glass_force_off");
 
-    // C function hooks for liquid glass tab bar / surfaces (fishhook)
-    if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) {
-        int result = rebind_symbols((struct rebinding[]){
-            {"IGFloatingTabBarEnabled", (void *)hook_IGFloatingTabBarEnabled, (void **)&orig_IGFloatingTabBarEnabled},
-            {"IGTabBarDynamicSizingEnabled", (void *)hook_IGTabBarDynamicSizingEnabled, (void **)&orig_IGTabBarDynamicSizingEnabled},
-            {"IGTabBarEnhancedDynamicSizingEnabled", (void *)hook_IGTabBarEnhancedDynamicSizingEnabled, (void **)&orig_IGTabBarEnhancedDynamicSizingEnabled},
-            {"IGTabBarHomecomingWithFloatingTabEnabled", (void *)hook_IGTabBarHomecomingWithFloatingTabEnabled, (void **)&orig_IGTabBarHomecomingWithFloatingTabEnabled},
-            {"IGTabBarViewPointFixEnabled", (void *)hook_IGTabBarViewPointFixEnabled, (void **)&orig_IGTabBarViewPointFixEnabled},
-            {"IGTabBarStyleForLauncherSet", (void *)hook_IGTabBarStyleForLauncherSet, (void **)&orig_IGTabBarStyleForLauncherSet},
-        }, 6);
-        NSLog(@"[SCInsta] Liquid glass fishhook result=%d floating=%p dynamic=%p enhanced=%p homecoming=%p viewpoint=%p style=%p",
-              result, orig_IGFloatingTabBarEnabled, orig_IGTabBarDynamicSizingEnabled,
-              orig_IGTabBarEnhancedDynamicSizingEnabled, orig_IGTabBarHomecomingWithFloatingTabEnabled,
-              orig_IGTabBarViewPointFixEnabled, orig_IGTabBarStyleForLauncherSet);
-    }
+	if (@available(iOS 19.0, *)) {
+		sLGButtons = !sLGForceOff && RYG_PREF(@"liquid_glass_buttons");
+	}
+
+	sLGSurfaces = !sLGForceOff && RYG_PREF(@"liquid_glass_surfaces");
+
+	if (@available(iOS 26.0, *)) {
+		sLGProgressiveBlur = RYG_PREF(@"liquid_glass_progressive_blur") && objc_getClass("UIScrollEdgeEffect") != nil;
+	}
+
+	%init(RYGAppLifecycleGroup);
+	%init(RYGDebugBlockGroup);
+	%init(RYGScreenshotBlockGroup,
+		IGDirectVisualMessageViewerSession = NSClassFromString(@"_TtC34IGDirectVisualMessageViewerSession34IGDirectVisualMessageViewerSession") ?: NSClassFromString(@"IGDirectVisualMessageViewerSession"),
+		IGDirectVisualMessageReplayService = NSClassFromString(@"_TtC31IGDirectVisualMessageServiceKit34IGDirectVisualMessageReplayService") ?: NSClassFromString(@"IGDirectVisualMessageReplayService"),
+		IGDirectMediaViewerViewController = NSClassFromString(@"_TtC27IGDirectMediaViewerKitSwift33IGDirectMediaViewerViewController") ?: NSClassFromString(@"IGDirectMediaViewerViewController"));
+	%init(RYGHideItemsGroup,
+		IGSearchListKitDataSource = NSClassFromString(@"_TtC15IGGenericSearch25IGSearchListKitDataSource") ?: NSClassFromString(@"IGSearchListKitDataSource"));
+	%init(RYGConfirmActionsGroup);
+	%init(RYGSafeModeGroup);
+
+	if (rygFlexEnabled()) {%init(RYGFlexGroup);}
+
+	if (sLGButtons || sLGSurfaces || sLGForceOff) {
+		%init(RYGLiquidGlassGroup);
+		rygInstallLiquidGlassHooks();
+	}
+
+	if (sLGProgressiveBlur) {
+		%init(RYGProgressiveBlurGroup);
+	}
 }

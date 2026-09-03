@@ -1,119 +1,69 @@
 #import "../../Utils.h"
-
-BOOL isSurfaceShown(IGMainAppSurfaceIntent *surface) {
-    BOOL isShown = YES;
-
-    // Feed
-    if ([[surface tabStringFromSurfaceIntent] isEqualToString:@"FEED"] && [SCIUtils getBoolPref:@"hide_feed_tab"]) {
-        isShown = NO;
-    }
-    
-    // Reels
-    else if ([[surface tabStringFromSurfaceIntent] isEqualToString:@"CLIPS"] && [SCIUtils getBoolPref:@"hide_reels_tab"]) {
-        isShown = NO;
-    }
-
-    // Messages
-    else if ([[surface tabStringFromSurfaceIntent] isEqualToString:@"DIRECT"] && [SCIUtils getBoolPref:@"hide_messages_tab"]) {
-        isShown = NO;
-    }
-
-    // Explore
-    else if ([[surface tabStringFromSurfaceIntent] isEqualToString:@"SEARCH"] && [SCIUtils getBoolPref:@"hide_explore_tab"]) {
-        isShown = NO;
-    }
-
-    // Create
-    else if ([(NSNumber *)[surface valueForKey:@"_subtype"] unsignedIntegerValue] == 3 && [SCIUtils getBoolPref:@"hide_create_tab"]) {
-        isShown = NO;
-    }
-
-    return isShown;
-}
-
-NSArray *filterSurfacesArray(NSArray *surfaces) {
-    NSMutableArray *filteredSurfaces = [NSMutableArray array];
-
-    for (IGMainAppSurfaceIntent *surface in surfaces) {
-        if (![surface isKindOfClass:%c(IGMainAppSurfaceIntent)]) break;
-
-        if (isSurfaceShown(surface)) {
-            [filteredSurfaces addObject:surface];
-        }
-    }
-
-    return filteredSurfaces;
-}
-
-///////////////////////////////////////////////
+#import "RYGTabBar.h"
 
 %hook IGTabBarControllerSwipeCoordinator
 - (id)initWithSurfaces:(id)surfaces parentViewController:(id)controller enableHaptics:(_Bool)haptics launcherSet:(id)set {
-    // Removes the surface from the main swipeable app collection view
-    return %orig(filterSurfacesArray(surfaces), controller, haptics, set);
+    // Keeps the swipeable page order in step with the tab bar.
+    return %orig([RYGTabBar visibleSurfaces:surfaces], controller, haptics, set);
+}
+
+// IG re-pushes the full list after button rebuilds; unfiltered, the pager keeps
+// a page and a nav stack per hidden tab.
+- (void)updateSurfaces:(id)surfaces {
+    %orig([surfaces isKindOfClass:NSArray.class] ? [RYGTabBar visibleSurfaces:surfaces] : surfaces);
 }
 %end
 
 %hook IGTabBarController
-- (void)_layoutTabBar {
-    // Prevents the wrong icon from being shown as selected because of mismatched surface array indexes
-    NSArray *_tabBarSurfaces = [SCIUtils getIvarForObj:self name:"_tabBarSurfaces"];
-
-    [SCIUtils setIvarForObj:self name:"_tabBarSurfaces" value:filterSurfacesArray(_tabBarSurfaces)];
-    
+- (void)viewDidLoad {
+    [RYGTabBar applyOrderToController:self];
     %orig;
 }
 
+- (void)_initializeAndConfigureBarButtonsIfNeeded {
+    [RYGTabBar applyOrderToController:self];
+    %orig;
+}
+
+- (void)_updateTabBarButtonsAndUpdateViewControllersIfNeeded {
+    [RYGTabBar applyOrderToController:self];
+    %orig;
+}
+
+- (void)_layoutTabBar {
+    [RYGTabBar applyOrderToController:self];
+    %orig;
+}
+
+- (id)_resolvedDefaultSurfaceIntentInTabSet {
+    return [RYGTabBar coerceToVisibleSurface:%orig inController:self];
+}
+
+- (void)_setSelectedTabBarSurface:(id)surface isTabBarAction:(BOOL)action animated:(BOOL)animated navigationAction:(unsigned long long)navAction skipMainFeedFetch:(BOOL)fetch {
+    %orig([RYGTabBar coerceToVisibleSurface:surface inController:self], action, animated, navAction, fetch);
+}
+
+- (void)_setSelectedTabBarSurface:(id)surface isTabBarAction:(BOOL)action animated:(BOOL)animated navigationAction:(unsigned long long)navAction skipMainFeedFetch:(BOOL)fetch animateIndicator:(BOOL)indicator {
+    %orig([RYGTabBar coerceToVisibleSurface:surface inController:self], action, animated, navAction, fetch, indicator);
+}
+
+// A nil button is how a hidden tab leaves the bar; the surface itself stays.
 - (id)_buttonForTabBarSurface:(id)surface {
-    // Prevents the button from being added to the tab bar 
     id button = %orig(surface);
-
-    if (!isSurfaceShown(surface)) {
-        return nil;
-    }
-
-    return button;
+    return [RYGTabBar isSurfaceVisible:surface] ? button : nil;
 }
 %end
 
 // Demangled name: IGNavConfiguration.IGNavConfiguration
 %hook _TtC18IGNavConfiguration18IGNavConfiguration
-- (NSInteger)tabOrdering {
-
-    if ([[SCIUtils getStringPref:@"nav_icon_ordering"] isEqualToString:@"classic"]) return 0;
-    else if ([[SCIUtils getStringPref:@"nav_icon_ordering"] isEqualToString:@"standard"]) return 1;
-    else if ([[SCIUtils getStringPref:@"nav_icon_ordering"] isEqualToString:@"alternate"]) return 2;
-
-    return %orig;
-
-}
-- (void)setTabOrdering:(NSInteger)arg1 {
-    return;
-}
-
 - (BOOL)isTabSwipingEnabled {
     // Swipe lands on stripped tabs in messages-only.
-    if ([SCIUtils getBoolPref:@"messages_only"]) return NO;
-    if ([[SCIUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"enabled"]) return YES;
-    else if ([[SCIUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"disabled"]) return NO;
+    if ([RYGUtils getBoolPref:@"messages_only"]) return NO;
+    if ([[RYGUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"enabled"]) return YES;
+    else if ([[RYGUtils getStringPref:@"swipe_nav_tabs"] isEqualToString:@"disabled"]) return NO;
     return %orig;
 }
 - (void)setIsTabSwipingEnabled:(BOOL)arg1 {
     return;
-}
-%end
-
-%hook IGHomeFeedHeaderView
-- (void)didMoveToWindow {
-    %orig;
-
-    if ([SCIUtils getBoolPref:@"hide_messages_tab"]) {
-        UIButton *rightButton = [self valueForKey:@"rightButton"];
-        if (rightButton) {
-            NSLog(@"[SCInsta] Hiding messages tab (on feed)");
-
-            [rightButton removeFromSuperview];
-        }
-    }
 }
 %end

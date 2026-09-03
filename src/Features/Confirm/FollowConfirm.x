@@ -1,108 +1,135 @@
 #import "../../Utils.h"
 #import "../../InstagramHeaders.h"
+#import "../../RYGFollowBridge.h"
+#import <substrate.h>
 
-////////////////////////////////////////////////////////
+#define RYG_CONFIRM_FOLLOW(origCall) \
+	if ([RYGUtils getBoolPref:@"follow_confirm"]) { \
+		[RYGUtils showConfirmation:^{ origCall; } title:RYGLocalized(@"Confirm follow")]; \
+		return; \
+	} \
+	origCall;
 
-#define CONFIRMFOLLOW(orig)                            \
-    if ([SCIUtils getBoolPref:@"follow_confirm"]) {             \
-        NSLog(@"[SCInsta] Confirm follow triggered");  \
-                                                       \
-        [SCIUtils showConfirmation:^(void) { orig; }]; \
-    }                                                  \
-    else {                                             \
-        return orig;                                   \
-    }                                                  \
+static void (*orig_didPressFollowWith)(id, SEL, id);
+static void (*orig_didPressFollowControlEvent)(id, SEL);
+static void (*orig_performUnfollow)(id, SEL);
 
-////////////////////////////////////////////////////////
-
-// Follow button on profile page
-%hook IGFollowController
-- (void)_didPressFollowButton {
-    NSInteger status = self.user.followStatus;
-    if (status == 2) {
-        CONFIRMFOLLOW(%orig);
-    } else {
-        return %orig;
-    }
+static NSInteger rygFollowStatus(id ctrl) {
+	IGUser *user = rygFollowControllerUser(ctrl);
+	return user ? user.followStatus : -1;
 }
 
-// Unfollow from profile action sheet
-- (void)_performUnfollow {
-    if ([SCIUtils getBoolPref:@"unfollow_confirm"]) {
-        [SCIUtils showConfirmation:^(void) { %orig; } title:SCILocalized(@"Unfollow?")];
-    } else {
-        %orig;
-    }
+static BOOL rygConfirmFollowTap(id ctrl, void (^proceed)(void)) {
+	RYGProbeHit(@"followconfirm.press", @"followStatus=%ld", (long)rygFollowStatus(ctrl));
+	if (rygFollowStatus(ctrl) != 2) return NO;
+	if (![RYGUtils getBoolPref:@"follow_confirm"]) return NO;
+	[RYGUtils showConfirmation:proceed title:RYGLocalized(@"Confirm follow")];
+	return YES;
 }
-%end
 
-// Follow button on discover people page
+static void ryg_didPressFollowWith(id self, SEL _cmd, id sender) {
+	if (rygConfirmFollowTap(self, ^{ orig_didPressFollowWith(self, _cmd, sender); })) return;
+	orig_didPressFollowWith(self, _cmd, sender);
+}
+
+static void ryg_didPressFollowControlEvent(id self, SEL _cmd) {
+	if (rygConfirmFollowTap(self, ^{ orig_didPressFollowControlEvent(self, _cmd); })) return;
+	orig_didPressFollowControlEvent(self, _cmd);
+}
+
+// Unreached on IG 443 — IG calls this by direct Swift dispatch.
+static void ryg_performUnfollow(id self, SEL _cmd) {
+	RYGProbeOnce(@"followconfirm.unfollow", @"followStatus=%ld", (long)rygFollowStatus(self));
+	if ([RYGUtils getBoolPref:@"unfollow_confirm"] &&
+		[RYGUtils showConfirmation:^{ orig_performUnfollow(self, _cmd); }
+							 title:RYGLocalized(@"Confirm unfollow")]) return;
+	orig_performUnfollow(self, _cmd);
+}
+
 %hook IGDiscoverPeopleButtonGroupView
+
 - (void)_onFollowButtonTapped:(id)arg1 {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 - (void)_onFollowingButtonTapped:(id)arg1 {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
 
-// Suggested for you (home feed & profile) follow button
 %hook IGHScrollAYMFCell
+
 - (void)_didTapAYMFActionButton {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
+
 %hook IGHScrollAYMFActionButton
+
 - (void)_didTapTextActionButton {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
 
-// Follow button on reels
 %hook IGUnifiedVideoFollowButton
+
 - (void)_hackilyHandleOurOwnButtonTaps:(id)arg1 event:(id)arg2 {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
 
-// Follow text on profile (when collapsed into top bar) 
 %hook IGProfileViewController
+
 - (void)navigationItemsControllerDidTapHeaderFollowButton:(id)arg1 {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
 
-// Follow button on suggested friends (in story section)
 %hook IGStorySectionController
+
 - (void)followButtonTapped:(id)arg1 cell:(id)arg2 {
-    CONFIRMFOLLOW(%orig);
+	RYG_CONFIRM_FOLLOW(%orig);
 }
+
 %end
 
-// Follow all button in group chats (3+ members) people view
 static void (*orig_listSectionController)(id, SEL, id, id);
 
 static void hooked_listSectionController(id self, SEL _cmd, id arg1, id arg2) {
-    if ([SCIUtils getBoolPref:@"follow_confirm"]) {
+	if ([RYGUtils getBoolPref:@"follow_confirm"]) {
+		[RYGUtils showConfirmation:^{
+			if (orig_listSectionController) {
+				orig_listSectionController(self, _cmd, arg1, arg2);
+			}
+		} title:RYGLocalized(@"Confirm follow")];
+		return;
+	}
 
-        [SCIUtils showConfirmation:^{
-            orig_listSectionController(self, _cmd, arg1, arg2);
-        }];
-
-        return;
-    }
-
-    orig_listSectionController(self, _cmd, arg1, arg2);
+	if (orig_listSectionController) {
+		orig_listSectionController(self, _cmd, arg1, arg2);
+	}
 }
 
 %ctor {
-    Class cls = objc_getClass("IGDirectDetailMembersKit.IGDirectThreadDetailsMembersListViewController");
-    if (!cls) return;
+	RYGProbeClass(@"followconfirm.controller", @"IGFollowController");
+	rygFollowHook(NSSelectorFromString(@"didPressFollowButtonWith:"),
+				  (IMP)ryg_didPressFollowWith, (IMP *)&orig_didPressFollowWith);
+	rygFollowHook(NSSelectorFromString(@"didPressFollowButtonFromControlEvent"),
+				  (IMP)ryg_didPressFollowControlEvent, (IMP *)&orig_didPressFollowControlEvent);
+	rygFollowHook(NSSelectorFromString(@"performUnfollow"),
+				  (IMP)ryg_performUnfollow, (IMP *)&orig_performUnfollow);
 
-    MSHookMessageEx(
-        cls,
-        @selector(listSectionController:didTapHeaderButtonWithViewModel:),
-        (IMP)hooked_listSectionController,
-        (IMP *)&orig_listSectionController
-    );
+
+	Class cls = objc_getClass("IGDirectDetailMembersKit.IGDirectThreadDetailsMembersListViewController");
+	if (!cls) return;
+
+	SEL sel = @selector(listSectionController:didTapHeaderButtonWithViewModel:);
+	if (![cls instancesRespondToSelector:sel]) return;
+
+	MSHookMessageEx(cls, sel, (IMP)hooked_listSectionController, (IMP *)&orig_listSectionController);
 }

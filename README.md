@@ -1,279 +1,293 @@
+<div align="center">
+
 # RyukGram
-A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com/SoCuul/SCInsta) with additional features and fixes.\
-`Version v1.2.2` | `Tested on Instagram 426.0.0`
+
+**The Instagram tweak for iOS power users.**
+
+`v1.3.4` · Instagram 444.0.0 | Instagram 410.1.0
+
+<sub>The Instagram 410 build is for older iOS versions and trails the main build on newer features.</sub>
+
+<p>
+  <a href="https://github.com/faroukbmiled/RyukGram/releases/latest"><img src="https://img.shields.io/badge/Download-Latest%20release-7C3AED?style=for-the-badge&labelColor=1F2430" alt="Latest release" height="32"></a>
+  <a href="https://t.me/ryukgram"><img src="https://img.shields.io/badge/Telegram-Channel-2AABEE?style=for-the-badge&labelColor=1F2430" alt="Telegram" height="32"></a>
+  <a href="https://buymeacoffee.com/axryuk"><img src="https://img.shields.io/badge/Donate-Support%20the%20project-E5484D?style=for-the-badge&labelColor=1F2430" alt="Donate" height="32"></a>
+</p>
+
+<p>
+  <a href="https://github.com/faroukbmiled/RyukGram/issues">Issues</a>
+  ·
+  <a href="#translating">Translate</a>
+  ·
+  <a href="#features">Features</a>
+</p>
+
+</div>
 
 ---
 
 > [!NOTE]
-> To modify RyukGram's settings, check out [this section below](#opening-tweak-settings) for help
+> RyukGram is [closed source](#credits) for now and will open up again later. Builds and translations stay current here.
+
+## Install
+
+### Add it in one tap
+
+<div align="center">
+
+<a href="https://store.ryuksign.com"><img src="https://img.shields.io/badge/Add%20RyukGram-store.ryuksign.com-7C3AED?style=for-the-badge&labelColor=1F2430" alt="Add RyukGram" height="36"></a>
+
+</div>
+
+Open it on your phone and everything is one tap away. Add it once and updates arrive on their own.
+
+- **Sideload.** Adds the source to **Feather** or **RyukSign**, **SideStore**, or **AltStore**. Pick the **plugins** build normally, or **no plugins** if you sign with a free Apple account, since free accounts cannot sign the bundled extensions.
+- **Jailbreak.** Adds the repo to **Sileo** or **Zebra**, then installs the build that matches your setup. To paste it by hand the repo is `https://source.ryuksign.com/apt/`.
+
+### Build your own IPA
+
+Instagram itself cannot be bundled here, so you bring the Instagram IPA and the build slots RyukGram into it.
+
+**With GitHub Actions, no Mac needed.** Fork this repo, open the **Actions** tab, and run **Build sideloaded IPA from Release Assets**. Give it your Instagram IPA and it hands back a patched IPA ready to sign and install. Turn on the no-plugins option if you sign with a free account.
+
+**Or by hand** with a tool like cyan, injecting into your own Instagram IPA:
+- Regular build. Inject `zxPluginsInject.dylib` into the app and its plugins. The normal one, with the bundled extensions.
+- No-plugins build. Inject `NoPluginsPatch.dylib` instead. For a plugin free sideload, or a free account where extensions cannot be signed.
+
+### Download the .deb
+
+Prefer the file? Both builds are on the [latest release](https://github.com/faroukbmiled/RyukGram/releases/latest).
+
+<table>
+  <tr>
+    <th align="left">File</th>
+    <th align="left">Build</th>
+  </tr>
+  <tr>
+    <td><code>RyukGram_x.x.x_rootless.deb</code></td>
+    <td>Rootless</td>
+  </tr>
+  <tr>
+    <td><code>RyukGram_x.x.x_rootful.deb</code></td>
+    <td>Rootful</td>
+  </tr>
+</table>
+
+The rootless .deb also carries the dylib and bundle the sideload builds use.
+
+### TrollStore
+
+Download `RyukGram_trollfools.zip` from the [latest release](https://github.com/faroukbmiled/RyukGram/releases/latest) and inject it into Instagram with TrollFools.
 
 ---
 
-# Installation
->[!IMPORTANT]
-> Which type of device are you planning on installing this tweak on?
-> - Jailbroken/TrollStore device -> [Download pre-built tweak](https://github.com/faroukbmiled/RyukGram/releases/latest)
-> - Standard iOS device -> Sideload the .deb using Feather or similar
+Once it is running, open the settings by holding the button at the top of your profile, or the home button in the tab bar. Screenshots are [below](#opening-settings).
 
-# Features
-> Features marked with **\*** are new or improved in RyukGram
+## Features
 
 ### General
-- Hide ads
-- Hide Meta AI
-- Hide metrics (likes, comments, shares counts)
-- Disable app haptics
-- Copy description
-- Copy comment text from long-press menu **\***
-- Download GIF comments **\***
-- Profile copy button **\***
-- Replace domain in shared links — rewrite copied/shared links for embeds in Discord, Telegram, etc. with preset or custom domains **\***
-- Strip tracking params from shared links (igsh, utm) **\***
-- Open links in external browser **\***
-- Strip tracking from browser links **\***
-- Do not save recent searches
-- Open link from clipboard — long-press the search tab to open a copied Instagram link (handles fix-embed mirrors) **\***
-- Use detailed (native) color picker
-- Enable liquid glass buttons
-- Enable liquid glass surfaces — floating tab bar, dynamic sizing, and other UI elements **\***
-- Enable teen app icons
-- IG Notes:
-  - Hide notes tray
-  - Hide friends map
-  - Enable note theming
-  - Custom note themes
-- Focus/Distractions
-  - No suggested users
-  - No suggested chats
-  - Hide trending searches
-  - Hide explore posts grid
-- Live
-  - Anonymous live viewing — blocks viewer-count heartbeat (you also won't see the viewer count) **\***
-  - Toggle live comments — long-press the heart to hide/show the comments overlay **\***
-- Privacy
-  - Hide UI on capture — redacts RyukGram buttons from screenshots, screen recordings, and mirroring **\***
+- Hide ads, Meta AI, and like, comment and share counts
+- Hide the TestFlight popup and turn off app haptics
+- Copy captions, comment text, and profile info
+- Download, copy, or expand image and GIF comments
+- Send any Giphy link as a comment GIF, and pin the ones you favorite
+- Download audio from the reels audio page
+- Clean shared links for embeds and strip their tracking
+- Open links in an external browser or straight from the clipboard
+- Native color picker and teen app icons
+- Liquid glass controls, with a force off switch and tab bar behavior
+- Instagram Plus turns on Instagram's own paid features
+- Notes tweaks: hide the tray, hide the friends map, custom themes
+- Drop suggestions, trending, the explore grid, sensitive covers, and surveys
+- Stat pills on search and explore, with a page to pick and reorder them
+- Anonymous live viewing and toggleable live comments
+- Redact RyukGram's own buttons in screenshots and recordings
 
 ### Feed
-- Hide stories tray
-- Hide suggested stories — removes suggested accounts from the stories tray **\***
-- View profile picture from story tray long-press menu (HD via API) **\***
-- Hide entire feed
-- No suggested posts
-- No suggested for you (accounts)
-- No suggested reels
-- No suggested threads posts
-- Disable video autoplay
-- Media zoom — long press on media to expand in full-screen viewer **\***
-- Custom date format (moved to General > Date format, now supports feed, notes/comments/stories, and DMs) **\***
-- Disable background refresh, home button refresh, and home button scroll **\***
-- Disable reels tab button refresh **\***
-- Hide repost button in feed **\***
+- Grid feed turns your home feed into thumbnails, each with its stats and author
+- Pick which stats show and their order, tile shape, columns by pinch, and the date format
+- Hold a tile to preview it, or to like, follow, expand, share, or copy the link
+- Switch back to Instagram's feed from the header heart or a floating button you place
+- Hide the stories tray, suggested stories, and highlights
+- View a profile picture from a story tray long press
+- Hide the whole feed, or just suggested posts, accounts, reels, and threads
+- Turn off video autoplay
+- Tap a reel in the feed to play it in place, or play first and open Reels on a second tap
+- Long press any media to open it full screen, muted if you want
+- Custom date format with your own template and relative times
+- Turn off background and home button refresh
+- Status bar tap can scroll up only, or do nothing
+- Confirm before a pull to refresh, or refresh only the stories tray
+- Hide the feed repost button
 
 ### Reels
-- Modify tap controls
-- Auto-scroll reels — IG default or RyukGram mode (keeps advancing after swiping back) **\***
-- Always show progress scrubber
-- Disable auto-unmuting reels (properly blocks mute switch, volume buttons, and announcer broadcasts) **\***
-- Confirm reel refresh
-- Unlock password-locked reels **\***
-- Hide reels header
-- Hide repost button in reels **\***
-- Hide reels blend button
-- Disable scrolling reels
-- Prevent doom scrolling (limit maximum viewable reels)
-- Enhanced Pause/Play mode (when Pause/Play tap control is set): **\***
-  - Mute toggle auto-hidden, only play/pause icon visible
-  - Audio forced on in reels tab
-  - Play indicator properly hidden when video plays (fixes IG bug after hold/zoom)
-  - Playback toggle synced with overlay during hold/zoom
-  - Optional tap-to-mute on photo reels (single + carousel photo pages)
-  - Works across IG A/B test variants
+- Custom tap controls and an auto scroll mode
+- Hold controls to pause, open the options menu, or open it with picture in picture
+- Playback menu for speed, seek, pause, and auto scroll
+- Always visible scrubber, no auto unmute, and refresh confirmation
+- Unlock password locked reels
+- Hide the header, repost button, friend avatars, and promo pills
+- Swipe left to open the author's profile
+- Show the repost date
+- Disable scrolling and cap how many reels you can watch in a row
+- Filter the reels feed by minimum likes, comments, views, or reposts
+- Enhanced pause and play mode
 
-### Action buttons **\***
-- Context-aware action menu on feed, reels, and stories (expand, repost, download, copy caption, etc.) **\***
-- Configurable default tap action per context **\***
-- Carousel and multi-story reel support with bulk download **\***
-- Repost via IG's native creation flow **\***
-- Full-screen media viewer with zoom and swipe **\***
-- Story playback pauses when menus are open **\***
+### Action buttons
+- Context aware menus on feed, reels, stories, DMs, and profiles
+- Configurable default tap, and a searchable browser of Instagram and system icons
+- Carousel and multi story bulk download
+- Save a photo post with its music as a video
+- Save a photo story as just the image
+- Repost through Instagram's own flow
+- Full screen viewer with zoom and swipe
+- Drag to arrange your overlay buttons on a live preview, with a slider for the spacing between them
 
-### Profile **\***
-- Zoom profile photo — long press to view full-screen with user info **\***
-- Save profile picture
-- View highlight cover from profile long-press menu **\***
-- Profile copy button **\***
-- Follow indicator — shows whether the user follows you **\***
-- Copy note on long press — long-press the note bubble to copy text **\***
-- Fake profile stats — fake verified badge and follower/following/post counts on your own profile **\***
-- Profile Analyzer (beta) — follower/following breakdown with mutuals, non-followbacks, new/lost followers and profile change tracking; per-list search, filters, and multi-select batch follow/unfollow **\***
+### Profile
+- Zoom or save the profile picture
+- View highlight covers from a long press
+- Action button for info, the picture, and follower stats
+- Follow indicator that shows who follows you back
+- Copy notes, reveal full counts, and fake your username, name, stats and badge
+- Sort and search follower and following lists by mutuals, verified, and more
+- Follow request tracker that logs every request, even ones cancelled before you answer
+
+### Profile analyzer
+- Follower and following scans, with mutuals and non followbacks
+- New and lost trackers across scans
+- Change history for name, username, bio, and picture
+- Inline and batch follow, unfollow, and remove
+- A log of every profile you open, with filters
+- Per check toggles, with a badge for gains and losses since your last look
 
 ### Saving
-- Enhanced HD downloads — up to 1080p via DASH + FFmpegKit **\***
-  - Quality picker with preview playback **\***
-  - Audio-only and raw photo download options in the quality picker **\***
-  - Fallback to 720p without FFmpegKit **\***
-- Download pill with frosted glass, progress bar, bulk counter, success/error states **\***
-- Save to RyukGram album — routes downloads into a dedicated album in Photos **\***
-- Download confirmation — optional dialog before downloading **\***
-- Output filenames formatted as `@username_context_timestamp` **\***
-- Legacy long-press gesture — deprecated, off by default. Finger count + hold time customizable **\***
+- HD downloads up to 1080p, with a quality picker and preview
+- Audio only and raw photo options
+- Download manager with live speed, filters, swipe actions, and bulk select
+- Download history that survives a restart, with redownload and a keep window
+- Duplicate check that warns before you save the same media twice, and can drop the old gallery copy first
+- Auto retry for downloads that drop offline
+- Save into a dedicated RyukGram album
+- Advanced encoding panel for codec, bitrate, resolution, and more
+- One clean filename everywhere, stamped with the date the post went up
+- Optional ryuk_ prefix on saved filenames
+- Optional download confirmation
+
+### Gallery
+- A private in app library that every download can mirror into
+- Images, video, audio, and animated GIFs
+- Filter by type, source, uploader, date, and favorites, with folders
+- Sort by date, name, or size, with images, videos, or favorites first
+- Group by user into sections or folders, from 2 to 5 columns
+- Long press a user section to select all their media
+- In app preview carousel
+- Pull audio and GIFs straight from the gallery
+- Import your own photos, videos and files into the gallery
+- Grid tiles show a date chip, long press an item for its date, source and size
 
 ### Stories and messages
-- Keep deleted messages (preserves unsent messages with visual indicator and notification pill) **\***
-- Hide trailing action buttons on preserved messages
-- Warn before clearing on refresh — optional confirmation when pulling to refresh the DMs tab if preserved messages would be cleared **\***
-- Manually mark messages as seen (button or toggle mode) **\***
-- Long-press the seen button for quick actions **\***
-- Auto mark seen on send (marks messages as read when you send any message) **\***
-- Auto mark seen on typing (marks messages as read the moment you start typing, even when typing status is hidden) **\***
-- Mark seen on story like **\***
-- Mark seen on story reply — also covers text replies and emoji reactions **\***
-- Advance to next story when marking as seen — tapping the eye button auto-skips to the next story **\***
-- Advance on story like — liking a story auto-skips to the next one **\***
-- Advance on story reply — sending a reply or emoji reaction auto-skips to the next story **\***
-- Per-chat read-receipt list with blocking mode — "Block all" (exclude list) or "Block selected only" (include list). Long-press any DM chat to add/remove. Settings page with search, sort, multi-select, and per-entry keep-deleted override **\***
-- Send audio as file — send audio files as voice messages from the DM plus menu **\***
-- Download voice messages — adds a Download option to the long-press menu on voice messages, saves as M4A via share sheet **\***
-- Disable typing status
-- Disable disappearing messages mode — blocks the swipe-to-enable gesture in DMs **\***
-- Hide voice/video call buttons — independent toggles for each, remaining nav items reflow dynamically **\***
-- Unlimited replay of direct stories (toggle in eye button menu) **\***
-- Full last active date — show full date instead of relative time **\***
-- Send files in DMs (experimental) — send select file types via the plus menu **\***
-- Notes actions — copy text, download GIF/audio from notes long-press menu **\***
-- Copy note text on long press **\***
-- Disable view-once limitations
-- Disable screenshot detection
-- Disable story seen receipt (blocks network upload, toggleable at runtime without restart) **\***
-- Keep stories visually seen locally — mark stories as seen locally (grey ring) while the seen receipt is still blocked on the server **\***
-- Manual mark story as seen — button on story overlay to selectively mark stories as seen (button or toggle mode) **\***
-- Long-press the story seen button for quick actions **\***
-- Per-user story seen-receipt list with blocking mode — "Block all" (exclude list) or "Block selected only" (include list). Manage via 3-dot menu, eye button long-press, or settings list **\***
-- Story audio mute/unmute toggle — button on overlay and in action menu to toggle audio **\***
-- View story mentions — bottom sheet with profile pic, follow/unfollow, tap-to-open profile **\***
-- Stop story auto-advance — stories won't auto-skip when the timer ends **\***
-- Disappearing DM media overlay — action button, mark-as-viewed eye, and audio toggle with independent toggles; long-press opens the full menu with a Messages settings shortcut **\***
-- Download disappearing DM media (photos + videos) — expand, share, or save from action menu **\***
-- Upload audio as voice message — send audio files, extract audio from videos, with built-in trim editor **\***
-- Disable instants creation
+- Keep deleted messages, including your own unsends
+- Mark the ones you kept with a tag, a faded bubble, a tinted bubble, or nothing
+- A full quality log of every unsent message, grouped by chat and searchable
+- Jump from the log straight to where the message sat in the chat
+- Catch view-once media that arrives while Instagram is closed
+- Activity notifications for reads, online, offline, and typing, set per person
+- An activity log that keeps it all as a timeline, filterable and swipe to delete
+- Accurate active status so the green dot turns off the moment someone leaves
+- Playback menu for story speed, seek, and pause, held from the story buttons or its menu
+- Manual and automatic mark as seen
+- Mark chats seen on your device only, the eye button stays orange until you really send it
+- Stories you already marked seen hide or tint the eye button for 48 hours
+- Send audio as a file or a voice note, with a trim editor
+- Send an image as your doodle in Draw, with a crop, resize, and background remover
+- Download voice messages
+- Turn off typing status, the vanish swipe, and view once limits
+- Toggle your activity status from a dot in the DMs inbox
+- Custom chat backgrounds from an image, video, or GIF, with a built in editor
+- Filter, sort, search, and pin story viewers, and see who reacted with what
+- Archive your own stories before they expire, viewer list included, per account
+- Story stats over your archive
+- View story mentions and reveal poll and quiz results
+- Bypass Reveal stickers and pick custom sticker colors
+- Download disappearing DM media in full quality
+- Send Instants from your album, with crop and trim editors
+- Auto close the Instants viewer once you have seen them all
+- Toggle the Instants switch confirmation from a button in the viewer
+- Record voice and video calls into an adaptive grid, browsed per person
+- Each recording is tagged auto or manual in the list
 
-### Navigation
-- Modify tab bar icon order
-- Modify swiping between tabs
-- Hiding tabs
-  - Hide feed tab
-  - Hide explore tab
-  - Hide reels tab
-  - Hide create tab
-  - Hide messages tab
-- Messages-only mode — keep DM inbox + profile, hide everything else, force launch into inbox **\***
-  - Hide tab bar sub-toggle — drop the bottom tab bar entirely, inbox-only UI with a floating settings gear **\***
-- Launch tab — pick which tab the app opens to (ignored in Messages-only mode) **\***
+### Interface
+- A universal notification pill you can place anywhere on screen
+- Mirror toasts to the iOS notification centre, in the background or while the app is open
+- Reorder and hide tab bar icons on a live tab bar preview
+- Messages only mode, with a daily schedule that switches in place and inbox header shortcuts
+- Force Instagram into any supported language
+- Home shortcut button with new item badges
+- Bring back the old Instagram logo in the feed header
+- Experimental flags
+- MobileConfig browser to read and change Instagram's own internal settings
 
 ### Confirm actions
-- Confirm like: Posts/Stories
-- Confirm story emoji reaction **\***
-- Confirm like: Reels
-- Confirm follow
-- Confirm unfollow **\***
-- Confirm repost
-- Confirm voice call **\***
-- Confirm video call **\***
-- Confirm voice messages
-- Confirm follow requests
-- Confirm shh mode (disappearing messages)
-- Confirm posting comment
-- Confirm changing direct message theme
-- Confirm sticker interaction
+- Optional confirmations for likes, follows, reposts, calls, comments, and more
+- Confirm DM reactions, either the double tap one only or every reaction
 
-### Fake location **\***
-- Overrides CoreLocation app-wide so any IG feature reading a coord (Friends Map, posts, etc.) gets your chosen location
-- MapKit picker with search + reverse-geocoded names
-- Saved presets — tap to apply
-- Quick toggle button injected into the Friends Map: enable/disable, swap presets, change location, open settings
+### Fake location
+- Override your location across the app, with a map picker and saved presets
 
-### Tweak settings **\***
-- Search bar in the main settings page — recursively finds any setting across nested pages with a breadcrumb to its location
-- Pause playback when opening settings (toggleable) **\***
-- Quick-access via long-press on feed tab **\***
+### Theme
+- Off, light, dark, or OLED, applied to Instagram only
+- OLED chat theme and a matching keyboard theme
 
-### Backup & Restore **\***
-- Export RyukGram settings as a JSON file
-- Import settings from a JSON file
-- Searchable, collapsible, editable preview before saving or applying
+### Security and privacy
+- Mask the device identifiers Instagram reads, from settings or the login screen
+- Passcode and biometric lock for settings, chats, logs, recordings, and the app itself
+- Hidden chats and per account lists
+- App switcher shroud and hidden previews for locked chats
 
-### Localization **\***
-- Multi-language UI — every user-facing string in RyukGram flows through a central translation layer **\***
-- Built-in language picker — globe icon in the top-right of Settings; pick System default or any shipped language **\***
-- Falls back to English when a translation is missing, so nothing ever breaks **\***
-- Currently shipping: **English**, **Spanish**, **Russian**, **Korean**, **Arabic** — other languages land as translators submit them (see below).
+### Backup and restore
+- Export your settings and feature data as JSON or an encrypted bundle
+- Restore with replace or merge
+- Scope any export, import, or reset to the accounts you pick
+- See what RyukGram keeps on your device, by section and account, and clear it
+
+### Localization
+- English, Spanish, French, Russian, Korean, Japanese, Arabic, Vietnamese, Chinese, Portuguese, and Turkish
+- In app language picker, with English as the fallback
 
 ### Optimization
-- Clear Instagram cache on demand from Advanced settings, with optional auto-clear interval and a toggle to skip the automatic size scan **\***
+- Clear the Instagram cache on demand or on a timer
+- Smoother feed scrolling
 
-# Translating RyukGram
-Want to see RyukGram in your language? Two ways:
+## Translating
 
-### Option A: In-app (fastest)
-1. Open **Settings → Debug → Localization → Export English strings** — share the base `.strings` file to yourself.
-2. Translate the **right-hand side** of every `"key" = "value";` line. Never touch the left-hand side.
-3. Go to **Debug → Localization → Update → + Add new language** — enter your language code (e.g. `fr`), pick the translated file, restart.
-4. Your language now appears in the globe menu. Test it, tweak it, re-import as needed.
-5. When ready, open a pull request with the file at `src/Localization/Resources/<code>.lproj/Localizable.strings`.
+Want RyukGram in your language? Export the strings from **Settings, Debug, Localization**, translate the right side of each `"key" = "value";` line, and open a pull request with your file at `src/Localization/Resources/<code>.lproj/Localizable.strings`. Keep the format specifiers like `%@` and `%lu` exactly as they are. Missing lines fall back to English, so partial work is welcome. Anything you contribute is licensed to the project under the same terms as RyukGram.
 
-### Option B: PR directly
-1. Copy `src/Localization/Resources/en.lproj/Localizable.strings` into a new folder: `<code>.lproj/Localizable.strings`
-2. Translate the right-hand side of every line.
-3. Keep format specifiers (`%@`, `%lu`, `%d`, `%1$@`…) exactly as-is. Use positional specifiers if your language needs different word order.
-4. Keep section banners and structure — makes the diff easy to review.
-5. Open a PR at <https://github.com/faroukbmiled/RyukGram/pulls>. Title it e.g. `l10n: Add French translation`.
-
-Partial translations are welcome — untranslated keys fall back to English at runtime.
-
-If you find a string that still renders in English on a translated build, open an issue with a screenshot.
-
-## Known Issues
-- Preserved unsent messages cannot be removed using "Delete for you". Pull to refresh in the DMs tab clears all preserved messages (with optional confirmation if "Warn before clearing on refresh" is enabled).
-- "Delete for you" detection uses a ~2 second window after the local action. If a real other-party unsend happens to land in the same window, it may not be preserved. Rare in practice and limited to that specific overlap.
-- With Liquid Glass buttons + Hide UI on capture both on, the DM eye leaves an empty glass bubble in captures — IG draws that backdrop, not the tweak, so it's outside our redaction.
-
-# Opening Tweak Settings
+## Opening settings
 
 |                                             |                                             |
 |:-------------------------------------------:|:-------------------------------------------:|
-| <img src="https://i.imgur.com/uPMcugZ.png"> | <img src="https://i.imgur.com/ctIiL7i.png"> |
+| <img src="https://i.imgur.com/OnjLpZK.png"> | <img src="https://i.imgur.com/pHIuYTm.jpeg"> |
 
-# Building from source
-### Prerequisites
-- XCode + Command-Line Developer Tools
-- [Homebrew](https://brew.sh/#install)
-- [CMake](https://formulae.brew.sh/formula/cmake#default) (`brew install cmake`)
-- [Theos](https://theos.dev/docs/installation)
-- [cyan](https://github.com/asdfzxcvbn/pyzule-rw?tab=readme-ov-file#install-instructions) **\*only required for sideloading**
-- [ipapatch](https://github.com/asdfzxcvbn/ipapatch/releases/latest) **\*only required for sideloading**
+## Credits
 
-### Setup
-1. Install iOS 16.2 frameworks for theos
-   1. [Click to download iOS SDKs](https://github.com/xybp888/iOS-SDKs/archive/refs/heads/master.zip)
-   2. Unzip, then copy the `iPhoneOS16.2.sdk` folder into `~/theos/sdks`
-2. Clone repo: `git clone --recurse-submodules https://github.com/faroukbmiled/RyukGram`
-3. **For sideloading**: Download a decrypted Instagram IPA from a trusted source, making sure to rename it to `com.burbn.instagram.ipa`.
-   Then create a folder called `packages` inside of the project folder, and move the Instagram IPA file into it.
+RyukGram got its start from [SCInsta](https://github.com/SoCuul/SCInsta) by [@SoCuul](https://github.com/SoCuul), and I'm grateful for the foundation it gave the project. That code has since been fully rewritten and none of it remains, so RyukGram is its own separate codebase. It went closed source because earlier releases were being lifted and resold as paid tweaks, which is something I can't keep feeding, and I know some of you valued it staying open. Thanks to @SoCuul and the wider iOS tweak scene for paving the way.
 
-### Run build script
-```sh
-$ chmod +x build.sh
-$ ./build.sh <sideload/rootless/rootful>
-```
+- [**@SoCuul**](https://github.com/SoCuul) for SCInsta, the spark for this project
+- [**@BandarHL**](https://github.com/BandarHL) for BHInstagram
+- [**@VAXMG**](https://t.me/ciesIPAs) for OLED theme inspiration
+- [**@euoradan**](https://t.me/euoradan) for experiment flag research
+- [**@n3d1117**](https://github.com/n3d1117) for the Following feed
+- [**BillyCurtis**](https://github.com/BillyCurtis/OpenInstagramSafariExtension) for the Safari extension base
+- [**@asdfzxcvbn**](https://github.com/asdfzxcvbn) for ipapatch and zxPluginsInject
+- Furamako, [@ZomkaDEV](https://github.com/ZomkaDEV), [@ch1tmdgus](https://github.com/ch1tmdgus), [@hooray804](https://github.com/hooray804), [@bruuhim](https://github.com/bruuhim), [@jaydenjcpy](https://github.com/jaydenjcpy), [@brunorainha](https://github.com/brunorainha), [@yesnt10](https://github.com/yesnt10), [@tranbinh02](https://github.com/tranbinh02), [@yannouuuu](https://github.com/yannouuuu), and [@willybilly981](https://github.com/willybilly981) for translations
 
-# Credits
-- [SCInsta](https://github.com/SoCuul/SCInsta) by [@SoCuul](https://github.com/SoCuul) — original tweak this fork is based on
-- [@BandarHL](https://github.com/BandarHL) — creator of the original BHInstagram project
-- [@faroukbmiled](https://github.com/faroukbmiled) — RyukGram modifications and additional features
-- [@euoradan](https://t.me/euoradan) (Radan) — experimental Instagram feature flag research
-- [@erupts0](https://github.com/erupts0) (John) — testing and feature suggestions
-- [BillyCurtis/OpenInstagramSafariExtension](https://github.com/BillyCurtis/OpenInstagramSafariExtension) — base for the bundled Safari extension
-- Furamako — Spanish translation
-- [@ch1tmdgus](https://github.com/ch1tmdgus) (N4C) — Korean translation
-- [ZomkaDEV](https://github.com/ZomkaDEV) — Russian translation
-- [@bruuhim](https://github.com/bruuhim) — Arabic translation
+## Support
+
+If RyukGram earns a spot on your phone, you can keep it going here.
+
+<div align="center">
+
+<a href="https://buymeacoffee.com/axryuk"><img src="https://img.shields.io/badge/Donate-Support%20the%20project-E5484D?style=for-the-badge&labelColor=1F2430" alt="Donate" height="32"></a>
+<a href="https://github.com/faroukbmiled/RyukGram"><img src="https://img.shields.io/badge/Star-the%20repo-6B7280?style=for-the-badge&labelColor=1F2430" alt="Star the repo" height="32"></a>
+
+</div>
