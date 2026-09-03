@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Normalize only the legacy nested-%orig constructs used by RyukGramPriv.
+"""Normalize legacy RyukGramPriv Logos syntax for the SDK 26.5 toolchain.
 
-Current Logos accepts top-level `%orig`/`%orig()` calls, but rejects passing the
-directive through another Objective-C expression or a C macro argument.  This
-pass rewrites only those known legacy callsites and deliberately leaves every
-other `%orig()` in the source untouched.
+Do not rewrite `%orig` generically.  Current Logos accepts top-level `%orig` and
+`%orig()` but rejects `%orig` when it is nested inside another Objective-C/C
+expression or passed as a macro argument.  Rewrite only the exact legacy method
+forms present in src/Tweak.x, preserving their behavior.
 """
 from pathlib import Path
 
@@ -12,27 +12,53 @@ path = Path("src/Tweak.x")
 text = path.read_text(encoding="utf-8")
 original = text
 
-# IGDSLauncherConfig Liquid Glass gates.  SCIUtils returns YES when the tweak's
-# liquid_glass_surfaces preference is enabled and otherwise returns the native
-# gate.  Express that directly so %orig is a top-level return expression.
+# Liquid Glass gates: SCIUtils forces YES when liquid_glass_surfaces is enabled;
+# otherwise the native gate is returned.  Keep %orig as a top-level return.
 text = text.replace(
     'return [SCIUtils liquidGlassEnabledBool:%orig];',
     'if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) { return true; }\n    return %orig;'
 )
 
-# IMPORTANT: replace NONVOID first because its token contains the complete
-# substring "VOID_HANDLESCREENSHOT".  Reversing this order creates `NONif`.
-text = text.replace(
-    'NONVOID_HANDLESCREENSHOT(%orig);',
-    'if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return nil; } return %orig;'
-)
-text = text.replace(
-    'VOID_HANDLESCREENSHOT(%orig);',
-    'if (![SCIUtils getBoolPref:@"remove_screenshot_alert"]) { %orig; }'
-)
+# Screenshot hooks.  Rewrite complete method definitions instead of replacing
+# macro arguments: partial substitutions confuse Logos' generated method braces.
+void_methods = {
+    '- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 { VOID_HANDLESCREENSHOT(%orig); }': '''- (void)setShouldBlockScreenshot:(BOOL)arg1 viewModel:(id)arg2 {
+    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return; }
+    %orig;
+}''',
+    '- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 { VOID_HANDLESCREENSHOT(%orig); }': '''- (void)screenshotObserverDidSeeScreenshotTaken:(id)arg1 {
+    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return; }
+    %orig;
+}''',
+    '- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 { VOID_HANDLESCREENSHOT(%orig); }': '''- (void)screenshotObserverDidSeeActiveScreenCapture:(id)arg1 event:(NSInteger)arg2 {
+    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return; }
+    %orig;
+}''',
+}
+for old, new in void_methods.items():
+    text = text.replace(old, new)
+
+nonvoid_methods = {
+    '- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 { NONVOID_HANDLESCREENSHOT(%orig); }': '''- (id)visualMessageViewerController:(id)arg1 didDetectScreenshotForVisualMessage:(id)arg2 atIndex:(NSInteger)arg3 {
+    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return nil; }
+    return %orig;
+}''',
+    '- (id)initForController:(id)arg1 { NONVOID_HANDLESCREENSHOT(%orig); }': '''- (id)initForController:(id)arg1 {
+    if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return nil; }
+    return %orig;
+}''',
+}
+for old, new in nonvoid_methods.items():
+    text = text.replace(old, new)
+
+# These macros may remain defined for source compatibility, but no Logos
+# directive may be passed through them after normalization.
+for forbidden in ('VOID_HANDLESCREENSHOT(%orig)', 'NONVOID_HANDLESCREENSHOT(%orig)'):
+    if forbidden in text:
+        raise SystemExit(f"[sdk26-logos] unnormalized legacy call remains: {forbidden}")
 
 if text != original:
     path.write_text(text, encoding="utf-8")
-    print("[sdk26-logos] normalized legacy nested %orig constructs")
+    print("[sdk26-logos] normalized exact legacy nested-%orig methods")
 else:
     print("[sdk26-logos] no legacy constructs required normalization")
