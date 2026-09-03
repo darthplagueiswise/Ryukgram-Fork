@@ -24,7 +24,7 @@ RYG_FILELOG ?= 0
 # Build RYG_PROBE=1 to audit hook coverage on the next IG bump.
 RYG_PROBE ?= 0
 
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DRYG_FILELOG=$(RYG_FILELOG) -DRYG_PROBE=$(RYG_PROBE) -include src/RYGPrefix.h
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DRYG_FILELOG=$(RYG_FILELOG) -DRYG_PROBE=$(RYG_PROBE)
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression -lsqlite3
 
