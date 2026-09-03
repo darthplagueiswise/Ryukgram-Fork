@@ -110,21 +110,39 @@ static BOOL sciShouldBlockSeenVisualForObj(id obj) {
 
 %hook IGStoryTrayViewModel
 - (void)markAsSeen { if (sciShouldBlockSeenVisualForObj(self)) return; %orig; }
-- (void)setHasUnseenMedia:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(YES); return; } %orig; }
+- (void)setHasUnseenMedia:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisualForObj(self)) arg1 = YES;
+    %orig;
+}
 - (BOOL)hasUnseenMedia { if (sciShouldBlockSeenVisualForObj(self)) return YES; return %orig; }
-- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
+- (void)setIsSeen:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisualForObj(self)) arg1 = NO;
+    %orig;
+}
 - (BOOL)isSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
 %end
 
 %hook IGStoryItem
-- (void)setHasSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
+- (void)setHasSeen:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisualForObj(self)) arg1 = NO;
+    %orig;
+}
 - (BOOL)hasSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
 %end
 
 %hook IGStoryGradientRingView
-- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (void)setSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (void)updateRingForSeenState:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
+- (void)setIsSeen:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisual()) arg1 = NO;
+    %orig;
+}
+- (void)setSeen:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisual()) arg1 = NO;
+    %orig;
+}
+- (void)updateRingForSeenState:(BOOL)arg1 {
+    if (sciShouldBlockSeenVisual()) arg1 = NO;
+    %orig;
+}
 %end
 
 // ============ Active story VC tracking ============
