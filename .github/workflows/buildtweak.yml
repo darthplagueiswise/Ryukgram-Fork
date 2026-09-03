@@ -63,6 +63,10 @@ jobs:
           test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
           grep -Eq '^TARGET[[:space:]]*:=[[:space:]]*iphone:clang:26\.5:15\.0' Makefile
 
+      - name: Normalize legacy Logos syntax for SDK 26.5
+        working-directory: main
+        run: python3 ./scripts/normalize-sdk26-logos.py
+
       - name: Get version
         working-directory: main
         run: |
