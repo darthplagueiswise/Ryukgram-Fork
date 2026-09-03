@@ -72,12 +72,14 @@ jobs:
           git checkout
           mv iPhoneOS26.5.sdk "$THEOS/sdks/"
 
-      - name: Verify SDK 26.5 and Theos target
+      - name: Verify SDK, Logos and bundled dependencies
         working-directory: main
         run: |
           test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
           grep -Eq '^TARGET[[:space:]]*:=[[:space:]]*iphone:clang:26\.5:15\.0' Makefile
           test "$(git -C "$THEOS/vendor/logos" rev-parse HEAD)" = "$RYG_LOGOS_REV"
+          test -f modules/JGProgressHUD/JGProgressHUD.m
+          grep -Fq '$(wildcard modules/JGProgressHUD/*.m)' Makefile
 
       - name: Get version
         working-directory: main
