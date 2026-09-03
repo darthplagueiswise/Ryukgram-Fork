@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
+$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) $(wildcard modules/JGProgressHUD/*.m) modules/fishhook/fishhook.c
 
 # The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
 # longer baked in here — it ships as a standalone NoPluginsPatch.dylib
