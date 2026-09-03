@@ -57,9 +57,15 @@ jobs:
           echo 'RyukGramPriv-main2 source identity checks passed.'
 
       - name: Install build dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           brew install ldid dpkg make
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          python3 -m venv "$RUNNER_TEMP/ryg-python"
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --disable-pip-version-check --upgrade pip
+          "$RUNNER_TEMP/ryg-python/bin/python" -m pip install --disable-pip-version-check 'lief==0.17.1'
+          echo "$RUNNER_TEMP/ryg-python/bin" >> "$GITHUB_PATH"
 
       - name: Setup Theos
         uses: actions/checkout@v4
@@ -95,12 +101,15 @@ jobs:
           git checkout
           mv iPhoneOS26.5.sdk "$THEOS/sdks/"
 
-      - name: Verify SDK and Logos
+      - name: Verify SDK, Logos and LIEF
         working-directory: main
+        shell: bash
         run: |
+          set -euo pipefail
           test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
           grep -Eq '^TARGET[[:space:]]*:=[[:space:]]*iphone:clang:26\.5:15\.0' Makefile
           test "$(git -C "$THEOS/vendor/logos" rev-parse HEAD)" = "$RYG_LOGOS_REV"
+          python3 -c 'import lief; print("LIEF", lief.__version__)'
 
       - name: Get version
         working-directory: main
