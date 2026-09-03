@@ -19,10 +19,6 @@ jobs:
       contents: read
     env:
       THEOS: ${{ github.workspace }}/theos
-      # RyukGramPriv-main2 predates the June 2026 Logos parser change. Keep the
-      # modern Theos/SDK, but use the last pre-change Logos revision so legacy
-      # `%orig` usages inside confirmation blocks/macros retain their original
-      # semantics instead of being source-rewritten by CI.
       RYG_LOGOS_REV: a62370066a97e36d59b200a9fa10c5091f5e8972
 
     steps:
@@ -32,6 +28,33 @@ jobs:
           path: main
           fetch-depth: 0
           submodules: recursive
+
+      - name: Refuse stale pre-main2 source trees
+        working-directory: main
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Eq '^Version:[[:space:]]*1\.3\.4$' control
+          test -f IG_VERSION
+          test "$(tr -d '[:space:]' < IG_VERSION)" = "444.0.0"
+          test -f src/RYGPrefix.h
+          test -d src/Background
+          test -d src/Debug
+          test -d src/Gallery
+          test -d src/Lock
+          test -d src/Observers
+          test -d src/Security
+          test -d src/UI
+          test -f src/Features/General/ProfileCopyButton.x_
+          test ! -e src/Features/General/ProfileCopyButton.x
+          test -f src/Features/ExpFlags/ExpFlagsHooks.xm_
+          test ! -e src/Features/ExpFlags/ExpFlagsHooks.xm
+          grep -Fq -- '-include src/RYGPrefix.h' Makefile
+          if grep -Fq 'modules/JGProgressHUD/*.m' Makefile; then
+            echo '::error::Stale overlay detected: JGProgressHUD was re-added only because disabled ZIP sources were left active.'
+            exit 1
+          fi
+          echo 'RyukGramPriv-main2 source identity checks passed.'
 
       - name: Install build dependencies
         run: |
@@ -72,14 +95,12 @@ jobs:
           git checkout
           mv iPhoneOS26.5.sdk "$THEOS/sdks/"
 
-      - name: Verify SDK, Logos and bundled dependencies
+      - name: Verify SDK and Logos
         working-directory: main
         run: |
           test -d "$THEOS/sdks/iPhoneOS26.5.sdk"
           grep -Eq '^TARGET[[:space:]]*:=[[:space:]]*iphone:clang:26\.5:15\.0' Makefile
           test "$(git -C "$THEOS/vendor/logos" rev-parse HEAD)" = "$RYG_LOGOS_REV"
-          test -f modules/JGProgressHUD/JGProgressHUD.m
-          grep -Fq '$(wildcard modules/JGProgressHUD/*.m)' Makefile
 
       - name: Get version
         working-directory: main
