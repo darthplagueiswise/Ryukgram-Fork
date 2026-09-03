@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Normalize legacy Logos constructs rejected by the current Theos parser.
+"""Normalize only the legacy nested-%orig constructs used by RyukGramPriv.
 
-The RyukGramPriv source contains old patterns where `%orig` is nested inside an
-Objective-C message or passed through a macro.  Current Logos rejects those
-forms.  Rewrite only the known constructs into equivalent top-level `%orig`
-statements/returns before preprocessing, without changing tweak behaviour.
+Current Logos accepts top-level `%orig`/`%orig()` calls, but rejects passing the
+directive through another Objective-C expression or a C macro argument.  This
+pass rewrites only those known legacy callsites and deliberately leaves every
+other `%orig()` in the source untouched.
 """
 from pathlib import Path
 
@@ -12,29 +12,24 @@ path = Path("src/Tweak.x")
 text = path.read_text(encoding="utf-8")
 original = text
 
-# Liquid Glass: never nest %orig inside an Objective-C message.  SCIUtils only
-# forces YES when liquid_glass_surfaces is enabled; otherwise it returns the
-# original gate.  Spell that logic out so Logos sees a plain `return %orig;`.
+# IGDSLauncherConfig Liquid Glass gates.  SCIUtils returns YES when the tweak's
+# liquid_glass_surfaces preference is enabled and otherwise returns the native
+# gate.  Express that directly so %orig is a top-level return expression.
 text = text.replace(
     'return [SCIUtils liquidGlassEnabledBool:%orig];',
     'if ([SCIUtils getBoolPref:@"liquid_glass_surfaces"]) { return true; }\n    return %orig;'
 )
 
-# Screenshot hooks: passing %orig through a C macro is rejected by current
-# Logos.  Expand the two legacy helpers at each callsite instead.  The macros
-# can remain defined because they are no longer invoked with Logos directives.
-text = text.replace(
-    'VOID_HANDLESCREENSHOT(%orig);',
-    'if (![SCIUtils getBoolPref:@"remove_screenshot_alert"]) { %orig; }'
-)
+# IMPORTANT: replace NONVOID first because its token contains the complete
+# substring "VOID_HANDLESCREENSHOT".  Reversing this order creates `NONif`.
 text = text.replace(
     'NONVOID_HANDLESCREENSHOT(%orig);',
     'if ([SCIUtils getBoolPref:@"remove_screenshot_alert"]) { return nil; } return %orig;'
 )
-
-# Guard against reintroducing the invalid transformations from the earlier
-# compatibility pass.
-text = text.replace('%orig()', '%orig')
+text = text.replace(
+    'VOID_HANDLESCREENSHOT(%orig);',
+    'if (![SCIUtils getBoolPref:@"remove_screenshot_alert"]) { %orig; }'
+)
 
 if text != original:
     path.write_text(text, encoding="utf-8")
