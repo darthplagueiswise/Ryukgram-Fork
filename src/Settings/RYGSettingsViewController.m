@@ -251,10 +251,7 @@ static char kRYGRowKey;
 	self.view.backgroundColor = [RYGPopupChrome backgroundColor];
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
-	else {
-		if (self.scopedSearch) [self setupScopedSearch];
-		if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
-	}
+	else if (self.scopedSearch) [self setupScopedSearch];
 	RYGLiquidGlassApplyToViewController(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(rygCacheSizeDidUpdate) name:RYGCacheSizeDidUpdateNotification object:nil];
@@ -305,7 +302,6 @@ static char kRYGRowKey;
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
 	if (self.isRoot) self.sections = [self filteredSections:[RYGTweakSettings sections]];
-	else if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
 	[self.tableView reloadData];
 	[self rygStyleSearchBar];
 }
@@ -460,11 +456,12 @@ static char kRYGRowKey;
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-	cell.contentView.alpha = (row.disabled || (row.lockedOnProvider && row.lockedOnProvider())) ? 0.4 : 1.0;
+	cell.contentView.alpha = (row.disabled || (row.lockedOnProvider && row.lockedOnProvider()) || (row.disabledProvider && row.disabledProvider())) ? 0.4 : 1.0;
 
 	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
 
+	// Search results keep the normal layout so the breadcrumb still has a place.
 	if (row.centeredTitle && ![self isSearching]) {
 		config.textProperties.alignment = UIListContentTextAlignmentCenter;
 		cell.contentConfiguration = config;
@@ -598,7 +595,7 @@ static char kRYGRowKey;
 			BOOL locked = row.lockedOnProvider ? row.lockedOnProvider() : NO;
 			t.on = locked ? YES : (row.disabled ? NO : on);
 			t.onTintColor = [RYGUtils RYGColor_Primary];
-			t.enabled = !row.disabled && !locked;
+			t.enabled = !row.disabled && !locked && !(row.disabledProvider && row.disabledProvider());
 			objc_setAssociatedObject(t, &kRYGRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			[t addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
 			cell.accessoryView = t;
@@ -631,11 +628,10 @@ static char kRYGRowKey;
 			[b setTitle:@"•••" forState:UIControlStateNormal];
 			b.menu = [row menuForButton:b];
 			b.showsMenuAsPrimaryAction = YES;
-			b.enabled = !row.disabled;
+			b.enabled = !row.disabled && !(row.disabledProvider && row.disabledProvider());
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			// Configure Glass before UITableView captures the accessoryView frame.
-			// The source uses UIKit default menu metrics; no manual expanded-menu
-			// margins or contentInsets are introduced here.
+			// SDK 26 lets a glass button act as the UIMenu source and morph into
+			// the system menu. Do not pre-compute padding or menu geometry.
 			RYGLiquidGlassConfigureButton(b, NO);
 			[b sizeToFit];
 			cell.accessoryView = b;
@@ -663,12 +659,13 @@ static char kRYGRowKey;
 - (void)tableView:(UITableView *)tv willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)ip {
 	if ([self isSearching]) return;
 	RYGSetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
+	// Clears this row's own dot once seen; a nav cell's bubble-up dot is separate.
 	if (row) [RYGWhatsNew markSeen:[RYGWhatsNew identifierForRow:row]];
 }
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
 	RYGSetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
-	if (!row || row.disabled) { [tv deselectRowAtIndexPath:ip animated:YES]; return; }
+	if (!row || row.disabled || (row.disabledProvider && row.disabledProvider())) { [tv deselectRowAtIndexPath:ip animated:YES]; return; }
 	switch (row.type) {
 		case RYGTableCellLink: if (row.url) [UIApplication.sharedApplication openURL:row.url options:@{} completionHandler:nil]; break;
 		case RYGTableCellButton: if (row.action) row.action(); break;
