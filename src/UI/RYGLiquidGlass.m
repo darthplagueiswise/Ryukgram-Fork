@@ -61,14 +61,8 @@ void RYGMarkOwnedView(UIView *view) {
 
 BOOL RYGIsOwnedView(UIView *view) {
     if (!view) return NO;
-    UIView *cursor = view;
-    NSUInteger depth = 0;
-    while (cursor && depth++ < 48) {
-        if ([objc_getAssociatedObject(cursor, kRYGOwnedViewKey) boolValue]) return YES;
-        if (RYGClassNameIsOwned(cursor.class)) return YES;
-        cursor = cursor.superview;
-    }
-    return NO;
+    if ([objc_getAssociatedObject(view, kRYGOwnedViewKey) boolValue]) return YES;
+    return RYGClassNameIsOwned(view.class);
 }
 
 BOOL RYGIsOwnedTargetAction(id target, SEL action) {
@@ -76,14 +70,11 @@ BOOL RYGIsOwnedTargetAction(id target, SEL action) {
 
     Class cls = object_isClass(target) ? (Class)target : object_getClass(target);
     if (!cls) return NO;
-    if (RYGClassNameIsOwned(cls)) return YES;
 
-    Method method = object_isClass(target)
-        ? class_getClassMethod((Class)target, action)
-        : class_getInstanceMethod(cls, action);
-    if (!method) return NO;
-    IMP implementation = method_getImplementation(method);
-    return implementation && RYGIsOwnedCodeAddress((const void *)implementation);
+    // Never infer ownership from an IMP address here. Logos can replace an
+    // Instagram method with a RyukGram IMP, which would make a native Instagram
+    // control look tweak-owned. Only an actually RyukGram-owned target counts.
+    return RYGClassNameIsOwned(cls);
 }
 
 static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
@@ -94,10 +85,6 @@ static UIViewController *RYGOwnedContainerContent(UIViewController *controller, 
     if (!controller || depth > 6) return nil;
     if (RYGControllerDirectlyOwned(controller)) return controller;
 
-    // Generic UIKit containers may forward ownership only to the actively
-    // presented RyukGram content. Never infer ownership from arbitrary child
-    // controllers: Instagram can host a RyukGram child/overlay while the rest
-    // of the screen remains entirely Instagram-owned.
     if ([controller isKindOfClass:UINavigationController.class]) {
         UINavigationController *nav = (UINavigationController *)controller;
         UIViewController *candidate = nav.visibleViewController ?: nav.topViewController;
@@ -261,22 +248,6 @@ static void RYGUseNativeNavigationTitle(UIViewController *controller) {
     }
 }
 
-static BOOL RYGButtonHasOwnedTargetAction(UIButton *button) {
-    if (!button) return NO;
-    for (id target in button.allTargets) {
-        for (NSNumber *eventNumber in @[@(UIControlEventTouchUpInside),
-                                        @(UIControlEventPrimaryActionTriggered),
-                                        @(UIControlEventValueChanged)]) {
-            NSArray<NSString *> *actions = [button actionsForTarget:target
-                                                   forControlEvent:(UIControlEvents)eventNumber.unsignedIntegerValue];
-            for (NSString *actionName in actions) {
-                if (RYGIsOwnedTargetAction(target, NSSelectorFromString(actionName))) return YES;
-            }
-        }
-    }
-    return NO;
-}
-
 static void RYGStyleOwnedControls(UIView *root) {
     if (!root) return;
     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:root];
@@ -284,11 +255,11 @@ static void RYGStyleOwnedControls(UIView *root) {
         UIView *view = pending.lastObject;
         [pending removeLastObject];
 
+        // The caller only passes a concrete RyukGram controller's root view, so
+        // every UIButton found here belongs to tweak UI. No Instagram root view
+        // is ever traversed by this function.
         if ([view isKindOfClass:UIButton.class]) {
-            UIButton *button = (UIButton *)view;
-            if (RYGIsOwnedView(button) || RYGButtonHasOwnedTargetAction(button)) {
-                RYGLiquidGlassConfigureButton(button, NO);
-            }
+            RYGLiquidGlassConfigureButton((UIButton *)view, NO);
         }
         for (UIView *subview in view.subviews) [pending addObject:subview];
     }
@@ -298,9 +269,16 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
     UIViewController *content = RYGOwnedContainerContent(controller, 0);
     if (!content || !RYGControllerDirectlyOwned(content)) return;
 
-    UINavigationController *navigationController = content.navigationController;
-    if ([controller isKindOfClass:UINavigationController.class]) {
+    // Do not mutate an Instagram-owned UINavigationController merely because it
+    // happens to host a RyukGram page. Navigation chrome is only configured when
+    // the navigation controller class itself belongs to the tweak.
+    UINavigationController *navigationController = nil;
+    if ([controller isKindOfClass:UINavigationController.class] &&
+        RYGControllerDirectlyOwned(controller)) {
         navigationController = (UINavigationController *)controller;
+    } else if (content.navigationController &&
+               RYGControllerDirectlyOwned(content.navigationController)) {
+        navigationController = content.navigationController;
     }
 
     if (navigationController) RYGLiquidGlassConfigureNavigationController(navigationController);
