@@ -41,10 +41,9 @@ ifeq ($(FINALPACKAGE),1)
 	$(TWEAK_NAME)_LDFLAGS += -Wl,-unexported_symbol,'_OBJC_IVAR_$$_*RYG*'
 endif
 
-# Do not use global CCFLAGS for the C++ dialect: Theos passes them through the
-# Swift Clang importer as well. Logos .xm files that become Objective-C++ need
-# the C++11 dialect, so scope it to Objective-C++ only.
-ADDITIONAL_OBJCCFLAGS += -std=c++11
+# SDK 26.5's clang default is sufficient for the existing Logos Objective-C++
+# sources. Keep dialect flags out of the target-wide compiler variables because
+# Theos forwards those to Swift's Clang importer.
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
