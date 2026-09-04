@@ -1,6 +1,10 @@
 import SwiftUI
 import UIKit
 
+private final class RYGWeakControllerBox {
+    weak var value: UIViewController?
+}
+
 /// iOS 26 menu presentation used by RyukGram settings.
 ///
 /// UIKit's contextual UIMenu uses a system full-width menu column for the
@@ -19,8 +23,8 @@ public final class RYGAdaptiveGlassMenuPresenter: NSObject {
         let sourceFrame = source.convert(source.bounds, to: window)
         let safeFrame = window.bounds.inset(by: window.safeAreaInsets)
         let metrics = MenuMetrics(menu: menu, sourceFrame: sourceFrame, safeFrame: safeFrame)
+        let hostBox = RYGWeakControllerBox()
 
-        weak var weakHost: UIViewController?
         let root = AdaptiveGlassMenuView(
             rootMenu: menu,
             source: source,
@@ -28,12 +32,12 @@ public final class RYGAdaptiveGlassMenuPresenter: NSObject {
             safeFrame: safeFrame,
             metrics: metrics,
             onDismiss: {
-                weakHost?.dismiss(animated: false)
+                hostBox.value?.dismiss(animated: false)
             }
         )
 
         let host = UIHostingController(rootView: root)
-        weakHost = host
+        hostBox.value = host
         host.modalPresentationStyle = .overFullScreen
         host.modalTransitionStyle = .crossDissolve
         host.view.backgroundColor = .clear
@@ -117,7 +121,7 @@ private struct MenuMetrics {
 @available(iOS 26.0, *)
 private struct AdaptiveGlassMenuView: View {
     let rootMenu: UIMenu
-    weak var source: UIButton?
+    let source: UIButton
     let sourceFrame: CGRect
     let safeFrame: CGRect
     let metrics: MenuMetrics
@@ -171,8 +175,9 @@ private struct AdaptiveGlassMenuView: View {
                     .frame(width: expanded ? targetFrame.width : max(sourceFrame.width, 44.0),
                            height: expanded ? targetFrame.height : max(sourceFrame.height, 36.0),
                            alignment: .top)
-                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: expanded ? 26.0 : max(sourceFrame.height, 36.0) * 0.5,
-                                                                              style: .continuous))
+                    .glassEffect(.regular.interactive(),
+                                 in: RoundedRectangle(cornerRadius: expanded ? 26.0 : max(sourceFrame.height, 36.0) * 0.5,
+                                                      style: .continuous))
                     .position(x: expanded ? targetFrame.midX : sourceFrame.midX,
                               y: expanded ? targetFrame.midY : sourceFrame.midY)
             }
@@ -211,9 +216,9 @@ private struct AdaptiveGlassMenuView: View {
                     Divider().padding(.horizontal, 12)
                 }
 
-                ForEach(Array(elements.enumerated()), id: \.offset) { _, element in
+                ForEach(Array(elements.enumerated()), id: \.offset) { index, element in
                     elementRow(element)
-                    if element !== elements.last {
+                    if index < elements.count - 1 {
                         Divider().padding(.leading, 46).padding(.trailing, 12)
                     }
                 }
@@ -301,11 +306,6 @@ private struct AdaptiveGlassMenuView: View {
     }
 
     private func dispatch(_ command: UICommand) {
-        guard let source else {
-            UIApplication.shared.sendAction(command.action, to: nil, from: command, for: nil)
-            return
-        }
-
         var responder: UIResponder? = source
         while let current = responder {
             if current.responds(to: command.action) {
