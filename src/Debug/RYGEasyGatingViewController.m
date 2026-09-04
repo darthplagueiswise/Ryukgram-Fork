@@ -109,7 +109,7 @@
     }
     if (!rows.count) {
         [rows addObject:[RYGSetting staticCellWithTitle:@"Waiting for live mapped gates"
-                                              subtitle:nil
+                                              subtitle:@""
                                                   icon:[RYGSymbol symbolWithName:@"function"]]];
     }
     [self applySettingSections:@[[RYGSettingsViewController sectionWithHeader:nil
