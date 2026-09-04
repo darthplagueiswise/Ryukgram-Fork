@@ -1,9 +1,19 @@
 #import "RYGLiquidGlass.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#if __has_include(<ptrauth.h>)
+#import <ptrauth.h>
+#endif
 
 static const void *kRYGGlassButtonConfiguredKey = &kRYGGlassButtonConfiguredKey;
 static const void *kRYGGeneratedTitleViewKey = &kRYGGeneratedTitleViewKey;
+static const void *kRYGOwnedViewKey = &kRYGOwnedViewKey;
+
+static NSString *RYGNormalizeImagePath(const char *rawPath) {
+    if (!rawPath) return nil;
+    NSString *path = [[NSString alloc] initWithUTF8String:rawPath];
+    return [[path stringByResolvingSymlinksInPath] stringByStandardizingPath];
+}
 
 static NSString *RYGDefiningImagePath(void) {
     static NSString *path;
@@ -11,11 +21,27 @@ static NSString *RYGDefiningImagePath(void) {
     dispatch_once(&once, ^{
         Dl_info info = {0};
         if (dladdr((const void *)&RYGIsOwnedViewController, &info) && info.dli_fname) {
-            path = [[[[NSString alloc] initWithUTF8String:info.dli_fname]
-                stringByResolvingSymlinksInPath] stringByStandardizingPath];
+            path = RYGNormalizeImagePath(info.dli_fname);
         }
     });
     return path;
+}
+
+static const void *RYGUnsignedCodePointer(const void *address) {
+#if __has_feature(ptrauth_calls)
+    return ptrauth_strip(address, ptrauth_key_function_pointer);
+#else
+    return address;
+#endif
+}
+
+BOOL RYGIsOwnedCodeAddress(const void *address) {
+    if (!address) return NO;
+    Dl_info info = {0};
+    if (!dladdr(RYGUnsignedCodePointer(address), &info) || !info.dli_fname) return NO;
+    NSString *image = RYGNormalizeImagePath(info.dli_fname);
+    NSString *owner = RYGDefiningImagePath();
+    return image.length && owner.length && [image isEqualToString:owner];
 }
 
 static BOOL RYGClassNameIsOwned(Class cls) {
@@ -23,9 +49,41 @@ static BOOL RYGClassNameIsOwned(Class cls) {
     if ([name hasPrefix:@"RYG"] || [name hasPrefix:@"_RYG"]) return YES;
     const char *rawImage = cls ? class_getImageName(cls) : NULL;
     if (!rawImage) return NO;
-    NSString *classImage = [[[[NSString alloc] initWithUTF8String:rawImage]
-        stringByResolvingSymlinksInPath] stringByStandardizingPath];
-    return classImage.length && [classImage isEqualToString:RYGDefiningImagePath()];
+    NSString *classImage = RYGNormalizeImagePath(rawImage);
+    NSString *owner = RYGDefiningImagePath();
+    return classImage.length && owner.length && [classImage isEqualToString:owner];
+}
+
+void RYGMarkOwnedView(UIView *view) {
+    if (!view) return;
+    objc_setAssociatedObject(view, kRYGOwnedViewKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+BOOL RYGIsOwnedView(UIView *view) {
+    if (!view) return NO;
+    UIView *cursor = view;
+    NSUInteger depth = 0;
+    while (cursor && depth++ < 48) {
+        if ([objc_getAssociatedObject(cursor, kRYGOwnedViewKey) boolValue]) return YES;
+        if (RYGClassNameIsOwned(cursor.class)) return YES;
+        cursor = cursor.superview;
+    }
+    return NO;
+}
+
+BOOL RYGIsOwnedTargetAction(id target, SEL action) {
+    if (!target || !action) return NO;
+
+    Class cls = object_isClass(target) ? (Class)target : object_getClass(target);
+    if (!cls) return NO;
+    if (RYGClassNameIsOwned(cls)) return YES;
+
+    Method method = object_isClass(target)
+        ? class_getClassMethod((Class)target, action)
+        : class_getInstanceMethod(cls, action);
+    if (!method) return NO;
+    IMP implementation = method_getImplementation(method);
+    return implementation && RYGIsOwnedCodeAddress((const void *)implementation);
 }
 
 static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
@@ -34,18 +92,12 @@ static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
 
 static UIViewController *RYGOwnedContainerContent(UIViewController *controller, NSUInteger depth) {
     if (!controller || depth > 6) return nil;
-
-    // A controller is owned only when its concrete class belongs to RyukGram.
-    // Never infer ownership from arbitrary childViewControllers: Instagram can
-    // legitimately host a RyukGram child/overlay inside an otherwise native
-    // controller. Treating that parent as owned caused the previous pass to
-    // glass every UIButton in the Instagram screen.
     if (RYGControllerDirectlyOwned(controller)) return controller;
 
-    // Generic UIKit presentation containers are allowed to forward ownership
-    // only to the content they are actively presenting. This keeps a standard
-    // UINavigationController wrapper around a RyukGram page working without
-    // broadening ownership to Instagram's surrounding hierarchy.
+    // Generic UIKit containers may forward ownership only to the actively
+    // presented RyukGram content. Never infer ownership from arbitrary child
+    // controllers: Instagram can host a RyukGram child/overlay while the rest
+    // of the screen remains entirely Instagram-owned.
     if ([controller isKindOfClass:UINavigationController.class]) {
         UINavigationController *nav = (UINavigationController *)controller;
         UIViewController *candidate = nav.visibleViewController ?: nav.topViewController;
@@ -68,8 +120,6 @@ BOOL RYGIsOwnedViewController(UIViewController *controller) {
 
 BOOL RYGLiquidGlassIsAvailable(void) {
     if (@available(iOS 26.0, *)) {
-        // Liquid Glass is the visual baseline for RyukGram-owned UI on iOS 26.
-        // Do not let a stale hidden preference silently turn the design off.
         return !UIAccessibilityIsReduceTransparencyEnabled();
     }
     return NO;
@@ -93,6 +143,7 @@ UIVisualEffectView *RYGLiquidGlassView(BOOL interactive,
     }
 
     UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
+    RYGMarkOwnedView(view);
     view.userInteractionEnabled = NO;
     if (!effect) view.backgroundColor = tintColor ?: UIColor.secondarySystemBackgroundColor;
     return view;
@@ -167,18 +218,18 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
             }
         }
     }
-
-    // SDK 26 glass/menu transitions depend on intrinsic geometry. Never rewrite
-    // the control frame after applying the configuration.
     [button invalidateIntrinsicContentSize];
 }
 
 void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
+    if (!button) return;
+    RYGMarkOwnedView(button);
     RYGSynchronizeGlassButton(button, prominent);
 }
 
 UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
     UILabel *label = [UILabel new];
+    RYGMarkOwnedView(label);
     label.text = title ?: @"";
     label.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
     label.textColor = UIColor.labelColor;
@@ -210,6 +261,22 @@ static void RYGUseNativeNavigationTitle(UIViewController *controller) {
     }
 }
 
+static BOOL RYGButtonHasOwnedTargetAction(UIButton *button) {
+    if (!button) return NO;
+    for (id target in button.allTargets) {
+        for (NSNumber *eventNumber in @[@(UIControlEventTouchUpInside),
+                                        @(UIControlEventPrimaryActionTriggered),
+                                        @(UIControlEventValueChanged)]) {
+            NSArray<NSString *> *actions = [button actionsForTarget:target
+                                                   forControlEvent:(UIControlEvents)eventNumber.unsignedIntegerValue];
+            for (NSString *actionName in actions) {
+                if (RYGIsOwnedTargetAction(target, NSSelectorFromString(actionName))) return YES;
+            }
+        }
+    }
+    return NO;
+}
+
 static void RYGStyleOwnedControls(UIView *root) {
     if (!root) return;
     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:root];
@@ -217,11 +284,11 @@ static void RYGStyleOwnedControls(UIView *root) {
         UIView *view = pending.lastObject;
         [pending removeLastObject];
 
-        // The root passed here is now guaranteed to belong directly to a
-        // RyukGram controller. We no longer traverse an Instagram parent just
-        // because it happens to contain one RyukGram child controller.
         if ([view isKindOfClass:UIButton.class]) {
-            RYGLiquidGlassConfigureButton((UIButton *)view, NO);
+            UIButton *button = (UIButton *)view;
+            if (RYGIsOwnedView(button) || RYGButtonHasOwnedTargetAction(button)) {
+                RYGLiquidGlassConfigureButton(button, NO);
+            }
         }
         for (UIView *subview in view.subviews) [pending addObject:subview];
     }
