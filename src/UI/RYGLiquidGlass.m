@@ -28,26 +28,42 @@ static BOOL RYGClassNameIsOwned(Class cls) {
     return classImage.length && [classImage isEqualToString:RYGDefiningImagePath()];
 }
 
-static BOOL RYGControllerTreeIsOwned(UIViewController *controller, NSUInteger depth) {
-    if (!controller || depth > 8) return NO;
-    if (RYGClassNameIsOwned(controller.class)) return YES;
+static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
+    return controller && RYGClassNameIsOwned(controller.class);
+}
+
+static UIViewController *RYGOwnedContainerContent(UIViewController *controller, NSUInteger depth) {
+    if (!controller || depth > 6) return nil;
+
+    // A controller is owned only when its concrete class belongs to RyukGram.
+    // Never infer ownership from arbitrary childViewControllers: Instagram can
+    // legitimately host a RyukGram child/overlay inside an otherwise native
+    // controller. Treating that parent as owned caused the previous pass to
+    // glass every UIButton in the Instagram screen.
+    if (RYGControllerDirectlyOwned(controller)) return controller;
+
+    // Generic UIKit presentation containers are allowed to forward ownership
+    // only to the content they are actively presenting. This keeps a standard
+    // UINavigationController wrapper around a RyukGram page working without
+    // broadening ownership to Instagram's surrounding hierarchy.
     if ([controller isKindOfClass:UINavigationController.class]) {
-        UINavigationController *navigationController = (UINavigationController *)controller;
-        UIViewController *candidate = navigationController.visibleViewController ?: navigationController.viewControllers.firstObject;
-        return candidate != controller && RYGControllerTreeIsOwned(candidate, depth + 1);
+        UINavigationController *nav = (UINavigationController *)controller;
+        UIViewController *candidate = nav.visibleViewController ?: nav.topViewController;
+        if (candidate && candidate != controller) return RYGOwnedContainerContent(candidate, depth + 1);
+        return nil;
     }
+
     if ([controller isKindOfClass:UITabBarController.class]) {
         UIViewController *candidate = ((UITabBarController *)controller).selectedViewController;
-        return candidate != controller && RYGControllerTreeIsOwned(candidate, depth + 1);
+        if (candidate && candidate != controller) return RYGOwnedContainerContent(candidate, depth + 1);
+        return nil;
     }
-    for (UIViewController *child in controller.childViewControllers) {
-        if (child != controller && RYGControllerTreeIsOwned(child, depth + 1)) return YES;
-    }
-    return NO;
+
+    return nil;
 }
 
 BOOL RYGIsOwnedViewController(UIViewController *controller) {
-    return RYGControllerTreeIsOwned(controller, 0);
+    return RYGOwnedContainerContent(controller, 0) != nil;
 }
 
 BOOL RYGLiquidGlassIsAvailable(void) {
@@ -201,9 +217,9 @@ static void RYGStyleOwnedControls(UIView *root) {
         UIView *view = pending.lastObject;
         [pending removeLastObject];
 
-        // This pass runs only inside a RyukGram-owned controller tree. Style
-        // every actual UIButton there, including accessory/custom-cell buttons;
-        // switches and list/navigation rows remain native controls.
+        // The root passed here is now guaranteed to belong directly to a
+        // RyukGram controller. We no longer traverse an Instagram parent just
+        // because it happens to contain one RyukGram child controller.
         if ([view isKindOfClass:UIButton.class]) {
             RYGLiquidGlassConfigureButton((UIButton *)view, NO);
         }
@@ -212,15 +228,12 @@ static void RYGStyleOwnedControls(UIView *root) {
 }
 
 void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
-    if (!RYGIsOwnedViewController(controller)) return;
+    UIViewController *content = RYGOwnedContainerContent(controller, 0);
+    if (!content || !RYGControllerDirectlyOwned(content)) return;
 
-    UIViewController *content = controller;
-    UINavigationController *navigationController = nil;
+    UINavigationController *navigationController = content.navigationController;
     if ([controller isKindOfClass:UINavigationController.class]) {
         navigationController = (UINavigationController *)controller;
-        content = navigationController.visibleViewController ?: controller;
-    } else {
-        navigationController = controller.navigationController;
     }
 
     if (navigationController) RYGLiquidGlassConfigureNavigationController(navigationController);
