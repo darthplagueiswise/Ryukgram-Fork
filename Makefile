@@ -5,13 +5,13 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = RyukGram
 
-$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m \)) modules/fishhook/fishhook.c
+$(TWEAK_NAME)_FILES = $(shell find src -type f \( -iname \*.x -o -iname \*.xm -o -iname \*.m -o -iname \*.swift \)) modules/fishhook/fishhook.c
 
 # The no-plugins sideload compat patch (keychain / app groups / CloudKit) is no
 # longer baked in here — it ships as a standalone NoPluginsPatch.dylib
 # (modules/SideloadPatch) injected by cyan for no-plugins builds.
 
-$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit LocalAuthentication Vision CoreImage CoreVideo CoreMedia VideoToolbox CoreData
+$(TWEAK_NAME)_FRAMEWORKS = UIKit SwiftUI Foundation CoreGraphics Photos CoreServices SystemConfiguration SafariServices Security QuartzCore AVFoundation AVKit UniformTypeIdentifiers CoreLocation MapKit LocalAuthentication Vision CoreImage CoreVideo CoreMedia VideoToolbox CoreData
 $(TWEAK_NAME)_PRIVATE_FRAMEWORKS = Preferences
 
 # File logger master switch. OFF for production — the logger, its NSLog tee, and
@@ -23,9 +23,8 @@ RYG_FILELOG ?= 0
 # Build RYG_PROBE=1 to audit hook coverage on the next IG bump.
 RYG_PROBE ?= 0
 
-# iOS 26-only UIKit classes are referenced by Logos groups whose installation is
-# already guarded at runtime with @available(iOS 26.0, *) + objc_getClass().
-# Keep deployment at iOS 15 while allowing those guarded declarations to compile.
+# iOS 26-only UIKit/SwiftUI APIs are availability-guarded at their call sites.
+# Keep deployment at iOS 15 while compiling against SDK 26.5.
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-unsupported-availability-guard -Wno-unguarded-availability-new -Wno-unused-value -Wno-deprecated-declarations -Wno-nullability-completeness -Wno-unused-function -Wno-incompatible-pointer-types -DRYG_FILELOG=$(RYG_FILELOG) -DRYG_PROBE=$(RYG_PROBE) -include src/RYGPrefix.h
 $(TWEAK_NAME)_LOGOSFLAGS = --c warnings=none
 $(TWEAK_NAME)_LDFLAGS += -lcompression -lsqlite3

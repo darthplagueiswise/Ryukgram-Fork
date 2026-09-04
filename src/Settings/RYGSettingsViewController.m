@@ -2,6 +2,7 @@
 #import "RYGWhatsNew.h"
 #import "RYGDonatePrompt.h"
 #import "../UI/RYGPopupChrome.h"
+#import "../UI/RYGLiquidGlass.h"
 #import "RYGSearchBarStyler.h"
 #import "../Features/General/RYGCacheManager.h"
 #import "../RYGImageCache.h"
@@ -250,7 +251,11 @@ static char kRYGRowKey;
 	self.view.backgroundColor = [RYGPopupChrome backgroundColor];
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
-	else if (self.scopedSearch) [self setupScopedSearch];
+	else {
+		if (self.scopedSearch) [self setupScopedSearch];
+		if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
+	}
+	RYGLiquidGlassApplyToViewController(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(rygCacheSizeDidUpdate) name:RYGCacheSizeDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(rygReloadFromNotification) name:@"RYGSettingsShouldReload" object:nil];
@@ -267,7 +272,8 @@ static char kRYGRowKey;
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.backgroundColor = self.view.backgroundColor;
-	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
+	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
+	if (@available(iOS 13.0, *)) self.tableView.automaticallyAdjustsScrollIndicatorInsets = YES;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	[self.view addSubview:self.tableView];
@@ -299,6 +305,7 @@ static char kRYGRowKey;
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
 	if (self.isRoot) self.sections = [self filteredSections:[RYGTweakSettings sections]];
+	else if (self.title.length) self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title);
 	[self.tableView reloadData];
 	[self rygStyleSearchBar];
 }
@@ -453,12 +460,11 @@ static char kRYGRowKey;
 	cell.accessoryView = nil;
 	cell.accessoryType = UITableViewCellAccessoryNone;
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-	cell.contentView.alpha = (row.disabled || (row.lockedOnProvider && row.lockedOnProvider()) || (row.disabledProvider && row.disabledProvider())) ? 0.4 : 1.0;
+	cell.contentView.alpha = (row.disabled || (row.lockedOnProvider && row.lockedOnProvider())) ? 0.4 : 1.0;
 
 	config.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 	config.textProperties.color = row.titleColor ?: UIColor.labelColor;
 
-	// Search results keep the normal layout so the breadcrumb still has a place.
 	if (row.centeredTitle && ![self isSearching]) {
 		config.textProperties.alignment = UIListContentTextAlignmentCenter;
 		cell.contentConfiguration = config;
@@ -592,7 +598,7 @@ static char kRYGRowKey;
 			BOOL locked = row.lockedOnProvider ? row.lockedOnProvider() : NO;
 			t.on = locked ? YES : (row.disabled ? NO : on);
 			t.onTintColor = [RYGUtils RYGColor_Primary];
-			t.enabled = !row.disabled && !locked && !(row.disabledProvider && row.disabledProvider());
+			t.enabled = !row.disabled && !locked;
 			objc_setAssociatedObject(t, &kRYGRowKey, row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 			[t addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
 			cell.accessoryView = t;
@@ -625,11 +631,12 @@ static char kRYGRowKey;
 			[b setTitle:@"•••" forState:UIControlStateNormal];
 			b.menu = [row menuForButton:b];
 			b.showsMenuAsPrimaryAction = YES;
-			b.enabled = !row.disabled && !(row.disabledProvider && row.disabledProvider());
+			b.enabled = !row.disabled;
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 8.0, 8.0, 8.0);
-			b.configuration = bc;
+			// Configure Glass before UITableView captures the accessoryView frame.
+			// The source uses UIKit default menu metrics; no manual expanded-menu
+			// margins or contentInsets are introduced here.
+			RYGLiquidGlassConfigureButton(b, NO);
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -656,13 +663,12 @@ static char kRYGRowKey;
 - (void)tableView:(UITableView *)tv willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)ip {
 	if ([self isSearching]) return;
 	RYGSetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
-	// Clears this row's own dot once seen; a nav cell's bubble-up dot is separate.
 	if (row) [RYGWhatsNew markSeen:[RYGWhatsNew identifierForRow:row]];
 }
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
 	RYGSetting *row = [self settingForIndexPath:ip breadcrumbOut:NULL];
-	if (!row || row.disabled || (row.disabledProvider && row.disabledProvider())) { [tv deselectRowAtIndexPath:ip animated:YES]; return; }
+	if (!row || row.disabled) { [tv deselectRowAtIndexPath:ip animated:YES]; return; }
 	switch (row.type) {
 		case RYGTableCellLink: if (row.url) [UIApplication.sharedApplication openURL:row.url options:@{} completionHandler:nil]; break;
 		case RYGTableCellButton: if (row.action) row.action(); break;
