@@ -2,10 +2,8 @@
 #import "../Utils.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
-#import <math.h>
 
 static const void *kRYGGlassButtonConfiguredKey = &kRYGGlassButtonConfiguredKey;
-static const void *kRYGGlassButtonDeferredFitKey = &kRYGGlassButtonDeferredFitKey;
 static const void *kRYGGeneratedTitleViewKey = &kRYGGeneratedTitleViewKey;
 
 static NSString *RYGDefiningImagePath(void) {
@@ -65,7 +63,7 @@ UIVisualEffectView *RYGLiquidGlassView(BOOL interactive,
                                        UIColor *tintColor) {
     UIVisualEffect *effect = nil;
     if (@available(iOS 26.0, *)) {
-        if (RYGLiquidGlassIsAvailable()) {
+        if (RYGLiquidGlassIsAvailable() && !UIAccessibilityIsReduceTransparencyEnabled()) {
             UIGlassEffect *glass = [UIGlassEffect effectWithStyle:
                 clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
             glass.interactive = interactive;
@@ -78,9 +76,6 @@ UIVisualEffectView *RYGLiquidGlassView(BOOL interactive,
     }
 
     UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
-    // Glass backgrounds must never swallow interaction intended for the content
-    // above them. Interactive UIGlassEffect still reacts through the containing
-    // control; the effect view itself remains a passive background surface.
     view.userInteractionEnabled = NO;
     if (!effect) view.backgroundColor = tintColor ?: UIColor.secondarySystemBackgroundColor;
     return view;
@@ -101,9 +96,8 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
 static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
     if (!menu) return;
 
-    // UIKit owns menu geometry. Automatic sizing is deliberately used instead
-    // of medium/large element sizes or a popover preferredContentSize so short
-    // menus are not forced into the wide cards that older RyukGram builds used.
+    // SDK 26 owns the menu's dimensions, placement and morph transition.
+    // Keep the model semantic and never force a menu element/card size.
     if (@available(iOS 17.0, *)) {
         menu.preferredElementSize = UIMenuElementSizeAutomatic;
     }
@@ -131,29 +125,16 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
 
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
+
+    // A menu source is a native glass control in SDK 26. Never carry the old
+    // RyukGram fixed 8pt padding into it. UIKit computes the capsule geometry
+    // and the source-to-menu morph from the button's intrinsic content.
     if (menuSource) {
         [glass setDefaultContentInsets];
     } else if (old) {
         glass.contentInsets = old.contentInsets;
     }
     return glass;
-}
-
-static void RYGFitFrameManagedMenuButton(UIButton *button) {
-    if (!button) return;
-    [button invalidateIntrinsicContentSize];
-    [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-    [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-
-    // Auto Layout owns constrained buttons. accessoryView/menu buttons created
-    // with explicit frames instead follow their intrinsic content size.
-    if (!button.translatesAutoresizingMaskIntoConstraints) return;
-    [button sizeToFit];
-    CGSize intrinsic = button.intrinsicContentSize;
-    CGRect frame = button.frame;
-    if (intrinsic.width > 0.0 && isfinite(intrinsic.width)) frame.size.width = ceil(intrinsic.width);
-    if (intrinsic.height > 0.0 && isfinite(intrinsic.height)) frame.size.height = ceil(intrinsic.height);
-    button.frame = frame;
 }
 
 static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
@@ -179,35 +160,13 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
         }
     }
 
-    if (menuSource) RYGFitFrameManagedMenuButton(button);
+    // Deliberately no sizeToFit/frame rewrite here. In SDK 26 the source view's
+    // intrinsic size is part of the native Liquid Glass/menu transition.
+    [button invalidateIntrinsicContentSize];
 }
 
 void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
-    if (!button) return;
     RYGSynchronizeGlassButton(button, prominent);
-
-    BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-    if (!menuSource || !button.translatesAutoresizingMaskIntoConstraints) return;
-
-    // A number of RyukGram cells assign the final title after building the
-    // accessory button. Re-fit once at the end of the run loop so the closed
-    // capsule never keeps the stale, truncated frame.
-    if (![objc_getAssociatedObject(button, kRYGGlassButtonDeferredFitKey) boolValue]) {
-        objc_setAssociatedObject(button,
-                                 kRYGGlassButtonDeferredFitKey,
-                                 @YES,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        __weak UIButton *weakButton = button;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIButton *strongButton = weakButton;
-            if (!strongButton) return;
-            objc_setAssociatedObject(strongButton,
-                                     kRYGGlassButtonDeferredFitKey,
-                                     nil,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            RYGSynchronizeGlassButton(strongButton, prominent);
-        });
-    }
 }
 
 UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
@@ -233,15 +192,9 @@ void RYGLiquidGlassConfigureNavigationController(UINavigationController *navigat
     navigationController.navigationBar.prefersLargeTitles = NO;
     navigationController.navigationBar.tintColor = UIColor.labelColor;
 
-    // With SDK 26.5, UINavigationBar/UIBarButtonItem render the public native
-    // Liquid Glass chrome themselves. Do not install a second blur/glass
-    // background or a custom title capsule on top of that system surface.
-    if (@available(iOS 26.0, *)) {
-        return;
-    }
-
-    // Older systems retain their standard UIKit material. Keeping the default
-    // appearance also respects the user's light/dark and accessibility choices.
+    // SDK 26 UINavigationBar, UIBarButtonItem, toolbar and their scroll-edge
+    // treatment are system Liquid Glass. Do not add a second material layer or
+    // force bar metrics/frames here.
 }
 
 static void RYGUseNativeNavigationTitle(UIViewController *controller) {
