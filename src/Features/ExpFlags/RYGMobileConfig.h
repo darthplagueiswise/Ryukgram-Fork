@@ -1,11 +1,20 @@
 #import <Foundation/Foundation.h>
 
-typedef NS_ENUM(uint8_t, RYGMCType) {
-    RYGMCTypeBool   = 1,
-    RYGMCTypeInt    = 2,
-    RYGMCTypeDouble = 3,
-    RYGMCTypeString = 4,
+typedef uint8_t RYGMCType;
+enum {
+    RYGMCTypeUnknown = 0,
+    RYGMCTypeBool    = 1,
+    RYGMCTypeInt     = 2,
+    // Revalidated against the current FBSharedFramework parameter table and
+    // native mc_overrides.json: discriminator 3 is string and 4 is double.
+    RYGMCTypeString  = 3,
+    RYGMCTypeDouble  = 4,
 };
+
+static inline BOOL RYGMCTypeIsRuntimeValue(RYGMCType type) {
+    return type == RYGMCTypeBool || type == RYGMCTypeInt ||
+           type == RYGMCTypeString || type == RYGMCTypeDouble;
+}
 
 typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
     RYGMCOverrideNone = 0,
@@ -18,60 +27,54 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 @property (nonatomic, assign) unsigned int configNumber;
 @property (nonatomic, assign) unsigned int paramIndex;
 @property (nonatomic, assign) RYGMCType type;
-@property (nonatomic, copy)   NSString *name;
+@property (nonatomic, assign, getter=isRuntimeBacked) BOOL runtimeBacked;
+@property (nonatomic, copy) NSString *name;
 @property (nonatomic, readonly) NSString *typeName;
-@property (nonatomic, readonly) NSString *normalizedName;
 @end
 
 @interface RYGMCConfig : NSObject
 @property (nonatomic, assign) unsigned int number;
-@property (nonatomic, copy)   NSString *name;
+@property (nonatomic, copy) NSString *name;
 @property (nonatomic, strong) NSArray<RYGMCParam *> *params;
 @property (nonatomic, readonly) NSString *displayName;
-@property (nonatomic, readonly) NSString *normalizedName;
+@property (nonatomic, readonly) BOOL hasRuntimeBacking;
 @end
 
 @interface RYGMobileConfig : NSObject
 
 + (instancetype)shared;
 
-+ (NSString *)storageDirectory;
-+ (void)mergeImportedStoreAtPath:(NSString *)importedDir;
-+ (void)resetStore;
-+ (void)reloadStoreFromDisk;
-
 @property (nonatomic, readonly) BOOL ready;
 @property (nonatomic, readonly) NSUInteger namedConfigCount;
 
 - (void)prepare;
+/// Rebuilds the browser from Instagram's live exported parameter table. A cached
+/// id/name catalog may decorate matching rows, but never creates runtime values.
+- (void)reloadFromRuntime;
 - (NSArray<RYGMCConfig *> *)allConfigs;
 - (NSArray<RYGMCConfig *> *)configsMatching:(NSString *)query onlyOverridden:(BOOL)onlyOverridden;
-- (NSArray<NSString *> *)paramNamesMatching:(NSString *)query inConfig:(RYGMCConfig *)c;
-- (NSArray<RYGMCParam *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)c;
+- (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)config;
 
-- (id)liveValueFor:(RYGMCParam *)p;
+/// Native-disk fallback used only before an explicit imported mapping exists.
+- (void)mergeDiskNamesInto:(NSMutableDictionary *)catalog;
 
-- (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)p;
-- (id)overrideValueFor:(RYGMCParam *)p;
-- (BOOL)setOverride:(id)value for:(RYGMCParam *)p;
-- (void)clearOverrideFor:(RYGMCParam *)p;
+- (id)liveValueFor:(RYGMCParam *)param;
+
+- (RYGMCOverrideState)overrideStateFor:(RYGMCParam *)param;
+- (id)overrideValueFor:(RYGMCParam *)param;
+- (BOOL)setOverride:(id)value for:(RYGMCParam *)param;
+- (void)clearOverrideFor:(RYGMCParam *)param;
 - (NSUInteger)overrideCount;
 - (void)resetAllOverrides;
 - (void)resetOverridesForConfig:(RYGMCConfig *)config;
 
-- (NSString *)callSiteFor:(RYGMCParam *)p;
+- (NSString *)callSiteFor:(RYGMCParam *)param;
 
-- (NSString *)noteFor:(RYGMCParam *)p;
-- (void)setNote:(NSString *)note for:(RYGMCParam *)p;
+- (NSString *)noteFor:(RYGMCParam *)param;
+- (void)setNote:(NSString *)note for:(RYGMCParam *)param;
 
 - (void)markLaunchStable;
 - (BOOL)consumeCrashLoopFlag;
 - (void)reapplyOverridesToNativeTable;
-
-- (NSArray<NSDictionary *> *)exportEntries;
-- (void)importEntries:(NSArray<NSDictionary *> *)entries
-              replace:(BOOL)replace
-              applied:(NSUInteger *)applied
-              skipped:(NSUInteger *)skipped;
 
 @end
