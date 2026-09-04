@@ -12,9 +12,8 @@ FOUNDATION_EXPORT void RYGLiquidGlassSetTint(UIVisualEffectView *view,
                                              UIColor * _Nullable tintColor);
 
 /// Explicit ownership is the source of truth for controls inserted by RyukGram
-/// into Instagram-owned view-controller trees. Marking a view never marks its
-/// Instagram parent/siblings; descendants of an owned RyukGram container may
-/// inherit ownership when queried.
+/// into Instagram-owned view-controller trees. Ownership is exact to the marked
+/// view/class: it never propagates through an Instagram parent, sibling or child.
 FOUNDATION_EXPORT void RYGMarkOwnedView(UIView *view);
 FOUNDATION_EXPORT BOOL RYGIsOwnedView(UIView *view);
 FOUNDATION_EXPORT BOOL RYGIsOwnedTargetAction(id _Nullable target, SEL _Nullable action);
