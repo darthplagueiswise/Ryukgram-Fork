@@ -24,11 +24,13 @@ static UIVisualEffect *RYGNavigationTitleEffect(void) {
 
 - (instancetype)initWithTitle:(NSString *)title {
     if ((self = [super initWithEffect:RYGNavigationTitleEffect()])) {
+        RYGMarkOwnedView(self);
         self.userInteractionEnabled = NO;
         self.clipsToBounds = YES;
         self.backgroundColor = self.effect ? UIColor.clearColor : UIColor.secondarySystemBackgroundColor;
 
         UILabel *label = [UILabel new];
+        RYGMarkOwnedView(label);
         label.translatesAutoresizingMaskIntoConstraints = NO;
         label.textColor = UIColor.labelColor;
         label.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
@@ -78,13 +80,10 @@ static UIViewController *RYGGlassContentController(UIViewController *controller)
 
 static void RYGEnsureGlassNavigationTitle(UIViewController *controller) {
     UIViewController *content = RYGGlassContentController(controller);
-    if (!content || !content.title.length || !content.navigationController) return;
+    if (!content || !RYGIsOwnedViewController(content) || !content.title.length || !content.navigationController) return;
 
     UIView *existing = content.navigationItem.titleView;
-    if (existing && ![existing isKindOfClass:RYGGlassNavigationTitleCapsule.class]) {
-        // Respect intentionally custom title views owned by a specialized page.
-        return;
-    }
+    if (existing && ![existing isKindOfClass:RYGGlassNavigationTitleCapsule.class]) return;
 
     RYGGlassNavigationTitleCapsule *titleView =
         [existing isKindOfClass:RYGGlassNavigationTitleCapsule.class]
@@ -100,10 +99,14 @@ static void RYGApplyOwnedControllerChrome(UIViewController *controller) {
     RYGEnsureGlassNavigationTitle(controller);
 }
 
-// The old implementation tried to fix individual screens after the fact. Keep
-// the policy at the RyukGram controller boundary instead: only controller trees
-// owned by the tweak receive this pass, while Instagram's own hierarchy remains
-// untouched.
+static BOOL RYGCallerBelongsToTweak(void) {
+    return RYGIsOwnedCodeAddress(__builtin_return_address(0));
+}
+
+// Controller chrome is still observed at the UIKit boundary, but ownership is
+// strict: only a RyukGram concrete controller (or a generic UIKit container
+// actively presenting one) can pass RYGIsOwnedViewController(). Instagram
+// parents no longer become owned merely because they contain a RyukGram child.
 %hook UIViewController
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -114,6 +117,79 @@ static void RYGApplyOwnedControllerChrome(UIViewController *controller) {
 - (void)viewDidLayoutSubviews {
     %orig;
     RYGApplyOwnedControllerChrome(self);
+}
+
+%end
+
+// A RyukGram button can live directly inside an Instagram controller. Control
+// ownership therefore follows the creator/target/action, not the controller.
+// These hooks never glass an arbitrary UIButton: they only mark controls whose
+// creation/configuration call site is in RyukGram or whose target/action IMP is
+// implemented by the RyukGram dylib.
+%hook UIButton
+
++ (instancetype)buttonWithType:(UIButtonType)buttonType {
+    BOOL ownedCallSite = RYGCallerBelongsToTweak();
+    UIButton *button = %orig;
+    if (ownedCallSite && button) {
+        RYGMarkOwnedView(button);
+        RYGLiquidGlassConfigureButton(button, NO);
+    }
+    return button;
+}
+
++ (instancetype)buttonWithConfiguration:(UIButtonConfiguration *)configuration
+                           primaryAction:(UIAction *)primaryAction {
+    BOOL ownedCallSite = RYGCallerBelongsToTweak();
+    UIButton *button = %orig;
+    if (ownedCallSite && button) {
+        RYGMarkOwnedView(button);
+        RYGLiquidGlassConfigureButton(button, NO);
+    }
+    return button;
+}
+
+- (void)setMenu:(UIMenu *)menu {
+    BOOL ownedCallSite = RYGCallerBelongsToTweak();
+    %orig;
+    if (ownedCallSite) RYGMarkOwnedView(self);
+    if (RYGIsOwnedView(self)) RYGLiquidGlassConfigureButton(self, NO);
+}
+
+- (void)setShowsMenuAsPrimaryAction:(BOOL)showsMenuAsPrimaryAction {
+    BOOL ownedCallSite = RYGCallerBelongsToTweak();
+    %orig;
+    if (ownedCallSite) RYGMarkOwnedView(self);
+    if (RYGIsOwnedView(self)) RYGLiquidGlassConfigureButton(self, NO);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    if (RYGIsOwnedView(self)) RYGLiquidGlassConfigureButton(self, NO);
+}
+
+%end
+
+%hook UIControl
+
+- (void)addTarget:(id)target action:(SEL)action forControlEvents:(UIControlEvents)controlEvents {
+    BOOL owned = [self isKindOfClass:UIButton.class] && RYGIsOwnedTargetAction(target, action);
+    %orig;
+    if (owned) {
+        UIButton *button = (UIButton *)self;
+        RYGMarkOwnedView(button);
+        RYGLiquidGlassConfigureButton(button, NO);
+    }
+}
+
+- (void)addAction:(UIAction *)action forControlEvents:(UIControlEvents)controlEvents {
+    BOOL ownedCallSite = [self isKindOfClass:UIButton.class] && RYGCallerBelongsToTweak();
+    %orig;
+    if (ownedCallSite) {
+        UIButton *button = (UIButton *)self;
+        RYGMarkOwnedView(button);
+        RYGLiquidGlassConfigureButton(button, NO);
+    }
 }
 
 %end
