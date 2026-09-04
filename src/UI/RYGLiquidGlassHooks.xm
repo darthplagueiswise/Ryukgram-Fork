@@ -1,13 +1,5 @@
 #import "RYGLiquidGlass.h"
 
-@interface RYGGlassNavigationTitleCapsule : UIVisualEffectView
-@property(nonatomic, strong) UILabel *rygTitleLabel;
-- (instancetype)initWithTitle:(NSString *)title;
-- (void)rygSetTitle:(NSString *)title;
-@end
-
-@implementation RYGGlassNavigationTitleCapsule
-
 static UIVisualEffect *RYGNavigationTitleEffect(void) {
     if (@available(iOS 26.0, *)) {
         if (!UIAccessibilityIsReduceTransparencyEnabled()) {
@@ -21,6 +13,14 @@ static UIVisualEffect *RYGNavigationTitleEffect(void) {
     }
     return nil;
 }
+
+@interface RYGGlassNavigationTitleCapsule : UIVisualEffectView
+@property(nonatomic, strong) UILabel *rygTitleLabel;
+- (instancetype)initWithTitle:(NSString *)title;
+- (void)rygSetTitle:(NSString *)title;
+@end
+
+@implementation RYGGlassNavigationTitleCapsule
 
 - (instancetype)initWithTitle:(NSString *)title {
     if ((self = [super initWithEffect:RYGNavigationTitleEffect()])) {
