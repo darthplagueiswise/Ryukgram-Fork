@@ -3,6 +3,7 @@
 #import "RYGRepostSheet.h"
 #import "../Utils.h"
 #import "../Features/StoriesAndMessages/OverlayHelpers.h"
+#import "../UI/RYGLiquidGlass.h"
 #import <objc/runtime.h>
 
 static const void *kRYGCtxKey       = &kRYGCtxKey;
@@ -70,6 +71,7 @@ const void *kRYGDismissKey   = &kRYGDismissKey;
     if ([defaultTap isEqualToString:@"menu"]) {
         button.menu = [self deferredMenuForContext:ctx fromView:button mediaProvider:provider];
         button.showsMenuAsPrimaryAction = YES;
+        RYGLiquidGlassConfigureButton(button, NO);
         return;
     }
 
@@ -82,6 +84,11 @@ const void *kRYGDismissKey   = &kRYGDismissKey;
     UIContextMenuInteraction *interaction =
         [[UIContextMenuInteraction alloc] initWithDelegate:[self shared]];
     [button addInteraction:interaction];
+
+    // This button is explicitly being converted into a RyukGram action surface.
+    // Style this concrete control only; never infer ownership from surrounding
+    // Instagram view/controller hierarchy.
+    RYGLiquidGlassConfigureButton(button, NO);
 }
 
 + (void)bounceButton:(UIView *)view {
