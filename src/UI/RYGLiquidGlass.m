@@ -1,5 +1,4 @@
 #import "RYGLiquidGlass.h"
-#import "../Utils.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
 
@@ -53,7 +52,9 @@ BOOL RYGIsOwnedViewController(UIViewController *controller) {
 
 BOOL RYGLiquidGlassIsAvailable(void) {
     if (@available(iOS 26.0, *)) {
-        return ![RYGUtils getBoolPref:@"liquid_glass_force_off"];
+        // Liquid Glass is the visual baseline for RyukGram-owned UI on iOS 26.
+        // Do not let a stale hidden preference silently turn the design off.
+        return !UIAccessibilityIsReduceTransparencyEnabled();
     }
     return NO;
 }
@@ -63,7 +64,7 @@ UIVisualEffectView *RYGLiquidGlassView(BOOL interactive,
                                        UIColor *tintColor) {
     UIVisualEffect *effect = nil;
     if (@available(iOS 26.0, *)) {
-        if (RYGLiquidGlassIsAvailable() && !UIAccessibilityIsReduceTransparencyEnabled()) {
+        if (RYGLiquidGlassIsAvailable()) {
             UIGlassEffect *glass = [UIGlassEffect effectWithStyle:
                 clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
             glass.interactive = interactive;
@@ -95,12 +96,7 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
 
 static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
     if (!menu) return;
-
-    // SDK 26 owns the menu's dimensions, placement and morph transition.
-    // Keep the model semantic and never force a menu element/card size.
-    if (@available(iOS 17.0, *)) {
-        menu.preferredElementSize = UIMenuElementSizeAutomatic;
-    }
+    if (@available(iOS 17.0, *)) menu.preferredElementSize = UIMenuElementSizeAutomatic;
     for (UIMenuElement *element in menu.children) {
         if ([element isKindOfClass:UIMenu.class]) RYGPrepareAdaptiveMenu((UIMenu *)element);
     }
@@ -110,8 +106,8 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
                                                               BOOL prominent) API_AVAILABLE(ios(26.0)) {
     UIButtonConfiguration *old = button.configuration;
     UIButtonConfiguration *glass = prominent
-        ? [UIButtonConfiguration prominentGlassButtonConfiguration]
-        : [UIButtonConfiguration glassButtonConfiguration];
+        ? [UIButtonConfiguration prominentClearGlassButtonConfiguration]
+        : [UIButtonConfiguration clearGlassButtonConfiguration];
 
     glass.title = old.title ?: [button titleForState:UIControlStateNormal];
     glass.attributedTitle = old.attributedTitle;
@@ -125,10 +121,6 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
 
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
-
-    // A menu source is a native glass control in SDK 26. Never carry the old
-    // RyukGram fixed 8pt padding into it. UIKit computes the capsule geometry
-    // and the source-to-menu morph from the button's intrinsic content.
     if (menuSource) {
         [glass setDefaultContentInsets];
     } else if (old) {
@@ -150,8 +142,8 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
             NSString *configured = objc_getAssociatedObject(button, kRYGGlassButtonConfiguredKey);
             if (![configured isEqualToString:stateKey]) {
                 button.backgroundColor = UIColor.clearColor;
-                if (menuSource) button.tintColor = UIColor.labelColor;
                 button.configuration = RYGGlassConfigurationForButton(button, prominent);
+                button.tintColor = UIColor.labelColor;
                 objc_setAssociatedObject(button,
                                          kRYGGlassButtonConfiguredKey,
                                          stateKey,
@@ -160,8 +152,8 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
         }
     }
 
-    // Deliberately no sizeToFit/frame rewrite here. In SDK 26 the source view's
-    // intrinsic size is part of the native Liquid Glass/menu transition.
+    // SDK 26 glass/menu transitions depend on intrinsic geometry. Never rewrite
+    // the control frame after applying the configuration.
     [button invalidateIntrinsicContentSize];
 }
 
@@ -191,10 +183,6 @@ void RYGLiquidGlassConfigureNavigationController(UINavigationController *navigat
     navigationController.toolbar.translucent = YES;
     navigationController.navigationBar.prefersLargeTitles = NO;
     navigationController.navigationBar.tintColor = UIColor.labelColor;
-
-    // SDK 26 UINavigationBar, UIBarButtonItem, toolbar and their scroll-edge
-    // treatment are system Liquid Glass. Do not add a second material layer or
-    // force bar metrics/frames here.
 }
 
 static void RYGUseNativeNavigationTitle(UIViewController *controller) {
@@ -206,14 +194,6 @@ static void RYGUseNativeNavigationTitle(UIViewController *controller) {
     }
 }
 
-static BOOL RYGViewLivesInsideContentCell(UIView *view) {
-    for (UIView *ancestor = view.superview; ancestor; ancestor = ancestor.superview) {
-        if ([ancestor isKindOfClass:UITableViewCell.class] ||
-            [ancestor isKindOfClass:UICollectionViewCell.class]) return YES;
-    }
-    return NO;
-}
-
 static void RYGStyleOwnedControls(UIView *root) {
     if (!root) return;
     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:root];
@@ -221,12 +201,11 @@ static void RYGStyleOwnedControls(UIView *root) {
         UIView *view = pending.lastObject;
         [pending removeLastObject];
 
+        // This pass runs only inside a RyukGram-owned controller tree. Style
+        // every actual UIButton there, including accessory/custom-cell buttons;
+        // switches and list/navigation rows remain native controls.
         if ([view isKindOfClass:UIButton.class]) {
-            UIButton *button = (UIButton *)view;
-            BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
-            if (menuSource || !RYGViewLivesInsideContentCell(button)) {
-                RYGLiquidGlassConfigureButton(button, NO);
-            }
+            RYGLiquidGlassConfigureButton((UIButton *)view, NO);
         }
         for (UIView *subview in view.subviews) [pending addObject:subview];
     }
