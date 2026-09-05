@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, assign) BOOL property;
 @property(nonatomic, copy) NSString *selectorName;
 @property(nonatomic, copy) NSString *displayName;
+@property(nonatomic, copy) NSString *category;
 @property(nonatomic, copy) NSString *returnType;
 @property(nonatomic, copy) NSString *typeCode;
 @property(nonatomic, copy) NSString *typeName;
@@ -25,13 +26,17 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSString *title;
 @property(nonatomic, copy) NSString *subtitle;
 @property(nonatomic, copy) NSString *icon;
-@property(nonatomic, copy) NSArray<NSString *> *selectorTokens;
+@property(nonatomic, strong) NSArray<NSString *> *classNames;
+@property(nonatomic, strong) NSArray<NSString *> *classNameFragments;
+@property(nonatomic, strong) NSArray<NSString *> *selectorTokens;
+@property(nonatomic, strong) NSArray<NSString *> *categoryAllowList;
 @property(nonatomic, assign) BOOL scanInstanceMethods;
 @property(nonatomic, assign) BOOL scanClassMethods;
 @property(nonatomic, assign) BOOL scanProperties;
-@property(nonatomic, assign) BOOL runtimeGenerated;
+@property(nonatomic, assign) BOOL advancedOnly;
 @property(nonatomic, copy, nullable) NSString *runtimeImagePath;
 @property(nonatomic, copy, nullable) NSString *runtimeFamilyKey;
+@property(nonatomic, assign) BOOL runtimeGenerated;
 @property(nonatomic, assign) NSUInteger runtimeClassCount;
 @property(nonatomic, assign) NSUInteger runtimeEntryCount;
 + (NSArray<RYGRuntimeSurfaceSpec *> *)allSurfaces;
