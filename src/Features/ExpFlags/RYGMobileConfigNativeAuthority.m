@@ -3,13 +3,13 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <os/lock.h>
-#import <dlfcn.h>
 #include <string.h>
 
 // Active-session getOverridesTablePath is the first authority. If that context
 // has not been initialized yet, Developer tools may still read an already
 // persisted <account>.data unit by enumerating EXISTING accessible containers.
-// The fallback is read-only: it never creates an AppGroup/mobileconfig tree.
+// The fallback is strictly read-only: it never calls a container API that can
+// synthesize a sideload directory and never creates a MobileConfig path.
 
 static os_unfair_lock gRYGMCNativeAuthorityLock = OS_UNFAIR_LOCK_INIT;
 static id gRYGMCObservedManager;
@@ -161,37 +161,14 @@ static NSString *RYGMCDataDirectoryFromManager(id manager) {
 
 #pragma mark - Existing container discovery
 
-typedef CFTypeRef (*RYGMCSecTaskCreateFromSelfFn)(CFAllocatorRef allocator);
-typedef CFTypeRef (*RYGMCSecTaskCopyValueForEntitlementFn)(CFTypeRef task, CFStringRef entitlement, CFErrorRef *error);
+static BOOL RYGMCDirectoryExists(NSString *path) {
+    BOOL isDirectory = NO;
+    return path.length && [NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory;
+}
 
-static NSArray<NSString *> *RYGMCApplicationGroupIdentifiers(void) {
-    NSMutableOrderedSet<NSString *> *groups = [NSMutableOrderedSet orderedSet];
-
-    // This is the same current-process entitlement source used by the project's
-    // sideload compatibility layer, and survives resigning better than guessing.
-    Class proxyClass = objc_lookUpClass("LSBundleProxy");
-    if (proxyClass) {
-        id proxy = RYGMCCallObjectNoArg((id)proxyClass, YES, "bundleProxyForCurrentProcess");
-        id entitlements = RYGMCCallObjectNoArg(proxy, NO, "entitlements");
-        id listed = [entitlements isKindOfClass:NSDictionary.class] ? entitlements[@"com.apple.security.application-groups"] : nil;
-        if ([listed isKindOfClass:NSString.class] && [listed length]) [groups addObject:listed];
-        else if ([listed isKindOfClass:NSArray.class])
-            for (id item in listed) if ([item isKindOfClass:NSString.class] && [item length]) [groups addObject:item];
-    }
-
-    RYGMCSecTaskCreateFromSelfFn createTask = (RYGMCSecTaskCreateFromSelfFn)dlsym(RTLD_DEFAULT, "SecTaskCreateFromSelf");
-    RYGMCSecTaskCopyValueForEntitlementFn copyValue = (RYGMCSecTaskCopyValueForEntitlementFn)dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
-    if (createTask && copyValue) {
-        CFTypeRef task = createTask(kCFAllocatorDefault);
-        if (task) {
-            CFTypeRef raw = copyValue(task, CFSTR("com.apple.security.application-groups"), NULL);
-            CFRelease(task);
-            NSArray *listed = CFBridgingRelease(raw);
-            if ([listed isKindOfClass:NSArray.class])
-                for (id item in listed) if ([item isKindOfClass:NSString.class] && [item length]) [groups addObject:item];
-        }
-    }
-    return groups.array;
+static BOOL RYGMCRootHasMobileConfig(NSString *root) {
+    return RYGMCDirectoryExists([root stringByAppendingPathComponent:@"mobileconfig"]) ||
+           RYGMCDirectoryExists([root stringByAppendingPathComponent:@"Documents/mobileconfig"]);
 }
 
 static NSArray<NSString *> *RYGMCBundleProxyGroupRoots(void) {
@@ -203,19 +180,10 @@ static NSArray<NSString *> *RYGMCBundleProxyGroupRoots(void) {
     if (![urls isKindOfClass:NSDictionary.class]) return roots.array;
     for (id value in [(NSDictionary *)urls allValues]) {
         NSString *path = [value isKindOfClass:NSURL.class] ? [value path] : ([value isKindOfClass:NSString.class] ? value : nil);
-        if (path.length) [roots addObject:path.stringByStandardizingPath];
+        path = path.stringByStandardizingPath;
+        if (RYGMCDirectoryExists(path)) [roots addObject:path];
     }
     return roots.array;
-}
-
-static BOOL RYGMCDirectoryExists(NSString *path) {
-    BOOL isDirectory = NO;
-    return path.length && [NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory;
-}
-
-static BOOL RYGMCRootHasMobileConfig(NSString *root) {
-    return RYGMCDirectoryExists([root stringByAppendingPathComponent:@"mobileconfig"]) ||
-           RYGMCDirectoryExists([root stringByAppendingPathComponent:@"Documents/mobileconfig"]);
 }
 
 static NSArray<NSString *> *RYGMCExistingContainerRoots(void) {
@@ -223,22 +191,13 @@ static NSArray<NSString *> *RYGMCExistingContainerRoots(void) {
     NSMutableOrderedSet<NSString *> *roots = [NSMutableOrderedSet orderedSet];
     NSString *home = NSHomeDirectory().stringByStandardizingPath;
     if (home.length) [roots addObject:home];
-
-    for (NSString *path in RYGMCBundleProxyGroupRoots()) if (RYGMCDirectoryExists(path)) [roots addObject:path];
-
-    for (NSString *group in RYGMCApplicationGroupIdentifiers()) {
-        NSURL *url = nil;
-        @try { url = [fm containerURLForSecurityApplicationGroupIdentifier:group]; }
-        @catch (__unused NSException *exception) { url = nil; }
-        NSString *path = url.path.stringByStandardizingPath;
-        if (RYGMCDirectoryExists(path)) [roots addObject:path];
-    }
+    for (NSString *path in RYGMCBundleProxyGroupRoots()) [roots addObject:path];
 
     NSString *documents = [home stringByAppendingPathComponent:@"Documents"];
     if (RYGMCDirectoryExists(documents)) {
-        // SideloadPatch redirects group containers to Documents/<group-id> when
-        // no real group URL is available. Discover only children that ALREADY
-        // contain a MobileConfig directory; do not create or guess a group id.
+        // The standalone SideloadPatch uses Documents/<group-id> when no real
+        // group URL survives signing. Scan only existing children that already
+        // contain MobileConfig, so this remains read-only and id-agnostic.
         for (NSString *child in [fm contentsOfDirectoryAtPath:documents error:nil] ?: @[]) {
             NSString *candidate = [[documents stringByAppendingPathComponent:child] stringByStandardizingPath];
             if (RYGMCDirectoryExists(candidate) && RYGMCRootHasMobileConfig(candidate)) [roots addObject:candidate];
