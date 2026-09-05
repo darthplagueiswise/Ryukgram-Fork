@@ -5,8 +5,9 @@ enum {
     RYGMCTypeUnknown = 0,
     RYGMCTypeBool    = 1,
     RYGMCTypeInt     = 2,
-    // Revalidated against the current FBSharedFramework parameter table and
-    // native mc_overrides.json: discriminator 3 is string and 4 is double.
+    // FBSharedFramework(3), UUID 4C4C44B7-5555-3144-A167-D73E543FBB32:
+    // mobileconfig::typeFromParameter = (parameter >> 48) & 0x3f.
+    // The current runtime discriminator is 1=bool, 2=int64, 3=string, 4=double.
     RYGMCTypeString  = 3,
     RYGMCTypeDouble  = 4,
 };
@@ -44,14 +45,25 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 
 + (instancetype)shared;
 
+// Compatibility facade consumed by RYGSettingsBackup. These methods operate
+// only on RyukGram-owned MobileConfig state; they never restore the removed
+// legacy MobileConfig controller/backend and never delete Instagram-owned data.
++ (NSString *)storageDirectory;
++ (void)resetStore;
++ (void)mergeImportedStoreAtPath:(NSString *)path;
++ (void)reloadStoreFromDisk;
+
 @property (nonatomic, readonly) BOOL ready;
 @property (nonatomic, readonly) NSUInteger namedConfigCount;
 
 - (void)prepare;
-/// Rebuilds the browser from Instagram's live exported parameter table. A cached
-/// id/name catalog may decorate matching rows, but never creates runtime values.
 - (void)reloadFromRuntime;
+/// Runtime-backed rows discovered in the current FBSharedFramework.
 - (NSArray<RYGMCConfig *> *)allConfigs;
+/// Union used by Developer/MobileConfig browsers: runtime rows plus
+/// id_name_mapping-only rows. Mapping-only rows are always read-only and have
+/// type=RYGMCTypeUnknown / paramID=0.
+- (NSArray<RYGMCConfig *> *)allConfigsIncludingMappingOnly;
 - (NSArray<RYGMCConfig *> *)configsMatching:(NSString *)query onlyOverridden:(BOOL)onlyOverridden;
 - (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)config;
 
