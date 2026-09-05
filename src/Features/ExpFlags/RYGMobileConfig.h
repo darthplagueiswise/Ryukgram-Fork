@@ -45,14 +45,6 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 
 + (instancetype)shared;
 
-// Compatibility facade consumed by RYGSettingsBackup. These methods operate
-// only on RyukGram-owned MobileConfig state; they never restore the removed
-// legacy MobileConfig controller/backend and never delete Instagram-owned data.
-+ (NSString *)storageDirectory;
-+ (void)resetStore;
-+ (void)mergeImportedStoreAtPath:(NSString *)path;
-+ (void)reloadStoreFromDisk;
-
 @property (nonatomic, readonly) BOOL ready;
 @property (nonatomic, readonly) NSUInteger namedConfigCount;
 
@@ -60,10 +52,6 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 - (void)reloadFromRuntime;
 /// Runtime-backed rows discovered in the current FBSharedFramework.
 - (NSArray<RYGMCConfig *> *)allConfigs;
-/// Union used by Developer/MobileConfig browsers: runtime rows plus
-/// id_name_mapping-only rows. Mapping-only rows are always read-only and have
-/// type=RYGMCTypeUnknown / paramID=0.
-- (NSArray<RYGMCConfig *> *)allConfigsIncludingMappingOnly;
 - (NSArray<RYGMCConfig *> *)configsMatching:(NSString *)query onlyOverridden:(BOOL)onlyOverridden;
 - (NSArray<NSString *> *)paramsMatching:(NSString *)query inConfig:(RYGMCConfig *)config;
 
@@ -89,4 +77,21 @@ typedef NS_ENUM(NSInteger, RYGMCOverrideState) {
 - (BOOL)consumeCrashLoopFlag;
 - (void)reapplyOverridesToNativeTable;
 
+@end
+
+@interface RYGMobileConfig (RYGBackupCompatibility)
+/// Compatibility facade consumed by RYGSettingsBackup. These methods operate
+/// only on RyukGram-owned MobileConfig state; they never restore the removed
+/// legacy MobileConfig controller/backend and never delete Instagram-owned data.
++ (NSString *)storageDirectory;
++ (void)resetStore;
++ (void)mergeImportedStoreAtPath:(NSString *)path;
++ (void)reloadStoreFromDisk;
+@end
+
+@interface RYGMobileConfig (RYGMappingRuntimeUnion)
+/// Union used by Developer/MobileConfig browsers: runtime rows plus
+/// id_name_mapping-only rows. Mapping-only rows are always read-only and have
+/// type=RYGMCTypeUnknown / paramID=0.
+- (NSArray<RYGMCConfig *> *)allConfigsIncludingMappingOnly;
 @end
