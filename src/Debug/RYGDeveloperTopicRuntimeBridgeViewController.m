@@ -1,5 +1,6 @@
 #import "RYGDeveloperTopicRuntimeBridgeViewController.h"
 #import "RYGPortedRuntimeBrowserViewController.h"
+#include <math.h>
 
 static UIView *RYGDeveloperStableAccessoryView(UIView *accessory) {
     if (!accessory) return nil;
