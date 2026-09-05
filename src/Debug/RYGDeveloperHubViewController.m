@@ -2,7 +2,7 @@
 #import "RYGDeveloperTopicRuntimeBridgeViewController.h"
 #import "RYGDeveloperTypedFeatureViewController.h"
 #import "RYGWordmarkViewController.h"
-#import "RYGRuntimeBrowserV2ViewController.h"
+#import "RYGPortedRuntimeBrowserViewController.h"
 #import "RYGEasyGatingViewController.h"
 #import "RYGMetaLocalExperimentBrowser.h"
 #import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
@@ -15,8 +15,8 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.navigationItem.titleView = RYGLiquidGlassNavigationTitleView(self.title ?: @"Developer");
-    // Developer remains cheap to enter. Runtime image/class discovery is deferred
-    // until the dedicated Runtime Browser is already on-screen.
+    // Developer remains cheap to enter. Runtime discovery is deferred until the
+    // WAT-derived Runtime Browser is already on-screen.
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
@@ -85,14 +85,14 @@
                                                        icon:[RYGSymbol symbolWithName:@"insights"]
                                                      action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
     RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser"
-                                                     subtitle:@"dyld image 0 + app frameworks · typed Objective-C getters + C imports"
+                                                     subtitle:@"WATweaks dogfood2 port · live image surfaces · typed getters · exact persisted hooks"
                                                          icon:[RYGSymbol symbolWithName:@"search"]
-                                               viewController:[[RYGRuntimeBrowserV2ViewController alloc] initWithTitle:@"Runtime Browser" initialQuery:@""]];
+                                               viewController:[[RYGPortedRuntimeBrowserViewController alloc] initWithTitle:@"Runtime Browser" initialQuery:@""]];
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, wordmarkFlags, easyGating, mobileConfig]],
         [RYGSettingsViewController sectionWithHeader:@"Feature domains"
-                                               footer:@"Feature-domain Runtime rows route through the same deferred dyld-backed Runtime Browser. Image and class discovery never blocks the Developer entry path."
+                                               footer:@"Feature-domain rows route through the same deferred WAT-derived Runtime Browser. Image/class discovery does not run while entering Developer."
                                                  rows:@[prism, stories, glass, maps, subscriptions, internalOnly, bugReport, settingsRows, dogfood]],
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
     ]];

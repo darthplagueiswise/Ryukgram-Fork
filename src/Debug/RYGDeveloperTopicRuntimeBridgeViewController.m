@@ -1,13 +1,13 @@
 #import "RYGDeveloperTopicRuntimeBridgeViewController.h"
-#import "RYGRuntimeBrowserV2ViewController.h"
+#import "RYGPortedRuntimeBrowserViewController.h"
 
 @implementation RYGDeveloperTopicRuntimeBridgeViewController
 
 - (void)pushRuntimeBrowserWithTitle:(NSString *)title query:(NSString *)query bulk:(BOOL)bulk {
-    (void)bulk;
-    RYGRuntimeBrowserV2ViewController *browser = [[RYGRuntimeBrowserV2ViewController alloc]
+    RYGPortedRuntimeBrowserViewController *browser = [[RYGPortedRuntimeBrowserViewController alloc]
         initWithTitle:title ?: @"Runtime Browser"
-         initialQuery:query ?: @""];
+         initialQuery:query ?: @""
+allowsBulkVisibilityOverride:bulk];
     if (self.navigationController) {
         [self.navigationController pushViewController:browser animated:YES];
         return;
