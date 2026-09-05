@@ -1,8 +1,8 @@
 #import "RYGDeveloperHubViewController.h"
-#import "RYGDeveloperTopicViewController.h"
+#import "RYGDeveloperTopicRuntimeBridgeViewController.h"
 #import "RYGDeveloperTypedFeatureViewController.h"
 #import "RYGWordmarkViewController.h"
-#import "RYGFastRuntimeBrowserViewController.h"
+#import "RYGRuntimeBrowserEntryViewController.h"
 #import "RYGEasyGatingViewController.h"
 #import "RYGMetaLocalExperimentBrowser.h"
 #import "../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
@@ -14,8 +14,8 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    // No broad Objective-C feature catalogue is prewarmed here. Feature domains
-    // resolve only Instagram's typed MobileConfig/runtime table when opened.
+    // Developer remains cheap to enter. Runtime image/class discovery is deferred
+    // until the dedicated Runtime Browser is already on-screen.
     [self rebuildSections];
     RYGLiquidGlassApplyToViewController(self);
 }
@@ -43,15 +43,15 @@
     RYGSetting *prism = [RYGSetting navigationCellWithTitle:@"Prism / IGDS / BSLDS"
                                                    subtitle:@"Exact native setters + resolved typed feature parameters"
                                                        icon:[RYGSymbol symbolWithName:@"layout"]
-                                             viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
+                                             viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfacePrism]];
     RYGSetting *stories = [RYGSetting navigationCellWithTitle:@"Story Tray / Story Grid"
                                                      subtitle:@"Exact Story gates + typed Story Tray, Grid and Homecoming parameters"
                                                          icon:[RYGSymbol symbolWithName:@"rectangle.stack"]
-                                               viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
+                                               viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceStories]];
     RYGSetting *glass = [RYGSetting navigationCellWithTitle:@"Liquid Glass / Throwback"
                                                    subtitle:@"Native Swizzle/Throwback/Navigation helpers + typed Glass parameters"
                                                        icon:[RYGSymbol symbolWithName:@"interface"]
-                                             viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
+                                             viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceLiquidGlass]];
     RYGSetting *maps = [RYGSetting navigationCellWithTitle:@"Maps / Location"
                                                   subtitle:@"Friend Map, location, event-map and related resolved typed parameters"
                                                       icon:[RYGSymbol symbolWithName:@"map"]
@@ -61,37 +61,37 @@
     RYGSetting *subscriptions = [RYGSetting navigationCellWithTitle:@"Aura / IG Plus / Subscriptions"
                                                            subtitle:@"Consumer subscriptions and Aura feature parameters"
                                                                icon:[RYGSymbol symbolWithName:@"star"]
-                                                     viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceConsumerSubs]];
+                                                     viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceConsumerSubs]];
     RYGSetting *internalOnly = [RYGSetting navigationCellWithTitle:@"IG-only / Internal-only"
                                                           subtitle:@"Exact internal visibility owner + typed employee/internal parameters"
                                                               icon:[RYGSymbol symbolWithName:@"eye"]
-                                                    viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
+                                                    viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceInternalOnly]];
     RYGSetting *bugReport = [RYGSetting navigationCellWithTitle:@"Bug Report Menu"
                                                        subtitle:@"Logged out, assistant, internal, shake and sandbox typed gates"
                                                            icon:[RYGSymbol symbolWithName:@"bug"]
-                                                 viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceBugReport]];
+                                                 viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceBugReport]];
     RYGSetting *settingsRows = [RYGSetting navigationCellWithTitle:@"Hidden Settings Rows"
                                                           subtitle:@"Visibility selectors remain in the raw Runtime Browser by design"
                                                               icon:[RYGSymbol symbolWithName:@"list"]
-                                                    viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows]];
+                                                    viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceSettingsRows]];
     RYGSetting *dogfood = [RYGSetting navigationCellWithTitle:@"Direct / Dogfooding Settings"
                                                      subtitle:@"Native flows + typed dogfood/employee/internal parameters"
                                                          icon:[RYGSymbol symbolWithName:@"paw"]
-                                               viewController:[[RYGDeveloperTopicViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
+                                               viewController:[[RYGDeveloperTopicRuntimeBridgeViewController alloc] initWithSurface:RYGDeveloperRuntimeSurfaceDirectDogfood]];
 
     RYGSetting *metaLocal = [RYGSetting buttonCellWithTitle:@"Meta / Family Local Experiments"
                                                    subtitle:@"Native list + FDID generator + current Odin family device ID"
                                                        icon:[RYGSymbol symbolWithName:@"insights"]
                                                      action:^{ [RYGMetaLocalExperimentBrowser presentFromCurrentViewController]; }];
-    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser · Typed"
-                                                     subtitle:@"Raw images → classes → typed getters; separate from feature-domain menus"
+    RYGSetting *runtime = [RYGSetting navigationCellWithTitle:@"Runtime Browser"
+                                                     subtitle:@"Immediate entry · async loaded images · typed Objective-C getters + C imports"
                                                          icon:[RYGSymbol symbolWithName:@"search"]
-                                               viewController:[RYGFastRuntimeBrowserViewController new]];
+                                               viewController:[[RYGRuntimeBrowserEntryViewController alloc] initWithTitle:@"Runtime Browser" initialQuery:@""]];
 
     [self applySettingSections:@[
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[wordmark, wordmarkFlags, easyGating, mobileConfig]],
         [RYGSettingsViewController sectionWithHeader:@"Feature domains"
-                                               footer:@"Feature menus resolve typed MobileConfig/runtime parameters only. Raw class/selector exploration is isolated in Runtime Browser. Native Bug Report and Dogfooding flows still use Instagram's real sessions, providers and uploader."
+                                               footer:@"Feature-domain Runtime rows now route through the same deferred Runtime Browser. Image and class discovery never blocks the navigation tap or Developer cold path."
                                                  rows:@[prism, stories, glass, maps, subscriptions, internalOnly, bugReport, settingsRows, dogfood]],
         [RYGSettingsViewController sectionWithHeader:nil footer:nil rows:@[metaLocal, runtime]],
     ]];
