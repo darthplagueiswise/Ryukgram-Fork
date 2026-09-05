@@ -6,7 +6,6 @@
 #endif
 
 static const void *kRYGGlassButtonConfiguredKey = &kRYGGlassButtonConfiguredKey;
-static const void *kRYGGeneratedTitleViewKey = &kRYGGeneratedTitleViewKey;
 static const void *kRYGOwnedViewKey = &kRYGOwnedViewKey;
 
 static NSString *RYGNormalizeImagePath(const char *rawPath) {
@@ -20,9 +19,8 @@ static NSString *RYGDefiningImagePath(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         Dl_info info = {0};
-        if (dladdr((const void *)&RYGIsOwnedViewController, &info) && info.dli_fname) {
+        if (dladdr((const void *)&RYGIsOwnedViewController, &info) && info.dli_fname)
             path = RYGNormalizeImagePath(info.dli_fname);
-        }
     });
     return path;
 }
@@ -55,8 +53,7 @@ static BOOL RYGClassNameIsOwned(Class cls) {
 }
 
 void RYGMarkOwnedView(UIView *view) {
-    if (!view) return;
-    objc_setAssociatedObject(view, kRYGOwnedViewKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (view) objc_setAssociatedObject(view, kRYGOwnedViewKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 BOOL RYGIsOwnedView(UIView *view) {
@@ -67,14 +64,8 @@ BOOL RYGIsOwnedView(UIView *view) {
 
 BOOL RYGIsOwnedTargetAction(id target, SEL action) {
     if (!target || !action) return NO;
-
     Class cls = object_isClass(target) ? (Class)target : object_getClass(target);
-    if (!cls) return NO;
-
-    // Never infer ownership from an IMP address here. Logos can replace an
-    // Instagram method with a RyukGram IMP, which would make a native Instagram
-    // control look tweak-owned. Only an actually RyukGram-owned target counts.
-    return RYGClassNameIsOwned(cls);
+    return cls && RYGClassNameIsOwned(cls);
 }
 
 static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
@@ -84,51 +75,36 @@ static BOOL RYGControllerDirectlyOwned(UIViewController *controller) {
 static UIViewController *RYGOwnedContainerContent(UIViewController *controller, NSUInteger depth) {
     if (!controller || depth > 6) return nil;
     if (RYGControllerDirectlyOwned(controller)) return controller;
-
     if ([controller isKindOfClass:UINavigationController.class]) {
-        UINavigationController *nav = (UINavigationController *)controller;
-        UIViewController *candidate = nav.visibleViewController ?: nav.topViewController;
-        if (candidate && candidate != controller) return RYGOwnedContainerContent(candidate, depth + 1);
-        return nil;
+        UIViewController *candidate = ((UINavigationController *)controller).visibleViewController ?: ((UINavigationController *)controller).topViewController;
+        return candidate && candidate != controller ? RYGOwnedContainerContent(candidate, depth + 1) : nil;
     }
-
     if ([controller isKindOfClass:UITabBarController.class]) {
         UIViewController *candidate = ((UITabBarController *)controller).selectedViewController;
-        if (candidate && candidate != controller) return RYGOwnedContainerContent(candidate, depth + 1);
-        return nil;
+        return candidate && candidate != controller ? RYGOwnedContainerContent(candidate, depth + 1) : nil;
     }
-
     return nil;
 }
 
-BOOL RYGIsOwnedViewController(UIViewController *controller) {
-    return RYGOwnedContainerContent(controller, 0) != nil;
-}
+BOOL RYGIsOwnedViewController(UIViewController *controller) { return RYGOwnedContainerContent(controller, 0) != nil; }
 
 BOOL RYGLiquidGlassIsAvailable(void) {
-    if (@available(iOS 26.0, *)) {
-        return !UIAccessibilityIsReduceTransparencyEnabled();
-    }
+    if (@available(iOS 26.0, *)) return !UIAccessibilityIsReduceTransparencyEnabled();
     return NO;
 }
 
-UIVisualEffectView *RYGLiquidGlassView(BOOL interactive,
-                                       BOOL clearStyle,
-                                       UIColor *tintColor) {
+UIVisualEffectView *RYGLiquidGlassView(BOOL interactive, BOOL clearStyle, UIColor *tintColor) {
     UIVisualEffect *effect = nil;
     if (@available(iOS 26.0, *)) {
         if (RYGLiquidGlassIsAvailable()) {
-            UIGlassEffect *glass = [UIGlassEffect effectWithStyle:
-                clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
+            UIGlassEffect *glass = [UIGlassEffect effectWithStyle:clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
             glass.interactive = interactive;
             glass.tintColor = tintColor;
             effect = glass;
         }
     }
-    if (!effect && !UIAccessibilityIsReduceTransparencyEnabled()) {
+    if (!effect && !UIAccessibilityIsReduceTransparencyEnabled())
         effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
-    }
-
     UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
     RYGMarkOwnedView(view);
     view.userInteractionEnabled = NO;
@@ -151,18 +127,14 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
 static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
     if (!menu) return;
     if (@available(iOS 17.0, *)) menu.preferredElementSize = UIMenuElementSizeAutomatic;
-    for (UIMenuElement *element in menu.children) {
+    for (UIMenuElement *element in menu.children)
         if ([element isKindOfClass:UIMenu.class]) RYGPrepareAdaptiveMenu((UIMenu *)element);
-    }
 }
 
-static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
-                                                              BOOL prominent) API_AVAILABLE(ios(26.0)) {
+static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button, BOOL prominent) API_AVAILABLE(ios(26.0)) {
     UIButtonConfiguration *old = button.configuration;
-    UIButtonConfiguration *glass = prominent
-        ? [UIButtonConfiguration prominentClearGlassButtonConfiguration]
-        : [UIButtonConfiguration clearGlassButtonConfiguration];
-
+    UIButtonConfiguration *glass = prominent ? [UIButtonConfiguration prominentClearGlassButtonConfiguration]
+                                             : [UIButtonConfiguration clearGlassButtonConfiguration];
     glass.title = old.title ?: [button titleForState:UIControlStateNormal];
     glass.attributedTitle = old.attributedTitle;
     glass.subtitle = old.subtitle;
@@ -172,23 +144,17 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
     glass.imagePadding = old ? old.imagePadding : 6.0;
     glass.titlePadding = old.titlePadding;
     if (old) glass.cornerStyle = old.cornerStyle;
-
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     glass.baseForegroundColor = old.baseForegroundColor ?: (menuSource ? UIColor.labelColor : button.tintColor);
-    if (menuSource) {
-        [glass setDefaultContentInsets];
-    } else if (old) {
-        glass.contentInsets = old.contentInsets;
-    }
+    if (menuSource) [glass setDefaultContentInsets];
+    else if (old) glass.contentInsets = old.contentInsets;
     return glass;
 }
 
 static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
     if (!button) return;
-
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
     if (menuSource && button.menu) RYGPrepareAdaptiveMenu(button.menu);
-
     if (@available(iOS 26.0, *)) {
         if (RYGLiquidGlassIsAvailable()) {
             NSString *title = button.configuration.title ?: [button titleForState:UIControlStateNormal] ?: @"";
@@ -198,10 +164,7 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
                 button.backgroundColor = UIColor.clearColor;
                 button.configuration = RYGGlassConfigurationForButton(button, prominent);
                 button.tintColor = UIColor.labelColor;
-                objc_setAssociatedObject(button,
-                                         kRYGGlassButtonConfiguredKey,
-                                         stateKey,
-                                         OBJC_ASSOCIATION_COPY_NONATOMIC);
+                objc_setAssociatedObject(button, kRYGGlassButtonConfiguredKey, stateKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
             }
         }
     }
@@ -210,13 +173,37 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
 
 void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
     if (!button) return;
+    // This function is the ownership boundary. Callers must invoke it only for a
+    // concrete control created/taken over by RyukGram; ownership never propagates
+    // from a parent controller/view into Instagram controls.
     RYGMarkOwnedView(button);
     RYGSynchronizeGlassButton(button, prominent);
 }
 
+@interface RYGGlassNavigationTitleView : UIView
+@property (nonatomic, strong) UILabel *label;
+@end
+
+@implementation RYGGlassNavigationTitleView
+- (CGSize)intrinsicContentSize {
+    CGSize text = [self.label sizeThatFits:CGSizeMake(280.0, 44.0)];
+    return CGSizeMake(ceil(text.width) + 22.0, ceil(text.height) + 8.0);
+}
+@end
+
 UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
+    RYGGlassNavigationTitleView *container = [RYGGlassNavigationTitleView new];
+    RYGMarkOwnedView(container);
+    container.clipsToBounds = YES;
+    container.layer.cornerRadius = 16.0;
+
+    UIVisualEffectView *glass = RYGLiquidGlassView(NO, YES, nil);
+    glass.translatesAutoresizingMaskIntoConstraints = NO;
+    [container addSubview:glass];
+
     UILabel *label = [UILabel new];
     RYGMarkOwnedView(label);
+    label.translatesAutoresizingMaskIntoConstraints = NO;
     label.text = title ?: @"";
     label.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
     label.textColor = UIColor.labelColor;
@@ -226,9 +213,20 @@ UIView *RYGLiquidGlassNavigationTitleView(NSString *title) {
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.78;
     label.accessibilityLabel = title;
-    [label sizeToFit];
-    objc_setAssociatedObject(label, kRYGGeneratedTitleViewKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return label;
+    container.label = label;
+    [container addSubview:label];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [glass.leadingAnchor constraintEqualToAnchor:container.leadingAnchor],
+        [glass.trailingAnchor constraintEqualToAnchor:container.trailingAnchor],
+        [glass.topAnchor constraintEqualToAnchor:container.topAnchor],
+        [glass.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
+        [label.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:11.0],
+        [label.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-11.0],
+        [label.topAnchor constraintEqualToAnchor:container.topAnchor constant:4.0],
+        [label.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-4.0],
+    ]];
+    return container;
 }
 
 void RYGLiquidGlassConfigureNavigationController(UINavigationController *navigationController) {
@@ -239,50 +237,19 @@ void RYGLiquidGlassConfigureNavigationController(UINavigationController *navigat
     navigationController.navigationBar.tintColor = UIColor.labelColor;
 }
 
-static void RYGUseNativeNavigationTitle(UIViewController *controller) {
-    if (!controller) return;
-    controller.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
-    UIView *titleView = controller.navigationItem.titleView;
-    if (titleView && [objc_getAssociatedObject(titleView, kRYGGeneratedTitleViewKey) boolValue]) {
-        controller.navigationItem.titleView = nil;
-    }
-}
-
-static void RYGStyleOwnedControls(UIView *root) {
-    if (!root) return;
-    NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:root];
-    while (pending.count) {
-        UIView *view = pending.lastObject;
-        [pending removeLastObject];
-
-        // The caller only passes a concrete RyukGram controller's root view, so
-        // every UIButton found here belongs to tweak UI. No Instagram root view
-        // is ever traversed by this function.
-        if ([view isKindOfClass:UIButton.class]) {
-            RYGLiquidGlassConfigureButton((UIButton *)view, NO);
-        }
-        for (UIView *subview in view.subviews) [pending addObject:subview];
-    }
-}
-
 void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
     UIViewController *content = RYGOwnedContainerContent(controller, 0);
     if (!content || !RYGControllerDirectlyOwned(content)) return;
+    content.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
 
-    // Do not mutate an Instagram-owned UINavigationController merely because it
-    // happens to host a RyukGram page. Navigation chrome is only configured when
-    // the navigation controller class itself belongs to the tweak.
+    // Never mutate an Instagram-owned navigation controller merely because it
+    // hosts a RyukGram page.
     UINavigationController *navigationController = nil;
-    if ([controller isKindOfClass:UINavigationController.class] &&
-        RYGControllerDirectlyOwned(controller)) {
+    if ([controller isKindOfClass:UINavigationController.class] && RYGControllerDirectlyOwned(controller))
         navigationController = (UINavigationController *)controller;
-    } else if (content.navigationController &&
-               RYGControllerDirectlyOwned(content.navigationController)) {
+    else if (content.navigationController && RYGControllerDirectlyOwned(content.navigationController))
         navigationController = content.navigationController;
-    }
-
     if (navigationController) RYGLiquidGlassConfigureNavigationController(navigationController);
-    RYGUseNativeNavigationTitle(content);
 
     if (content.isViewLoaded) {
         if ([content isKindOfClass:UITableViewController.class]) {
@@ -292,6 +259,8 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
         } else if (!content.view.backgroundColor) {
             content.view.backgroundColor = UIColor.systemBackgroundColor;
         }
-        RYGStyleOwnedControls(content.view);
     }
+
+    // Deliberately no recursive UIButton traversal here. Buttons receive Glass
+    // only at their RyukGram creation/takeover site via ConfigureButton().
 }
