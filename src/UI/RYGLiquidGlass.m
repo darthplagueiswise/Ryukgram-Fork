@@ -1,6 +1,7 @@
 #import "RYGLiquidGlass.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#include <math.h>
 #if __has_include(<ptrauth.h>)
 #import <ptrauth.h>
 #endif
@@ -19,8 +20,9 @@ static NSString *RYGDefiningImagePath(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         Dl_info info = {0};
-        if (dladdr((const void *)&RYGIsOwnedViewController, &info) && info.dli_fname)
+        if (dladdr((const void *)&RYGIsOwnedViewController, &info) && info.dli_fname) {
             path = RYGNormalizeImagePath(info.dli_fname);
+        }
     });
     return path;
 }
@@ -76,7 +78,8 @@ static UIViewController *RYGOwnedContainerContent(UIViewController *controller, 
     if (!controller || depth > 6) return nil;
     if (RYGControllerDirectlyOwned(controller)) return controller;
     if ([controller isKindOfClass:UINavigationController.class]) {
-        UIViewController *candidate = ((UINavigationController *)controller).visibleViewController ?: ((UINavigationController *)controller).topViewController;
+        UIViewController *candidate = ((UINavigationController *)controller).visibleViewController ?:
+                                      ((UINavigationController *)controller).topViewController;
         return candidate && candidate != controller ? RYGOwnedContainerContent(candidate, depth + 1) : nil;
     }
     if ([controller isKindOfClass:UITabBarController.class]) {
@@ -86,7 +89,9 @@ static UIViewController *RYGOwnedContainerContent(UIViewController *controller, 
     return nil;
 }
 
-BOOL RYGIsOwnedViewController(UIViewController *controller) { return RYGOwnedContainerContent(controller, 0) != nil; }
+BOOL RYGIsOwnedViewController(UIViewController *controller) {
+    return RYGOwnedContainerContent(controller, 0) != nil;
+}
 
 BOOL RYGLiquidGlassIsAvailable(void) {
     if (@available(iOS 26.0, *)) return !UIAccessibilityIsReduceTransparencyEnabled();
@@ -97,14 +102,16 @@ UIVisualEffectView *RYGLiquidGlassView(BOOL interactive, BOOL clearStyle, UIColo
     UIVisualEffect *effect = nil;
     if (@available(iOS 26.0, *)) {
         if (RYGLiquidGlassIsAvailable()) {
-            UIGlassEffect *glass = [UIGlassEffect effectWithStyle:clearStyle ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
+            UIGlassEffect *glass = [UIGlassEffect effectWithStyle:clearStyle ? UIGlassEffectStyleClear
+                                                                       : UIGlassEffectStyleRegular];
             glass.interactive = interactive;
             glass.tintColor = tintColor;
             effect = glass;
         }
     }
-    if (!effect && !UIAccessibilityIsReduceTransparencyEnabled())
+    if (!effect && !UIAccessibilityIsReduceTransparencyEnabled()) {
         effect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterial];
+    }
     UIVisualEffectView *view = [[UIVisualEffectView alloc] initWithEffect:effect];
     RYGMarkOwnedView(view);
     view.userInteractionEnabled = NO;
@@ -127,11 +134,13 @@ void RYGLiquidGlassSetTint(UIVisualEffectView *view, UIColor *tintColor) {
 static void RYGPrepareAdaptiveMenu(UIMenu *menu) {
     if (!menu) return;
     if (@available(iOS 17.0, *)) menu.preferredElementSize = UIMenuElementSizeAutomatic;
-    for (UIMenuElement *element in menu.children)
+    for (UIMenuElement *element in menu.children) {
         if ([element isKindOfClass:UIMenu.class]) RYGPrepareAdaptiveMenu((UIMenu *)element);
+    }
 }
 
-static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button, BOOL prominent) API_AVAILABLE(ios(26.0)) {
+static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button,
+                                                              BOOL prominent) API_AVAILABLE(ios(26.0)) {
     UIButtonConfiguration *old = button.configuration;
     UIButtonConfiguration *glass = prominent ? [UIButtonConfiguration prominentClearGlassButtonConfiguration]
                                              : [UIButtonConfiguration clearGlassButtonConfiguration];
@@ -151,6 +160,26 @@ static UIButtonConfiguration *RYGGlassConfigurationForButton(UIButton *button, B
     return glass;
 }
 
+static void RYGPrepareDetachedMenuButtonGeometry(UIButton *button, BOOL menuSource) {
+    if (!button || !menuSource) return;
+
+    // UITableViewCell.accessoryView is still frame-driven. A newly-created iOS 26
+    // glass UIButton has no useful frame until after configuration; handing that
+    // zero-sized view directly to a cell lets its title render over the cell text.
+    // Only stabilize detached, autoresizing-backed RyukGram menu buttons. Buttons
+    // already owned by Auto Layout are deliberately left untouched.
+    [button setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [button setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    if (button.superview || !button.translatesAutoresizingMaskIntoConstraints) return;
+
+    [button invalidateIntrinsicContentSize];
+    CGSize intrinsic = button.intrinsicContentSize;
+    if (!(intrinsic.width > 0.0) || !(intrinsic.height > 0.0)) return;
+    CGFloat width = MIN(132.0, MAX(92.0, ceil(intrinsic.width)));
+    CGFloat height = MAX(36.0, ceil(intrinsic.height));
+    button.frame = CGRectMake(0.0, 0.0, width, height);
+}
+
 static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
     if (!button) return;
     BOOL menuSource = button.showsMenuAsPrimaryAction || button.menu != nil;
@@ -164,11 +193,13 @@ static void RYGSynchronizeGlassButton(UIButton *button, BOOL prominent) {
                 button.backgroundColor = UIColor.clearColor;
                 button.configuration = RYGGlassConfigurationForButton(button, prominent);
                 button.tintColor = UIColor.labelColor;
-                objc_setAssociatedObject(button, kRYGGlassButtonConfiguredKey, stateKey, OBJC_ASSOCIATION_COPY_NONATOMIC);
+                objc_setAssociatedObject(button, kRYGGlassButtonConfiguredKey, stateKey,
+                                         OBJC_ASSOCIATION_COPY_NONATOMIC);
             }
         }
     }
     [button invalidateIntrinsicContentSize];
+    RYGPrepareDetachedMenuButtonGeometry(button, menuSource);
 }
 
 void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
@@ -181,7 +212,7 @@ void RYGLiquidGlassConfigureButton(UIButton *button, BOOL prominent) {
 }
 
 @interface RYGGlassNavigationTitleView : UIView
-@property (nonatomic, strong) UILabel *label;
+@property(nonatomic, strong) UILabel *label;
 @end
 
 @implementation RYGGlassNavigationTitleView
@@ -245,10 +276,11 @@ void RYGLiquidGlassApplyToViewController(UIViewController *controller) {
     // Never mutate an Instagram-owned navigation controller merely because it
     // hosts a RyukGram page.
     UINavigationController *navigationController = nil;
-    if ([controller isKindOfClass:UINavigationController.class] && RYGControllerDirectlyOwned(controller))
+    if ([controller isKindOfClass:UINavigationController.class] && RYGControllerDirectlyOwned(controller)) {
         navigationController = (UINavigationController *)controller;
-    else if (content.navigationController && RYGControllerDirectlyOwned(content.navigationController))
+    } else if (content.navigationController && RYGControllerDirectlyOwned(content.navigationController)) {
         navigationController = content.navigationController;
+    }
     if (navigationController) RYGLiquidGlassConfigureNavigationController(navigationController);
 
     if (content.isViewLoaded) {
