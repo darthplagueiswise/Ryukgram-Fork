@@ -3,25 +3,21 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <os/lock.h>
+#import <dlfcn.h>
 
 // Native MobileConfig path authority.
 //
-// Binary evidence from the 2026-08-23 Instagram/FBShared pair:
+// Priority is always Instagram's current FBT MobileConfig manager:
+//   FBMobileConfigFBTGlobalSessionManager.sharedInstance
+//     -> currentSessionContextManagerHolder
+//     -> mcFbtManager
+//     -> mobileconfig
+//     -> getOverridesTablePath
 //
-// FBSharedFramework:
-//   -FBMobileConfigContextManager getOverridesTablePath @16@0:8
-//   -IGMobileConfigContextManager getOverridesTablePath @16@0:8
-//
-// Instagram executable:
-//   +[FBMobileConfigFBTGlobalSessionManager sharedInstance] @16@0:8
-//   -currentSessionContextManagerHolder                    @16@0:8
-//   -[FBMobileConfigFBTContextManagerHolder mcFbtManager]  @16@0:8
-//   -[FBMobileConfigFBTContextManager mobileconfig]        @16@0:8
-//
-// This gives us the ACTIVE session's native MobileConfig context manager with
-// no App Group guessing and no cold-launch getter hook. The one-shot getBool:
-// observer below is only an on-demand fallback when the FBT session chain has
-// not been initialized yet.
+// When that chain is not initialized yet, the Developer tools may still need to
+// read id_name_mapping.json / mc_overrides.json that Instagram already persisted.
+// The fallback below enumerates EXISTING accessible app/group containers only.
+// It never invents an AppGroup UUID and never creates a mobileconfig/.data tree.
 
 static os_unfair_lock gRYGMCNativeAuthorityLock = OS_UNFAIR_LOCK_INIT;
 static id gRYGMCObservedManager;
@@ -50,7 +46,8 @@ static id RYGMCCallObjectNoArg(id receiver, BOOL classMethod, const char *select
         ? class_getClassMethod((Class)receiver, selector)
         : class_getInstanceMethod([receiver class], selector);
     if (!RYGMCObjectNoArgMethod(method)) return nil;
-    return ((id (*)(id, SEL))objc_msgSend)(receiver, selector);
+    @try { return ((id (*)(id, SEL))objc_msgSend)(receiver, selector); }
+    @catch (__unused NSException *exception) { return nil; }
 }
 
 static BOOL RYGMCGetterMethodLooksCompatible(Method method) {
@@ -67,9 +64,7 @@ static BOOL RYGMCGetterMethodLooksCompatible(Method method) {
     return *argumentType == '{' && (strstr(argumentType, "=Q}") || strstr(argumentType, "=q}"));
 }
 
-static BOOL RYGMCPathMethodLooksCompatible(Method method) {
-    return RYGMCObjectNoArgMethod(method);
-}
+static BOOL RYGMCPathMethodLooksCompatible(Method method) { return RYGMCObjectNoArgMethod(method); }
 
 static void RYGMCRetainObservedManager(id manager) {
     if (!manager) return;
@@ -89,11 +84,8 @@ static id RYGMCActiveSessionContextManager(void) {
     Class globalClass = objc_lookUpClass("FBMobileConfigFBTGlobalSessionManager");
     if (!globalClass) return nil;
     id global = RYGMCCallObjectNoArg((id)globalClass, YES, "sharedInstance");
-    if (!global) return nil;
     id holder = RYGMCCallObjectNoArg(global, NO, "currentSessionContextManagerHolder");
-    if (!holder) return nil;
     id fbtManager = RYGMCCallObjectNoArg(holder, NO, "mcFbtManager");
-    if (!fbtManager) return nil;
     id manager = RYGMCCallObjectNoArg(fbtManager, NO, "mobileconfig");
     if (!manager) return nil;
     Method pathMethod = class_getInstanceMethod([manager class], sel_registerName("getOverridesTablePath"));
@@ -143,14 +135,10 @@ static void RYGMCTryInstallCaptureForClass(const char *className,
 
 static void RYGMCTryInstallOneShotManagerCapture(void) {
     if (RYGMCCurrentObservedManager()) return;
-    RYGMCTryInstallCaptureForClass("FBMobileConfigContextManager",
-                                   (IMP)RYGMCCaptureFBGetBool,
-                                   &gRYGMCCaptureFBUpstream,
-                                   &gRYGMCCaptureFBInstalled);
-    RYGMCTryInstallCaptureForClass("IGMobileConfigContextManager",
-                                   (IMP)RYGMCCaptureIGGetBool,
-                                   &gRYGMCCaptureIGUpstream,
-                                   &gRYGMCCaptureIGInstalled);
+    RYGMCTryInstallCaptureForClass("FBMobileConfigContextManager", (IMP)RYGMCCaptureFBGetBool,
+                                   &gRYGMCCaptureFBUpstream, &gRYGMCCaptureFBInstalled);
+    RYGMCTryInstallCaptureForClass("IGMobileConfigContextManager", (IMP)RYGMCCaptureIGGetBool,
+                                   &gRYGMCCaptureIGUpstream, &gRYGMCCaptureIGInstalled);
 }
 
 static NSString *RYGMCNativeDataDirectoryFromValue(id value) {
@@ -179,8 +167,112 @@ static NSString *RYGMCDataDirectoryFromManager(id manager) {
     SEL selector = sel_registerName("getOverridesTablePath");
     Method method = class_getInstanceMethod([manager class], selector);
     if (!RYGMCPathMethodLooksCompatible(method)) return nil;
-    id value = ((id (*)(id, SEL))objc_msgSend)(manager, selector);
+    id value = nil;
+    @try { value = ((id (*)(id, SEL))objc_msgSend)(manager, selector); }
+    @catch (__unused NSException *exception) { return nil; }
     return RYGMCValidatedNativeDirectory(RYGMCNativeDataDirectoryFromValue(value));
+}
+
+#pragma mark - Existing-container fallback
+
+typedef CFTypeRef (*RYGMCSecTaskCreateFromSelfFn)(CFAllocatorRef allocator);
+typedef CFTypeRef (*RYGMCSecTaskCopyValueForEntitlementFn)(CFTypeRef task, CFStringRef entitlement, CFErrorRef *error);
+
+static NSArray<NSString *> *RYGMCApplicationGroupIdentifiers(void) {
+    RYGMCSecTaskCreateFromSelfFn createTask = (RYGMCSecTaskCreateFromSelfFn)dlsym(RTLD_DEFAULT, "SecTaskCreateFromSelf");
+    RYGMCSecTaskCopyValueForEntitlementFn copyValue = (RYGMCSecTaskCopyValueForEntitlementFn)dlsym(RTLD_DEFAULT, "SecTaskCopyValueForEntitlement");
+    if (!createTask || !copyValue) return @[];
+    CFTypeRef task = createTask(kCFAllocatorDefault);
+    if (!task) return @[];
+    CFTypeRef raw = copyValue(task, CFSTR("com.apple.security.application-groups"), NULL);
+    CFRelease(task);
+    NSArray *groups = CFBridgingRelease(raw);
+    if (![groups isKindOfClass:NSArray.class]) return @[];
+    NSMutableArray<NSString *> *valid = [NSMutableArray array];
+    for (id item in groups) if ([item isKindOfClass:NSString.class] && [item length]) [valid addObject:item];
+    return valid.copy;
+}
+
+static NSArray<NSString *> *RYGMCExistingContainerRoots(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableOrderedSet<NSString *> *roots = [NSMutableOrderedSet orderedSet];
+    NSString *home = NSHomeDirectory().stringByStandardizingPath;
+    if (home.length) [roots addObject:home];
+
+    // Common sideload bridge used by this project: an AppGroup directory made
+    // visible inside the data container. It is accepted only when it already
+    // exists; nothing is created here.
+    NSString *bridged = [[home stringByAppendingPathComponent:@"Documents/AppGroup"] stringByStandardizingPath];
+    BOOL bridgeDirectory = NO;
+    if ([fm fileExistsAtPath:bridged isDirectory:&bridgeDirectory] && bridgeDirectory) [roots addObject:bridged];
+
+    for (NSString *group in RYGMCApplicationGroupIdentifiers()) {
+        NSURL *url = nil;
+        @try { url = [fm containerURLForSecurityApplicationGroupIdentifier:group]; }
+        @catch (__unused NSException *exception) { url = nil; }
+        NSString *path = url.path.stringByStandardizingPath;
+        BOOL isDirectory = NO;
+        if (path.length && [fm fileExistsAtPath:path isDirectory:&isDirectory] && isDirectory) [roots addObject:path];
+    }
+    return roots.array;
+}
+
+static NSInteger RYGMCArtifactScore(NSString *dataDirectory, NSTimeInterval *latestDate) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSInteger score = 0;
+    NSTimeInterval latest = 0;
+    NSArray<NSString *> *strongNames = @[@"id_name_mapping.json", @"mc_overrides.json"];
+    for (NSUInteger i = 0; i < strongNames.count; i++) {
+        NSString *path = [dataDirectory stringByAppendingPathComponent:strongNames[i]];
+        BOOL isDirectory = NO;
+        if (![fm fileExistsAtPath:path isDirectory:&isDirectory] || isDirectory) continue;
+        score += i == 0 ? 100 : 90;
+        NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+        latest = MAX(latest, [attrs.fileModificationDate timeIntervalSince1970]);
+    }
+    NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:dataDirectory error:nil] ?: @[];
+    for (NSString *name in children) {
+        NSString *lower = name.lowercaseString;
+        if ([lower hasPrefix:@"mc_sync_response_dump"] || [lower containsString:@"params_map"] || [lower containsString:@"mobileconfigadminid"]) {
+            score += 5;
+            NSDictionary *attrs = [fm attributesOfItemAtPath:[dataDirectory stringByAppendingPathComponent:name] error:nil];
+            latest = MAX(latest, [attrs.fileModificationDate timeIntervalSince1970]);
+        }
+    }
+    if (latestDate) *latestDate = latest;
+    return score;
+}
+
+static NSString *RYGMCDiscoverExistingDataDirectory(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *best = nil;
+    NSInteger bestScore = 0;
+    NSTimeInterval bestDate = 0;
+
+    for (NSString *root in RYGMCExistingContainerRoots()) {
+        NSArray<NSString *> *mobileRoots = @[
+            [root stringByAppendingPathComponent:@"Documents/mobileconfig"],
+            [root stringByAppendingPathComponent:@"mobileconfig"],
+        ];
+        for (NSString *mobileRoot in mobileRoots) {
+            BOOL mobileDirectory = NO;
+            if (![fm fileExistsAtPath:mobileRoot isDirectory:&mobileDirectory] || !mobileDirectory) continue;
+            for (NSString *child in [fm contentsOfDirectoryAtPath:mobileRoot error:nil] ?: @[]) {
+                if (![child.pathExtension.lowercaseString isEqualToString:@"data"]) continue;
+                NSString *candidate = [[mobileRoot stringByAppendingPathComponent:child] stringByStandardizingPath];
+                BOOL candidateDirectory = NO;
+                if (![fm fileExistsAtPath:candidate isDirectory:&candidateDirectory] || !candidateDirectory) continue;
+                NSTimeInterval latest = 0;
+                NSInteger score = RYGMCArtifactScore(candidate, &latest);
+                if (score > bestScore || (score == bestScore && score > 0 && latest > bestDate)) {
+                    best = candidate;
+                    bestScore = score;
+                    bestDate = latest;
+                }
+            }
+        }
+    }
+    return bestScore > 0 ? best : nil;
 }
 
 @interface RYGMobileConfig (RYGNativeAuthorityPrivate)
@@ -191,8 +283,8 @@ static NSString *RYGMCDataDirectoryFromManager(id manager) {
 @implementation RYGMobileConfig (RYGNativeAuthority)
 
 - (id)ryg_resolveActiveSessionManager {
-    // Explicit browser/editor path only. This is intentionally not called from
-    // a constructor or a MobileConfig getter hot path.
+    // Explicit browser/editor path only. No discovery runs from a MobileConfig
+    // getter hot path.
     id manager = RYGMCActiveSessionContextManager() ?: RYGMCCurrentObservedManager();
     if (manager) RYGMCRetainObservedManager(manager);
     if (!manager) RYGMCTryInstallOneShotManagerCapture();
@@ -200,17 +292,21 @@ static NSString *RYGMCDataDirectoryFromManager(id manager) {
 }
 
 - (NSString *)ryg_authorityNativeDataDirectory {
-    // User-triggered resolution only. No MobileConfig manager discovery runs in
-    // a cold-launch constructor.
     id manager = [self ryg_resolveActiveSessionManager];
     NSString *native = RYGMCDataDirectoryFromManager(manager ?: RYGMCCurrentObservedManager());
     if (native.length) return native;
 
-    // Older/partially initialized builds may not have the FBT current-session
-    // chain ready yet. Arm a one-shot observer for the next real getter; it does
-    // no path/filesystem work and removes itself on first invocation.
+    // A file already persisted in the real accessible container must be visible
+    // even before a MobileConfig getter happens. Read-only filesystem discovery
+    // is therefore the second authority, not a locally fabricated cache path.
+    NSString *existing = RYGMCDiscoverExistingDataDirectory();
+    if (existing.length) return existing;
+
     RYGMCTryInstallOneShotManagerCapture();
 
+    // After method_exchangeImplementations this selector points at JSONIO's
+    // original mcDirectory-backed implementation. Keep it as the final legacy
+    // fallback for builds with a nonstandard but already-resolved manager path.
     NSString *previous = [self ryg_authorityNativeDataDirectory];
     return RYGMCValidatedNativeDirectory(previous);
 }
