@@ -4,17 +4,22 @@
 #import "../UI/RYGPopupChrome.h"
 #include <stdlib.h>
 
+static BOOL RYGEditorPersistAndInstall(NSString *className, NSString *selectorName, BOOL meta,
+                                       NSString *typeCode, id value, dispatch_block_t completion) {
+    RYGRuntimeValueSetOverride(className, selectorName, meta, typeCode, value);
+    BOOL installed = RYGRuntimeValueHasOverride(className, selectorName, meta) &&
+                     RYGRuntimeValueInstallHook(className, selectorName, meta, typeCode);
+    if (completion) completion();
+    return installed;
+}
+
 static void RYGEditorApply(NSString *className, NSString *selectorName, BOOL meta,
                            NSString *typeCode, id value, dispatch_block_t completion) {
-    RYGRuntimeValueSetOverride(className, selectorName, meta, typeCode, value);
-    if (RYGRuntimeValueHasOverride(className, selectorName, meta)) {
-        (void)RYGRuntimeValueInstallHook(className, selectorName, meta, typeCode);
-    }
-    if (completion) completion();
+    (void)RYGEditorPersistAndInstall(className, selectorName, meta, typeCode, value, completion);
 }
 
 static void RYGEditorError(UIViewController *presenter, NSString *message) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Invalid value"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Runtime Editor"
                                                                    message:message ?: @"Could not convert the value."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
@@ -56,6 +61,35 @@ static NSString *RYGPrettyJSON(id object) {
 static BOOL RYGLooksLikeJSON(NSString *text) {
     NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     return [trimmed hasPrefix:@"{"] || [trimmed hasPrefix:@"["];
+}
+
+// Port of dogfood2 WAGRRuntimeCanonicalJSONStringUI: remove only insignificant
+// JSON whitespace outside quoted strings. This preserves key order, escapes and
+// numeric lexical forms instead of parse/re-serialize changing the wire string.
+static NSString *RYGCompactJSONLexically(NSString *text) {
+    if (![text isKindOfClass:NSString.class] || !text.length) return text ?: @"";
+    NSMutableString *output = [NSMutableString stringWithCapacity:text.length];
+    BOOL inString = NO;
+    BOOL escaped = NO;
+    for (NSUInteger index = 0; index < text.length; index++) {
+        unichar ch = [text characterAtIndex:index];
+        if (inString) {
+            [output appendFormat:@"%C", ch];
+            if (escaped) escaped = NO;
+            else if (ch == '\\') escaped = YES;
+            else if (ch == '"') inString = NO;
+            continue;
+        }
+        if (ch == '"') {
+            inString = YES;
+            escaped = NO;
+            [output appendFormat:@"%C", ch];
+            continue;
+        }
+        if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') continue;
+        [output appendFormat:@"%C", ch];
+    }
+    return output;
 }
 
 static NSString *RYGObjectText(id value) {
@@ -147,6 +181,8 @@ static id RYGParseObjectText(NSString *text, id currentRaw, NSString **errorText
 @property(nonatomic, copy) NSString *targetTypeCode;
 @property(nonatomic, assign) BOOL targetMeta;
 @property(nonatomic, strong) id sourceValue;
+@property(nonatomic, assign) BOOL preserveString;
+@property(nonatomic, assign) BOOL validateJSON;
 @property(nonatomic, strong) UITextView *textView;
 @property(nonatomic, strong) UILabel *statusLabel;
 @property(nonatomic, copy) dispatch_block_t completion;
@@ -171,12 +207,13 @@ static id RYGParseObjectText(NSString *text, id currentRaw, NSString **errorText
     status.translatesAutoresizingMaskIntoConstraints = NO;
     status.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightRegular];
     status.textColor = UIColor.secondaryLabelColor;
-    status.numberOfLines = 3;
-    status.text = [NSString stringWithFormat:@"%@ · %@ method · %@\nOriginal object: %@\nThe outer Objective-C ABI is preserved; JSON text from NSString remains NSString unless an explicit prefix is used.",
+    status.numberOfLines = 4;
+    status.text = [NSString stringWithFormat:@"%@ · %@ method · %@\nOriginal object: %@\nOuter Objective-C ABI stays object (@).%@",
                    self.targetClassName ?: @"Runtime",
                    self.targetMeta ? @"class" : @"instance",
                    RYGRuntimeValueTypeName(self.targetTypeCode) ?: self.targetTypeCode ?: @"object",
-                   self.sourceValue ? NSStringFromClass([self.sourceValue class]) : @"nil"];
+                   self.sourceValue ? NSStringFromClass([self.sourceValue class]) : @"nil",
+                   self.preserveString ? @" JSON may be formatted here, but Apply keeps it NSString and compacts only insignificant whitespace." : @""];
     [self.view addSubview:status];
     self.statusLabel = status;
 
@@ -239,7 +276,15 @@ static id RYGParseObjectText(NSString *text, id currentRaw, NSString **errorText
     RYGLiquidGlassApplyToViewController(self);
 }
 
-- (void)cancelPressed { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)closeEditor {
+    if (self.navigationController && self.navigationController.viewControllers.firstObject != self) {
+        [self.navigationController popViewControllerAnimated:YES];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
+- (void)cancelPressed { [self closeEditor]; }
 
 - (void)formatPressed {
     NSString *error = nil;
@@ -247,29 +292,51 @@ static id RYGParseObjectText(NSString *text, id currentRaw, NSString **errorText
     NSString *pretty = RYGPrettyJSON(object);
     if (!pretty.length) { RYGEditorError(self, error ?: @"Text is not valid JSON."); return; }
     self.textView.text = pretty;
+    self.validateJSON = YES;
 }
 
 - (void)validatePressed {
     NSString *error = nil;
     id object = RYGParseJSON(self.textView.text ?: @"", &error);
     if (!object) { RYGEditorError(self, error ?: @"Invalid JSON."); return; }
+    self.validateJSON = YES;
     self.statusLabel.textColor = UIColor.systemGreenColor;
-    self.statusLabel.text = [NSString stringWithFormat:@"Valid JSON · %@", NSStringFromClass([object class]) ?: @"object"];
+    self.statusLabel.text = [NSString stringWithFormat:@"Valid JSON · %@\nOuter object remains %@.",
+                             NSStringFromClass([object class]) ?: @"object",
+                             self.preserveString ? @"NSString" : (self.sourceValue ? NSStringFromClass([self.sourceValue class]) : @"Foundation object")];
 }
 
 - (void)originalPressed {
     RYGRuntimeValueClearOverride(self.targetClassName, self.targetSelectorName, self.targetMeta);
     if (self.completion) self.completion();
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [self closeEditor];
 }
 
 - (void)applyPressed {
+    NSString *text = self.textView.text ?: @"";
+    id value = nil;
     NSString *error = nil;
-    id value = RYGParseObjectText(self.textView.text ?: @"", self.sourceValue, &error);
-    if (!value) { RYGEditorError(self, error ?: @"Could not parse object."); return; }
-    RYGEditorApply(self.targetClassName, self.targetSelectorName, self.targetMeta,
-                   self.targetTypeCode, value, self.completion);
-    [self dismissViewControllerAnimated:YES completion:nil];
+
+    if (self.preserveString) {
+        if (self.validateJSON || RYGLooksLikeJSON(text)) {
+            id parsed = RYGParseJSON(text, &error);
+            if (!parsed) { RYGEditorError(self, error ?: @"Invalid JSON."); return; }
+            text = RYGCompactJSONLexically(text);
+        }
+        value = text;
+    } else {
+        value = RYGParseObjectText(text, self.sourceValue, &error);
+        if (!value) { RYGEditorError(self, error ?: @"Could not parse object."); return; }
+    }
+
+    BOOL installed = RYGEditorPersistAndInstall(self.targetClassName, self.targetSelectorName,
+                                                 self.targetMeta, self.targetTypeCode,
+                                                 value, self.completion);
+    if (!installed) {
+        RYGEditorError(self, @"The typed override was persisted, but its exact hook is still pending. Use Apply after the target image/receiver is available.");
+        return;
+    }
+    [self closeEditor];
 }
 @end
 
@@ -349,21 +416,31 @@ void RYGPresentRuntimeValueEditor(UIViewController *presenter, UIView *sourceVie
         }]];
     } else if (RYGRuntimeValueTypeIsObject(typeCode)) {
         id effective = overridden ? forced : currentRawValue;
+        BOOL longString = [effective isKindOfClass:NSString.class] && [(NSString *)effective length] > 96;
+        BOOL jsonString = [effective isKindOfClass:NSString.class] && RYGLooksLikeJSON(effective);
         BOOL complex = [effective isKindOfClass:NSArray.class] || [effective isKindOfClass:NSDictionary.class] ||
                        [effective isKindOfClass:NSSet.class] || [effective isKindOfClass:NSData.class] ||
-                       ([effective isKindOfClass:NSString.class] && [(NSString *)effective length] > 180) ||
-                       ([effective isKindOfClass:NSString.class] && RYGLooksLikeJSON(effective));
+                       longString || jsonString;
         [sheet addAction:[UIAlertAction actionWithTitle:complex ? @"Open full-screen editor…" : @"Set Foundation object…"
                                               style:UIAlertActionStyleDefault
                                             handler:^(__unused UIAlertAction *action) {
             if (complex) {
                 RYGRuntimeFullValueEditorViewController *editor = [RYGRuntimeFullValueEditorViewController new];
-                editor.targetClassName = className; editor.targetSelectorName = selectorName;
-                editor.targetTypeCode = typeCode; editor.targetMeta = meta;
-                editor.sourceValue = effective; editor.completion = completion;
-                UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
-                nav.modalPresentationStyle = UIModalPresentationPageSheet;
-                [presenter presentViewController:nav animated:YES completion:nil];
+                editor.targetClassName = className;
+                editor.targetSelectorName = selectorName;
+                editor.targetTypeCode = typeCode;
+                editor.targetMeta = meta;
+                editor.sourceValue = effective;
+                editor.preserveString = [effective isKindOfClass:NSString.class];
+                editor.validateJSON = jsonString;
+                editor.completion = completion;
+                if (presenter.navigationController) {
+                    [presenter.navigationController pushViewController:editor animated:YES];
+                } else {
+                    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:editor];
+                    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+                    [presenter presentViewController:nav animated:YES completion:nil];
+                }
                 return;
             }
             NSString *help = [NSString stringWithFormat:@"Current object: %@. Preserve the current type or use string:, number:, url:, data:<base64>, date:<timestamp>, json:<JSON>, set:<array JSON>.", effective ? NSStringFromClass([effective class]) : @"nil"];
