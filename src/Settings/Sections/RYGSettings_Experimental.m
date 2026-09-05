@@ -1,6 +1,6 @@
 #import "RYGSettingsSections.h"
 #import "../../Features/Experimental/RYGExperimentalGuard.h"
-#import "../../Features/ExpFlags/RYGMobileConfigViewController.h"
+#import "../../Features/ExpFlags/RYGMobileConfigToolsViewController.h"
 #import "../../UI/RYGPopupChrome.h"
 
 @implementation RYGTweakSettings (Section_Experimental)
@@ -58,7 +58,7 @@
 		return;
 	}
 	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ryg_metaconfig_warning_seen"]) {
-		[RYGPopupChrome presentVC:[RYGMobileConfigViewController new] from:nil];
+		[RYGPopupChrome presentVC:[RYGMobileConfigToolsViewController new] from:nil];
 		return;
 	}
 	UIAlertController *a = [UIAlertController
@@ -69,7 +69,7 @@
 	[a addAction:[UIAlertAction actionWithTitle:RYGLocalized(@"I understand") style:UIAlertActionStyleDefault
 										handler:^(UIAlertAction *_) {
 		[[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"ryg_metaconfig_warning_seen"];
-		[RYGPopupChrome presentVC:[RYGMobileConfigViewController new] from:nil];
+		[RYGPopupChrome presentVC:[RYGMobileConfigToolsViewController new] from:nil];
 	}]];
 	[rygTopVC() presentViewController:a animated:YES completion:nil];
 }
@@ -108,14 +108,14 @@
 		},
 		@{
 			@"header": RYGLocalized(@"MobileConfig"),
-			@"footer": RYGLocalized(@"Read and change Instagram's own internal settings. Known names are built in; configs shown only as a number have obfuscated names we can't recover yet. If Instagram crashes on launch three times in a row, your changes are cleared for you."),
+			@"footer": RYGLocalized(@"Read and change Instagram's own internal settings. The Developer browser now uses id_name_mapping plus the current typed runtime table; mapping-only rows stay read-only until this iOS build exposes them."),
 			@"rows": @[
 				[RYGSetting switchCellWithTitle:RYGLocalized(@"Enable MobileConfig browser")
-									   subtitle:RYGLocalized(@"Lets the browser read values and apply your changes")
+									   subtitle:RYGLocalized(@"Lets the browser read values and apply typed changes")
 									defaultsKey:@"ryg_metaconfig_enabled"
 								requiresRestart:YES],
 				[RYGSetting buttonCellWithTitle:RYGLocalized(@"Open MobileConfig browser")
-									   subtitle:RYGLocalized(@"Search, toggle and edit config values")
+									   subtitle:RYGLocalized(@"Search, import/export names and edit runtime-linked values")
 										   icon:[RYGSymbol symbolWithIGName:@"bcn_settings_outline_24" fallback:@"slider.horizontal.3"]
 										 action:^{ [self openMobileConfigBrowser]; }],
 			]
