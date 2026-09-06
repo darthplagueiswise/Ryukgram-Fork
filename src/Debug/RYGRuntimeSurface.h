@@ -28,6 +28,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy) NSString *icon;
 @property(nonatomic, strong) NSArray<NSString *> *classNames;
 @property(nonatomic, strong) NSArray<NSString *> *classNameFragments;
+/// Presentation-only compatibility metadata. The scanner never uses these
+/// tokens to define the runtime universe; search/filtering happens after the
+/// full selected-image/whole-host catalog has been built.
 @property(nonatomic, strong) NSArray<NSString *> *selectorTokens;
 @property(nonatomic, strong) NSArray<NSString *> *categoryAllowList;
 @property(nonatomic, assign) BOOL scanInstanceMethods;
@@ -51,9 +54,15 @@ FOUNDATION_EXPORT NSString *RYGRuntimeSubcategoryForEntry(NSString * _Nullable s
 FOUNDATION_EXPORT NSArray<NSString *> *RYGRuntimeQueryTerms(NSString * _Nullable query);
 
 @interface RYGRuntimeScanner : NSObject
+/// Full runtime catalog for the requested scope. No feature/domain keyword is
+/// applied here. Supported methods are defined only by their Objective-C ABI.
 + (NSArray<RYGRuntimeEntry *> *)scanSurface:(RYGRuntimeSurfaceSpec *)spec;
+/// Image-first root. Enumerates loaded Instagram-owned Mach-O images without
+/// eagerly enumerating every method in the process.
 + (NSArray<RYGRuntimeSurfaceSpec *> *)runtimeImageSurfaces;
 + (NSArray<RYGRuntimeSurfaceSpec *> *)runtimeFamilySurfaces;
+/// Whole-host scope used by Developer domain shortcuts. `query` is intentionally
+/// not copied into scanner filters; it is applied by the browser after discovery.
 + (RYGRuntimeSurfaceSpec *)allAppSurfaceWithTitle:(NSString *)title query:(NSString *)query;
 @end
 

@@ -1,0 +1,8 @@
+{
+  "format": 2,
+  "product": "Instagram",
+  "groups": [
+    {"id":"instagram_current","image":"Instagram","uuid":"4C4C443A-5555-3144-A192-8F033FB73CED","candidates_total":14},
+    {"id":"fbsharedframework_current","image":"FBSharedFramework","uuid":"4C4C44B7-5555-3144-A167-D73E543FBB32","candidates_total":13}
+  ]
+}

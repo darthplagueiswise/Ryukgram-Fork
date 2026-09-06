@@ -1,0 +1,21 @@
+{
+  "id":"fbsharedframework_current",
+  "image":"FBSharedFramework",
+  "uuid":"4C4C44B7-5555-3144-A167-D73E543FBB32",
+  "source":"FBSharedFramework(3) binary analysis",
+  "candidates":[
+    {"kind":"c","symbol":"_EasyGatingGetBoolean_Internal_DoNotUseOrMock","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingPlatformGetBoolean","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingGetInt32_Internal_DoNotUseOrMock","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingPlatformGetInt32","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingGetInt64_Internal_DoNotUseOrMock","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingPlatformGetInt64","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingGetDouble_Internal_DoNotUseOrMock","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingPlatformGetDouble","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingCopyString_Internal_DoNotUseOrMock","family":"easygating"},
+    {"kind":"c","symbol":"_EasyGatingPlatformCopyString","family":"easygating"},
+    {"kind":"c","symbol":"_IGMobileConfigSetConfigOverrides","family":"mobileconfig"},
+    {"kind":"c","symbol":"_IGMobileConfigForceUpdateConfigs","family":"mobileconfig"},
+    {"kind":"c","symbol":"_IGMobileConfigTryUpdateConfigsWithCompletion","family":"mobileconfig"}
+  ]
+}
