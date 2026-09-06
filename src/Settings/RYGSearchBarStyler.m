@@ -26,18 +26,14 @@
 
 + (void)resetSearchBar:(UISearchBar *)searchBar {
     if (!searchBar) return;
-    searchBar.searchBarStyle = UISearchBarStyleMinimal;
-    searchBar.backgroundImage = nil;
-    searchBar.barTintColor = UIColor.clearColor;
-    searchBar.backgroundColor = UIColor.clearColor;
-    searchBar.translucent = YES;
 
-    UITextField *field = searchBar.searchTextField;
-    field.borderStyle = UITextBorderStyleRoundedRect;
-    field.backgroundColor = nil;
-    field.layer.backgroundColor = nil;
-    field.layer.cornerRadius = 0.0;
-    field.layer.masksToBounds = NO;
+    // SDK 26: UISearchController/UISearchBar provide their own Liquid Glass and
+    // scroll-edge integration. Remove our legacy paint, but do not restyle the
+    // private search text-field geometry that UIKit now owns.
+    searchBar.backgroundImage = nil;
+    searchBar.barTintColor = nil;
+    searchBar.backgroundColor = nil;
+    searchBar.translucent = YES;
 }
 
 + (void)styleSearchBar:(UISearchBar *)searchBar {

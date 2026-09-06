@@ -1,0 +1,22 @@
+{
+  "id":"instagram_current",
+  "image":"Instagram",
+  "uuid":"4C4C443A-5555-3144-A192-8F033FB73CED",
+  "source":"Instagram(2) binary analysis",
+  "candidates":[
+    {"kind":"objc","selector":"isEmployee","family":"internal"},
+    {"kind":"objc","selector":"isEmployeeBuild","family":"internal"},
+    {"kind":"objc","selector":"isIGInternal","family":"internal"},
+    {"kind":"objc","selector":"internalSettingsAvailabilityStatus","family":"internal"},
+    {"kind":"objc","selector":"showInternalSettings","family":"internal"},
+    {"kind":"objc","selector":"showLoggedOutInternalSettings","family":"internal"},
+    {"kind":"objc","selector":"showShakeToReportPreferenceToggle","family":"bug-report"},
+    {"kind":"objc","selector":"showDogfoodingAssistant","family":"dogfood"},
+    {"kind":"objc","selector":"showDebugMenu","family":"debug"},
+    {"kind":"objc","selector":"showDebugMenuWithEntryPoint:","family":"debug"},
+    {"kind":"objc","selector":"isInternalOnly","family":"internal"},
+    {"kind":"objc","selector":"rageShakeDetectorEnabled","family":"bug-report"},
+    {"kind":"objc","selector":"isTrayAttachedToHeaderEnabled:","family":"stories"},
+    {"kind":"objc","selector":"isStoryViewerCardAnimationEnabledWithLauncherSet:","family":"stories"}
+  ]
+}

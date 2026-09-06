@@ -1,5 +1,6 @@
 #import "RYGOptionSheet.h"
 #import "../Utils.h"
+#import <RyukGram-Swift.h>
 
 @interface RYGOptionSheetVC : UITableViewController
 @property (nonatomic, copy) NSArray<NSDictionary *> *options;
@@ -40,10 +41,10 @@
 	NSString *desc = opt[@"description"];
 	cell.detailTextLabel.text = desc.length ? desc : nil;
 	cell.detailTextLabel.numberOfLines = 0;
-	cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+	cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
 	NSString *value = opt[@"value"] ?: @"";
 	cell.accessoryType = [value isEqualToString:self.currentValue] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-	cell.tintColor = [UIColor systemBlueColor];
+	cell.tintColor = UIColor.systemBlueColor;
 	cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 	return cell;
 }
@@ -53,7 +54,7 @@
 	NSDictionary *opt = self.options[(NSUInteger)indexPath.row];
 	NSString *value = opt[@"value"] ?: @"";
 	self.currentValue = value;
-	if (self.defaultsKey.length) [[NSUserDefaults standardUserDefaults] setObject:value forKey:self.defaultsKey];
+	if (self.defaultsKey.length) [NSUserDefaults.standardUserDefaults setObject:value forKey:self.defaultsKey];
 	if (self.onChange) self.onChange(value);
 	[tableView reloadData];
 	UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleLight];
@@ -74,6 +75,18 @@
            onChange:(void (^)(NSString *))onChange {
 	if (!presenter || !options.count) return;
 
+	// UIKit/SwiftUI standard presentation owns the iOS 26 Liquid Glass sheet.
+	// Avoid custom corner radii/backgrounds and let NavigationStack/List/toolbar
+	// adopt the current system design automatically.
+	if (@available(iOS 26.0, *)) {
+		[RYGSwiftUIOptionSheetPresenter presentFrom:presenter
+										 title:title ?: @""
+								 defaultsKey:defaultsKey
+									 options:options
+								  onChange:onChange];
+		return;
+	}
+
 	// Present while a previous sheet is mid-dismiss → UIKit rejects.
 	// Ride the transition coordinator and re-enter once it lands.
 	if (presenter.presentedViewController) {
@@ -90,7 +103,7 @@
 	vc.title = title;
 	vc.options = options;
 	vc.defaultsKey = defaultsKey;
-	vc.currentValue = defaultsKey.length ? ([[NSUserDefaults standardUserDefaults] stringForKey:defaultsKey] ?: @"") : @"";
+	vc.currentValue = defaultsKey.length ? ([NSUserDefaults.standardUserDefaults stringForKey:defaultsKey] ?: @"") : @"";
 	vc.onChange = onChange;
 
 	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
@@ -99,7 +112,6 @@
 	if (sheet) {
 		sheet.detents = @[ UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent ];
 		sheet.prefersGrabberVisible = YES;
-		sheet.preferredCornerRadius = 24.0;
 	}
 	[presenter presentViewController:nav animated:YES completion:nil];
 }

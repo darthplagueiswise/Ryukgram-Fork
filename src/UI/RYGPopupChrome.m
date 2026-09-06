@@ -9,31 +9,37 @@
 }
 
 + (void)applyBackdropTo:(UIViewController *)vc {
-    if (!vc) return;
     if (!vc.isViewLoaded) [vc loadViewIfNeeded];
+    UIColor *background = [self backgroundColor];
+    vc.view.backgroundColor = background;
 
-    UIColor *bg = [self backgroundColor];
-    vc.view.backgroundColor = bg;
     NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:vc.view];
     while (stack.count) {
-        UIView *v = stack.lastObject;
+        UIView *view = stack.lastObject;
         [stack removeLastObject];
-        if ([v isKindOfClass:UITableView.class] || [v isKindOfClass:UICollectionView.class]) {
-            v.backgroundColor = UIColor.clearColor;
+        if ([view isKindOfClass:UITableView.class] || [view isKindOfClass:UICollectionView.class]) {
+            view.backgroundColor = background;
+            // Do not put a second material behind every table/collection cell.
+            // Navigation/tool chrome is the native Liquid Glass surface.
+            continue;
         }
-        for (UIView *sub in v.subviews) [stack addObject:sub];
+        for (UIView *subview in view.subviews) [stack addObject:subview];
     }
     RYGLiquidGlassApplyToViewController(vc);
 }
 
 + (UINavigationController *)wrap:(UIViewController *)content {
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:content];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:content];
+    navigationController.modalPresentationStyle = UIModalPresentationFullScreen;
     if ([RYGTheme shouldOverrideAppearance]) {
-        nav.overrideUserInterfaceStyle = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
+        // A window-level force can hide the actual system style. Pin only the
+        // RyukGram container back to the screen's active appearance.
+        navigationController.overrideUserInterfaceStyle = UIScreen.mainScreen.traitCollection.userInterfaceStyle;
     }
+
+    RYGLiquidGlassConfigureNavigationController(navigationController);
     [self applyBackdropTo:content];
-    RYGLiquidGlassConfigureNavigationController(nav);
+
     if (!content.navigationItem.leftBarButtonItem && !content.navigationItem.leftBarButtonItems.count) {
         UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark"]
                                                                    style:UIBarButtonItemStylePlain
@@ -41,35 +47,35 @@
                                                                   action:@selector(closeTopMost:)];
         content.navigationItem.leftBarButtonItem = close;
     }
-    return nav;
+    return navigationController;
 }
 
 + (void)presentVC:(UIViewController *)content from:(UIViewController *)presenter {
     if (!presenter) presenter = [self topMostController];
     if (!presenter || !content) return;
-    UINavigationController *nav = [self wrap:content];
-    [presenter presentViewController:nav animated:YES completion:nil];
+    UINavigationController *navigationController = [self wrap:content];
+    [presenter presentViewController:navigationController animated:YES completion:nil];
 }
 
 #pragma mark - Helpers
 
 + (UIViewController *)topMostController {
-    UIWindow *key = nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if (![s isKindOfClass:UIWindowScene.class]) continue;
-        for (UIWindow *w in ((UIWindowScene *)s).windows) {
-            if (w.isKeyWindow) { key = w; break; }
+    UIWindow *keyWindow = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.isKeyWindow) { keyWindow = window; break; }
         }
-        if (key) break;
+        if (keyWindow) break;
     }
-    if (!key) key = UIApplication.sharedApplication.windows.firstObject;
-    UIViewController *top = key.rootViewController;
+    if (!keyWindow) keyWindow = UIApplication.sharedApplication.windows.firstObject;
+
+    UIViewController *top = keyWindow.rootViewController;
     while (top.presentedViewController) top = top.presentedViewController;
     return top;
 }
 
-+ (void)closeTopMost:(UIBarButtonItem *)sender {
-    (void)sender;
++ (void)closeTopMost:(__unused UIBarButtonItem *)sender {
     UIViewController *top = [self topMostController];
     [top dismissViewControllerAnimated:YES completion:nil];
 }

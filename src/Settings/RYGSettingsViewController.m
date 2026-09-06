@@ -2,6 +2,7 @@
 #import "RYGWhatsNew.h"
 #import "RYGDonatePrompt.h"
 #import "../UI/RYGPopupChrome.h"
+#import "../UI/RYGLiquidGlass.h"
 #import "RYGSearchBarStyler.h"
 #import "../Features/General/RYGCacheManager.h"
 #import "../RYGImageCache.h"
@@ -251,6 +252,7 @@ static char kRYGRowKey;
 	[self setupTableView];
 	if (self.isRoot) [self setupRootNavigation];
 	else if (self.scopedSearch) [self setupScopedSearch];
+	RYGLiquidGlassApplyToViewController(self);
 	NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
 	[nc addObserver:self selector:@selector(rygCacheSizeDidUpdate) name:RYGCacheSizeDidUpdateNotification object:nil];
 	[nc addObserver:self selector:@selector(rygReloadFromNotification) name:@"RYGSettingsShouldReload" object:nil];
@@ -267,7 +269,8 @@ static char kRYGRowKey;
 	self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
 	self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
 	self.tableView.backgroundColor = self.view.backgroundColor;
-	self.tableView.contentInset = UIEdgeInsetsMake(self.reduceMargin ? -30.0 : -10.0, 0.0, 0.0, 0.0);
+	self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAutomatic;
+	if (@available(iOS 13.0, *)) self.tableView.automaticallyAdjustsScrollIndicatorInsets = YES;
 	self.tableView.dataSource = self;
 	self.tableView.delegate = self;
 	[self.view addSubview:self.tableView];
@@ -627,9 +630,9 @@ static char kRYGRowKey;
 			b.showsMenuAsPrimaryAction = YES;
 			b.enabled = !row.disabled && !(row.disabledProvider && row.disabledProvider());
 			b.titleLabel.font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize weight:UIFontWeightMedium];
-			UIButtonConfiguration *bc = b.configuration ?: UIButtonConfiguration.plainButtonConfiguration;
-			bc.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 8.0, 8.0, 8.0);
-			b.configuration = bc;
+			// SDK 26 lets a glass button act as the UIMenu source and morph into
+			// the system menu. Do not pre-compute padding or menu geometry.
+			RYGLiquidGlassConfigureButton(b, NO);
 			[b sizeToFit];
 			cell.accessoryView = b;
 			cell.selectionStyle = UITableViewCellSelectionStyleNone;
